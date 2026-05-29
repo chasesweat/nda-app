@@ -1186,9 +1186,27 @@ function getReturnLegSurcharges(dateVal, timeVal){
 }
 
 // ═══════════════════════════════════════════
-// ── MILEAGE — Google Maps Distance Matrix API ──
+// ── MILEAGE — Google Maps Distance Matrix (via Maps JS API) ──
 const GMAPS_KEY = 'AIzaSyCjVAgmOqoAwC7ZTGqT-pqWhbGuE-gGtGQ';
 let mileageTimer = null;
+let gmapsLoaded = false;
+let gmapsService = null;
+
+function loadGoogleMapsAPI(){
+  if(gmapsLoaded || document.getElementById('gmaps-script')) return;
+  const script = document.createElement('script');
+  script.id = 'gmaps-script';
+  script.src = `https://maps.googleapis.com/maps/api/js?key=${GMAPS_KEY}&libraries=geometry&callback=onGoogleMapsReady`;
+  script.async = true;
+  script.defer = true;
+  document.head.appendChild(script);
+}
+
+window.onGoogleMapsReady = function(){
+  gmapsLoaded = true;
+  gmapsService = new google.maps.DistanceMatrixService();
+  console.log('Google Maps ready ✓');
+};
 
 function debounceMileage(){
   clearTimeout(mileageTimer);
@@ -1204,21 +1222,45 @@ async function calcMileage(){
   const dropoff = document.getElementById('q-dropoff').value.trim();
   if(!pickup || !dropoff) return;
   const statusEl = document.getElementById('calc-status');
-  statusEl.textContent = 'Getting distance from Google Maps…';
+
+  // Ensure Google Maps is loaded
+  if(!gmapsLoaded){
+    loadGoogleMapsAPI();
+    statusEl.textContent = 'Loading Maps…';
+    // Wait up to 5 seconds for it to load
+    let waited = 0;
+    while(!gmapsLoaded && waited < 5000){
+      await new Promise(r=>setTimeout(r,200));
+      waited += 200;
+    }
+    if(!gmapsLoaded){ statusEl.innerHTML=`Maps unavailable. <span style="color:#4ade80;cursor:pointer;text-decoration:underline;" onclick="openGoogleMaps()">Check in Google Maps ↗</span>`; return; }
+  }
+
+  statusEl.textContent = 'Getting distance…';
   try {
-    const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(pickup)}&destinations=${encodeURIComponent(dropoff)}&units=imperial&key=${GMAPS_KEY}`;
-    const resp = await fetch(url);
-    const data = await resp.json();
-    if(data.status !== 'OK') throw new Error(data.status);
-    const element = data.rows[0].elements[0];
+    const result = await new Promise((resolve, reject)=>{
+      gmapsService.getDistanceMatrix({
+        origins: [pickup],
+        destinations: [dropoff],
+        travelMode: google.maps.TravelMode.DRIVING,
+        unitSystem: google.maps.UnitSystem.IMPERIAL,
+      }, (response, status)=>{
+        if(status === 'OK') resolve(response);
+        else reject(new Error(status));
+      });
+    });
+
+    const element = result.rows[0].elements[0];
     if(element.status !== 'OK') throw new Error(element.status);
-    const meters  = element.distance.value;
-    const miles   = meters / 1609.344;
-    const seconds = element.duration.value;
-    const mins    = Math.round(seconds / 60);
-    const hrs     = Math.floor(mins / 60);
-    const durStr  = hrs > 0 ? `${hrs}h ${mins % 60}m drive` : `${mins} min drive`;
+
+    const meters   = element.distance.value;
+    const miles    = meters / 1609.344;
+    const seconds  = element.duration.value;
+    const mins     = Math.round(seconds / 60);
+    const hrs      = Math.floor(mins / 60);
+    const durStr   = hrs > 0 ? `${hrs}h ${mins % 60}m drive` : `${mins} min drive`;
     const milesVal = parseFloat(miles.toFixed(1));
+
     document.getElementById('q-miles').value = milesVal;
     statusEl.textContent = `✓ ${milesVal} miles · ${durStr} (Google Maps)`;
     updateMilesDisplay();
@@ -2994,6 +3036,8 @@ function enterApp(){
     else document.getElementById('income-nav').style.display='none';
   }
   populateDriverFilter(); buildCalTabs(); refreshDash(); renderCal(); renderRides(); renderDriverSettings(); calcQuote(); updateNotifBadge(); updateTripFields();
+  // Pre-load Google Maps so mileage calc is ready instantly
+  loadGoogleMapsAPI();
 }
 
 function buildUserChips(){
