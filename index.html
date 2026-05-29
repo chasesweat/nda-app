@@ -1216,35 +1216,27 @@ window.onGoogleMapsReady = function(){
 };
 
 function initAddressAutocomplete(){
-  // Address fields to attach autocomplete to
-  const fields = [
-    { id:'q-pickup',   onPlace: ()=>{ resetMileage(); debounceMileage(); } },
-    { id:'q-dropoff',  onPlace: ()=>{ resetMileage(); debounceMileage(); } },
-    { id:'edit-pickup',onPlace: ()=>{} },
-    { id:'edit-home',  onPlace: ()=>{} },
-    { id:'dup-driver', onPlace: ()=>{} }, // skip — not an address field
-  ];
-
   const addressIds = ['q-pickup','q-dropoff','edit-pickup','edit-home'];
   addressIds.forEach(id=>{
     const el = document.getElementById(id);
-    if(!el) return;
-    const ac = new google.maps.places.Autocomplete(el, {
-      componentRestrictions: { country: 'us' },
-      fields: ['formatted_address','geometry','name'],
-      types: ['geocode','establishment'],
-    });
-    ac.addListener('place_changed', ()=>{
-      const place = ac.getPlace();
-      if(place.formatted_address) el.value = place.formatted_address;
-      // Trigger mileage calc for quote fields
-      if(id==='q-pickup'||id==='q-dropoff'){
-        resetMileage();
-        debounceMileage();
-      }
-    });
-    // Prevent form submit on Enter key selecting autocomplete
-    el.addEventListener('keydown', e=>{ if(e.key==='Enter') e.preventDefault(); });
+    if(!el || el.dataset.acInit) return;
+    try {
+      const ac = new google.maps.places.Autocomplete(el, {
+        componentRestrictions: { country: 'us' },
+        fields: ['formatted_address','geometry','name'],
+        types: ['geocode','establishment'],
+      });
+      ac.addListener('place_changed', ()=>{
+        const place = ac.getPlace();
+        if(place.formatted_address) el.value = place.formatted_address;
+        if(id==='q-pickup'||id==='q-dropoff'){
+          resetMileage();
+          debounceMileage();
+        }
+      });
+      el.addEventListener('keydown', e=>{ if(e.key==='Enter') e.preventDefault(); });
+      el.dataset.acInit = '1';
+    } catch(e){ console.warn('Autocomplete failed for', id, e); }
   });
 }
 
@@ -3140,6 +3132,7 @@ function showPage(id,el){
   if(id==='dashboard'){refreshDash();}
   if(id==='drivers'){renderDriverSettings();}
   if(id==='income'){renderIncome();}
+  if(id==='quote'&&gmapsLoaded){ setTimeout(initAddressAutocomplete, 100); }
 }
 
 // ═══════════════════════════════════════════
