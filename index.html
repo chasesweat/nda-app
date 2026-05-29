@@ -214,7 +214,13 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
 .notif-badge{position:relative;}
 .notif-count{position:absolute;top:-6px;right:-10px;background:var(--red);color:#fff;font-size:.62rem;font-weight:700;border-radius:10px;padding:1px 5px;min-width:16px;text-align:center;}
 
-/* TOAST */
+/* Google Places Autocomplete dropdown */
+.pac-container{border-radius:8px;border:1.5px solid var(--light);box-shadow:0 4px 16px rgba(0,0,0,.12);font-family:'DM Sans',sans-serif;margin-top:2px;}
+.pac-item{padding:.5rem .75rem;font-size:.88rem;cursor:pointer;border-top:0.5px solid var(--light);}
+.pac-item:hover{background:var(--gold-pale);}
+.pac-item-query{font-weight:600;color:var(--black);}
+.pac-matched{color:var(--gold);}
+.pac-icon{display:none;}
 .toast{position:fixed;bottom:2rem;right:2rem;background:var(--green);color:var(--white);padding:.75rem 1.5rem;border-radius:8px;font-size:.88rem;font-weight:500;z-index:400;transform:translateY(100px);opacity:0;transition:all .3s;}
 .toast.show{transform:translateY(0);opacity:1;}
 </style>
@@ -1196,7 +1202,7 @@ function loadGoogleMapsAPI(){
   if(gmapsLoaded || document.getElementById('gmaps-script')) return;
   const script = document.createElement('script');
   script.id = 'gmaps-script';
-  script.src = `https://maps.googleapis.com/maps/api/js?key=${GMAPS_KEY}&libraries=geometry&callback=onGoogleMapsReady`;
+  script.src = `https://maps.googleapis.com/maps/api/js?key=${GMAPS_KEY}&libraries=places,geometry&callback=onGoogleMapsReady`;
   script.async = true;
   script.defer = true;
   document.head.appendChild(script);
@@ -1205,8 +1211,42 @@ function loadGoogleMapsAPI(){
 window.onGoogleMapsReady = function(){
   gmapsLoaded = true;
   gmapsService = new google.maps.DistanceMatrixService();
+  initAddressAutocomplete();
   console.log('Google Maps ready ✓');
 };
+
+function initAddressAutocomplete(){
+  // Address fields to attach autocomplete to
+  const fields = [
+    { id:'q-pickup',   onPlace: ()=>{ resetMileage(); debounceMileage(); } },
+    { id:'q-dropoff',  onPlace: ()=>{ resetMileage(); debounceMileage(); } },
+    { id:'edit-pickup',onPlace: ()=>{} },
+    { id:'edit-home',  onPlace: ()=>{} },
+    { id:'dup-driver', onPlace: ()=>{} }, // skip — not an address field
+  ];
+
+  const addressIds = ['q-pickup','q-dropoff','edit-pickup','edit-home'];
+  addressIds.forEach(id=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    const ac = new google.maps.places.Autocomplete(el, {
+      componentRestrictions: { country: 'us' },
+      fields: ['formatted_address','geometry','name'],
+      types: ['geocode','establishment'],
+    });
+    ac.addListener('place_changed', ()=>{
+      const place = ac.getPlace();
+      if(place.formatted_address) el.value = place.formatted_address;
+      // Trigger mileage calc for quote fields
+      if(id==='q-pickup'||id==='q-dropoff'){
+        resetMileage();
+        debounceMileage();
+      }
+    });
+    // Prevent form submit on Enter key selecting autocomplete
+    el.addEventListener('keydown', e=>{ if(e.key==='Enter') e.preventDefault(); });
+  });
+}
 
 function debounceMileage(){
   clearTimeout(mileageTimer);
@@ -1737,6 +1777,17 @@ function toggleEditMode(on){
   if(!on) return;
   // populate edit fields
   const r=rides.find(x=>x.id===activeRideId); if(!r) return;
+  // Re-attach autocomplete to edit address fields (they may have been hidden)
+  if(gmapsLoaded) setTimeout(()=>{
+    ['edit-pickup','edit-home'].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el && !el.dataset.acInit){
+        const ac=new google.maps.places.Autocomplete(el,{componentRestrictions:{country:'us'},fields:['formatted_address'],types:['geocode','establishment']});
+        ac.addListener('place_changed',()=>{ const p=ac.getPlace(); if(p.formatted_address) el.value=p.formatted_address; });
+        el.dataset.acInit='1';
+      }
+    });
+  }, 100);
   document.getElementById('edit-client').value   = r.client||'';
   document.getElementById('edit-phone').value    = r.phone||'';
   document.getElementById('edit-email').value    = r.email||'';
