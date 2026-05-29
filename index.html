@@ -289,6 +289,7 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
     <div class="nav-link" onclick="showPage('quote',this)">Quote</div>
     <div class="nav-link" onclick="showPage('calendar',this)">Calendar</div>
     <div class="nav-link" onclick="showPage('rides',this)">All Rides</div>
+    <div class="nav-link" onclick="showPage('clients',this)">Clients</div>
     <div class="nav-link" onclick="showPage('drivers',this)">Drivers</div>
     <div class="topbar-user" id="topbar-user"></div>
     <div class="notif-badge">
@@ -325,7 +326,7 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
         <!-- SECTION 1: CLIENT -->
         <div style="font-size:.72rem;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--mid);margin-bottom:.75rem;padding-bottom:.4rem;border-bottom:1px solid var(--light);">Client Info</div>
         <div class="form-row">
-          <div class="form-group"><label>Client Name</label><input type="text" id="q-client" placeholder="Full name" /></div>
+          <div class="form-group"><label>Client Name</label><input type="text" id="q-client" placeholder="Full name" oninput="checkClientConflict()" /><div id="client-conflict-warning"></div></div>
           <div class="form-group"><label>Phone</label><input type="text" id="q-phone" placeholder="Client phone" /></div>
         </div>
         <div class="form-group"><label>Email</label><input type="text" id="q-email" placeholder="Client email" /></div>
@@ -600,6 +601,50 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
       <button onclick="closeUpgradeModal()" style="background:none;border:none;color:var(--mid);font-size:.82rem;cursor:pointer;font-family:'DM Sans',sans-serif;">Maybe later</button>
     </div>
   </div>
+  <!-- CLIENTS -->
+  <div class="page" id="page-clients">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;margin-bottom:1.25rem;">
+      <div>
+        <div class="page-title" id="client-page-title">My Clients</div>
+        <div class="page-sub" id="client-page-sub">Your personal client list</div>
+      </div>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+        <button onclick="document.getElementById('client-import-input').click()" style="display:flex;align-items:center;gap:.4rem;padding:.5rem 1rem;background:var(--green);color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">
+          ⬆ Import from Excel/CSV
+        </button>
+        <button onclick="exportClientCSV()" style="display:flex;align-items:center;gap:.4rem;padding:.5rem 1rem;background:var(--surface);color:var(--black);border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">
+          ⬇ Export CSV
+        </button>
+        <input type="file" id="client-import-input" accept=".csv,.xlsx,.xls" style="display:none;" onchange="importClientsFromFile(this)" />
+      </div>
+    </div>
+    <div style="display:flex;gap:.6rem;margin-bottom:1rem;flex-wrap:wrap;">
+      <input type="text" id="client-search" placeholder="Search by name or phone…" oninput="renderClients()"
+        style="flex:1;min-width:180px;padding:.55rem .85rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.9rem;" />
+      <select id="client-driver-filter" onchange="renderClients()" style="display:none;padding:.55rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;">
+        <option value="">All Drivers</option>
+      </select>
+    </div>
+    <div id="client-stats" style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1.25rem;"></div>
+    <div id="client-import-status" style="margin-bottom:.75rem;"></div>
+    <div id="client-list"></div>
+  </div>
+
+  <!-- CLIENT DETAIL MODAL -->
+  <div class="modal-overlay" id="client-modal">
+    <div class="modal" style="max-width:520px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+        <h2 id="client-modal-name" style="margin:0;">Client</h2>
+        <button onclick="closeClientModal()" style="background:none;border:none;font-size:1.25rem;cursor:pointer;color:var(--mid);">✕</button>
+      </div>
+      <div id="client-modal-body"></div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeClientModal()">Close</button>
+        <button class="btn-primary" style="width:auto;padding:.5rem 1.25rem;" onclick="newRideForClient()">+ Book Ride</button>
+      </div>
+    </div>
+  </div>
+
   <div class="page" id="page-drivers">
     <div class="page-title">Team</div>
     <div class="page-sub">Manage driver profiles, colors, and payment links</div>
@@ -763,6 +808,7 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 // ═══════════════════════════════════════════
 // USERS & DRIVER COLORS
@@ -1006,6 +1052,7 @@ async function initApp() {
     if(storedProfiles) Object.assign(DRIVER_PROFILES, storedProfiles);
     await loadPasswords();
     await loadSubscriptions();
+    await loadImportedClients();
     nextId = rides.length ? Math.max(...rides.map(r=>r.id||0)) + 1 : 100;
     setupRealtimeListeners();
   } catch(err){
@@ -3083,6 +3130,209 @@ function enterApp(){
   loadGoogleMapsAPI();
 }
 
+// ═══════════════════════════════════════════
+// CLIENT DATABASE
+// ═══════════════════════════════════════════
+
+let importedClients = {};
+async function loadImportedClients(){ const d=await storageGet('kat:importedClients'); if(d) importedClients=d; }
+async function saveImportedClients(){ await storageSet('kat:importedClients', importedClients); }
+
+function buildClientDB(forDriver){
+  const db = {};
+  const addEntry = (key,name,phone,driver,ride,address,email,notes)=>{
+    if(!db[key]) db[key]={name,phone:phone||'',drivers:new Set(),rides:[],lastRide:'',address:address||'',email:email||'',notes:notes||''};
+    if(driver) db[key].drivers.add(driver);
+    if(phone&&!db[key].phone) db[key].phone=phone;
+    if(email&&!db[key].email) db[key].email=email;
+    if(notes&&!db[key].notes) db[key].notes=notes;
+    if(address&&!db[key].address) db[key].address=address;
+    if(ride){ db[key].rides.push(ride); if(!db[key].lastRide||ride.date>db[key].lastRide) db[key].lastRide=ride.date; }
+  };
+  rides.forEach(r=>{
+    if(!r.client) return;
+    if(forDriver && r.driver!==forDriver && USER_DRIVER_MAP[r.createdBy]!==forDriver && r.createdBy!==forDriver) return;
+    addEntry(r.client.trim().toLowerCase(), r.client.trim(), r.phone, r.driver, r, r.type==='AP RUN'?r.home:r.pickup||r.home||'','','');
+  });
+  const imported = forDriver ? (importedClients[forDriver]||[]) : Object.values(importedClients).flat();
+  imported.forEach(c=>{
+    if(!c.name) return;
+    const key = c.name.trim().toLowerCase();
+    addEntry(key,c.name.trim(),c.phone,forDriver,null,c.address,c.email,c.notes);
+    if(db[key]&&!db[key].source) db[key].source='imported';
+  });
+  Object.values(db).forEach(c=>{ c.drivers=[...c.drivers]; });
+  return db;
+}
+
+let activeClientKey = null;
+
+function renderClients(){
+  const admin    = isAdmin();
+  const myDriver = getMyDriverName();
+  document.getElementById('client-page-title').textContent = admin?'Client Directory':'My Clients';
+  document.getElementById('client-page-sub').textContent   = admin?'All drivers — search before booking to check for conflicts':'Your personal client list — private to you';
+  const dfEl = document.getElementById('client-driver-filter');
+  dfEl.style.display = admin?'block':'none';
+  if(admin && dfEl.options.length<=1) DRIVERS.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=d.split(' ')[0];dfEl.appendChild(o);});
+  const viewAs = admin?(dfEl.value||null):myDriver;
+  const db = buildClientDB(viewAs);
+  const q  = (document.getElementById('client-search')?.value||'').toLowerCase().trim();
+  let clients = Object.values(db);
+  if(q) clients=clients.filter(c=>c.name.toLowerCase().includes(q)||(c.phone&&c.phone.includes(q)));
+  clients.sort((a,b)=>a.name.localeCompare(b.name));
+  const allDB = buildClientDB(null);
+  const multiCount = Object.values(allDB).filter(c=>c.drivers.length>1).length;
+  const statCards = admin
+    ?[{label:'Total Clients',val:Object.keys(allDB).length,color:'var(--gold)'},{label:'Multiple Drivers',val:multiCount,color:'#dc2626'},{label:'This Month',val:(()=>{const m=new Date().toISOString().slice(0,7);return clients.filter(c=>c.lastRide&&c.lastRide.startsWith(m)).length;})(),color:'var(--green)'}]
+    :[{label:'My Clients',val:clients.length,color:'var(--gold)'},{label:'Active This Month',val:(()=>{const m=new Date().toISOString().slice(0,7);return clients.filter(c=>c.lastRide&&c.lastRide.startsWith(m)).length;})(),color:'var(--green)'},{label:'Total Rides',val:clients.reduce((s,c)=>s+c.rides.length,0),color:'#1e88e5'}];
+  document.getElementById('client-stats').innerHTML=statCards.map(s=>`<div style="background:var(--surface);border-radius:8px;padding:.65rem 1rem;text-align:center;min-width:110px;"><div style="font-size:.65rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);">${s.label}</div><div style="font-size:1.4rem;font-weight:700;color:${s.color};">${s.val}</div></div>`).join('');
+  if(!clients.length){document.getElementById('client-list').innerHTML='<div style="text-align:center;padding:2rem;color:var(--mid);">No clients yet.<br><span style="font-size:.85rem;">Import from Excel/CSV or save a ride to add clients automatically.</span></div>';return;}
+  document.getElementById('client-list').innerHTML=clients.map(c=>{
+    const multi=admin&&c.drivers.length>1;
+    const bg=c.drivers[0]?driverColor(c.drivers[0]):'#888';
+    const ini=c.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
+    const badges=admin?c.drivers.map(d=>`<span style="font-size:.72rem;padding:2px 7px;border-radius:10px;background:${driverColor(d)}22;color:${driverColor(d)};border:1px solid ${driverColor(d)}55;">${d.split(' ')[0]}</span>`).join(' '):'';
+    const imp=c.source==='imported'&&!c.rides.length?`<span style="font-size:.68rem;padding:1px 5px;border-radius:4px;background:#e0e7ff;color:#3730a3;">imported</span>`:'';
+    return `<div onclick="openClientModal('${c.name.replace(/'/g,"\'")}',event)" style="display:flex;align-items:center;gap:.85rem;padding:.75rem 1rem;border-radius:10px;margin-bottom:.4rem;border:1.5px solid ${multi?'#fca5a5':'var(--light)'};background:${multi?'#fff5f5':'var(--white)'};cursor:pointer;" onmouseover="this.style.background='var(--gold-pale)'" onmouseout="this.style.background='${multi?'#fff5f5':'var(--white)'}'">
+      <div style="width:36px;height:36px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:.82rem;flex-shrink:0;">${ini}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:600;font-size:.92rem;color:var(--black);">${c.name}${multi?' <span style="font-size:.68rem;color:#dc2626;font-weight:700;">⚠ MULTIPLE DRIVERS</span>':''} ${imp}</div>
+        <div style="font-size:.78rem;color:var(--mid);">${c.phone||'No phone'}${c.email?' · '+c.email:''} · ${c.rides.length} ride${c.rides.length!==1?'s':''}</div>
+        ${badges?`<div style="margin-top:3px;">${badges}</div>`:''}
+      </div>
+      <div style="font-size:.78rem;color:var(--green);font-weight:600;white-space:nowrap;">${c.rides.length?'$'+c.rides.reduce((s,r)=>s+(parseFloat(r.price)||0),0).toFixed(0):''}</div>
+    </div>`;
+  }).join('');
+}
+
+function openClientModal(clientName,e){
+  e?.stopPropagation();
+  const admin=isAdmin();
+  const db=buildClientDB(admin?null:getMyDriverName());
+  const c=db[clientName.toLowerCase()]; if(!c) return;
+  activeClientKey=clientName;
+  document.getElementById('client-modal-name').textContent=c.name;
+  const sorted=[...c.rides].sort((a,b)=>b.date.localeCompare(a.date));
+  const total=c.rides.reduce((s,r)=>s+(parseFloat(r.price)||0),0);
+  document.getElementById('client-modal-body').innerHTML=`
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem;">
+      ${c.phone?`<a href="tel:${c.phone}" style="padding:.4rem .85rem;background:var(--surface);border-radius:7px;font-size:.85rem;color:var(--black);text-decoration:none;border:1px solid var(--light);">📞 ${c.phone}</a>`:''}
+      ${c.email?`<div style="padding:.4rem .85rem;background:var(--surface);border-radius:7px;font-size:.85rem;border:1px solid var(--light);">✉ ${c.email}</div>`:''}
+      <div style="padding:.4rem .85rem;background:var(--surface);border-radius:7px;font-size:.85rem;border:1px solid var(--light);">🚗 ${c.rides.length} rides</div>
+      ${total?`<div style="padding:.4rem .85rem;background:var(--surface);border-radius:7px;font-size:.85rem;color:var(--green);font-weight:600;border:1px solid var(--light);">$${total.toFixed(2)} total</div>`:''}
+    </div>
+    ${c.address?`<div style="font-size:.82rem;color:var(--mid);margin-bottom:.5rem;">📍 ${c.address}</div>`:''}
+    ${c.notes?`<div style="font-size:.82rem;color:var(--mid);margin-bottom:.5rem;">📝 ${c.notes}</div>`:''}
+    ${admin&&c.drivers.length>1?`<div style="margin-bottom:.75rem;padding:.4rem .75rem;background:#fff5f5;border-radius:6px;font-size:.78rem;color:#dc2626;">⚠ Shared by: ${c.drivers.join(', ')}</div>`:''}
+    ${sorted.length?`<div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Ride History</div>
+    ${sorted.slice(0,8).map(r=>`<div onclick="openRideModal(${r.id});closeClientModal();" style="display:flex;align-items:center;gap:.6rem;padding:.5rem .75rem;border-radius:8px;border-left:4px solid ${rideColor(r)};background:${rideColor(r)}10;margin-bottom:.35rem;cursor:pointer;"><div style="min-width:70px;font-size:.8rem;font-weight:500;color:${rideColor(r)};">${fmtDateShort(r.date)}</div><div style="flex:1;font-size:.82rem;">${r.type} · ${r.driver?r.driver.split(' ')[0]:'Unassigned'}</div><div style="font-size:.82rem;font-weight:600;color:var(--green);">$${r.price}</div></div>`).join('')}
+    ${sorted.length>8?`<div style="text-align:center;font-size:.78rem;color:var(--mid);">+${sorted.length-8} more</div>`:''}
+    `:'<div style="color:var(--mid);font-size:.85rem;">No rides yet — imported client.</div>'}`;
+  document.getElementById('client-modal').classList.add('show');
+}
+
+function closeClientModal(){ document.getElementById('client-modal').classList.remove('show'); activeClientKey=null; }
+
+function newRideForClient(){
+  const admin=isAdmin();
+  const db=buildClientDB(admin?null:getMyDriverName());
+  const c=activeClientKey?db[activeClientKey.toLowerCase()]:null;
+  closeClientModal();
+  showPage('quote',document.querySelectorAll('.nav-link')[2]);
+  if(c) setTimeout(()=>{
+    document.getElementById('q-client').value=c.name;
+    if(c.phone) document.getElementById('q-phone').value=c.phone;
+    if(c.address) document.getElementById('q-pickup').value=c.address;
+  },150);
+}
+
+function checkClientConflict(){
+  const name=document.getElementById('q-client')?.value?.trim();
+  const warningEl=document.getElementById('client-conflict-warning');
+  if(!warningEl) return;
+  if(!name||name.length<3){warningEl.innerHTML='';return;}
+  const db=buildClientDB(null); // always check all for conflict detection
+  const matches=Object.values(db).filter(c=>c.name.toLowerCase().includes(name.toLowerCase()));
+  if(!matches.length){warningEl.innerHTML='';return;}
+  const match=matches[0];
+  const myDriver=getMyDriverName();
+  const isMyClient=myDriver&&match.drivers.includes(myDriver);
+  if(isMyClient){
+    warningEl.innerHTML=`<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:.4rem .75rem;font-size:.78rem;color:#166534;margin-top:3px;">✓ Your client · ${match.rides.length} previous rides · <a href="#" onclick="openClientModal('${match.name.replace(/'/g,"\'")}',event);return false;" style="color:#166534;font-weight:600;">View history</a></div>`;
+  } else if(match.drivers.length){
+    warningEl.innerHTML=`<div style="background:#fff5f5;border:1px solid #fca5a5;border-radius:6px;padding:.4rem .75rem;font-size:.78rem;color:#dc2626;margin-top:3px;">⚠ Client of <strong>${match.drivers.map(d=>d.split(' ')[0]).join(', ')}</strong> · <a href="#" onclick="openClientModal('${match.name.replace(/'/g,"\'")}',event);return false;" style="color:#dc2626;font-weight:600;">View details</a></div>`;
+  } else { warningEl.innerHTML=''; }
+}
+
+function importClientsFromFile(input){
+  const file=input.files[0]; if(!file) return;
+  const statusEl=document.getElementById('client-import-status');
+  statusEl.innerHTML=`<div style="color:var(--mid);font-size:.82rem;">Reading file…</div>`;
+  const reader=new FileReader();
+  reader.onload=async(e)=>{
+    try{
+      let rows=[];
+      if(file.name.endsWith('.csv')){
+        rows=parseCSV(e.target.result);
+      } else {
+        const data=new Uint8Array(e.target.result);
+        const wb=XLSX.read(data,{type:'array'});
+        rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+      }
+      const myDriver=getMyDriverName()||currentUser?.name;
+      if(!importedClients[myDriver]) importedClients[myDriver]=[];
+      let added=0,skipped=0;
+      rows.forEach(row=>{
+        const name=String(row['Name']||row['name']||row['Client']||row['Full Name']||row['CLIENT']||'').trim();
+        const phone=String(row['Phone']||row['phone']||row['Phone Number']||row['PHONE']||'').trim();
+        const email=String(row['Email']||row['email']||row['EMAIL']||'').trim();
+        const address=String(row['Address']||row['address']||row['Home Address']||'').trim();
+        const notes=String(row['Notes']||row['notes']||row['NOTES']||'').trim();
+        if(!name){skipped++;return;}
+        if(importedClients[myDriver].some(c=>c.name.toLowerCase()===name.toLowerCase())){skipped++;return;}
+        importedClients[myDriver].push({name,phone,email,address,notes,source:'imported'});
+        added++;
+      });
+      await saveImportedClients();
+      statusEl.innerHTML=`<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:.5rem .85rem;font-size:.82rem;color:#166534;">✓ Imported ${added} clients · ${skipped} skipped (duplicates or blank)</div>`;
+      renderClients();
+      input.value='';
+    } catch(err){
+      statusEl.innerHTML=`<div style="background:#fff5f5;border:1px solid #fca5a5;border-radius:6px;padding:.5rem .85rem;font-size:.82rem;color:#dc2626;">Import failed: ${err.message}<br>Columns needed: Name, Phone, Email, Address, Notes</div>`;
+    }
+  };
+  if(file.name.endsWith('.csv')) reader.readAsText(file);
+  else reader.readAsArrayBuffer(file);
+}
+
+function parseCSV(text){
+  const lines=text.split('\n').filter(l=>l.trim());
+  if(!lines.length) return [];
+  const headers=lines[0].split(',').map(h=>h.replace(/"/g,'').trim());
+  return lines.slice(1).map(line=>{
+    const vals=line.split(',').map(v=>v.replace(/"/g,'').trim());
+    const obj={};
+    headers.forEach((h,i)=>{obj[h]=vals[i]||'';});
+    return obj;
+  });
+}
+
+function exportClientCSV(){
+  const admin=isAdmin();
+  const db=buildClientDB(admin?null:getMyDriverName());
+  const clients=Object.values(db).sort((a,b)=>a.name.localeCompare(b.name));
+  const rows=[['Name','Phone','Email','Address','Drivers','Rides','Last Ride','Total Spent','Notes'],
+    ...clients.map(c=>[c.name,c.phone||'',c.email||'',c.address||'',c.drivers.join('; '),c.rides.length,c.lastRide||'',c.rides.reduce((s,r)=>s+(parseFloat(r.price)||0),0).toFixed(2),c.notes||''])];
+  const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download=`NDA_Clients_${admin?'All':(getMyDriverName()||'My').split(' ')[0]}.csv`;
+  a.click();
+  showToast('Client list exported ✓');
+}
+
+
 function buildUserChips(){
   const sel=document.getElementById('user-select');
   sel.innerHTML=`<option value="">— Choose your name —</option>`+
@@ -3127,6 +3377,7 @@ function showPage(id,el){
   document.querySelectorAll('.nav-link').forEach(n=>n.classList.remove('active'));
   document.getElementById('page-'+id).classList.add('active');
   if(el) el.classList.add('active');
+  if(id==='clients'){renderClients();}
   if(id==='rides'){renderRides();}
   if(id==='calendar'){renderCal();}
   if(id==='dashboard'){refreshDash();}
