@@ -300,20 +300,25 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
     <div class="nav-link" onclick="showPage('clients',this)">Clients</div>
     <div class="nav-link" onclick="showPage('drivers',this)">Drivers</div>
     <div class="nav-link" onclick="showPage('chat',this)" id="chat-nav" style="position:relative;">💬 Chat<span id="chat-badge" style="display:none;position:absolute;top:-2px;right:-6px;background:#dc2626;color:#fff;font-size:.55rem;font-weight:700;border-radius:50%;width:14px;height:14px;line-height:14px;text-align:center;">●</span></div>
-    <div class="topbar-user" id="topbar-user"></div>
-    <div class="notif-badge" style="position:relative;">
-      <div class="nav-link" onclick="showPage('myrides',this)" id="myrides-nav" style="display:none;">My Rides</div>
-      <div class="nav-link" onclick="showPage('account',this)" id="account-nav" style="display:none;position:relative;">My Account<span id="account-badge" style="display:none;position:absolute;top:-2px;right:-6px;width:7px;height:7px;border-radius:50%;background:#f5a623;"></span></div>
-      <div class="nav-link" onclick="showIncomeOrUpgrade(this)" id="income-nav" style="display:none;">💰 Income</div>
-      <button onclick="toggleNotifPanel()" style="position:relative;background:none;border:none;cursor:pointer;padding:.25rem .4rem;color:var(--white);font-size:1.1rem;" title="Notifications">
-        🔔<span id="notif-count" style="display:none;position:absolute;top:-2px;right:-2px;background:#dc2626;color:#fff;font-size:.6rem;font-weight:700;border-radius:50%;width:16px;height:16px;display:none;align-items:center;justify-content:center;"></span>
+    <div class="nav-link" onclick="showPage('myrides',this)" id="myrides-nav" style="display:none;">My Rides</div>
+    <div class="nav-link" onclick="showPage('account',this)" id="account-nav" style="display:none;position:relative;">Account<span id="account-badge" style="display:none;position:absolute;top:-2px;right:-6px;width:7px;height:7px;border-radius:50%;background:#f5a623;"></span></div>
+    <div class="nav-link" onclick="showIncomeOrUpgrade(this)" id="income-nav" style="display:none;">💰 Income</div>
+    <button onclick="toggleNotifPanel()" style="position:relative;background:none;border:none;cursor:pointer;padding:.25rem .4rem;color:var(--white);font-size:1.1rem;" title="Notifications">
+      🔔<span id="notif-count" style="display:none;position:absolute;top:-2px;right:-2px;background:#dc2626;color:#fff;font-size:.6rem;font-weight:700;border-radius:50%;width:16px;height:16px;display:none;align-items:center;justify-content:center;"></span>
+    </button>
+    <button id="notif-push-btn" onclick="togglePushNotifications()" title="Enable push notifications" style="display:none;background:none;border:none;cursor:pointer;padding:.25rem .3rem;color:var(--white);font-size:1rem;">📳</button>
+    <!-- User menu dropdown -->
+    <div style="position:relative;">
+      <button onclick="toggleUserMenu()" id="user-menu-btn" style="background:none;border:1px solid #4a2d6e;border-radius:20px;padding:.25rem .75rem;color:var(--white);font-size:.78rem;cursor:pointer;display:flex;align-items:center;gap:.4rem;white-space:nowrap;">
+        <span id="topbar-user"></span> ▾
       </button>
-      <button id="notif-push-btn" onclick="togglePushNotifications()" title="Enable push notifications" style="display:none;background:none;border:none;cursor:pointer;padding:.25rem .3rem;color:var(--white);font-size:1rem;">📳</button>
-      <!-- Notification dropdown panel -->
-      <div id="notif-panel" style="display:none;position:absolute;top:44px;right:0;width:320px;max-height:420px;overflow-y:auto;background:var(--white);border:1.5px solid var(--light);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:200;"></div>
+      <div id="user-menu-panel" style="display:none;position:absolute;top:38px;right:0;background:var(--white);border:1.5px solid var(--light);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:200;min-width:160px;overflow:hidden;">
+        <div onclick="openPwModal(null);document.getElementById('user-menu-panel').style.display='none';" style="padding:.65rem 1rem;font-size:.85rem;cursor:pointer;color:#9c27b0;border-bottom:1px solid var(--light);">Change password</div>
+        <div onclick="logout()" style="padding:.65rem 1rem;font-size:.85rem;cursor:pointer;color:var(--red);">Sign out</div>
+      </div>
     </div>
-    <div class="topbar-logout" onclick="openPwModal(null)" style="color:#a855f7;">Change Password</div>
-    <div class="topbar-logout" onclick="logout()">Sign out</div>
+    <!-- Notification dropdown panel -->
+    <div id="notif-panel" style="display:none;position:absolute;top:56px;right:1.5rem;width:320px;max-height:420px;overflow-y:auto;background:var(--white);border:1.5px solid var(--light);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:200;"></div>
   </div>
 
   <!-- DASHBOARD -->
@@ -2419,6 +2424,23 @@ async function togglePushNotifications(){
   else { await requestPushPermission(); }
 }
 
+
+function toggleUserMenu(){
+  const panel = document.getElementById('user-menu-panel');
+  if(!panel) return;
+  const isOpen = panel.style.display !== 'none';
+  if(isOpen){ panel.style.display='none'; return; }
+  panel.style.display='block';
+  setTimeout(()=>{
+    document.addEventListener('click', function handler(e){
+      if(!e.target.closest('#user-menu-panel') && !e.target.closest('#user-menu-btn')){
+        panel.style.display='none';
+        document.removeEventListener('click', handler);
+      }
+    });
+  }, 100);
+}
+
 function toggleNotifPanel(){
   const panel = document.getElementById('notif-panel');
   if(!panel) return;
@@ -3815,9 +3837,9 @@ function renderIncome(){
             ${isAdmin()?'<th style="padding:.6rem .75rem;text-align:left;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Driver</th>':''}
             <th style="padding:.6rem .75rem;text-align:left;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Type</th>
             <th style="padding:.6rem .75rem;text-align:left;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Miles</th>
-            <th style="padding:.6rem .75rem;text-align:right;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Vehicle Cost</th>
+            ${!isAdmin()?'<th style="padding:.6rem .75rem;text-align:right;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Vehicle Cost</th>':''}
             <th style="padding:.6rem .75rem;text-align:right;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Gross</th>
-            <th style="padding:.6rem .75rem;text-align:right;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Net/Ride</th>
+            ${!isAdmin()?'<th style="padding:.6rem .75rem;text-align:right;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Net/Ride</th>':''}
           </tr>
         </thead>
         <tbody>
