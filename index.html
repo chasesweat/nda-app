@@ -3222,9 +3222,10 @@ async function toggleUserAccess(userName, el){
 }
 
 function renderDriverSettings(){
-  // Show Access Control tab only for admins
+  // Show Access Control tab — check both isAdmin() and direct role check for safety
+  const adminCheck = currentUser && currentUser.role === 'admin';
   const accessTab = document.getElementById('dtab-access');
-  if(accessTab) accessTab.style.display = isAdmin() ? 'inline-block' : 'none';
+  if(accessTab) accessTab.style.display = adminCheck ? 'inline-block' : 'none';
   const grid=document.getElementById('driver-settings-grid');
   const todayStr=new Date().toISOString().split('T')[0];
   const admin=isAdmin();
@@ -4431,35 +4432,38 @@ function enterApp(){
   document.getElementById('paywall-screen').style.display='none';
   document.getElementById('auth-screen').style.display='none';
   document.getElementById('app').style.display='flex';
-  document.getElementById('topbar-user').textContent=`${currentUser.name}`;
-  const myNav=document.getElementById('myrides-nav');
-  const acctNav=document.getElementById('account-nav');
-  const dName=getMyDriverName();
 
-  // My Rides — show for drivers (including admin-drivers like Chase & Kat)
+  const admin = currentUser.role === 'admin';
+  const dName = getMyDriverName(); // full driver name e.g. "Chase Sweat"
+
+  // Topbar username
+  document.getElementById('topbar-user').textContent = currentUser.name;
+
+  // My Rides — show for anyone with a driver name (drivers + admin-drivers)
+  const myNav = document.getElementById('myrides-nav');
   if(dName){
-    myNav.style.display='block';
-    document.getElementById('myrides-title').textContent=`My Rides — ${dName.split(' ')[0]}`;
+    myNav.style.display = 'block';
+    document.getElementById('myrides-title').textContent = 'My Rides — ' + dName.split(' ')[0];
   } else {
-    myNav.style.display='none';
+    myNav.style.display = 'none';
   }
 
-  // Account page — show for drivers (admin-drivers too)
-  acctNav.style.display = dName ? 'block' : 'none';
+  // Account page — show for anyone with a driver name
+  const acctNav = document.getElementById('account-nav');
+  if(acctNav) acctNav.style.display = dName ? 'block' : 'none';
 
   // Income — always show for everyone
   document.getElementById('income-nav').style.display = 'block';
 
-  // Access Control tab in Drivers page — always enforce based on admin status
+  // Access Control tab — show for admins (Chase, Kat, Morgan)
   const accessTab = document.getElementById('dtab-access');
-  if(accessTab) accessTab.style.display = isAdmin() ? 'inline-block' : 'none';
+  if(accessTab) accessTab.style.display = admin ? 'inline-block' : 'none';
 
-  // For admins pre-render Access Control so it's ready immediately
-  if(isAdmin()) setTimeout(()=>renderAccessControl(), 200);
+  // Pre-render admin tools so they are ready when clicked
+  if(admin) setTimeout(function(){ renderAccessControl(); }, 100);
+
   populateDriverFilter(); buildCalTabs(); refreshDash(); renderCal(); renderRides(); renderDriverSettings(); calcQuote(); updateNotifBadge(); updateTripFields(); updateChatBadge();
-  // Pre-load Google Maps so mileage calc is ready instantly
   loadGoogleMapsAPI();
-  // Set up push notifications UI and foreground message handler
   setupFCMForeground();
   setupPushUI();
   renderAccountPage();
