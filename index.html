@@ -673,9 +673,11 @@ input,select,textarea{font-size:16px;}
       <div style="font-size:.8rem;color:#92400e;margin-bottom:.6rem;">You can renew below to keep tracking, or download all of your documentation (income, outside rides &amp; receipts) to keep for your records.</div>
       <button onclick="downloadMyDocumentation()" style="width:100%;padding:.6rem;background:#92400e;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">⬇ Download all my documentation</button>
     </div>
-    <p style="font-size:.88rem;color:var(--mid);margin-bottom:1.25rem;">Full P&L, vehicle costs, expense tracking, receipt scanner, and PDF export for tax time.</p>
+    <p style="font-size:.88rem;color:var(--mid);margin-bottom:1.25rem;">Auto-written client confirmation texts, full P&L, vehicle costs, expense tracking, receipt scanner, and PDF export for tax time.</p>
     <div style="background:var(--surface);border-radius:10px;padding:1rem;margin-bottom:1.25rem;text-align:left;">
       <div style="font-size:.8rem;line-height:2;color:var(--black);">
+        ✓ Daily client confirmation texts — auto-written<br>
+        ✓ One-tap send + a ✓ on the calendar when done<br>
         ✓ Weekly &amp; monthly earnings dashboard<br>
         ✓ EPA MPG vehicle cost per ride<br>
         ✓ Monthly expense tracking<br>
@@ -3160,8 +3162,9 @@ function buildUpgradePromptCard(){
   return '<div style="background:#1a0d2e;border-radius:12px;padding:1.25rem;">'
     +'<div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#9c27b0;margin-bottom:.5rem;">Upgrade available</div>'
     +'<div style="font-size:1.1rem;font-weight:600;color:#fff;margin-bottom:.25rem;">Income Tracking</div>'
-    +'<div style="font-size:.85rem;color:#9c7bbf;margin-bottom:1rem;">See your full earnings, vehicle costs, expenses, and net take-home per ride.</div>'
+    +'<div style="font-size:.85rem;color:#9c7bbf;margin-bottom:1rem;">Auto-written client confirmation texts, full earnings, vehicle costs, expenses, and net take-home per ride.</div>'
     +'<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem;">'
+    +'<span style="font-size:.78rem;padding:3px 8px;background:rgba(156,39,176,.2);color:#ce93d8;border-radius:5px;">Daily confirmation texts</span>'
     +'<span style="font-size:.78rem;padding:3px 8px;background:rgba(156,39,176,.2);color:#ce93d8;border-radius:5px;">Weekly & monthly dashboard</span>'
     +'<span style="font-size:.78rem;padding:3px 8px;background:rgba(156,39,176,.2);color:#ce93d8;border-radius:5px;">EPA MPG vehicle cost</span>'
     +'<span style="font-size:.78rem;padding:3px 8px;background:rgba(156,39,176,.2);color:#ce93d8;border-radius:5px;">Insurance & car payment tracking</span>'
@@ -3442,10 +3445,44 @@ function refreshDash(){
 }
 
 // Monthly income snapshot for the dashboard (gross / net / total rides). Upgrade-gated.
+// Dismissible advert banner shown on the dashboard to drivers who haven't upgraded.
+// Resets each session (not persisted) so it keeps gently advertising.
+let dashUpgradeDismissed = false;
+function dismissDashUpgrade(){ dashUpgradeDismissed = true; renderDashIncome(); }
+function buildDashUpgradeBanner(){
+  const feats = [
+    ['✓','Daily client confirmation texts — auto-written'],
+    ['✓','One-tap send, with a ✓ on the calendar'],
+    ['✓','Weekly &amp; monthly earnings dashboard'],
+    ['✓','Per-ride vehicle cost (EPA MPG)'],
+    ['✓','Monthly expense tracking'],
+    ['✓','Receipt scanner with camera'],
+    ['✓','Log outside rides &amp; cash jobs'],
+    ['✓','Net take-home calculation'],
+    ['✓','PDF &amp; CSV tax export'],
+    ['✓','Client payment method &amp; notes'],
+  ];
+  const chips = feats.map(f=>'<div style="display:flex;align-items:flex-start;gap:.4rem;font-size:.82rem;color:#e9ddfa;"><span style="color:#7CFFB2;font-weight:700;">'+f[0]+'</span><span>'+f[1]+'</span></div>').join('');
+  return ''
+    +'<div style="position:relative;background:linear-gradient(135deg,#1a0d2e 0%,#3a1d5c 100%);border-radius:14px;padding:1.4rem 1.5rem;overflow:hidden;">'
+      +'<button onclick="dismissDashUpgrade()" aria-label="Dismiss" style="position:absolute;top:.6rem;right:.7rem;background:none;border:none;color:#9482bf;font-size:1.1rem;cursor:pointer;line-height:1;">✕</button>'
+      +'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.15rem;">'
+        +'<span style="font-size:1.3rem;">💰</span>'
+        +'<span style="font-family:\'Playfair Display\',serif;font-size:1.2rem;font-weight:600;color:#fff;">Unlock Driver Pro</span>'
+      +'</div>'
+      +'<div style="font-size:.85rem;color:#bba7e0;margin-bottom:1rem;max-width:52ch;">Everything below is included — auto-written confirmation texts plus full income &amp; expense tracking for tax time.</div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.35rem .9rem;margin-bottom:1.1rem;">'+chips+'</div>'
+      +'<div style="display:flex;align-items:center;gap:.85rem;flex-wrap:wrap;">'
+        +'<button onclick="showIncomeOrUpgrade(null)" style="padding:.7rem 1.4rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.9rem;font-weight:700;cursor:pointer;">Upgrade — $15/mo</button>'
+        +'<span style="font-size:.8rem;color:#9482bf;">or start a 7-day free trial</span>'
+      +'</div>'
+    +'</div>';
+}
+
 function renderDashIncome(){
   const box=document.getElementById('dash-income-overview');
   if(!box) return;
-  if(!hasIncomeAccess()){ box.innerHTML=''; return; }
+  if(!hasIncomeAccess()){ box.innerHTML = dashUpgradeDismissed ? '' : buildDashUpgradeBanner(); return; }
   const now=new Date();
   const start=new Date(now.getFullYear(),now.getMonth(),1);
   const end=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59);
