@@ -517,6 +517,7 @@ input,select,textarea{font-size:16px;}
         <button onclick="openQuickAddModal()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">+ Add Ride</button>
       </div>
     </div>
+    <div id="fw-sync-status" style="font-size:.8rem;color:var(--mid);margin-bottom:.6rem;min-height:1.1rem;"></div>
     <div id="cal-driver-tabs" style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.75rem;"></div>
     <input type="text" id="cal-search" placeholder="🔍 Search all rides — client, phone, driver, type…" oninput="calSearch()" style="width:100%;padding:.55rem .85rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;margin-bottom:.75rem;box-sizing:border-box;" />
     <div id="cal-controls" style="display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem;flex-wrap:wrap;">
@@ -4966,10 +4967,10 @@ async function syncFamilyWall(){
 
   for(let i=0; i<attempts.length; i++){
     try {
-      status.textContent = `Trying method ${i+1} of ${attempts.length}…`;
+      setStatus(`Trying method ${i+1} of ${attempts.length}…`);
       icsText = await attempts[i]();
       if(icsText && icsText.includes('BEGIN:VCALENDAR')){
-        status.textContent = `Connected via method ${i+1}`;
+        setStatus(`Connected via method ${i+1}`);
         break;
       }
       icsText = null;
@@ -4978,9 +4979,13 @@ async function syncFamilyWall(){
 
   if(!icsText){
     // All methods failed — offer manual paste fallback
-    btn.textContent = '🔄 Sync from FamilyWall';
-    btn.disabled = false;
-    status.innerHTML = `Auto-sync blocked. <button onclick="manualICSPaste()" style="color:#9c27b0;border:1px solid #9c27b0;background:none;border-radius:6px;padding:2px 8px;cursor:pointer;font-size:.78rem;">Paste ICS manually ↗</button>`;
+    if(btn){ btn.textContent = origLabel || '🔄 Sync FamilyWall'; btn.disabled = false; }
+    if(status){
+      status.innerHTML = `Auto-sync blocked. <button onclick="manualICSPaste()" style="color:#9c27b0;border:1px solid #9c27b0;background:none;border-radius:6px;padding:2px 8px;cursor:pointer;font-size:.78rem;">Paste ICS manually ↗</button>`;
+    } else {
+      showToast('Auto-sync blocked — opening manual paste','error');
+      manualICSPaste();
+    }
     return;
   }
 
