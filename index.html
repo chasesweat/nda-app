@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606020730">
+<meta name="version" content="202606021200">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -25,6 +25,7 @@
   --black:#1a0d2e; --white:#fdfcff; --gold:#7c3aed; --gold-pale:#f3eeff;
   --charcoal:#2d1f45; --mid:#7c6d9a; --light:#e2d9f3; --surface:#f7f3ff;
   --red:#b03a2e; --green:#2e6b46; --blue:#1e4f87;
+  --accent:#0d9488;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:'DM Sans',sans-serif;background:var(--white);color:var(--black);min-height:100vh;display:flex;flex-direction:column;}
@@ -131,6 +132,25 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
 .week-ride-price{font-size:.82rem;font-weight:600;color:var(--green);white-space:nowrap;}
 .week-empty{font-size:.8rem;color:var(--mid);padding:.4rem 0 .5rem .5rem;font-style:italic;}
 .week-day.collapsed .week-rides{display:none;}
+/* View toggle (week / month) */
+.view-toggle{display:inline-flex;border:1.5px solid var(--light);border-radius:8px;overflow:hidden;}
+.view-btn{padding:.35rem .85rem;font-size:.8rem;font-weight:600;border:none;background:var(--white);color:var(--mid);cursor:pointer;font-family:'DM Sans',sans-serif;}
+.view-btn.active{background:var(--gold);color:#fff;}
+/* Month grid */
+.month-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+.month-dow{font-size:.66rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);text-align:center;padding:.25rem 0;}
+.month-cell{min-height:84px;border:1px solid var(--light);border-radius:8px;padding:4px 5px;background:var(--white);display:flex;flex-direction:column;gap:3px;overflow:hidden;}
+.month-cell.other{background:var(--surface);opacity:.55;}
+.month-cell.today .month-daynum{background:var(--gold);color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;}
+.month-daynum{font-size:.78rem;font-weight:600;color:var(--black);align-self:flex-start;}
+.month-holiday{font-size:.58rem;color:#92400e;background:#fef3c7;padding:0 4px;border-radius:4px;}
+.month-pill{font-size:.62rem;line-height:1.25;padding:1px 5px;border-radius:5px;color:#fff;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.month-more{font-size:.6rem;color:var(--mid);cursor:pointer;}
+@media(max-width:600px){
+  .month-cell{min-height:58px;padding:3px;}
+  .month-pill{font-size:.55rem;padding:1px 3px;}
+  .hide-sm{display:none;}
+}
 .search-input{flex:1;min-width:180px;padding:.55rem 1rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.9rem;}
 .status-yes{color:var(--green);font-weight:600;font-size:.78rem;}
 .status-no{color:var(--mid);font-size:.78rem;}
@@ -358,6 +378,9 @@ input,select,textarea{font-size:16px;}
       <button onclick="showPage('chat',null)" style="position:relative;background:none;border:none;cursor:pointer;padding:.25rem .4rem;color:var(--white);font-size:1.1rem;" title="Chat">
         💬<span id="chat-badge-topbar" style="display:none;position:absolute;top:-2px;right:-2px;background:#dc2626;color:#fff;font-size:.6rem;font-weight:700;border-radius:50%;width:16px;height:16px;line-height:16px;text-align:center;">●</span>
       </button>
+      <button onclick="goToCalendar()" style="position:relative;background:none;border:none;cursor:pointer;padding:.25rem .4rem;color:var(--white);font-size:1.1rem;" title="All rides calendar">
+        📅
+      </button>
       <button id="notif-push-btn" onclick="togglePushNotifications()" title="Push notifications" style="display:none;background:none;border:none;cursor:pointer;padding:.25rem .3rem;color:var(--white);font-size:1rem;">📳</button>
       <!-- Hamburger menu -->
       <div style="position:relative;">
@@ -381,10 +404,9 @@ input,select,textarea{font-size:16px;}
         <div class="page-title">Dashboard</div>
         <div class="page-sub" id="dash-date"></div>
       </div>
-      <button onclick="syncFamilyWall()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">🔄 Sync from FamilyWall</button>
     </div>
-    <div id="driver-legend" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:1.25rem;"></div>
-    <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.75rem;">Upcoming rides</div>
+    <div id="dash-income-overview" style="margin-bottom:1.5rem;"></div>
+    <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.75rem;" id="dash-upcoming-label">Your upcoming rides</div>
     <div id="upcoming-list"></div>
   </div>
 
@@ -490,14 +512,21 @@ input,select,textarea{font-size:16px;}
   <div class="page" id="page-calendar">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:.75rem;">
       <div class="page-title">Calendar</div>
-      <button onclick="openQuickAddModal()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">+ Add Ride</button>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+        <button id="cal-familywall-btn" onclick="syncFamilyWall()" style="background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;padding:.5rem .85rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">🔄 Sync FamilyWall</button>
+        <button onclick="openQuickAddModal()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">+ Add Ride</button>
+      </div>
     </div>
     <div id="cal-driver-tabs" style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.75rem;"></div>
     <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem;flex-wrap:wrap;">
-      <button onclick="prevWeek()" class="btn-secondary" style="padding:.35rem .75rem;">←</button>
+      <button onclick="calPrev()" class="btn-secondary" style="padding:.35rem .75rem;">←</button>
       <span id="cal-range-label" style="font-size:.95rem;font-weight:600;"></span>
-      <button onclick="nextWeek()" class="btn-secondary" style="padding:.35rem .75rem;">→</button>
-      <button onclick="goToThisWeek()" class="btn-secondary" style="margin-left:auto;padding:.35rem .75rem;font-size:.8rem;">This week</button>
+      <button onclick="calNext()" class="btn-secondary" style="padding:.35rem .75rem;">→</button>
+      <button onclick="calToday()" class="btn-secondary" style="padding:.35rem .75rem;font-size:.8rem;">Today</button>
+      <div class="view-toggle" style="margin-left:auto;">
+        <button id="cal-view-week" class="view-btn active" onclick="setCalView('week')">Week</button>
+        <button id="cal-view-month" class="view-btn" onclick="setCalView('month')">Month</button>
+      </div>
     </div>
     <div id="cal-grid"></div>
   </div>
@@ -508,21 +537,33 @@ input,select,textarea{font-size:16px;}
       <div class="page-title">All Rides</div>
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
         <select id="filter-driver" onchange="renderRides()" style="padding:.4rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;"></select>
-        <input type="text" id="search-rides" placeholder="Search client, phone…" oninput="renderRides()" style="padding:.4rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;width:200px;" />
+        <select id="filter-type" onchange="renderRides()" style="padding:.4rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;">
+          <option value="">All types</option>
+          <option value="AP ROUND TRIP">AP Round Trip</option>
+          <option value="AP PICK UP">AP Pick Up</option>
+          <option value="AP RUN">AP Run</option>
+          <option value="ROUND TRIP">Round Trip</option>
+          <option value="POINT TO POINT">Point to Point</option>
+        </select>
+        <input type="text" id="search-input" placeholder="Search client, phone…" oninput="renderRides()" style="padding:.4rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;width:200px;" />
       </div>
     </div>
     <div style="overflow-x:auto;">
       <table style="width:100%;border-collapse:collapse;font-size:.85rem;">
         <thead>
           <tr style="background:var(--black);color:var(--gold);">
+            <th style="padding:.6rem .4rem;"></th>
             <th style="padding:.6rem .75rem;text-align:left;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Date</th>
             <th style="padding:.6rem .75rem;text-align:left;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Client</th>
             <th style="padding:.6rem .75rem;text-align:left;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Driver</th>
             <th style="padding:.6rem .75rem;text-align:left;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Type</th>
+            <th class="hide-sm" style="padding:.6rem .75rem;text-align:left;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Vehicle</th>
             <th style="padding:.6rem .75rem;text-align:right;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Price</th>
+            <th class="hide-sm" style="padding:.6rem .4rem;"></th>
+            <th style="padding:.6rem .4rem;"></th>
           </tr>
         </thead>
-        <tbody id="rides-body"></tbody>
+        <tbody id="rides-tbody"></tbody>
       </table>
     </div>
   </div>
@@ -573,9 +614,6 @@ input,select,textarea{font-size:16px;}
     </div>
     <div id="driver-panel-settings" style="display:none;"><div id="driver-settings-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:1rem;"></div></div>
     <div id="driver-panel-members">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:.85rem;">
-        <button onclick="shareAllVenmo()" style="background:#3d95ce;color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">↗ Share all Venmo links</button>
-      </div>
       <div id="driver-members-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;"></div>
     </div>
     <div id="driver-panel-access" style="display:none;"><div id="access-control-list"></div></div>
@@ -585,12 +623,26 @@ input,select,textarea{font-size:16px;}
   <div class="page" id="page-myrides">
     <div class="page-title" id="myrides-title">My Rides</div>
     <div style="display:flex;gap:.5rem;border-bottom:2px solid var(--light);padding-bottom:.75rem;margin-bottom:1rem;flex-wrap:wrap;">
-      <button class="cal-tab active" onclick="switchMyTab('cal',this)">Calendar</button>
-      <button class="cal-tab" onclick="switchMyTab('list',this)">Upcoming list</button>
+      <button class="cal-tab active" id="mytab-cal" onclick="switchMyTab('cal',this)">Calendar</button>
+      <button class="cal-tab" id="mytab-list" onclick="switchMyTab('list',this)">Upcoming list</button>
+      <button class="cal-tab" id="mytab-confirm" onclick="switchMyTab('confirm',this)">Tomorrow ✓</button>
     </div>
-    <div id="my-cal-grid"></div>
+    <div id="my-cal-panel">
+      <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem;flex-wrap:wrap;">
+        <button onclick="myCalPrev()" class="btn-secondary" style="padding:.35rem .75rem;">←</button>
+        <span id="mycal-range-label" style="font-size:.95rem;font-weight:600;"></span>
+        <button onclick="myCalNext()" class="btn-secondary" style="padding:.35rem .75rem;">→</button>
+        <button onclick="myCalToday()" class="btn-secondary" style="padding:.35rem .75rem;font-size:.8rem;">Today</button>
+        <div class="view-toggle" style="margin-left:auto;">
+          <button id="mycal-view-week" class="view-btn active" onclick="setMyCalView('week')">Week</button>
+          <button id="mycal-view-month" class="view-btn" onclick="setMyCalView('month')">Month</button>
+        </div>
+      </div>
+      <div id="my-cal-grid"></div>
+    </div>
     <div id="my-rides-list" style="display:none;"></div>
-    <div style="margin-top:1.5rem;">
+    <div id="my-confirm-panel" style="display:none;"></div>
+    <div id="my-export-block" style="margin-top:1.5rem;">
       <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.75rem;">Export to calendar</div>
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
         <button onclick="exportCalendar('apple')" class="btn-secondary" style="font-size:.82rem;">🍎 Apple Calendar</button>
@@ -677,8 +729,8 @@ input,select,textarea{font-size:16px;}
         ✓ Client payment method &amp; notes
       </div>
     </div>
-    <div style="font-size:1.5rem;font-weight:700;color:var(--black);margin-bottom:1rem;">$10<span style="font-size:.9rem;font-weight:400;color:var(--mid);">/month</span></div>
-    <a id="upgrade-cta-btn" href="https://square.link/u/n7LdNRQt" target="_blank" class="btn-primary" style="display:block;width:100%;text-decoration:none;padding:.85rem;margin-bottom:.5rem;">Upgrade Now — $10/mo</a>
+    <div style="font-size:1.5rem;font-weight:700;color:var(--black);margin-bottom:1rem;">$15<span style="font-size:.9rem;font-weight:400;color:var(--mid);">/month</span></div>
+    <a id="upgrade-cta-btn" href="https://square.link/u/n7LdNRQt" target="_blank" class="btn-primary" style="display:block;width:100%;text-decoration:none;padding:.85rem;margin-bottom:.5rem;">Upgrade Now — $15/mo</a>
     <button onclick="startIncomeTrial()" style="width:100%;padding:.7rem;background:none;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;cursor:pointer;color:var(--mid);margin-bottom:.5rem;">Start 7-day free trial</button>
     <button onclick="closeUpgradeModal()" style="width:100%;padding:.7rem;background:none;border:none;font-family:'DM Sans',sans-serif;font-size:.85rem;cursor:pointer;color:var(--mid);">Not now</button>
   </div>
@@ -1141,7 +1193,7 @@ function setupRealtimeListeners(){
       // Re-render if app is visible
       if(document.getElementById('app').style.display!=='none'){
         refreshDash(); renderCal(); renderRides();
-        if(document.getElementById('page-myrides').classList.contains('active')) renderMyCal();
+        if(document.getElementById('page-myrides').classList.contains('active')){ renderMyCal(); if(myTab==='confirm') renderConfirmations(); }
         if(document.getElementById('page-income').classList.contains('active')) renderIncome();
       }
     }
@@ -1611,7 +1663,7 @@ function updateTripFields(){
 async function saveQuote(){
   const client=document.getElementById('q-client').value.trim();
   if(!client){showToast('Please enter a client name','error');return;}
-  const driverVal=document.getElementById('q-driver').value;
+  const driverVal=document.getElementById('q-driver').value || getMyDriverName() || '';
   const total=calcQuote();
   const ride={
     id:nextId++, client, driver:driverVal,
@@ -1744,6 +1796,24 @@ function renderNotifPanel(){
 // DRIVER COLOR HELPERS
 // ═══════════════════════════════════════════
 function driverColor(name){ return driverColors[name]||'#888'; }
+
+// Returns '#fff' or a dark color — whichever is actually more readable on the given
+// background hex. `alpha` accounts for badges drawn at partial opacity over the white card.
+function contrastText(hex, alpha){
+  if(alpha===undefined) alpha=1;
+  const h=(hex||'').replace('#','');
+  if(h.length<6) return '#fff';
+  let r=parseInt(h.slice(0,2),16), g=parseInt(h.slice(2,4),16), b=parseInt(h.slice(4,6),16);
+  if([r,g,b].some(Number.isNaN)) return '#fff';
+  // Blend toward white to mimic the partial-opacity badge over a light card
+  r=r*alpha+255*(1-alpha); g=g*alpha+255*(1-alpha); b=b*alpha+255*(1-alpha);
+  const lin=c=>{ c/=255; return c<=0.03928 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4); };
+  const L = 0.2126*lin(r)+0.7152*lin(g)+0.0722*lin(b);
+  const DARK = 0.0114; // relative luminance of #1a0d2e
+  const crWhite = 1.05/(L+0.05);          // contrast of white text on bg
+  const crDark  = (L+0.05)/(DARK+0.05);   // contrast of dark text on bg
+  return crWhite >= crDark ? '#fff' : '#1a0d2e';
+}
 function driverDot(name){ return `<span class="driver-dot" style="background:${driverColor(name)};"></span>`; }
 
 // Returns the color for a ride — driver's color if assigned, otherwise creator's color
@@ -1781,24 +1851,35 @@ function weekLabel(start){
   return `${MONTHS[start.getMonth()]} ${start.getDate()} – ${MONTHS[end.getMonth()]} ${end.getDate()}, ${start.getFullYear()}`;
 }
 
+// ── VIEW STATE (week vs month) ──
+let calView = 'week';                 // 'week' | 'month'
+let calMonthDate = new Date();        // any date within the displayed month
+let myCalView = 'week';
+let myCalMonthDate = new Date();
+let myTab = 'cal';                    // My Rides: 'cal' | 'list'
+
+function monthLabel(d){ return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`; }
+
 function switchCalTab(driver,el){
   calDriverFilter=driver;
-  document.querySelectorAll('.cal-tab').forEach(t=>t.classList.remove('active'));
-  el.classList.add('active');
+  document.querySelectorAll('#cal-driver-tabs .cal-tab').forEach(t=>t.classList.remove('active'));
+  if(el) el.classList.add('active');
   renderCal();
 }
 function buildCalTabs(){
-  const c=document.getElementById('driver-cal-tabs');
-  c.innerHTML=DRIVERS.map(d=>`<button class="cal-tab" onclick="switchCalTab('${d}',this)" style="color:${driverColor(d)};font-weight:600;">${d.split(' ')[0]}</button>`).join('');
+  const c=document.getElementById('cal-driver-tabs');
+  if(!c) return;
+  const allActive = (!calDriverFilter||calDriverFilter==='group') ? ' active' : '';
+  c.innerHTML=`<button class="cal-tab${allActive}" onclick="switchCalTab('group',this)" style="font-weight:600;">All drivers</button>`
+    +DRIVERS.map(d=>`<button class="cal-tab${calDriverFilter===d?' active':''}" onclick="switchCalTab('${d}',this)" style="color:${driverColor(d)};font-weight:600;">${d.split(' ')[0]}</button>`).join('');
 }
 
-
+// Build the week-view markup for a Sunday-start week into containerId.
 function renderWeekView(containerId, weekStart, driverFilter){
-  const labelId = containerId==='cal-week-view' ? 'cal-month-label' : 'mycal-month-label';
-  document.getElementById(labelId).textContent = weekLabel(weekStart);
   const today = toDateStr(new Date());
   const container = document.getElementById(containerId);
-  container.innerHTML='';
+  if(!container) return;
+  let html='<div class="week-view">';
   for(let i=0;i<7;i++){
     const day=addDays(weekStart,i);
     const ds=toDateStr(day);
@@ -1809,11 +1890,9 @@ function renderWeekView(containerId, weekStart, driverFilter){
     let dayRides=rides.filter(r=>r.date===ds);
     if(driverFilter&&driverFilter!=='group') dayRides=dayRides.filter(r=>r.driver===driverFilter);
     dayRides.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
-    const dayEl=document.createElement('div');
-    dayEl.className='week-day'+(dayRides.length===0?' collapsed':'');
     const holBadge=isHoliday?`<span class="week-holiday">${holName}</span>`:'';
     const countBadge=dayRides.length?`<span class="week-count">${dayRides.length} ride${dayRides.length>1?'s':''}</span>`:'<span class="week-count" style="opacity:.4;">No rides</span>';
-    dayEl.innerHTML=`
+    html+=`<div class="week-day${dayRides.length===0?' collapsed':''}">
       <div class="week-day-header" onclick="this.parentElement.classList.toggle('collapsed')">
         <div class="week-day-name">${DAY_SHORT[day.getDay()]}</div>
         <div class="week-day-date${isToday?' today':''}">${day.getDate()}</div>
@@ -1832,7 +1911,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
                   <div style="width:8px;height:8px;border-radius:50%;background:${c};margin-top:3px;"></div>
                 </div>
                 <div style="flex:1;min-width:0;">
-                  <div class="week-ride-client">${r.client}</div>
+                  <div class="week-ride-client">${r.confirmSent?'<span style="color:var(--green);font-weight:900;">✓ </span>':''}${r.client}</div>
                   <div class="week-ride-detail">${r.vehicle} · ${r.driver?r.driver.split(' ')[0]:'Unassigned'}</div>
                 </div>
                 <div style="text-align:right;">
@@ -1843,36 +1922,101 @@ function renderWeekView(containerId, weekStart, driverFilter){
             }).join('')
           : `<div class="week-empty">No rides scheduled</div>`
         }
-      </div>`;
-    container.appendChild(dayEl);
+      </div></div>`;
   }
+  html+='</div>';
+  container.innerHTML=html;
+}
+
+// Build a month grid into containerId. weekToggleFn(dateStr) is called when a day is clicked.
+function renderMonthView(containerId, monthDate, driverFilter, jumpFn){
+  const container=document.getElementById(containerId);
+  if(!container) return;
+  const today=toDateStr(new Date());
+  const year=monthDate.getFullYear(), month=monthDate.getMonth();
+  const first=new Date(year,month,1);
+  const gridStart=addDays(first,-first.getDay()); // back up to Sunday
+  let html='<div class="month-grid">'+DAY_SHORT.map(d=>`<div class="month-dow">${d}</div>`).join('');
+  for(let i=0;i<42;i++){
+    const day=addDays(gridStart,i);
+    const ds=toDateStr(day);
+    const inMonth=day.getMonth()===month;
+    const isToday=ds===today;
+    const mmdd=ds.slice(5);
+    const isHoliday=ALL_HOLIDAY_MMDD.includes(mmdd);
+    let dayRides=rides.filter(r=>r.date===ds);
+    if(driverFilter&&driverFilter!=='group') dayRides=dayRides.filter(r=>r.driver===driverFilter);
+    dayRides.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+    const shown=dayRides.slice(0,3);
+    const extra=dayRides.length-shown.length;
+    const pills=shown.map(r=>{
+      const c=rideColor(r);
+      const check=r.confirmSent?'<span style="font-weight:900;">✓</span> ':'';
+      const lbl=`${r.time?r.time+' ':''}${(r.client||'').split(' ')[0]}`;
+      return `<div class="month-pill" style="background:${c};" title="${r.confirmSent?'✓ Confirmed · ':''}${(r.client||'')} · ${r.type} · $${r.price}" onclick="event.stopPropagation();openRideModal(${r.id})">${check}${lbl}</div>`;
+    }).join('');
+    const more=extra>0?`<div class="month-more">+${extra} more</div>`:'';
+    const hol=isHoliday?`<span class="month-holiday">${HOLIDAY_NAMES[mmdd]||'Holiday'}</span>`:'';
+    html+=`<div class="month-cell${inMonth?'':' other'}${isToday?' today':''}" onclick="${jumpFn}('${ds}')" style="cursor:pointer;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">
+        <span class="month-daynum">${day.getDate()}</span>${hol}
+      </div>${pills}${more}</div>`;
+  }
+  html+='</div>';
+  container.innerHTML=html;
 }
 
 function renderCal(){
   if(!document.getElementById('cal-grid')) return;
-  document.getElementById('cal-month-label').textContent = weekLabel(calWeekStart);
-  const legend=document.getElementById('cal-legend');
-  if(calDriverFilter==='group'||!calDriverFilter){
-    legend.innerHTML=DRIVERS.map(d=>`<span style="display:flex;align-items:center;gap:5px;font-size:.75rem;padding:.2rem .6rem;border-radius:20px;border:2px solid ${driverColor(d)}20;cursor:pointer;" onclick="switchCalTab('${d}',event.target.closest('span'))">${driverDot(d)}<strong>${d.split(' ')[0]}</strong></span>`).join('');
-  } else { legend.innerHTML=''; }
-  renderWeekView('cal-week-view', calWeekStart, calDriverFilter);
+  buildCalTabs();
+  // FamilyWall sync only on the all-drivers view
+  const fwBtn=document.getElementById('cal-familywall-btn');
+  if(fwBtn) fwBtn.style.display=(!calDriverFilter||calDriverFilter==='group')?'inline-block':'none';
+  document.getElementById('cal-view-week').classList.toggle('active', calView==='week');
+  document.getElementById('cal-view-month').classList.toggle('active', calView==='month');
+  const label=document.getElementById('cal-range-label');
+  if(calView==='month'){
+    if(label) label.textContent=monthLabel(calMonthDate);
+    renderMonthView('cal-grid', calMonthDate, calDriverFilter, 'calJumpToWeek');
+  } else {
+    if(label) label.textContent=weekLabel(calWeekStart);
+    renderWeekView('cal-grid', calWeekStart, calDriverFilter);
+  }
 }
+function calJumpToWeek(ds){
+  calWeekStart=getWeekStart(new Date(ds+'T12:00:00'));
+  setCalView('week');
+}
+function setCalView(v){ calView=v; renderCal(); }
+function calPrev(){ if(calView==='month'){calMonthDate=new Date(calMonthDate.getFullYear(),calMonthDate.getMonth()-1,1);} else {calWeekStart=addDays(calWeekStart,-7);} renderCal(); }
+function calNext(){ if(calView==='month'){calMonthDate=new Date(calMonthDate.getFullYear(),calMonthDate.getMonth()+1,1);} else {calWeekStart=addDays(calWeekStart,7);} renderCal(); }
+function calToday(){ calWeekStart=getWeekStart(new Date()); calMonthDate=new Date(); renderCal(); }
+// Topbar quick-link → all-drivers calendar
+function goToCalendar(){ calDriverFilter='group'; showPage('calendar',null); }
 
 function renderMyCal(){
   if(!document.getElementById('my-cal-grid')) return;
   const dName=getMyDriverName();
-  document.getElementById('mycal-month-label').textContent = weekLabel(myCalWeekStart);
-  renderWeekView('mycal-week-view', myCalWeekStart, dName||'');
-  // upcoming list
+  document.getElementById('mycal-view-week').classList.toggle('active', myCalView==='week');
+  document.getElementById('mycal-view-month').classList.toggle('active', myCalView==='month');
+  const label=document.getElementById('mycal-range-label');
+  if(myCalView==='month'){
+    if(label) label.textContent=monthLabel(myCalMonthDate);
+    renderMonthView('my-cal-grid', myCalMonthDate, dName||'', 'myCalJumpToWeek');
+  } else {
+    if(label) label.textContent=weekLabel(myCalWeekStart);
+    renderWeekView('my-cal-grid', myCalWeekStart, dName||'');
+  }
+  // upcoming list (separate tab)
   const todayStr=new Date().toISOString().split('T')[0];
-  const upcoming=rides.filter(r=>r.driver===dName&&r.date>=todayStr).sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time));
-  const ul=document.getElementById('my-upcoming-list');
-  ul.innerHTML=upcoming.length?upcoming.map(r=>{
+  const upcoming=rides.filter(r=>r.driver===dName&&r.date>=todayStr).sort((a,b)=>a.date.localeCompare(b.date)||(a.time||'').localeCompare(b.time||''));
+  const ul=document.getElementById('my-rides-list');
+  if(ul) ul.innerHTML=upcoming.length?upcoming.map(r=>{
     const c=rideColor(r);
     return`<div style="display:flex;align-items:center;gap:1rem;padding:.75rem 1rem;border-radius:10px;margin-bottom:.5rem;background:${c}22;border:1.5px solid ${c}55;cursor:pointer;flex-wrap:wrap;" onclick="openRideModal(${r.id})">
       <div style="width:8px;min-height:36px;border-radius:3px;background:${c};flex-shrink:0;align-self:stretch;"></div>
       <div class="ride-date" style="color:${c};">${fmtDateShort(r.date)}<br>${r.time||'—'}</div>
-      <div class="ride-info"><div class="ride-client">${r.client}</div><div class="ride-detail">${r.type} · ${r.vehicle} · ${r.pickup}</div></div>
+      <div class="ride-info"><div class="ride-client">${r.client}</div><div class="ride-detail">${r.type} · ${r.vehicle} · ${r.pickup||''}</div></div>
       <div class="ride-price">$${r.price}</div>
     </div>`;
   }).join(''):'<p style="color:var(--mid);font-size:.9rem;">No upcoming rides assigned.</p>';
@@ -1880,6 +2024,222 @@ function renderMyCal(){
     notifications[dName].forEach(n=>n.read=true);
     saveNotifs(); updateNotifBadge();
   }
+}
+function myCalJumpToWeek(ds){ myCalWeekStart=getWeekStart(new Date(ds+'T12:00:00')); setMyCalView('week'); }
+function setMyCalView(v){ myCalView=v; renderMyCal(); }
+function myCalPrev(){ if(myCalView==='month'){myCalMonthDate=new Date(myCalMonthDate.getFullYear(),myCalMonthDate.getMonth()-1,1);} else {myCalWeekStart=addDays(myCalWeekStart,-7);} renderMyCal(); }
+function myCalNext(){ if(myCalView==='month'){myCalMonthDate=new Date(myCalMonthDate.getFullYear(),myCalMonthDate.getMonth()+1,1);} else {myCalWeekStart=addDays(myCalWeekStart,7);} renderMyCal(); }
+function myCalToday(){ myCalWeekStart=getWeekStart(new Date()); myCalMonthDate=new Date(); renderMyCal(); }
+function switchMyTab(tab, el){
+  myTab=tab;
+  document.querySelectorAll('#page-myrides .cal-tab').forEach(t=>t.classList.remove('active'));
+  if(el) el.classList.add('active');
+  document.getElementById('my-cal-panel').style.display = tab==='cal' ? 'block':'none';
+  document.getElementById('my-rides-list').style.display = tab==='list' ? 'block':'none';
+  const cp=document.getElementById('my-confirm-panel');
+  if(cp) cp.style.display = tab==='confirm' ? 'block':'none';
+  const ex=document.getElementById('my-export-block');
+  if(ex) ex.style.display = tab==='confirm' ? 'none':'block';
+  if(tab==='confirm') renderConfirmations();
+  else renderMyCal();
+}
+
+// ═══════════════════════════════════════════
+// TOMORROW CONFIRMATIONS (paywalled)
+// Driver marks that they've texted each client to confirm tomorrow's ride.
+// Marking "sent" flips ride.confirmSent → a bold ✓ appears on the calendar title.
+// ═══════════════════════════════════════════
+function renderConfirmations(){
+  const panel=document.getElementById('my-confirm-panel');
+  if(!panel) return;
+
+  // Paywall gate — feature lives behind the $15/mo income upgrade.
+  if(!hasIncomeAccess()){
+    panel.innerHTML=`
+      <div style="background:var(--surface);border:1.5px solid var(--light);border-radius:12px;padding:1.5rem;text-align:center;">
+        <div style="font-size:2rem;margin-bottom:.5rem;">🔒</div>
+        <div style="font-weight:600;font-size:1rem;margin-bottom:.35rem;">Confirmation tracking is a premium feature</div>
+        <p style="color:var(--mid);font-size:.88rem;margin-bottom:1.1rem;">See tomorrow's rides, mark when you've texted each client, and show a ✓ on the calendar so dispatch knows it's handled.</p>
+        <button onclick="showIncomeOrUpgrade(null)" class="btn-primary" style="padding:.7rem 1.4rem;">Unlock — $15/mo</button>
+      </div>`;
+    return;
+  }
+
+  const tomorrow=toDateStr(addDays(new Date(),1));
+  const admin=isAdmin();
+  const dName=getMyDriverName();
+  let list=rides.filter(r=>r.date===tomorrow);
+  if(!admin) list=list.filter(r=>r.driver===dName);
+  list.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+
+  const sentCount=list.filter(r=>r.confirmSent).length;
+  const header=`
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem;">
+      <div>
+        <div style="font-size:1.05rem;font-weight:700;">Tomorrow — ${fmtDate(tomorrow)}</div>
+        <div style="font-size:.82rem;color:var(--mid);">${admin?'All drivers · ':''}${list.length} ride${list.length===1?'':'s'} · ${sentCount} confirmed</div>
+      </div>
+    </div>`;
+
+  if(!list.length){
+    panel.innerHTML=header+`<p style="color:var(--mid);font-size:.9rem;">No rides scheduled for tomorrow${admin?'':' assigned to you'}.</p>`;
+    return;
+  }
+
+  panel.innerHTML=header+list.map(r=>{
+    const c=rideColor(r);
+    const sent=!!r.confirmSent;
+    const phone=(r.phone||'').trim();
+    const phoneLink=phone?`<a href="tel:${phone.replace(/[^0-9+]/g,'')}" onclick="event.stopPropagation();" style="color:${c};font-weight:600;text-decoration:none;">📞 ${phone}</a>`:`<span style="color:var(--mid);">No phone on file</span>`;
+    const driverBadge=admin?`<span style="font-size:.68rem;padding:1px 7px;border-radius:6px;background:${c}22;color:${c};font-weight:600;">${r.driver?r.driver.split(' ')[0]:'Unassigned'}</span>`:'';
+    const stamp=sent&&r.confirmSentBy?`<div style="font-size:.7rem;color:var(--mid);margin-top:.35rem;">Sent by ${escHtml(String(r.confirmSentBy))}${r.confirmSentAt?' · '+fmtTs(r.confirmSentAt):''}</div>`:'';
+    const btn=sent
+      ? `<button onclick="toggleConfirmSent(${r.id})" style="width:100%;padding:.6rem;border:none;border-radius:8px;background:var(--green);color:#fff;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:700;cursor:pointer;">✓ Confirmation text sent</button>`
+      : `<button onclick="toggleConfirmSent(${r.id})" style="width:100%;padding:.6rem;border:1.5px solid var(--green);border-radius:8px;background:var(--white);color:var(--green);font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">Mark confirmation text sent</button>`;
+    const conf=buildConfirmationText(r);
+    const btnStyle="flex:1;min-width:120px;padding:.5rem;border:1.5px solid "+c+";border-radius:8px;background:var(--white);color:"+c+";font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;";
+    const msgSection=`
+      <div style="font-size:.68rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.3rem;">Text to send</div>
+      <div style="background:#f7f4ee;border:1px solid #e6ddd0;border-radius:8px;padding:.6rem .7rem;margin-bottom:.5rem;font-size:.78rem;line-height:1.5;color:#333;white-space:pre-wrap;max-height:200px;overflow:auto;">${escHtml(conf.message)}</div>
+      ${conf.instructions?`
+        <div style="font-size:.68rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.3rem;">Pickup instructions (send as 2nd text)</div>
+        <div style="background:#f7f4ee;border:1px solid #e6ddd0;border-radius:8px;padding:.6rem .7rem;margin-bottom:.5rem;font-size:.78rem;line-height:1.5;color:#333;white-space:pre-wrap;max-height:200px;overflow:auto;">${escHtml(conf.instructions)}</div>`:''}
+      <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.6rem;">
+        <button onclick="copyConfirmation(${r.id})" style="${btnStyle}">📋 Copy text</button>
+        ${phone?`<button onclick="textClient(${r.id})" style="${btnStyle}">💬 Text client</button>`:''}
+        ${conf.instructions?`<button onclick="copyInstructions(${r.id})" style="${btnStyle}">📋 Copy instructions</button>`:''}
+      </div>`;
+    return `<div style="border:1.5px solid ${c}55;border-left:5px solid ${c};border-radius:12px;padding:.9rem 1rem;margin-bottom:.75rem;background:${sent?c+'14':'var(--white)'};">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.3rem;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:.5rem;">
+          <span style="font-size:.95rem;font-weight:700;color:var(--black);cursor:pointer;" onclick="openRideModal(${r.id})">${sent?'<span style=\"color:var(--green);font-weight:900;\">✓ </span>':''}${escHtml(r.client||'—')}</span>
+          ${driverBadge}
+        </div>
+        <span style="font-size:.85rem;font-weight:700;color:${c};">${r.time||'—'}</span>
+      </div>
+      <div style="font-size:.78rem;color:var(--mid);margin-bottom:.2rem;">${escHtml(r.type||'')} · ${escHtml(r.vehicle||'')}</div>
+      <div style="font-size:.78rem;color:var(--mid);margin-bottom:.5rem;">${escHtml(r.pickup||'—')} → ${escHtml(r.home||'—')}</div>
+      <div style="font-size:.82rem;margin-bottom:.6rem;">${phoneLink}</div>
+      ${msgSection}
+      ${btn}${stamp}
+    </div>`;
+  }).join('');
+}
+
+async function toggleConfirmSent(id){
+  const r=rides.find(x=>x.id===id);
+  if(!r) return;
+  r.confirmSent=!r.confirmSent;
+  if(r.confirmSent){
+    r.confirmSentBy=currentUser?.name||'';
+    r.confirmSentAt=Date.now();
+  } else {
+    delete r.confirmSentBy;
+    delete r.confirmSentAt;
+  }
+  await saveRides();
+  renderConfirmations();
+  renderCal();
+  renderMyCal();
+  renderRides();
+  showToast(r.confirmSent?'Marked as confirmed ✓':'Confirmation cleared');
+}
+
+// ── Confirmation-text generator (ported from the "Confirmation Sheet" Apps Script) ──
+function fmtTime12(t){
+  if(!t) return '';
+  const m=/^(\d{1,2}):(\d{2})/.exec(String(t).trim());
+  if(!m) return String(t).trim();
+  let h=+m[1]; const min=m[2]; const ap=h>=12?'PM':'AM'; h=h%12; if(h===0) h=12;
+  return h+':'+min+' '+ap;
+}
+
+// Returns { message, instructions } — message is the confirmation text to send the
+// client; instructions is the separate terminal pickup message (AP PICK UP only).
+function buildConfirmationText(r){
+  // The confirmation is sent BY the logged-in driver (the client's owner) and signed with
+  // their name — not hardcoded to Kat. "I will be driving you" is used only when that same
+  // driver is the one assigned to drive this ride; otherwise a partner is covering, so the
+  // partner is named and copied. Works for every driver.
+  const sender        = (getMyDriverName() || (r.driver||'').trim());  // who sends / signs
+  const assigned      = ((r.driver||'').trim() || sender);             // who actually drives
+  const assignedPhone = (DRIVER_PROFILES[assigned]||{}).phone || '';
+  const sameDriver    = !!sender && !!assigned && sender.toLowerCase()===assigned.toLowerCase();
+  const time          = fmtTime12(r.time);
+  const amount        = (r.price!==undefined && r.price!==null && r.price!=='') ? '$'+r.price : '';
+  const flight        = (r.flight||'').trim();
+  const terminalVal   = (r.terminal||'').trim();
+  const start         = (r.pickup||'').trim();   // where the client is picked up
+  const dest          = (r.home||'').trim();     // drop-off / destination
+  const type          = (r.type||'').toUpperCase();
+
+  const driverLine = sameDriver
+    ? 'I will be driving you.'
+    : 'My partner '+assigned+' will be driving you on my behalf. '+assigned+' is copied on this message.';
+  const contact = 'Contact Information:\n\n'+assigned+'\n'+assignedPhone;
+
+  // Kat keeps her branded sign-off; every other driver signs with their first name.
+  const sig = (sender.toLowerCase()==='kathleen herringdine') ? 'Kathleen \u201cKat\u201d' : (sender.split(' ')[0]||'Your driver');
+
+  let message='', instructions='';
+
+  if(type==='AP RUN' || type==='LOCAL'){
+    message = 'I am confirming your pickup scheduled for tomorrow at '+time+'.\n\n'+
+              driverLine+'\n\n'+contact+'\n\n'+
+              'Many Thanks\n\n'+sig+'\n\n'+
+              'Trip cost: '+amount+' (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)';
+  }
+  else if(type==='AP PICK UP'){
+    const termUpper = terminalVal.toUpperCase();
+    if(termUpper.includes('NORTH')){
+      instructions = '🛫 NORTH TERMINAL Pick Up Instructions\n\n1️⃣ Text or call when you ARRIVE at baggage claim.\n\n2️⃣ From baggage claim, take the escalator to lower level (LN1) pickup. The escalator is located just beyond baggage carousel #4, between doors N2 and N3.\n\n3️⃣ The driver will meet you near the lower level elevator, which is to your right once you exit the lower level.\n\n🔻🔻⬇️⬇️⬇️⬇️🔻🔻\nDISREGARD SIGNS FOR UBER/LYFT RIDESHARE\n🔺🔺⬆️⬆️⬆️⬆️🔺🔺';
+    } else if(termUpper.includes('SOUTH')){
+      instructions = '🛬 SOUTH TERMINAL (Delta Domestic) Pick Up Instructions\n\n1️⃣ Text your driver once you have retrieved your luggage from baggage claim.\n\n2️⃣ Take the escalator or elevator located between Doors S2 and S3 down to the Lower Level Pickup Area (LS1).\n\n3️⃣ Text your driver again when you are on your way to the LS1 pickup area.\n\n4️⃣ Wait on the curb just before the crosswalk near the curbside baggage check-in.\n\nYour driver will pick up from there.\n\n✨ Important: Please make sure your phone is off Airplane Mode and your ringer is on so your driver can communicate with you.';
+    } else if(termUpper.includes('INTERNATIONAL') || termUpper.includes('INTL')){
+      instructions = '🛂 INTERNATIONAL TERMINAL Pick Up Instructions\n\n1️⃣ Text or call when you arrive at baggage claim. This helps us time our arrival appropriately.\n\n2️⃣ From baggage claim, proceed to curbside pickup. Exit through door A2 to curbside pickup (A1 is usually very congested).\n\n3️⃣ Follow the signs for ground transportation and passenger pickup. Doors A1 and A2 will be to the left ⬅.\n\n4️⃣ Once you exit the airport, use the walkway and proceed to the middle island for passenger pickup. IF POSSIBLE, GO TO THE LAST SIGN FOR A2—just before the A3 sign.\n\n(If you do not have Global Entry or Mobile Passport Control, you can visit etbykat.com/mpc for details on Mobile Passport Control.)';
+    }
+    message = 'I am confirming your pickup scheduled for tomorrow at '+time+' from the airport, Flight # '+flight+'.\n\n'+
+              driverLine+'\n\n'+contact+'\n\n'+
+              'Many thanks,\n\n'+sig+'\n\n'+
+              'Trip cost: '+amount+' (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)';
+  }
+  else {
+    // ROUND TRIP / ONE WAY / AP ROUND TRIP / other
+    const going = dest || '(destination)';
+    const fromPart = start ? ' from '+start : '';
+    message = 'I am confirming your pickup scheduled for tomorrow at '+time+fromPart+', going to '+going+'.\n\n'+
+              driverLine+'\n\n'+contact+'\n\n'+
+              'Many thanks,\n\n'+sig+'\n\n'+
+              'Trip cost: '+amount+' (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)';
+  }
+
+  return { message, instructions };
+}
+
+function copyToClipboard(str, label){
+  if(!str){ showToast('Nothing to copy','error'); return; }
+  const done=()=>showToast('📋 '+(label||'Copied'));
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(str).then(done).catch(()=>fallbackCopy(str,label));
+  } else fallbackCopy(str,label);
+}
+function fallbackCopy(str,label){
+  try{
+    const ta=document.createElement('textarea');
+    ta.value=str; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    showToast('📋 '+(label||'Copied'));
+  }catch(e){ showToast('Copy failed — long-press the text to copy','error'); }
+}
+function copyConfirmation(id){ const r=rides.find(x=>x.id===id); if(r) copyToClipboard(buildConfirmationText(r).message,'Confirmation text copied'); }
+function copyInstructions(id){ const r=rides.find(x=>x.id===id); if(r) copyToClipboard(buildConfirmationText(r).instructions,'Pickup instructions copied'); }
+function textClient(id){
+  const r=rides.find(x=>x.id===id); if(!r) return;
+  const digits=(r.phone||'').replace(/[^0-9+]/g,'');
+  if(!digits){ showToast('No phone number on file','error'); return; }
+  const body=encodeURIComponent(buildConfirmationText(r).message);
+  window.location.href='sms:'+digits+'?&body='+body;
 }
 
 function closeDayModal(){document.getElementById('day-modal').classList.remove('show');}
@@ -2764,11 +3124,11 @@ function buildAccountStatusCard(sub, hasInc, expDate, daysLeft, trialDaysLeft){
       statusBadge = '<span style="background:#dcfce7;color:#166534;font-size:.72rem;padding:3px 10px;border-radius:12px;font-weight:600;">Active</span>';
     }
     statusDesc = '<div style="font-size:.82rem;color:var(--mid);margin-top:.35rem;">Income tracking active · renews '+expStr+'</div>';
-    renewBtn   = '<button onclick="renewIncomeUpgrade()" style="width:100%;padding:.65rem;margin-top:.85rem;background:#9c27b0;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.88rem;font-weight:600;cursor:pointer;">Renew — $10/month</button>';
+    renewBtn   = '<button onclick="renewIncomeUpgrade()" style="width:100%;padding:.65rem;margin-top:.85rem;background:#9c27b0;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.88rem;font-weight:600;cursor:pointer;">Renew — $15/month</button>';
   } else if(trialDaysLeft > 0){
     statusBadge = '<span style="background:#dbeafe;color:#1e40af;font-size:.72rem;padding:3px 10px;border-radius:12px;font-weight:600;">Trial — '+trialDaysLeft+' day'+(trialDaysLeft!==1?'s':'')+' left</span>';
     statusDesc  = '<div style="font-size:.82rem;color:var(--mid);margin-top:.35rem;">Free income trial · subscribe to keep access</div>';
-    renewBtn    = '<button onclick="renewIncomeUpgrade()" style="width:100%;padding:.65rem;margin-top:.85rem;background:#9c27b0;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.88rem;font-weight:600;cursor:pointer;">Subscribe — $10/month</button>';
+    renewBtn    = '<button onclick="renewIncomeUpgrade()" style="width:100%;padding:.65rem;margin-top:.85rem;background:#9c27b0;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.88rem;font-weight:600;cursor:pointer;">Subscribe — $15/month</button>';
   } else {
     statusBadge = '<span style="background:var(--surface);color:var(--mid);font-size:.72rem;padding:3px 10px;border-radius:12px;font-weight:600;">Free plan</span>';
     statusDesc  = '<div style="font-size:.82rem;color:var(--mid);margin-top:.35rem;">Base app · upgrade for income tracking</div>';
@@ -2797,7 +3157,7 @@ function buildUpgradePromptCard(){
     +'<span style="font-size:.78rem;padding:3px 8px;background:rgba(156,39,176,.2);color:#ce93d8;border-radius:5px;">CSV export</span>'
     +'</div>'
     +'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;">'
-    +'<div style="font-size:1.5rem;font-weight:700;color:#fff;">$10<span style="font-size:.9rem;font-weight:400;color:#9c7bbf;">/month</span></div>'
+    +'<div style="font-size:1.5rem;font-weight:700;color:#fff;">$15<span style="font-size:.9rem;font-weight:400;color:#9c7bbf;">/month</span></div>'
     +'<button onclick="renewIncomeUpgrade()" style="padding:.6rem 1.25rem;background:#9c27b0;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.88rem;font-weight:600;cursor:pointer;">Upgrade Now</button>'
     +'</div>'
     +'<div style="margin-top:.75rem;padding-top:.75rem;border-top:1px solid #3d1f6e;">'
@@ -2835,6 +3195,20 @@ async function startIncomeTrial(){
 
 // ── QUICK ADD RIDE ──
 
+function openQuickAddModal(){
+  // Populate the driver dropdown, defaulting to the creator
+  const sel=document.getElementById('qa-driver');
+  const mine=getMyDriverName();
+  if(sel){
+    sel.innerHTML=`<option value="">Unassigned</option>`+DRIVERS.map(d=>`<option value="${d}"${d===mine?' selected':''}>${d}</option>`).join('');
+  }
+  // Default date to today
+  const dEl=document.getElementById('qa-date');
+  if(dEl && !dEl.value) dEl.value=new Date().toISOString().split('T')[0];
+  const err=document.getElementById('qa-error'); if(err) err.textContent='';
+  document.getElementById('quick-add-modal').classList.add('show');
+}
+
 function closeQuickAddModal(){
   document.getElementById('quick-add-modal').classList.remove('show');
 }
@@ -2852,7 +3226,7 @@ async function saveQuickAddRide(){
     date, time: document.getElementById('qa-time').value,
     type:    document.getElementById('qa-type').value,
     vehicle: document.getElementById('qa-vehicle').value,
-    driver:  document.getElementById('qa-driver').value,
+    driver:  document.getElementById('qa-driver').value || getMyDriverName() || '',
     price:   parseFloat(document.getElementById('qa-price').value)||0,
     pickup:  document.getElementById('qa-pickup').value.trim(),
     home:    document.getElementById('qa-home').value.trim(),
@@ -2989,11 +3363,12 @@ function populateDriverFilter(){
   const sel=document.getElementById('filter-driver');
   sel.innerHTML=`<option value="">All Drivers</option>`+DRIVERS.map(d=>`<option value="${d}">${d.split(' ')[0]}</option>`).join('');
   const qDr=document.getElementById('q-driver');
-  qDr.innerHTML=`<option value="">Unassigned</option>`+DRIVERS.map(d=>`<option value="${d}">${d}</option>`).join('');
+  const mine=getMyDriverName();
+  qDr.innerHTML=`<option value="">Unassigned</option>`+DRIVERS.map(d=>`<option value="${d}"${d===mine?' selected':''}>${d}</option>`).join('');
 }
 
 function renderRides(){
-  if(!document.getElementById('rides-body')) return;
+  if(!document.getElementById('rides-tbody')) return;
   const q=document.getElementById('search-input').value.toLowerCase();
   const t=document.getElementById('filter-type').value;
   const dv=document.getElementById('filter-driver').value;
@@ -3011,10 +3386,9 @@ function renderRides(){
       <td><strong>${r.client}</strong><br><span style="font-size:.75rem;color:var(--mid)">${r.phone||''}</span></td>
       <td style="font-size:.83rem;">${r.driver?`${driverDot(r.driver)}${r.driver.split(' ')[0]}`:'<span style="color:var(--mid)">Unassigned</span>'}</td>
       <td><span class="badge ${typeCls}">${r.type}</span></td>
-      <td style="font-size:.83rem">${r.vehicle}</td>
+      <td class="hide-sm" style="font-size:.83rem">${r.vehicle}</td>
       <td style="font-weight:600;color:var(--green)">$${r.price}</td>
-      <td style="font-size:.8rem;color:var(--mid)">${cCount?`💬 ${cCount}`:''}</td>
-      <td>${r.confirmed?'<span class="status-yes">✓ Yes</span>':'<span class="status-no">Pending</span>'}</td>
+      <td class="hide-sm" style="font-size:.8rem;color:var(--mid)">${cCount?`💬 ${cCount}`:''}</td>
       <td><button class="btn-icon" onclick="event.stopPropagation();deleteRide(${r.id})" title="Delete" style="display:${canDeleteRide(r)?'inline-block':'none'}">✕</button></td>
     </tr>`;
   }).join('');
@@ -3028,15 +3402,17 @@ function refreshDash(){
   if(!document.getElementById('upcoming-list')) return;
   const now=new Date(), todayStr=now.toISOString().split('T')[0];
   document.getElementById('dash-date').textContent=now.toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
-  // driver legend — color dots only, no counts
-  document.getElementById('driver-legend').innerHTML=DRIVERS.map(d=>{
-    return`<div class="driver-legend-item" style="border-color:${driverColor(d)}20;" onclick="filterByDriver('${d}')">
-      <div class="color-swatch" style="background:${driverColor(d)};"></div>
-      <span>${d.split(' ')[0]}</span>
-    </div>`;
-  }).join('');
-  // upcoming
-  const upcoming=rides.filter(r=>r.date>=todayStr).sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time)).slice(0,10);
+
+  // Income overview (only if the user has the upgrade / is admin)
+  renderDashIncome();
+
+  // "Your upcoming rides" — the logged-in user's own assigned rides
+  const dName=getMyDriverName();
+  const lbl=document.getElementById('dash-upcoming-label');
+  if(lbl) lbl.textContent = dName ? 'Your upcoming rides' : 'Upcoming rides';
+  let upcoming=rides.filter(r=>r.date>=todayStr);
+  if(dName) upcoming=upcoming.filter(r=>r.driver===dName);
+  upcoming=upcoming.sort((a,b)=>a.date.localeCompare(b.date)||(a.time||'').localeCompare(b.time||'')).slice(0,10);
   const _upd=document.getElementById('upcoming-list'); if(_upd) _upd.innerHTML=upcoming.length?upcoming.map(r=>{
     const c=rideColor(r);
     const typeCls=r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP'?'badge-ap':r.type==='ROUND TRIP'?'badge-rt':'badge-pt';
@@ -3051,6 +3427,44 @@ function refreshDash(){
       <div class="ride-price">$${r.price}</div>
     </div>`;
   }).join(''):'<p style="color:var(--mid);">No upcoming rides.</p>';
+}
+
+// Monthly income snapshot for the dashboard (gross / net / total rides). Upgrade-gated.
+function renderDashIncome(){
+  const box=document.getElementById('dash-income-overview');
+  if(!box) return;
+  if(!hasIncomeAccess()){ box.innerHTML=''; return; }
+  const now=new Date();
+  const start=new Date(now.getFullYear(),now.getMonth(),1);
+  const end=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59);
+  const dName=isAdmin()?null:getMyDriverName();
+  const inMonth=r=>{ if(!r.date) return false; const d=new Date(r.date+'T12:00:00'); return d>=start&&d<=end; };
+  let monthRides=rides.filter(r=>inMonth(r)&&parseFloat(r.price||0)>0);
+  if(dName) monthRides=monthRides.filter(r=>r.driver===dName);
+  // include driver's own outside rides
+  if(!isAdmin()){
+    const outside=getMyOutsideRidesAsRides().filter(r=>inMonth(r)&&parseFloat(r.price||0)>0);
+    monthRides=monthRides.concat(outside);
+  }
+  const gross=monthRides.reduce((s,r)=>s+parseFloat(r.price||0),0);
+  const count=monthRides.length;
+  const monthlyExp=!isAdmin()?getMonthlyExpenseTotal():0;
+  const net=gross-monthlyExp;
+  const monthName=now.toLocaleDateString('en-US',{month:'long',year:'numeric'});
+  const card=(label,val,color)=>`<div style="background:var(--surface);border-radius:10px;padding:.9rem;text-align:center;border:1.5px solid var(--light);">
+      <div style="font-size:.66rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.3rem;">${label}</div>
+      <div style="font-size:1.35rem;font-weight:700;color:${color};">${val}</div>
+    </div>`;
+  box.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem;flex-wrap:wrap;gap:.5rem;">
+      <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);">💰 Income · ${monthName}</div>
+      <span onclick="nav('income')" style="font-size:.78rem;color:var(--gold);font-weight:600;cursor:pointer;">View details →</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;">
+      ${card('Gross','$'+gross.toFixed(2),'var(--green)')}
+      ${card('Net','$'+net.toFixed(2), net>=0?'var(--green)':'#dc2626')}
+      ${card('Total Rides',count,'var(--gold)')}
+    </div>`;
 }
 
 function filterByDriver(d){
@@ -3384,6 +3798,8 @@ function renderDriverMembers(){
     const venmo=driverVenmo[d]||'';
     const prof=DRIVER_PROFILES[d]||{};
     const color=driverColor(d);
+    const badgeText=contrastText(color, 0.8);   // badge bg is color at ~80% over white card
+    const photoText=contrastText(color, 1);     // initials sit on the full-strength color
     const initials=d.split(' ').map(n=>n[0]).join('').slice(0,2);
     const dk=d.replace(/ /g,'_');
     // can edit if admin OR this is the logged-in driver's own card
@@ -3406,17 +3822,16 @@ function renderDriverMembers(){
       <div class="member-card-photo" style="background:${color};position:relative;">
         ${DRIVER_PHOTOS[d]
           ? '<img src="'+DRIVER_PHOTOS[d]+'" style="width:100%;height:100%;object-fit:cover;object-position:top center;" alt="'+d+'" />'
-          : '<div class="member-card-initials">'+initials+'</div>'
+          : '<div class="member-card-initials" style="color:'+photoText+';">'+initials+'</div>'
         }
 
       </div>
       <!-- name badge -->
       <div class="member-card-badge" style="background:${color}cc;">
         <div>
-          <div class="member-card-badge-name">${d}${myDriverName===d?' <span style="font-size:.65rem;opacity:.7;">(you)</span>':''}</div>
-          <div class="member-card-badge-role">${admin&&(d==='Chase Sweat'||d==='Morgan Newton')?'Admin':'Driver'}</div>
+          <div class="member-card-badge-name" style="color:${badgeText};">${d}${myDriverName===d?' <span style="font-size:.65rem;opacity:.7;">(you)</span>':''}</div>
         </div>
-        <div style="width:8px;height:8px;border-radius:50%;background:#fff;opacity:.7;"></div>
+        <div style="width:8px;height:8px;border-radius:50%;background:${badgeText};opacity:.55;"></div>
       </div>
       <!-- vehicle bar -->
       <div class="member-card-vehicle">
@@ -3440,8 +3855,8 @@ function renderDriverMembers(){
         ${editField('Notes',prof.notes,'prof-notes','Any notes…')}
         ${venmoLink?('<div style="margin-top:.5rem;">'+venmoLink+'</div>'):''}
         <div style="display:flex;gap:.4rem;margin-top:.6rem;">
-          <button onclick="shareDriverCard('${d}')" style="flex:1;padding:.45rem;background:var(--accent);color:#fff;border:none;border-radius:7px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">↗ Share</button>
-          <button onclick="downloadDriverCard('${d}')" style="flex:1;padding:.45rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:7px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">⬇ Card</button>
+          <button onclick="shareDriverCard('${d}')" style="flex:1;padding:.45rem;background:var(--accent);color:#fff;border:none;border-radius:7px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">↗ Share Card</button>
+          <button onclick="downloadDriverCard('${d}')" style="flex:1;padding:.45rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:7px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">⬇ Download</button>
         </div>
         ${venmo?('<button onclick="shareDriverVenmo(\''+d+'\')" style="width:100%;margin-top:.4rem;padding:.45rem;background:#3d95ce;color:#fff;border:none;border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">↗ Share Venmo link</button>'):''}
         ${canEdit?('<div style="display:flex;gap:.4rem;align-items:center;margin-top:.5rem;">'
@@ -3558,8 +3973,7 @@ function driverVenmoUrl(fullName){
 function buildDriverCardText(fullName, includeVenmo){
   const prof = DRIVER_PROFILES[fullName]||{};
   const lines = [fullName];
-  const role = (fullName==='Chase Sweat'||fullName==='Morgan Newton'||fullName==='Kathleen Herringdine') ? 'Admin' : 'Driver';
-  lines.push(`NDA Transportation · ${role}`);
+  lines.push('NDA Transportation');
   if(prof.phone)   lines.push(`Phone: ${prof.phone}`);
   if(prof.email)   lines.push(`Email: ${prof.email}`);
   const vurl = driverVenmoUrl(fullName);
@@ -3573,7 +3987,6 @@ function buildDriverCardHTML(fullName, includeVenmo){
   const color = driverColor(fullName);
   const initials = fullName.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
   const photo = (typeof DRIVER_PHOTOS!=='undefined' && DRIVER_PHOTOS[fullName]) ? DRIVER_PHOTOS[fullName] : '';
-  const role  = (fullName==='Chase Sweat'||fullName==='Morgan Newton'||fullName==='Kathleen Herringdine') ? 'Admin' : 'Driver';
   const vurl  = driverVenmoUrl(fullName);
   const vhandle = driverVenmoHandle(fullName);
   const esc = s => String(s||'').replace(/</g,'&lt;');
@@ -3599,7 +4012,7 @@ function buildDriverCardHTML(fullName, includeVenmo){
     <div class="top">${photo?`<img src="${photo}" alt="${esc(fullName)}" />`:`<div class="ini">${initials}</div>`}</div>
     <div class="body">
       <div class="name">${esc(fullName)}</div>
-      <div class="role">NDA Transportation · ${role}</div>
+      <div class="role">NDA Transportation</div>
       ${prof.phone?`<div class="row"><span class="lbl">Phone</span><a href="tel:${esc(prof.phone)}">${esc(prof.phone)}</a></div>`:''}
       ${prof.email?`<div class="row"><span class="lbl">Email</span><a href="mailto:${esc(prof.email)}">${esc(prof.email)}</a></div>`:''}
       ${(includeVenmo && vurl)?`<a class="pay" href="${vurl}" target="_blank">Pay @${esc(vhandle)} on Venmo</a>`:''}
@@ -3656,21 +4069,6 @@ async function shareDriverVenmo(fullName){
     if(navigator.share){ await navigator.share({ title:`${fullName} — Venmo`, text, url }); return; }
   } catch(e){ if(e && e.name==='AbortError') return; }
   try { await navigator.clipboard.writeText(text); showToast('📋 Venmo link copied'); }
-  catch(e){ showToast('Sharing not supported here','error'); }
-}
-
-// Share every driver's Venmo link at once (text list).
-async function shareAllVenmo(){
-  const lines = DRIVERS.map(d=>{
-    const u = driverVenmoUrl(d);
-    return u ? `${d}: @${driverVenmoHandle(d)} — ${u}` : null;
-  }).filter(Boolean);
-  if(!lines.length){ showToast('No Venmo links saved yet','error'); return; }
-  const text = 'NDA Transportation — Driver Venmo links\n\n' + lines.join('\n');
-  try {
-    if(navigator.share){ await navigator.share({ title:'NDA Driver Venmo links', text }); return; }
-  } catch(e){ if(e && e.name==='AbortError') return; }
-  try { await navigator.clipboard.writeText(text); showToast('📋 All Venmo links copied'); }
   catch(e){ showToast('Sharing not supported here','error'); }
 }
 
@@ -3939,7 +4337,7 @@ function hasIncomeAccess(){
   if(!currentUser) return false;
   if(isAdmin()) return true; // admins always get it free
   const sub = subscriptions[currentUser.name];
-  // Check $10/month income upgrade
+  // Check $15/month income upgrade
   if(sub?.upgraded === true && new Date(sub?.upgradeExpiresAt||0) > new Date()) return true;
   // Also check trial for income
   if(sub?.incomeTrial === true && new Date(sub?.incomeTrialEnds||0) > new Date()) return true;
@@ -3995,10 +4393,10 @@ function showIncomeOrUpgrade(el){
       const cta     = document.getElementById('upgrade-cta-btn');
       if(banner) banner.style.display = expired ? 'block' : 'none';
       if(title)  title.textContent    = expired ? 'Renew Income Tracking' : 'Unlock Income Tracking';
-      if(cta)    cta.textContent       = expired ? 'Renew Now — $10/mo' : 'Upgrade Now — $10/mo';
+      if(cta)    cta.textContent       = expired ? 'Renew Now — $15/mo' : 'Upgrade Now — $15/mo';
       modal.classList.add('show');
     }
-    else showToast('Upgrade to $10/mo to unlock income tracking');
+    else showToast('Upgrade to $15/mo to unlock income tracking');
   }
 }
 
@@ -4746,7 +5144,7 @@ function buildClientModalHTML(cl, sorted, total, hasUpgrade, pmOptions, safeName
       + '</div></div>'
     : '<div style="background:var(--surface);border-radius:8px;padding:.65rem .85rem;margin-bottom:.75rem;display:flex;align-items:center;justify-content:space-between;gap:.75rem;">'
       + '<div style="font-size:.78rem;color:var(--mid);">Upgrade to add payment method & notes</div>'
-      + '<button onclick="showIncomeOrUpgrade()" style="font-size:.72rem;padding:.25rem .65rem;background:var(--gold);color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">$10/mo</button>'
+      + '<button onclick="showIncomeOrUpgrade()" style="font-size:.72rem;padding:.25rem .65rem;background:var(--gold);color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">$15/mo</button>'
       + '</div>';
 
   let rideHistory = '';
@@ -4966,7 +5364,7 @@ setTimeout(()=>{
 }, 5000);
 
 // ═══════════════════════════════════════════
-// RECEIPTS SYSTEM ($10/mo — income upgrade)
+// RECEIPTS SYSTEM ($15/mo — income upgrade)
 // ═══════════════════════════════════════════
 
 const RECEIPT_CATEGORIES = ['Fuel','Maintenance','Tolls','Parking','Other'];
