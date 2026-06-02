@@ -99,6 +99,12 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
 
 .color-swatch{width:12px;height:12px;border-radius:50%;flex-shrink:0;}
 .toggle-group{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:4px;}
+.tog{padding:.5rem .9rem;border:1.5px solid var(--light);border-radius:8px;background:var(--white);color:var(--mid);font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:500;cursor:pointer;transition:all .15s;}
+.tog:hover{border-color:var(--gold);}
+.tog.active{border-color:var(--gold);background:var(--gold-pale);color:var(--gold);font-weight:600;}
+.addon-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.5rem;margin-top:4px;}
+.addon-chip{padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;background:var(--white);color:var(--mid);font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:500;cursor:pointer;text-align:center;transition:all .15s;}
+.addon-chip.on{border-color:var(--gold);background:var(--gold-pale);color:var(--gold);font-weight:600;}
 .toggle-btn.on{border-color:var(--gold);background:var(--gold-pale);color:var(--gold);font-weight:600;}
 .quote-line{display:flex;justify-content:space-between;font-size:.88rem;padding:.4rem 0;border-bottom:1px solid #3d1f6e;}
 .quote-total{margin-top:1.25rem;padding-top:1rem;border-top:2px solid var(--gold);display:flex;justify-content:space-between;align-items:center;}
@@ -414,6 +420,7 @@ input,select,textarea{font-size:16px;}
           <div id="q-client-status" style="font-size:.78rem;min-height:1.2rem;margin-top:.3rem;"></div>
         </div>
         <div class="form-group"><label>Phone</label><input type="text" id="q-phone" placeholder="404-555-0100" /></div>
+        <div class="form-group"><label>Additional numbers on confirmation <span style="text-transform:none;letter-spacing:0;font-weight:400;color:var(--mid);">(comma-separated)</span></label><input type="text" id="q-extra-phones" placeholder="spouse, assistant…  e.g. 404-555-0102, 770-555-0188" /></div>
         <div class="form-group">
           <label>Travel type</label>
           <div class="toggle-group" id="q-type-group">
@@ -431,6 +438,7 @@ input,select,textarea{font-size:16px;}
           <div style="font-size:.72rem;color:var(--mid);margin-bottom:.25rem;">Distance · Google Maps</div>
           <div id="q-miles-display" style="font-size:1.5rem;font-weight:700;color:var(--gold);">—</div>
           <div id="q-mileage-status" style="font-size:.78rem;color:var(--mid);"></div>
+          <div id="miles-overage-note" style="font-size:.74rem;color:var(--gold);margin-top:.2rem;"></div>
           <input type="hidden" id="q-miles" value="0" />
         </div>
         <div class="form-group">
@@ -529,10 +537,11 @@ input,select,textarea{font-size:16px;}
   <div class="page" id="page-clients">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:.75rem;">
       <div>
-        <div class="page-title">Clients</div>
+        <div class="page-title" id="client-page-title">Clients</div>
         <div class="page-sub" id="client-page-sub"></div>
       </div>
-      <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;">
+        <select id="client-driver-filter" onchange="renderClients()" style="display:none;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.82rem;"><option value="">All drivers</option></select>
         <input type="file" id="client-csv-input" accept=".csv,.xlsx,.xls" style="display:none;" onchange="importClientsFromFile(this)" />
         <button onclick="document.getElementById('client-csv-input').click()" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:.5rem .9rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">⬆ Import CSV</button>
         <button onclick="exportClientsToCSV()" style="background:none;border:1.5px solid var(--light);border-radius:8px;padding:.5rem .9rem;font-family:'DM Sans',sans-serif;font-size:.82rem;cursor:pointer;color:var(--black);">⬇ Export</button>
@@ -720,6 +729,7 @@ input,select,textarea{font-size:16px;}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
         <div class="form-group"><label>Client Name</label><input type="text" id="edit-client" /></div>
         <div class="form-group"><label>Phone</label><input type="text" id="edit-phone" /></div>
+        <div class="form-group" style="grid-column:1/-1;"><label>Additional numbers on confirmation <span style="text-transform:none;letter-spacing:0;font-weight:400;color:var(--mid);">(comma-separated)</span></label><input type="text" id="edit-extra-phones" placeholder="404-555-0102, 770-555-0188" /></div>
         <div class="form-group"><label>Email</label><input type="text" id="edit-email" /></div>
         <div class="form-group"><label>Date</label><input type="date" id="edit-date" /></div>
         <div class="form-group"><label>Time</label><input type="time" id="edit-time" /></div>
@@ -799,6 +809,20 @@ input,select,textarea{font-size:16px;}
       <button onclick="sendChatMessage()" style="padding:.6rem 1.1rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;white-space:nowrap;">Send</button>
     </div>
   </div>
+
+<!-- CLIENT DETAIL MODAL -->
+<div class="modal-overlay" id="client-modal">
+  <div class="modal" style="max-width:min(580px,95vw);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:.5rem;">
+      <h2 id="client-modal-name" style="margin:0;">Client</h2>
+      <div style="display:flex;gap:.5rem;">
+        <button id="client-transfer-btn" class="btn-secondary" style="display:none;font-size:.8rem;padding:.4rem .9rem;">Request transfer</button>
+        <button class="btn-secondary" onclick="closeClientModal()" style="font-size:.8rem;padding:.4rem .9rem;">Close</button>
+      </div>
+    </div>
+    <div id="client-modal-body"></div>
+  </div>
+</div>
 
 <!-- CLIENT TRANSFER REQUEST MODAL -->
 <div class="modal-overlay" id="transfer-modal">
@@ -1483,7 +1507,7 @@ function debounceMileage(){
   const pickup  = document.getElementById('q-pickup').value.trim();
   const dropoff = document.getElementById('q-dropoff').value.trim();
   if(pickup.length < 5 || dropoff.length < 5) return;
-  document.getElementById('calc-status').textContent = 'Calculating…';
+  document.getElementById('q-mileage-status').textContent = 'Calculating…';
   mileageTimer = setTimeout(()=>{ calcMileage(); }, 1200);
 }
 
@@ -1491,7 +1515,7 @@ async function calcMileage(){
   const pickup  = document.getElementById('q-pickup').value.trim();
   const dropoff = document.getElementById('q-dropoff').value.trim();
   if(!pickup || !dropoff) return;
-  const statusEl = document.getElementById('calc-status');
+  const statusEl = document.getElementById('q-mileage-status');
 
   // Ensure Google Maps is loaded
   if(!gmapsLoaded){
@@ -1544,6 +1568,8 @@ async function calcMileage(){
 function updateMilesDisplay(){
   const miles  = parseFloat(document.getElementById('q-miles').value)||0;
   const type   = document.getElementById('q-type').value;
+  const disp   = document.getElementById('q-miles-display');
+  if(disp) disp.textContent = miles>0 ? miles+' mi' : '—';
   const noteEl = document.getElementById('miles-overage-note');
   if(!noteEl) return;
   const apType = type==='AP RUN'||type==='AP PICK UP'||type==='AP ROUND TRIP';
@@ -1558,7 +1584,7 @@ function updateMilesDisplay(){
 }
 
 function resetMileage(){
-  document.getElementById('calc-status').textContent='';
+  document.getElementById('q-mileage-status').textContent='';
   const noteEl=document.getElementById('miles-overage-note');
   if(noteEl) noteEl.textContent='';
   document.getElementById('q-miles').value=0;
@@ -1606,15 +1632,125 @@ function autoFillTerminalAddress(){
 
 function updateTripFields(){
   if(!document.getElementById('q-type')) return;
+  const type    = document.getElementById('q-type').value;
   const isAP    = type==='AP RUN'||type==='AP PICK UP'||type==='AP ROUND TRIP';
   const isAPRT  = type==='AP ROUND TRIP';
   const isRT    = type==='ROUND TRIP';
-  // Flight fields — only for AP types
-  document.getElementById('flight-fields').style.display = isAP ? 'block' : 'none';
-  // AP Round Trip extra return leg
-  document.getElementById('ap-rt-fields').style.display  = isAPRT ? 'block' : 'none';
-  // Round Trip return time/date
-  document.getElementById('rt-fields').style.display     = isRT ? 'block' : 'none';
+  const isOneWay= type==='ONE WAY';
+  const show=(id,on)=>{ const el=document.getElementById(id); if(el) el.style.display = on?'block':'none'; };
+  // Flight # + Terminal only make sense for airport trips
+  show('q-flight-group', isAP);
+  show('q-terminal-group', isAP);
+  // AP Round Trip return leg
+  show('q-ap-rt-fields', isAPRT);
+  // Drop-off isn't needed for AP RUN/AP PICK UP (terminal auto-fills it) — keep visible but optional
+  const dz=document.getElementById('q-dropoff-group');
+  if(dz) dz.style.display = (isOneWay||isRT||isAPRT||type==='AP RUN'||type==='AP PICK UP') ? 'block':'block';
+}
+
+// ── QUOTE FORM WRAPPERS (wire the toggle buttons/fields to the calc engine) ──
+function setActiveTog(btn){
+  if(!btn||!btn.parentElement) return;
+  btn.parentElement.querySelectorAll('.tog').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+}
+function setTripType(t, btn){
+  const el=document.getElementById('q-type'); if(el) el.value=t;
+  setActiveTog(btn);
+  updateTripFields();
+  if(typeof autoFillTerminalAddress==='function') autoFillTerminalAddress();
+  calcQuote();
+}
+function setVehicle(v, btn){
+  const el=document.getElementById('q-ride'); if(el) el.value=v;
+  setActiveTog(btn);
+  calcQuote();
+}
+function onDateChange(){
+  // Auto-flag holiday/Christmas surcharges from the chosen date, then recalc.
+  const dv=(document.getElementById('q-date')||{}).value;
+  if(dv){
+    const mmdd=dv.slice(5); // 'MM-DD'
+    if(typeof CHRISTMAS_DATES!=='undefined' && CHRISTMAS_DATES.includes(mmdd)){
+      addonState.christmas=true; addonState.holiday=false;
+    } else if(typeof HOLIDAY_DATES!=='undefined' && HOLIDAY_DATES.includes(mmdd)){
+      addonState.holiday=true; addonState.christmas=false;
+    }
+    const notice=document.getElementById('holiday-notice');
+    if(notice){
+      const name=(typeof HOLIDAY_NAMES!=='undefined') ? HOLIDAY_NAMES[mmdd] : '';
+      if(name){ notice.style.display='block'; notice.textContent='📅 '+name+' — holiday surcharge applied automatically.'; }
+      else { notice.style.display='none'; }
+    }
+    renderAddons();
+  }
+  calcQuote();
+}
+function viewRouteOnMaps(){
+  if(typeof openGoogleMaps==='function'){ openGoogleMaps(); return; }
+  const p=(document.getElementById('q-pickup')||{}).value||'';
+  const d=(document.getElementById('q-dropoff')||{}).value||'';
+  if(!p||!d){ showToast('Enter a pickup and drop-off first','error'); return; }
+  window.open('https://www.google.com/maps/dir/'+encodeURIComponent(p)+'/'+encodeURIComponent(d)+'/','_blank');
+}
+
+// ── SURCHARGE CHIPS ──
+const ADDON_LABELS = { premium:'Premium hours', holiday:'Holiday', christmas:'Christmas', late:'Late notice', fuel:'Fuel (8%)', traffic:'Traffic' };
+function renderAddons(){
+  const box=document.getElementById('q-addons');
+  if(!box) return;
+  box.innerHTML=Object.keys(ADDON_LABELS).map(k=>
+    `<div class="addon-chip${addonState[k]?' on':''}" onclick="toggleAddon('${k}')">${ADDON_LABELS[k]}</div>`
+  ).join('');
+}
+function toggleAddon(k){
+  addonState[k]=!addonState[k];
+  // Holiday and Christmas are mutually exclusive
+  if(k==='holiday'&&addonState.holiday) addonState.christmas=false;
+  if(k==='christmas'&&addonState.christmas) addonState.holiday=false;
+  renderAddons();
+  calcQuote();
+}
+
+// ── EXPORTS ──
+function exportClientsToCSV(){
+  const db=(typeof buildClientDB==='function') ? buildClientDB(isAdmin()?null:getMyDriverName()) : {};
+  const rows=[['Client','Phone','Email','Drivers','Rides','Total $']];
+  Object.values(db).forEach(c=>{
+    const total=(c.rides||[]).reduce((s,r)=>s+(parseFloat(r.price)||0),0);
+    rows.push([c.name||'', c.phone||'', c.email||'', (c.drivers||[]).join(' / '), (c.rides||[]).length, total]);
+  });
+  const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');
+  downloadTextFile(csv, 'nda-clients.csv', 'text/csv');
+  showToast('📥 Clients exported');
+}
+function exportCalendar(target){
+  // Build an .ics of upcoming rides; Apple/Google/Outlook all import .ics.
+  const now=new Date(); const todayStr=now.toISOString().split('T')[0];
+  const dName=getMyDriverName();
+  let list=rides.filter(r=>r.date && r.date>=todayStr);
+  if(dName && !isAdmin()) list=list.filter(r=>typeof isMyRide==='function'?isMyRide(r):r.driver===dName);
+  const pad=n=>String(n).padStart(2,'0');
+  const toICS=(ds,ts)=>{ const[y,m,d]=ds.split('-'); const[hh,mm]=(ts||'09:00').split(':'); return y+pad(m)+pad(d)+'T'+pad(hh)+pad(mm)+'00'; };
+  let ics='BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//NDA Transportation//EN\r\nCALSCALE:GREGORIAN\r\n';
+  list.forEach(r=>{
+    const start=toICS(r.date,r.time);
+    const summary=(r.client||'Ride')+' · '+(r.type||'');
+    const desc=[r.driver?'Driver: '+r.driver:'',r.pickup?'Pickup: '+r.pickup:'',r.home?'Drop: '+r.home:'',r.phone?'Phone: '+r.phone:''].filter(Boolean).join('\\n');
+    ics+='BEGIN:VEVENT\r\nUID:nda-'+r.id+'@nda\r\nDTSTART:'+start+'\r\nSUMMARY:'+summary+'\r\nDESCRIPTION:'+desc+'\r\nLOCATION:'+(r.pickup||'')+'\r\nEND:VEVENT\r\n';
+  });
+  ics+='END:VCALENDAR';
+  downloadTextFile(ics, 'nda-calendar.ics', 'text/calendar');
+  showToast('📅 '+list.length+' ride'+(list.length===1?'':'s')+' exported — open the file to add to '+(target==='apple'?'Apple Calendar':target==='google'?'Google Calendar':'your calendar'));
+}
+function downloadTextFile(content, filename, mime){
+  try{
+    const blob=new Blob([content],{type:(mime||'text/plain')+';charset=utf-8'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }catch(e){ showToast('Export failed','error'); }
 }
 
 
@@ -1631,7 +1767,7 @@ async function saveQuote(){
     miles:parseFloat(document.getElementById('q-miles').value)||0,
     date:document.getElementById('q-date').value,
     time:document.getElementById('q-time').value,
-    rt:document.getElementById('q-rt').value,
+    rt:(document.getElementById('q-rt-time')||document.getElementById('q-rt-pickup-date')||{}).value||'',
     rtDate:document.getElementById('q-rt-pickup-date')?.value||'',
     rtFlight:document.getElementById('q-rt-flight')?.value||'',
     rtTerminal:document.getElementById('q-rt-terminal')?.value||'',
@@ -1644,7 +1780,8 @@ async function saveQuote(){
     terminal:document.getElementById('q-terminal').value,
     pax:document.getElementById('q-pax').value,
     phone:document.getElementById('q-phone').value,
-    email:document.getElementById('q-email').value,
+    extraPhones:(document.getElementById('q-extra-phones')||{}).value||'',
+    email:(document.getElementById('q-email')||{}).value||'',
     ...Object.fromEntries(Object.keys(addonState).map(k=>[k,addonState[k]?'Y':'N'])),
     xstop: extraStops,
     wait:parseFloat(document.getElementById('q-wait').value)||0,
@@ -2111,16 +2248,19 @@ function renderConfirmations(){
       ? `<button onclick="toggleConfirmSent(${r.id})" style="width:100%;padding:.6rem;border:none;border-radius:8px;background:var(--green);color:#fff;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:700;cursor:pointer;">✓ Confirmation text sent</button>`
       : `<button onclick="toggleConfirmSent(${r.id})" style="width:100%;padding:.6rem;border:1.5px solid var(--green);border-radius:8px;background:var(--white);color:var(--green);font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">Mark confirmation text sent</button>`;
     const conf=buildConfirmationText(r);
+    const recips=confirmationRecipients(r);
     const btnStyle="flex:1;min-width:120px;padding:.5rem;border:1.5px solid "+c+";border-radius:8px;background:var(--white);color:"+c+";font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;";
+    const groupLine=recips.length?`<div style="font-size:.72rem;color:var(--mid);margin-bottom:.45rem;">👥 Group text to ${recips.length} number${recips.length===1?'':'s'}: ${escHtml(recips.map(x=>x.name).join(', '))}</div>`:`<div style="font-size:.72rem;color:var(--red);margin-bottom:.45rem;">No numbers yet — add the client's number to this ride.</div>`;
     const msgSection=`
       <div style="font-size:.68rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.3rem;">Text to send</div>
       <div style="background:#f7f4ee;border:1px solid #e6ddd0;border-radius:8px;padding:.6rem .7rem;margin-bottom:.5rem;font-size:.78rem;line-height:1.5;color:#333;white-space:pre-wrap;max-height:200px;overflow:auto;">${escHtml(conf.message)}</div>
       ${conf.instructions?`
         <div style="font-size:.68rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.3rem;">Pickup instructions (send as 2nd text)</div>
         <div style="background:#f7f4ee;border:1px solid #e6ddd0;border-radius:8px;padding:.6rem .7rem;margin-bottom:.5rem;font-size:.78rem;line-height:1.5;color:#333;white-space:pre-wrap;max-height:200px;overflow:auto;">${escHtml(conf.instructions)}</div>`:''}
+      ${groupLine}
       <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.6rem;">
         <button onclick="copyConfirmation(${r.id})" style="${btnStyle}">📋 Copy text</button>
-        ${phone?`<button onclick="textClient(${r.id})" style="${btnStyle}">💬 Text client</button>`:''}
+        ${recips.length?`<button onclick="textClient(${r.id})" style="${btnStyle}">💬 Text group</button>`:''}
         ${conf.instructions?`<button onclick="copyInstructions(${r.id})" style="${btnStyle}">📋 Copy instructions</button>`:''}
       </div>`;
     return `<div style="border:1.5px solid ${c}55;border-left:5px solid ${c};border-radius:12px;padding:.9rem 1rem;margin-bottom:.75rem;background:${sent?c+'14':'var(--white)'};">
@@ -2248,12 +2388,44 @@ function fallbackCopy(str,label){
 }
 function copyConfirmation(id){ const r=rides.find(x=>x.id===id); if(r) copyToClipboard(buildConfirmationText(r).message,'Confirmation text copied'); }
 function copyInstructions(id){ const r=rides.find(x=>x.id===id); if(r) copyToClipboard(buildConfirmationText(r).instructions,'Pickup instructions copied'); }
+// Builds the confirmation group-text recipients for a ride, each labeled with a name
+// where the app knows it. Always: client + any client-requested extra numbers + the
+// main (owner) driver + the assigned driver. If the sender is Kat or Morgan, adds both.
+// Returns [{name, phone}] (deduped by phone); use .phone for the SMS link, .name for display.
+function confirmationRecipients(r){
+  const seen=new Set();
+  const out=[];
+  const add=(name,raw)=>{
+    const d=(raw||'').replace(/[^0-9+]/g,'');
+    if(!d || seen.has(d)) return;
+    seen.add(d);
+    out.push({ name:(name||d), phone:d });
+  };
+  // Client + extras (extras are just digits)
+  add(r.client||'Client', r.phone);
+  (r.extraPhones||'').split(/[,;]/).forEach(p=>add(null,p));
+  // Assigned driver
+  if(r.driver) add(r.driver.split(' ')[0], (DRIVER_PROFILES[r.driver]||{}).phone);
+  // Main driver = whoever scheduled/owns the ride (createdBy → driver name)
+  const owner = r.createdBy ? USER_DRIVER_MAP[r.createdBy] : null;
+  if(owner) add(owner.split(' ')[0], (DRIVER_PROFILES[owner]||{}).phone);
+  // If the sender is Kat or Morgan, loop them both in
+  const sender = currentUser && currentUser.name;
+  if(sender==='Kat' || sender==='Morgan'){
+    add('Kat',    (DRIVER_PROFILES['Kathleen Herringdine']||{}).phone);
+    add('Morgan', (DRIVER_PROFILES['Morgan Newton']||{}).phone);
+  }
+  return out;
+}
+
 function textClient(id){
   const r=rides.find(x=>x.id===id); if(!r) return;
-  const digits=(r.phone||'').replace(/[^0-9+]/g,'');
-  if(!digits){ showToast('No phone number on file','error'); return; }
+  const nums=confirmationRecipients(r).map(x=>x.phone);
+  if(!nums.length){ showToast('No phone numbers to text — add the client\u2019s number first','error'); return; }
   const body=encodeURIComponent(buildConfirmationText(r).message);
-  window.location.href='sms:'+digits+'?&body='+body;
+  // iOS prefers ?&body=, Android accepts ?body= — comma-separated list starts a group thread.
+  const sep = /iphone|ipad|ipod|mac/i.test(navigator.userAgent) ? '&' : '?';
+  window.location.href='sms:'+nums.join(',')+sep+'body='+body;
 }
 
 function closeDayModal(){document.getElementById('day-modal').classList.remove('show');}
@@ -2383,6 +2555,7 @@ function toggleEditMode(on){
   }, 100);
   document.getElementById('edit-client').value   = r.client||'';
   document.getElementById('edit-phone').value    = r.phone||'';
+  { const ep=document.getElementById('edit-extra-phones'); if(ep) ep.value=r.extraPhones||''; }
   document.getElementById('edit-email').value    = r.email||'';
   document.getElementById('edit-date').value     = r.date||'';
   document.getElementById('edit-time').value     = r.time||'';
@@ -2410,6 +2583,7 @@ async function saveRideEdits(){
   // Apply all edits
   r.client    = document.getElementById('edit-client').value.trim()||r.client;
   r.phone     = document.getElementById('edit-phone').value.trim();
+  { const ep=document.getElementById('edit-extra-phones'); if(ep) r.extraPhones=ep.value.trim(); }
   r.email     = document.getElementById('edit-email').value.trim();
   r.date      = document.getElementById('edit-date').value;
   r.time      = document.getElementById('edit-time').value;
@@ -4751,11 +4925,12 @@ function exportIncomeCSV(){
 const FAMILYWALL_ICAL_URL = 'https://api.familywall.com/ical/byquc/bjnm3?partnerScope=Family&key=CLqZt64g6wDNM5o9JB1aZ2g%2F9bo%3D';
 
 async function syncFamilyWall(){
-  const btn    = document.getElementById('fw-sync-btn');
+  const btn    = document.getElementById('fw-sync-btn') || document.getElementById('cal-familywall-btn');
   const status = document.getElementById('fw-sync-status');
-  btn.textContent = '⏳ Syncing…';
-  btn.disabled = true;
-  status.textContent = '';
+  const setStatus = (t)=>{ if(status) status.textContent=t; else if(t) showToast(t); };
+  const origLabel = btn ? btn.textContent : '';
+  if(btn){ btn.textContent = '⏳ Syncing…'; btn.disabled = true; }
+  setStatus('');
 
   const ICAL_URL = FAMILYWALL_ICAL_URL;
   let icsText = null;
@@ -4813,14 +4988,13 @@ async function syncFamilyWall(){
     const imported = parseAndImportICS(icsText);
     await saveRides();
     refreshDash(); renderRides(); renderCal();
-    status.textContent = `✓ ${imported.added} added, ${imported.skipped} already existed, ${imported.skipped_nonride} non-ride events skipped`;
+    setStatus(`✓ ${imported.added} added, ${imported.skipped} already existed, ${imported.skipped_nonride} non-ride events skipped`);
     showToast(`✓ Synced ${imported.added} rides from FamilyWall`);
   } catch(err){
-    status.textContent = `Parse error: ${err.message}`;
+    setStatus(`Parse error: ${err.message}`);
     console.error('FamilyWall parse error:', err);
   }
-  btn.textContent = '🔄 Sync from FamilyWall';
-  btn.disabled = false;
+  if(btn){ btn.textContent = origLabel || '🔄 Sync FamilyWall'; btn.disabled = false; }
 }
 
 function manualICSPaste(){
@@ -4832,7 +5006,7 @@ function manualICSPaste(){
   try {
     const imported = parseAndImportICS(text);
     saveRides().then(()=>{ refreshDash(); renderRides(); renderCal(); });
-    document.getElementById('fw-sync-status').textContent = `✓ ${imported.added} added, ${imported.skipped} already existed`;
+    { const st=document.getElementById('fw-sync-status'); if(st) st.textContent=`✓ ${imported.added} added, ${imported.skipped} already existed`; }
     showToast(`✓ Imported ${imported.added} rides`);
   } catch(e){
     showToast('Import failed: '+e.message,'error');
@@ -5376,7 +5550,7 @@ function showPage(id, el){
   window.scrollTo(0,0);
   // Page-specific render
   if(id==='dashboard') refreshDash();
-  if(id==='quote' && gmapsLoaded) setTimeout(initAddressAutocomplete, 100);
+  if(id==='quote'){ renderAddons(); updateTripFields(); calcQuote(); if(gmapsLoaded) setTimeout(initAddressAutocomplete, 100); }
   if(id==='calendar') renderCal();
   if(id==='clients') renderClients();
   if(id==='documents') renderDocuments();
