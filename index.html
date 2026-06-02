@@ -323,6 +323,7 @@ input,select,textarea{font-size:16px;}
   <div id="menu-account" onclick="nav('account')" style="display:none;padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#ce93d8;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;font-weight:500;">👤 My Account</div>
   <div id="menu-income" onclick="nav('income')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#f5a623;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">💰 Income</div>
   <div id="menu-access" onclick="nav('access')" style="display:none;padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#ce93d8;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🔐 Access Control</div>
+  <div id="menu-install" onclick="closeMenu(); triggerInstall();" style="display:none;padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#7fd1ae;border-bottom:1px solid #2d1460;align-items:center;gap:.75rem;">📲 Install App</div>
   <div onclick="closeMenu();openPwModal(null);" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#aaa;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🔑 Change password</div>
   <div onclick="closeMenu();logout();" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#e57373;display:flex;align-items:center;gap:.75rem;">↩ Sign out</div>
 </div>
@@ -4171,14 +4172,19 @@ function renderDriverMembers(){
         ${editField('Email',prof.email,'prof-email','email@example.com')}
         ${editField('Vehicle Year',prof.vehicleYear,'prof-vehicleyear','e.g. 2022')}
         ${editField('Vehicle Make/Model',prof.vehicle,'prof-vehicle','e.g. Toyota Camry')}
-        ${canEdit?('<div style="margin-bottom:.45rem;">'
+        ${canEdit?('<div style="display:flex;gap:.6rem;margin-bottom:.45rem;">'
+          +'<div style="flex:1;">'
           +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Gas Price ($/gal)</div>'
-          +'<div style="display:flex;gap:.4rem;align-items:center;">'
-          +'<input type="number" id="prof-gasprice-'+dk+'" value="'+(prof.gasPrice||'')+'" placeholder="3.49" min="0" step="0.01" style="width:80px;padding:.35rem .65rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;" />'
-          +'<button onclick="lookupMPG(\''+d+'\')" style="padding:.35rem .7rem;background:#1e88e5;color:#fff;border:none;border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.75rem;font-weight:600;cursor:pointer;">Look up MPG</button>'
+          +'<input type="number" id="prof-gasprice-'+dk+'" value="'+(prof.gasPrice||'')+'" placeholder="3.49" min="0" step="0.01" style="width:100%;padding:.35rem .65rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;box-sizing:border-box;" />'
           +'</div>'
-          +'<div id="mpg-result-'+dk+'" style="font-size:.75rem;color:var(--mid);margin-top:3px;">'+(prof.mpg?'EPA: '+prof.mpg+' MPG combined':'')+'</div>'
-          +'</div>'):''}
+          +'<div style="flex:1;">'
+          +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">MPG (combined)</div>'
+          +'<input type="number" id="prof-mpg-'+dk+'" value="'+(prof.mpg||'')+'" placeholder="e.g. 27" min="1" max="150" step="0.1" style="width:100%;padding:.35rem .65rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;box-sizing:border-box;" />'
+          +'</div>'
+          +'</div>'
+          +'<div style="font-size:.7rem;color:var(--mid);margin:-.2rem 0 .5rem;">'+(prof.mpg?'Cost/mile: $'+calcCostPerMile(d).toFixed(3)+' (gas + maintenance)':'Enter MPG to estimate fuel cost')+'</div>'
+          ):''}
+        ${editField('Home address (for dead-head miles)',prof.homeAddress,'prof-home','Street, City, State')}
         ${editField('Notes',prof.notes,'prof-notes','Any notes…')}
         ${venmoLink?('<div style="margin-top:.5rem;">'+venmoLink+'</div>'):''}
         <div style="display:flex;gap:.4rem;margin-top:.6rem;">
@@ -4208,8 +4214,9 @@ async function saveDriverProfile(driverName){
     vehicleYear: getVal('prof-vehicleyear'),
     vehicle:     getVal('prof-vehicle'),
     notes:       getVal('prof-notes'),
+    homeAddress: getVal('prof-home'),
     gasPrice:    parseFloat(document.getElementById('prof-gasprice-'+dk)?.value)||DRIVER_PROFILES[driverName]?.gasPrice||0,
-    mpg:         DRIVER_PROFILES[driverName]?.mpg||0,
+    mpg:         parseFloat(document.getElementById('prof-mpg-'+dk)?.value)||DRIVER_PROFILES[driverName]?.mpg||0,
   };
   const venmoEl=document.getElementById('venmo-'+dk);
   if(venmoEl) driverVenmo[driverName]=venmoEl.value.trim();
@@ -4222,55 +4229,6 @@ async function saveDriverProfile(driverName){
 // ── VEHICLE COST PER MILE ──
 const IRS_MAINTENANCE_RATE = 0.21; // IRS non-fuel portion ~21¢/mile (2025)
 
-async function lookupMPG(driverName){
-  const dk = driverName.replace(/ /g,'_');
-  const year  = document.getElementById('prof-vehicleyear-'+dk)?.value?.trim();
-  const model = document.getElementById('prof-vehicle-'+dk)?.value?.trim();
-  const resultEl = document.getElementById('mpg-result-'+dk);
-  if(!year||!model){ resultEl.textContent='Enter year and vehicle first'; return; }
-  resultEl.textContent='Looking up…';
-  try {
-    // Use NHTSA / fueleconomy.gov API (free, no key needed)
-    const make  = model.split(' ')[0];
-    const vmodel= model.split(' ').slice(1).join(' ');
-    const url = `https://www.fueleconomy.gov/ws/rest/vehicle/menu/options?year=${year}&make=${encodeURIComponent(make)}&model=${encodeURIComponent(vmodel)}`;
-    const resp = await fetch(url, {headers:{Accept:'application/json'}});
-    const data = await resp.json();
-    // Get first result's vehicle ID then fetch MPG
-    const vehicles = Array.isArray(data?.menuItem) ? data.menuItem : data?.menuItem ? [data.menuItem] : [];
-    if(!vehicles.length){ resultEl.textContent='Vehicle not found — enter MPG manually below'; showMPGManual(dk); return; }
-    const vid = vehicles[0].value;
-    const vResp = await fetch(`https://www.fueleconomy.gov/ws/rest/vehicle/${vid}`, {headers:{Accept:'application/json'}});
-    const vData = await vResp.json();
-    const mpg = parseFloat(vData.comb08)||parseFloat(vData.city08)||0;
-    if(!mpg){ resultEl.textContent='MPG not found — enter manually below'; showMPGManual(dk); return; }
-    DRIVER_PROFILES[driverName].mpg = mpg;
-    await storageSet('kat:driverProfiles', DRIVER_PROFILES);
-    resultEl.innerHTML=`✓ EPA: <strong>${mpg} MPG</strong> combined · Cost/mile: <strong>$${calcCostPerMile(driverName).toFixed(3)}</strong>`;
-    showToast(`MPG found: ${mpg} combined`);
-  } catch(e){
-    resultEl.textContent='Lookup failed — enter MPG manually below';
-    showMPGManual(dk);
-  }
-}
-
-function showMPGManual(dk){
-  const el = document.getElementById('mpg-result-'+dk);
-  el.innerHTML += ` <input type="number" id="mpg-manual-${dk}" placeholder="MPG" min="1" max="150" style="width:60px;padding:2px 5px;border:1px solid var(--light);border-radius:4px;font-size:.78rem;" oninput="saveMPGManual('${dk}')" />`;
-}
-
-async function saveMPGManual(dk){
-  const driverName = dk.replace(/_/g,' ');
-  const mpg = parseFloat(document.getElementById('mpg-manual-'+dk)?.value)||0;
-  if(mpg>0){
-    if(!DRIVER_PROFILES[driverName]) DRIVER_PROFILES[driverName]={};
-    DRIVER_PROFILES[driverName].mpg=mpg;
-    await storageSet('kat:driverProfiles', DRIVER_PROFILES);
-    const resultEl=document.getElementById('mpg-result-'+dk);
-    if(resultEl) resultEl.innerHTML=`✓ ${mpg} MPG set · Cost/mile: <strong>$${calcCostPerMile(driverName).toFixed(3)}</strong>`;
-  }
-}
-
 function calcCostPerMile(driverName){
   const prof     = DRIVER_PROFILES[driverName]||{};
   const mpg      = parseFloat(prof.mpg)||0;
@@ -4278,6 +4236,79 @@ function calcCostPerMile(driverName){
   if(!mpg) return IRS_MAINTENANCE_RATE; // fallback: just maintenance
   const gasCostPerMile = gasPrice / mpg;
   return gasCostPerMile + IRS_MAINTENANCE_RATE;
+}
+
+// ── DEAD-HEAD MILEAGE (empty miles home ⇄ pickup) ──
+// Cache one-way miles keyed by "home||start". Round-trip is assumed (drive there empty, back empty).
+let deadheadCache = {};
+let deadheadInFlight = false;
+
+function rideStartAddress(r){ return (r && (r.pickup || r.home)) || ''; }
+
+// Returns round-trip dead-head miles for a ride if cached, else 0 (until computed).
+function getRideDeadheadMiles(r, home){
+  if(!home || !r || r._outside) return 0;
+  const start = rideStartAddress(r);
+  if(!start) return 0;
+  const val = deadheadCache[home + '||' + start];
+  return (typeof val === 'number') ? val * 2 : 0; // ×2 = round trip
+}
+
+// True if any ride still needs a distance lookup (so the UI can show "calculating…").
+function deadheadPending(ridesList, home){
+  if(!home) return false;
+  return ridesList.some(r=>{
+    if(r._outside) return false;
+    const start = rideStartAddress(r);
+    if(!start) return false;
+    const v = deadheadCache[home + '||' + start];
+    return v === undefined || v === 'pending';
+  });
+}
+
+// Fill the cache for any uncached (home → start) pairs via Google DistanceMatrix, then re-render income.
+async function ensureDeadhead(ridesList, home){
+  if(!home || deadheadInFlight) return;
+  const need = [];
+  ridesList.forEach(r=>{
+    if(r._outside) return;
+    const start = rideStartAddress(r);
+    if(!start) return;
+    const key = home + '||' + start;
+    if(deadheadCache[key] === undefined){ deadheadCache[key] = 'pending'; need.push({ key, start }); }
+  });
+  if(!need.length) return;
+  if(!gmapsLoaded){ loadGoogleMapsAPI(); }
+  let waited = 0;
+  while(!gmapsLoaded && waited < 6000){ await new Promise(r=>setTimeout(r,200)); waited += 200; }
+  if(!gmapsLoaded || !gmapsService){ need.forEach(n=>{ deadheadCache[n.key] = 0; }); return; }
+  deadheadInFlight = true;
+  try {
+    for(let i=0;i<need.length;i+=20){
+      const chunk = need.slice(i, i+20);
+      await new Promise(resolve=>{
+        gmapsService.getDistanceMatrix({
+          origins: [home],
+          destinations: chunk.map(c=>c.start),
+          travelMode: google.maps.TravelMode.DRIVING,
+          unitSystem: google.maps.UnitSystem.IMPERIAL,
+        }, (resp, status)=>{
+          if(status === 'OK' && resp.rows && resp.rows[0]){
+            resp.rows[0].elements.forEach((el, idx)=>{
+              deadheadCache[chunk[idx].key] = (el.status === 'OK') ? (el.distance.value / 1609.344) : 0;
+            });
+          } else {
+            chunk.forEach(c=>{ deadheadCache[c.key] = 0; });
+          }
+          resolve();
+        });
+      });
+    }
+  } catch(e){
+    need.forEach(n=>{ if(deadheadCache[n.key]==='pending') deadheadCache[n.key] = 0; });
+  }
+  deadheadInFlight = false;
+  if(document.getElementById('page-income')?.classList?.contains('active')) renderIncome();
 }
 
 function getRideVehicleCost(ride){
@@ -4854,7 +4885,15 @@ function renderIncome(){
       proratedExp = monthlyExp * (days/30.44);
     }
   }
-  const netEarnings = totalEarnings - proratedExp;
+  // Vehicle (trip) cost + dead-head (empty home⇄pickup miles)
+  const homeAddr        = personalView ? (DRIVER_PROFILES[dName]?.homeAddress || '') : '';
+  if(personalView && homeAddr) ensureDeadhead(filtered, homeAddr);
+  const tripVehicleCost = personalView ? filtered.reduce((s,r)=>s+getRideVehicleCost(r),0) : 0;
+  const deadheadMiles   = (personalView && homeAddr) ? filtered.reduce((s,r)=>s+getRideDeadheadMiles(r, homeAddr),0) : 0;
+  const cpmNum          = calcCostPerMile(dName||'');
+  const deadheadCost    = deadheadMiles * cpmNum;
+  const deadheadCalc    = personalView && !!homeAddr && deadheadPending(filtered, homeAddr);
+  const netEarnings = totalEarnings - tripVehicleCost - deadheadCost - proratedExp;
 
   // Summary cards
   const cards = [
@@ -4864,6 +4903,8 @@ function renderIncome(){
   ];
   if(personalView && monthlyExp > 0){
     cards.push({label:`Expenses (${incomeTab==='weekly'?'~week':incomeTab==='monthly'?'month':'period'})`, val:`-$${proratedExp.toFixed(2)}`, color:'#dc2626'});
+  }
+  if(personalView && (monthlyExp>0 || tripVehicleCost>0 || deadheadCost>0)){
     cards.push({label:'Net Take-Home', val:`$${netEarnings.toFixed(2)}`, color: netEarnings>=0?'var(--green)':'#dc2626'});
   }
   cards.push({label:'AP Rides', val:apRides, color:'#9c27b0'});
@@ -4876,7 +4917,7 @@ function renderIncome(){
       <div style="font-size:1.5rem;font-weight:700;color:${c.color};">${c.val}</div>
     </div>`).join('');
 
-  const totalVehicleCost = personalView ? filtered.reduce((s,r)=>s+getRideVehicleCost(r),0) : 0;
+  const totalVehicleCost = tripVehicleCost;
   const netAfterVehicle  = totalEarnings - totalVehicleCost;
   if(!filtered.length){
     document.getElementById('income-ride-list').innerHTML='<p style="color:var(--mid);text-align:center;padding:2rem;">No rides in this period.</p>';
@@ -4894,8 +4935,9 @@ function renderIncome(){
             <th style="padding:.6rem .75rem;text-align:left;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Type</th>
             <th style="padding:.6rem .75rem;text-align:left;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Miles</th>
             ${personalView?'<th style="padding:.6rem .75rem;text-align:right;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Vehicle Cost</th>':''}
+            ${!personalView?'<th style="padding:.6rem .75rem;text-align:right;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Surcharges</th>':''}
             <th style="padding:.6rem .75rem;text-align:right;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Gross</th>
-            ${personalView?'<th style="padding:.6rem .75rem;text-align:right;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Net/Ride</th>':''}
+            ${personalView?'<th style="padding:.6rem .75rem;text-align:right;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Net/Ride</th>':'<th></th>'}
           </tr>
         </thead>
         <tbody>
@@ -4912,7 +4954,7 @@ function renderIncome(){
             <td style="padding:.7rem .75rem;text-align:right;font-weight:700;font-size:1rem;color:var(--gold);">$${totalEarnings.toFixed(2)}</td>
             <td></td>
           </tr>
-          ${buildIncomeFooterRows(!personalView,totalVehicleCost,netAfterVehicle,dName,expenseItems,proratedExp,monthlyExp,netEarnings)}
+          ${buildIncomeFooterRows({admin:!personalView, dName, totalEarnings, tripVehicleCost, deadheadMiles, deadheadCost, deadheadCalc, cpmNum, expenseItems, proratedExp, monthlyExp, netEarnings})}
         </tfoot>
       </table>
     </div>
@@ -4940,6 +4982,7 @@ function buildIncomeRow(r, i, admin){
   const bg    = i%2===0?'var(--white)':'var(--surface)';
   const netColor = net>=0?'var(--green)':'#dc2626';
   const isOutside = !!r._outside;
+  let driverCell = '';
   const rowClick = isOutside ? '' : ('onclick="openRideModal('+r.id+')"');
   const rowCursor = isOutside ? 'default' : 'pointer';
   if(admin){
@@ -4977,19 +5020,35 @@ function buildIncomeRow(r, i, admin){
     + '</tr>';
 }
 
-function buildIncomeFooterRows(admin,totalVehicleCost,netAfterVehicle,dName,expenseItems,proratedExp,monthlyExp,netEarnings){
+function buildIncomeFooterRows(o){
+  if(o.admin) return '';
   let rows='';
-  if(!admin&&totalVehicleCost>0){
-    const cpm = calcCostPerMile(dName||'').toFixed(3);
-    rows+=`<tr style="background:#fff5f5;"><td colspan="4" style="padding:.5rem .75rem;color:#dc2626;font-size:.82rem;"><strong>Vehicle Costs</strong> <span style="font-size:.72rem;">(gas+maintenance @ $${cpm}/mi)</span></td><td></td><td style="padding:.5rem .75rem;text-align:right;font-weight:600;color:#dc2626;">-$${totalVehicleCost.toFixed(2)}</td><td style="padding:.5rem .75rem;text-align:right;font-weight:700;color:${netAfterVehicle>=0?'var(--green)':'#dc2626'};">$${netAfterVehicle.toFixed(2)}</td></tr>`;
+  const cpm = (o.cpmNum||0).toFixed(3);
+  let running = o.totalEarnings;
+  const moneyCell = (v,color)=>`<td style="padding:.5rem .75rem;text-align:right;font-weight:600;color:${color};">${v}</td>`;
+  const netCell   = (v)=>`<td style="padding:.5rem .75rem;text-align:right;font-weight:700;color:${v>=0?'var(--green)':'#dc2626'};">$${v.toFixed(2)}</td>`;
+
+  if(o.tripVehicleCost>0){
+    running -= o.tripVehicleCost;
+    rows+=`<tr style="background:#fff5f5;"><td colspan="4" style="padding:.5rem .75rem;color:#dc2626;font-size:.82rem;"><strong>Vehicle Costs</strong> <span style="font-size:.72rem;">(gas+maintenance @ $${cpm}/mi)</span></td><td></td>${moneyCell('-$'+o.tripVehicleCost.toFixed(2),'#dc2626')}${netCell(running)}</tr>`;
   }
-  if(!admin&&expenseItems.length){
-    rows+=`<tr style="background:#fff5f5;"><td colspan="4" style="padding:.5rem .75rem;color:#dc2626;font-size:.82rem;"><strong>Monthly Expenses</strong> <span style="font-size:.72rem;">(pro-rated)</span></td><td></td><td style="padding:.5rem .75rem;text-align:right;font-weight:600;color:#dc2626;">-$${proratedExp.toFixed(2)}</td><td></td></tr>`;
-    expenseItems.forEach(e=>{
-      rows+=`<tr style="background:#fff5f5;"><td colspan="4" style="padding:.3rem .75rem .3rem 1.5rem;font-size:.78rem;color:#dc2626;">&#8627; ${e.label}</td><td></td><td style="padding:.3rem .75rem;text-align:right;font-size:.78rem;color:#dc2626;">-$${(e.amount*(proratedExp/monthlyExp||1)).toFixed(2)}</td><td></td></tr>`;
+  if(o.deadheadCalc){
+    rows+=`<tr style="background:#fff5f5;"><td colspan="4" style="padding:.5rem .75rem;color:#dc2626;font-size:.82rem;"><strong>Dead-head miles</strong> <span style="font-size:.72rem;">(home ⇄ pickup)</span></td><td></td><td style="padding:.5rem .75rem;text-align:right;font-size:.78rem;color:var(--mid);">calculating…</td><td></td></tr>`;
+  } else if(o.deadheadCost>0){
+    running -= o.deadheadCost;
+    rows+=`<tr style="background:#fff5f5;"><td colspan="4" style="padding:.5rem .75rem;color:#dc2626;font-size:.82rem;"><strong>Dead-head miles</strong> <span style="font-size:.72rem;">(${Math.round(o.deadheadMiles)} mi round trip, home ⇄ pickup @ $${cpm}/mi)</span></td><td></td>${moneyCell('-$'+o.deadheadCost.toFixed(2),'#dc2626')}${netCell(running)}</tr>`;
+  }
+  if(o.expenseItems && o.expenseItems.length){
+    running -= o.proratedExp;
+    rows+=`<tr style="background:#fff5f5;"><td colspan="4" style="padding:.5rem .75rem;color:#dc2626;font-size:.82rem;"><strong>Monthly Expenses</strong> <span style="font-size:.72rem;">(pro-rated)</span></td><td></td>${moneyCell('-$'+o.proratedExp.toFixed(2),'#dc2626')}${netCell(running)}</tr>`;
+    o.expenseItems.forEach(e=>{
+      const share = (e.amount*(o.proratedExp/o.monthlyExp||1));
+      rows+=`<tr style="background:#fff5f5;"><td colspan="4" style="padding:.3rem .75rem .3rem 1.5rem;font-size:.78rem;color:#dc2626;">&#8627; ${e.label}</td><td></td><td style="padding:.3rem .75rem;text-align:right;font-size:.78rem;color:#dc2626;">-$${share.toFixed(2)}</td><td></td></tr>`;
     });
-    const netColor = netEarnings>=0?'var(--green)':'#dc2626';
-    rows+=`<tr style="background:#f0fdf4;border-top:2px solid var(--green);"><td colspan="4" style="padding:.7rem .75rem;color:var(--green);font-weight:700;">NET TAKE-HOME</td><td></td><td style="padding:.7rem .75rem;text-align:right;font-weight:700;font-size:1.1rem;color:${netColor};">$${netEarnings.toFixed(2)}</td><td></td></tr>`;
+  }
+  if(o.tripVehicleCost>0 || o.deadheadCost>0 || (o.expenseItems && o.expenseItems.length)){
+    const net = o.netEarnings;
+    rows+=`<tr style="background:#f0fdf4;border-top:2px solid var(--green);"><td colspan="4" style="padding:.7rem .75rem;color:var(--green);font-weight:700;">NET TAKE-HOME</td><td></td><td style="padding:.7rem .75rem;text-align:right;font-weight:700;font-size:1.1rem;color:${net>=0?'var(--green)':'#dc2626'};">$${net.toFixed(2)}</td><td></td></tr>`;
   }
   return rows;
 }
@@ -6406,12 +6465,50 @@ async function sendPushToDriver(driverName, title, body){
 
 // PWA INSTALL PROMPT
 let deferredInstallPrompt = null;
+const PWA_SNOOZE_MS = 14 * 24 * 60 * 60 * 1000; // re-offer the banner after 14 days
+
+function pwaIsInstalled(){
+  return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+}
+function pwaSnoozed(key){
+  const t = parseInt(localStorage.getItem(key) || '0', 10);
+  return t > 0 && (Date.now() - t < PWA_SNOOZE_MS);
+}
+function isIOSDevice(){
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent);
+  return isIOS && isSafari;
+}
+function showInstallMenuItem(){
+  const item = document.getElementById('menu-install');
+  if(item) item.style.display = pwaIsInstalled() ? 'none' : 'flex';
+}
+
+// Manual trigger from the side menu — always available, never permanently hidden
+async function triggerInstall(){
+  if(pwaIsInstalled()){ showToast('App is already installed ✓'); return; }
+  if(deferredInstallPrompt){
+    deferredInstallPrompt.prompt();
+    const result = await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    const banner = document.getElementById('pwa-install-banner');
+    if(banner) banner.style.display='none';
+    if(result.outcome === 'accepted') showToast('Installing NDA App…');
+    return;
+  }
+  if(isIOSDevice()){
+    const banner = document.getElementById('ios-install-banner');
+    if(banner) banner.style.display='block';
+    return;
+  }
+  showToast('Open your browser menu → "Install app" / "Add to Home Screen"');
+}
 
 window.addEventListener('beforeinstallprompt', e=>{
   e.preventDefault();
   deferredInstallPrompt = e;
-  // Show install banner if not dismissed
-  if(!localStorage.getItem('pwa-dismissed')){
+  showInstallMenuItem();
+  if(!pwaIsInstalled() && !pwaSnoozed('pwa-snooze')){
     const banner = document.getElementById('pwa-install-banner');
     if(banner) banner.style.display='flex';
   }
@@ -6421,29 +6518,22 @@ window.addEventListener('appinstalled', ()=>{
   deferredInstallPrompt = null;
   const banner = document.getElementById('pwa-install-banner');
   if(banner) banner.style.display='none';
+  const item = document.getElementById('menu-install');
+  if(item) item.style.display='none';
   showToast('NDA App installed ✓ Check your home screen!');
 });
 
-document.getElementById('pwa-install-btn')?.addEventListener('click', async()=>{
-  if(!deferredInstallPrompt) return;
-  deferredInstallPrompt.prompt();
-  const result = await deferredInstallPrompt.userChoice;
-  deferredInstallPrompt = null;
-  document.getElementById('pwa-install-banner').style.display='none';
-  if(result.outcome === 'accepted') localStorage.setItem('pwa-dismissed','1');
-});
+document.getElementById('pwa-install-btn')?.addEventListener('click', triggerInstall);
 
 document.getElementById('pwa-dismiss-btn')?.addEventListener('click',()=>{
   document.getElementById('pwa-install-banner').style.display='none';
-  localStorage.setItem('pwa-dismissed','1');
+  localStorage.setItem('pwa-snooze', String(Date.now())); // snooze for 14 days, not forever
 });
 
 // iOS Safari: no beforeinstallprompt — show manual instructions
 (function(){
-  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-  const isStandalone = window.navigator.standalone === true;
-  if(isIOS && isSafari && !isStandalone && !localStorage.getItem('pwa-ios-dismissed')){
+  showInstallMenuItem();
+  if(isIOSDevice() && !pwaIsInstalled() && !pwaSnoozed('pwa-ios-snooze')){
     setTimeout(()=>{
       const banner = document.getElementById('ios-install-banner');
       if(banner) banner.style.display='block';
@@ -6484,7 +6574,7 @@ initApp();
   </div>
   <div style="display:flex;gap:8px;">
     <button id="pwa-install-btn" style="padding:8px 16px;background:#9c27b0;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">Install</button>
-    <button id="pwa-dismiss-btn" onclick="document.getElementById('pwa-install-banner').style.display='none';localStorage.setItem('pwa-dismissed','1');" style="padding:8px 12px;background:none;color:#9c7bbf;border:1px solid #4a2d6e;border-radius:8px;font-size:12px;cursor:pointer;">Later</button>
+    <button id="pwa-dismiss-btn" onclick="document.getElementById('pwa-install-banner').style.display='none';localStorage.setItem('pwa-snooze',String(Date.now()));" style="padding:8px 12px;background:none;color:#9c7bbf;border:1px solid #4a2d6e;border-radius:8px;font-size:12px;cursor:pointer;">Later</button>
   </div>
 </div>
 
@@ -6492,7 +6582,7 @@ initApp();
 <div id="ios-install-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#1a0d2e;border-top:2px solid #9c27b0;padding:14px 16px;z-index:500;text-align:center;">
   <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:4px;">Install on iPhone</div>
   <div style="font-size:12px;color:#9c7bbf;margin-bottom:10px;">Tap <strong style="color:#fff;">Share</strong> (the box with arrow ↑) then <strong style="color:#fff;">Add to Home Screen</strong></div>
-  <button onclick="document.getElementById('ios-install-banner').style.display='none';localStorage.setItem('pwa-ios-dismissed','1');" style="padding:6px 16px;background:none;color:#9c7bbf;border:1px solid #4a2d6e;border-radius:7px;font-size:12px;cursor:pointer;">Got it</button>
+  <button onclick="document.getElementById('ios-install-banner').style.display='none';localStorage.setItem('pwa-ios-snooze',String(Date.now()));" style="padding:6px 16px;background:none;color:#9c7bbf;border:1px solid #4a2d6e;border-radius:7px;font-size:12px;cursor:pointer;">Got it</button>
 </div>
 
 <!-- FCM FIREBASE MESSAGING SDK -->
