@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606032600">
+<meta name="version" content="202606032900">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2099,16 +2099,17 @@ function renderNotifPanel(){
 // ═══════════════════════════════════════════
 // DRIVER COLOR HELPERS
 // ═══════════════════════════════════════════
-function driverColor(name){ return driverColors[name]||'#888'; }
+function driverColor(name){ return driverColors[name]||'#888888'; }
 
 // Returns '#fff' or a dark color — whichever is actually more readable on the given
 // background hex. `alpha` accounts for badges drawn at partial opacity over the white card.
 function contrastText(hex, alpha){
   if(alpha===undefined) alpha=1;
-  const h=(hex||'').replace('#','');
-  if(h.length<6) return '#fff';
+  let h=(hex||'').replace('#','');
+  if(h.length===3) h=h.split('').map(x=>x+x).join('');
+  if(h.length<6) return '#1a0d2e';
   let r=parseInt(h.slice(0,2),16), g=parseInt(h.slice(2,4),16), b=parseInt(h.slice(4,6),16);
-  if([r,g,b].some(Number.isNaN)) return '#fff';
+  if([r,g,b].some(Number.isNaN)) return '#1a0d2e';
   // Blend toward white to mimic the partial-opacity badge over a light card
   r=r*alpha+255*(1-alpha); g=g*alpha+255*(1-alpha); b=b*alpha+255*(1-alpha);
   const lin=c=>{ c/=255; return c<=0.03928 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4); };
@@ -2125,7 +2126,7 @@ function rideColor(r){
   if(r.driver) return driverColor(r.driver);
   // map login name → full driver name via USER_DRIVER_MAP
   if(r.createdBy && USER_DRIVER_MAP[r.createdBy]) return driverColor(USER_DRIVER_MAP[r.createdBy]);
-  return '#888';
+  return '#888888';
 }
 
 // Short vehicle designator: SUV/Van → "XL", Premium → "Premium", else "Sedan"
@@ -3017,7 +3018,7 @@ function renderInterest(r){
     <div style="background:var(--gold-pale);border:1px solid var(--light);border-radius:10px;padding:.85rem 1rem;margin-bottom:.75rem;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap;">
         <div style="font-size:.78rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);">
-          ${count?`❤️ ${count} interested`:'Who can take this ride?'}
+          ${count?`❤️ ${count} interested`:(r.driver?'Interested in covering this ride?':'Who can take this ride?')}
         </div>
         ${me?`<button onclick="toggleInterest(${r.id})" style="display:inline-flex;align-items:center;gap:.4rem;cursor:pointer;border-radius:999px;padding:.45rem .95rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;${iAmIn?'background:#e0245e;color:#fff;border:1.5px solid #e0245e;':'background:transparent;color:#e0245e;border:1.5px solid #e0245e;'}">
             ${iAmIn?'❤️ Interested':'🤍 I\'m interested'}
@@ -4368,7 +4369,7 @@ async function confirmDuplicate(){
     id: nextId++,
     date: newDate,
     time: newTime,
-    driver: newDriver,
+    driver: newDriver || getMyDriverName() || '',
     confirmed: false,
     createdBy: currentUser?.name || src.createdBy,
   };
@@ -4422,7 +4423,7 @@ function renderComments(id){
   el.innerHTML=list.length?list.map(c=>{
     const user=USERS.find(u=>u.name===c.user)||{initials:'?',name:c.user};
     const dName=DRIVERS.find(d=>d.toLowerCase().includes(c.user.toLowerCase()));
-    const bg=dName?driverColor(dName):'#888';
+    const bg=dName?driverColor(dName):'#888888';
     return `<div class="comment-item">
       <div class="comment-avatar" style="background:${bg};">${user.initials||c.user[0]}</div>
       <div class="comment-body">
@@ -4668,7 +4669,7 @@ function renderAccessControl(){
   const list = document.getElementById('access-control-list');
   list.innerHTML = USERS.map(function(u){
     const dName  = USER_DRIVER_MAP[u.name]||'';
-    const color  = dName ? driverColor(dName) : '#888';
+    const color  = dName ? driverColor(dName) : '#888888';
     const isMe   = u.name === currentUser.name;
     const active = !u.disabled;
     const isAdmin_u = u.role === 'admin';
@@ -4786,7 +4787,7 @@ function buildDriverDocHTML(fullName){
   const year = new Date().getFullYear();
   const today = new Date().toLocaleDateString();
 
-  const catColors={Fuel:'#f5a623',Maintenance:'#1e88e5',Tolls:'#43a047',Parking:'#9c27b0',Other:'#888'};
+  const catColors={Fuel:'#f5a623',Maintenance:'#1e88e5',Tolls:'#43a047',Parking:'#9c27b0',Other:'#888888'};
   const recTotals={}; RECEIPT_CATEGORIES.forEach(c=>recTotals[c]=0);
   recs.forEach(r=>{ recTotals[r.category]=(recTotals[r.category]||0)+parseFloat(r.amount||0); });
   const recGrand = Object.values(recTotals).reduce((s,v)=>s+v,0);
@@ -4800,7 +4801,7 @@ function buildDriverDocHTML(fullName){
     </tr>`).join('') || `<tr><td colspan="5" style="text-align:center;color:#888;padding:1rem;">No rides on record.</td></tr>`;
 
   const recRows = recs.map(r=>{
-    const col = catColors[r.category]||'#888';
+    const col = catColors[r.category]||'#888888';
     return `<div class="rc">
       <div class="rc-img">${r.imageData?`<img src="${r.imageData}" />`:'<div class="ph">🧾</div>'}</div>
       <div class="rc-info">
@@ -6289,6 +6290,9 @@ function parseAndImportICS(icsText){
         driver = driverNameMap[firstName] || DRIVERS.find(d=>d.split(' ')[0].toLowerCase()===firstName) || '';
       }
     }
+    // No driver detected on the calendar entry → default to the importer (creator).
+    // The ride can still be reassigned to someone else afterward.
+    if(!driver) driver = getMyDriverName() || '';
 
     // CREATED BY from parentheses in summary e.g. (kat), (Allen), (Jenn)
     let createdBy = 'FamilyWall';
@@ -6506,7 +6510,7 @@ function renderClients(){
     </div>`;
   const _clt=document.getElementById('client-list'); if(_clt) _clt.innerHTML=headerRow+clients.map(c=>{
     const multi=admin&&c.drivers.length>1;
-    const bg=c.drivers[0]?driverColor(c.drivers[0]):'#888';
+    const bg=c.drivers[0]?driverColor(c.drivers[0]):'#888888';
     const ini=c.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
     // When filtered to one driver, label their relationship; otherwise list assigned drivers.
     let badges='';
@@ -6998,7 +7002,7 @@ function renderReceipts(){
   sorted.forEach(r=>{ totals[r.category]=(totals[r.category]||0)+parseFloat(r.amount||0); });
   const grandTotal = Object.values(totals).reduce((s,v)=>s+v,0);
 
-  const catColors = {Fuel:'#f5a623',Maintenance:'#1e88e5',Tolls:'#43a047',Parking:'#9c27b0',Other:'#888'};
+  const catColors = {Fuel:'#f5a623',Maintenance:'#1e88e5',Tolls:'#43a047',Parking:'#9c27b0',Other:'#888888'};
 
   sec.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;margin-bottom:1.25rem;">
@@ -7014,7 +7018,7 @@ function renderReceipts(){
       ${RECEIPT_CATEGORIES.map(cat=>`
         <div style="background:var(--surface);border-radius:10px;padding:.85rem;text-align:center;">
           <div style="font-size:.68rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.3rem;">${cat}</div>
-          <div style="font-size:1.1rem;font-weight:700;color:${catColors[cat]||'#888'};">$${totals[cat].toFixed(2)}</div>
+          <div style="font-size:1.1rem;font-weight:700;color:${catColors[cat]||'#888888'};">$${totals[cat].toFixed(2)}</div>
         </div>`).join('')}
       <div style="background:var(--black);border-radius:10px;padding:.85rem;text-align:center;border:2px solid #9c27b0;">
         <div style="font-size:.68rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.3rem;">Total</div>
@@ -7035,7 +7039,7 @@ function renderReceipts(){
           <div style="flex:1;padding:.75rem .75rem .75rem 0;">
             <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.3rem;margin-bottom:.35rem;">
               <div style="display:flex;align-items:center;gap:.5rem;">
-                <span style="font-size:.72rem;padding:2px 8px;border-radius:10px;background:${catColors[r.category]||'#888'}22;color:${catColors[r.category]||'#888'};font-weight:600;">${r.category}</span>
+                <span style="font-size:.72rem;padding:2px 8px;border-radius:10px;background:${catColors[r.category]||'#888888'}22;color:${catColors[r.category]||'#888888'};font-weight:600;">${r.category}</span>
                 <span style="font-size:.82rem;color:var(--mid);">${r.date}</span>
               </div>
               <span style="font-size:1rem;font-weight:700;color:var(--black);">$${parseFloat(r.amount||0).toFixed(2)}</span>
@@ -7212,7 +7216,7 @@ function renderDocuments(){
 
   const me = getMyDriverName() || currentUser?.name || '';
   list.innerHTML = docs.map(d=>{
-    const color = DOC_COLORS[d.category] || '#888';
+    const color = DOC_COLORS[d.category] || '#888888';
     const imgs = d.images || [];
     const canDelete = isAdmin() || d.uploaderName === me;
     return `
@@ -7448,9 +7452,9 @@ async function exportReceiptsPDF(){
   </div>
   <hr style="margin-bottom:24px;border:none;border-top:1px solid #e0dcd6;">`;
 
-  const catColors={Fuel:'#f5a623',Maintenance:'#1e88e5',Tolls:'#43a047',Parking:'#9c27b0',Other:'#888'};
+  const catColors={Fuel:'#f5a623',Maintenance:'#1e88e5',Tolls:'#43a047',Parking:'#9c27b0',Other:'#888888'};
   sorted.forEach(r=>{
-    const col = catColors[r.category]||'#888';
+    const col = catColors[r.category]||'#888888';
     html += `<div class="receipt-item">
       <div class="receipt-img">${r.imageData?`<img src="${r.imageData}" />`:'<div class="receipt-img-placeholder">🧾</div>'}</div>
       <div class="receipt-info">
