@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606032300">
+<meta name="version" content="202606032500">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1156,6 +1156,7 @@ input,select,textarea{font-size:16px;}
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 // ═══════════════════════════════════════════
@@ -1291,12 +1292,18 @@ const firebaseConfig = {
 let fbDB = null;
 let fbRef = null;
 
-function initFirebase(){
+async function initFirebase(){
   try {
     if(typeof firebase === 'undefined') throw new Error('Firebase SDK not loaded');
     firebase.initializeApp(firebaseConfig);
     fbDB  = firebase.database();
     fbRef = (path) => fbDB.ref(path);
+    // Sign in anonymously so the database can require an authenticated client
+    // (lets us lock the security rules to "auth != null" instead of fully public).
+    if(firebase.auth){
+      try { await firebase.auth().signInAnonymously(); console.log('Firebase auth ✓ (anonymous)'); }
+      catch(authErr){ console.warn('Anonymous sign-in failed (check Authentication is enabled):', authErr.message); }
+    }
     console.log('Firebase connected ✓');
   } catch(e){
     console.warn('Firebase unavailable, using localStorage only:', e.message);
@@ -1416,7 +1423,7 @@ let nextId = 100;
 // ═══════════════════════════════════════════
 async function initApp() {
   try {
-    initFirebase();
+    await initFirebase();
     const [storedRides, storedComments, storedNotifs, storedColors] = await Promise.all([
       storageGet('kat:rides'),
       storageGet('kat:comments'),
@@ -3525,7 +3532,7 @@ function listenAllChat(){
       chatMessages[key] = arr;
     });
     renderChatTabs();
-    if(chatMessages[chatChannel]) renderChatMessages();
+    renderChatMessages();
     updateChatBadge();
   });
 }
@@ -3676,16 +3683,26 @@ async function sendChatMessage(){
 
   // Push to Firebase
   if(fbDB){
-    const path = 'nda/kat/chat/' + chatChannel;
-    await fbRef(path).push(msg);
-    // Clear typing indicator
-    fbRef('nda/kat/chatTyping/' + (currentUser?.name||'').replace(/ /g,'_')).remove();
-  } else {
-    // localStorage fallback
-    if(!chatMessages[chatChannel]) chatMessages[chatChannel] = [];
-    chatMessages[chatChannel].push(msg);
-    renderChatMessages();
+    try {
+      const path = 'nda/kat/chat/' + chatChannel;
+      await fbRef(path).push(msg);
+      // Clear typing indicator
+      fbRef('nda/kat/chatTyping/' + (currentUser?.name||'').replace(/ /g,'_')).remove();
+    } catch(err){
+      console.error('Chat send failed:', err);
+      if(input) input.value = text;   // restore the text so it is not lost
+      showToast("Message didn't send — check your connection",'error');
+      return;
+    }
   }
+  // Show it immediately for the sender instead of relying only on the realtime
+  // listener (which reconciles from the server a moment later and overwrites this
+  // array, so the optimistic copy never lingers as a duplicate).
+  if(!chatMessages[chatChannel]) chatMessages[chatChannel] = [];
+  if(!chatMessages[chatChannel].some(m=>m.ts===msg.ts && m.sender===msg.sender && m.text===msg.text)){
+    chatMessages[chatChannel].push(msg);
+  }
+  renderChatMessages();
 
   // Send push notification to channel members
   notifyChatMembers(chatChannel, msg);
