@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606033500">
+<meta name="version" content="202606033700">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -7529,6 +7529,7 @@ async function registerSW(){
 
 // Request push permission and get FCM token
 async function requestPushPermission(){
+  if(VAPID_KEY === 'PASTE_YOUR_VAPID_KEY_HERE'){ showToast('Push notifications aren\u2019t set up yet \u2014 using in-app alerts for now.'); return; }
   if(!('Notification' in window)){ showToast('Push notifications not supported on this browser','error'); return; }
   const permission = await Notification.requestPermission();
   if(permission !== 'granted'){ showToast('Notifications blocked — enable in browser settings','error'); return; }
@@ -7578,10 +7579,11 @@ function updateNotifToggle(enabled){
 
 // Show push toggle in topbar after login
 async function setupPushUI(){
-  const enabled = await isPushEnabled();
-  updateNotifToggle(enabled);
+  // Browser push needs a server to actually send the messages, which a client-only
+  // static site can't do — so the push toggle stays hidden. The in-app bell still
+  // works while the app is open.
   const btn = document.getElementById('notif-push-btn');
-  if(btn) btn.style.display = 'inline-block';
+  if(btn) btn.style.display = 'none';
 }
 
 // Handle foreground FCM messages (app is open)
@@ -7634,7 +7636,7 @@ window.addEventListener('appinstalled', ()=>{
 });
 
 document.getElementById('pwa-install-btn')?.addEventListener('click', async()=>{
-  if(!deferredInstallPrompt) return;
+  if(!deferredInstallPrompt){ showInstallHelp(); return; }
   deferredInstallPrompt.prompt();
   const result = await deferredInstallPrompt.userChoice;
   deferredInstallPrompt = null;
