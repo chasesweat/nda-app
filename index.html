@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606047200">
+<meta name="version" content="202606047800">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -508,6 +508,8 @@ input,select,textarea{font-size:16px;}
           </select>
         </div>
         <div class="form-group"><label>Passengers</label><input type="number" id="q-pax" value="1" min="1" max="14" oninput="calcQuote()" /></div>
+        <div class="form-group"><label>Checked Bags</label><input type="number" id="q-checked-bags" value="0" min="0" /></div>
+        <div class="form-group"><label>Carry-on Bags</label><input type="number" id="q-carryon-bags" value="0" min="0" /></div>
         <div class="form-group"><label>Wait time (hrs)</label><input type="number" id="q-wait" value="0" min="0" step="0.25" oninput="calcQuote()" /></div>
         <div class="form-group">
           <label>Additional pickups</label>
@@ -631,12 +633,14 @@ input,select,textarea{font-size:16px;}
       <button class="cal-tab active" id="dtab-members" onclick="switchDriverTab('members',this)">Driver Cards</button>
       <button class="cal-tab" id="dtab-settings" onclick="switchDriverTab('settings',this)" style="display:none;">Colors</button>
       <button class="cal-tab" id="dtab-access" onclick="switchDriverTab('access',this)" style="display:none;">Access control</button>
+      <button class="cal-tab" id="dtab-pricing" onclick="switchDriverTab('pricing',this)" style="display:none;">Pricing</button>
     </div>
     <div id="driver-panel-settings" style="display:none;"><div id="driver-settings-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:1rem;"></div></div>
     <div id="driver-panel-members">
       <div id="driver-members-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;"></div>
     </div>
     <div id="driver-panel-access" style="display:none;"><div id="selfie-admin-section"></div><div id="access-control-list"></div></div>
+    <div id="driver-panel-pricing" style="display:none;"></div>
   </div>
 
   <!-- MY RIDES -->
@@ -933,6 +937,8 @@ input,select,textarea{font-size:16px;}
         <div class="form-group"><label>Return Date</label><input type="date" id="edit-rt-date" /></div>
         <div class="form-group"><label>Miles</label><input type="number" id="edit-miles" min="0" step="0.1" /></div>
         <div class="form-group"><label>Passengers</label><input type="number" id="edit-pax" min="1" max="14" /></div>
+        <div class="form-group"><label>Checked Bags</label><input type="number" id="edit-checked-bags" min="0" /></div>
+        <div class="form-group"><label>Carry-on Bags</label><input type="number" id="edit-carryon-bags" min="0" /></div>
         <div class="form-group"><label>Flight #</label><input type="text" id="edit-flight" /></div>
         <div class="form-group"><label>Terminal</label>
           <select id="edit-terminal"><option value="">—</option><option>North Domestic</option><option>South Domestic</option><option>International</option></select>
@@ -1106,13 +1112,35 @@ input,select,textarea{font-size:16px;}
       <div class="form-group"><label>Date</label><input type="date" id="qa-date" /></div>
       <div class="form-group"><label>Time</label><input type="time" id="qa-time" /></div>
       <div class="form-group"><label>Travel Type</label>
-        <select id="qa-type">
+        <select id="qa-type" onchange="qaTypeChanged()">
           <option>AP ROUND TRIP</option>
           <option selected>AP RUN</option>
           <option>AP PICK UP</option>
           <option>ROUND TRIP</option>
           <option>ONE WAY</option>
         </select>
+      </div>
+      <div id="qa-rt-section" style="grid-column:1/-1;display:none;background:#f9f4ff;border-radius:10px;padding:.75rem;margin-top:.25rem;">
+        <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#6b3fa0;margin-bottom:.6rem;">Return Leg (AP Pickup)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+          <div class="form-group"><label>Return Date</label><input type="date" id="qa-rt-date" /></div>
+          <div class="form-group"><label>Return Time</label><input type="time" id="qa-rt-time" /></div>
+          <div class="form-group"><label>Return Flight #</label><input type="text" id="qa-rt-flight" placeholder="e.g. DL1234" /></div>
+          <div class="form-group"><label>Return Terminal</label>
+            <select id="qa-rt-terminal"><option value="">—</option><option>North Domestic</option><option>South Domestic</option><option>International</option></select>
+          </div>
+        </div>
+        <div style="margin-top:.6rem;padding:.5rem;background:#fff;border-radius:8px;border:1.5px solid #d8b4fe;">
+          <div style="font-size:.75rem;font-weight:600;color:#6b3fa0;margin-bottom:.4rem;">Both legs must be confirmed before saving</div>
+          <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;">
+            <input type="checkbox" id="qa-leg-run" style="width:15px;height:15px;accent-color:#6b3fa0;cursor:pointer;" onchange="qaCheckLegs()" />
+            <label for="qa-leg-run" style="font-size:.82rem;cursor:pointer;">AP Run — outbound leg ready</label>
+          </div>
+          <div style="display:flex;align-items:center;gap:.5rem;">
+            <input type="checkbox" id="qa-leg-pickup" style="width:15px;height:15px;accent-color:#6b3fa0;cursor:pointer;" onchange="qaCheckLegs()" />
+            <label for="qa-leg-pickup" style="font-size:.82rem;cursor:pointer;">AP Pickup — return leg ready</label>
+          </div>
+        </div>
       </div>
       <div class="form-group"><label>Vehicle</label>
         <select id="qa-vehicle" onchange="recalcQa()">
@@ -1122,7 +1150,8 @@ input,select,textarea{font-size:16px;}
         </select>
       </div>
       <div class="form-group"><label>Driver</label>
-        <select id="qa-driver"></select>
+        <select id="qa-driver" onchange="qaDriverChanged()"></select>
+        <div id="qa-avail-warn" style="display:none;margin-top:.3rem;padding:.35rem .6rem;background:#fef3c7;border-radius:6px;font-size:.75rem;color:#92400e;"></div>
       </div>
       <div class="form-group"><label>Price ($)</label>
         <input type="number" id="qa-price" min="0" step="0.01" value="0" />
@@ -1152,6 +1181,7 @@ input,select,textarea{font-size:16px;}
           <option>International</option>
         </select>
       </div>
+      <div style="grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;"><div class="form-group"><label>Passengers</label><input type="number" id="qa-pax" min="1" max="14" value="1" /></div><div class="form-group"><label>Checked Bags</label><input type="number" id="qa-checked-bags" min="0" value="0" /></div><div class="form-group"><label>Carry-on Bags</label><input type="number" id="qa-carryon-bags" min="0" value="0" /></div></div>
       <div class="form-group" style="grid-column:1/-1;"><label>Notes</label>
         <input type="text" id="qa-notes" placeholder="Any notes…" />
       </div>
@@ -1159,7 +1189,7 @@ input,select,textarea{font-size:16px;}
     <div style="color:var(--red);font-size:.82rem;min-height:1rem;margin:.5rem 0;" id="qa-error"></div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeQuickAddModal()">Cancel</button>
-      <button class="btn-primary" style="width:auto;padding:.65rem 1.5rem;" onclick="saveQuickAddRide()">Save Ride</button>
+      <button id="qa-save-btn" class="btn-primary" style="width:auto;padding:.65rem 1.5rem;" onclick="saveQuickAddRide()">Save Ride</button>
     </div>
   </div>
 </div>
@@ -2097,6 +2127,8 @@ async function saveQuote(){
     flight:document.getElementById('q-flight').value,
     terminal:document.getElementById('q-terminal').value,
     pax:document.getElementById('q-pax').value,
+    checkedBags:parseInt(document.getElementById('q-checked-bags')?.value)||0,
+    carryOnBags:parseInt(document.getElementById('q-carryon-bags')?.value)||0,
     phone:document.getElementById('q-phone').value,
     extraPhones:(document.getElementById('q-extra-phones')||{}).value||'',
     email:(document.getElementById('q-email')||{}).value||'',
@@ -2172,8 +2204,10 @@ function updateNotifBadge(){
   // Count pending transfer requests relevant to this user
   const pendingTransfers = Object.values(clientRequests||{}).filter(r=>{
     if(r.status!=='pending') return false;
+    if(r.type==='admin_release') return isAdmin();
+    if(r.type==='avail_override') return !!(dName && r.driverName===dName); // driver sees their own overrides
     if(isAdmin()) return true;
-    if(dName && r.fromDriver.includes(dName)) return true; // original driver
+    if(dName && r.fromDriver.includes(dName)) return true;
     return false;
   }).length;
 
@@ -2192,15 +2226,47 @@ function renderNotifPanel(){
   const myName  = currentUser?.name;
   const myNotifs = dName ? (notifications[dName]||[]).slice().reverse() : [];
 
-  // Pending transfer requests for this user
+  // Pending transfer requests (excluding admin_release — shown separately below)
   const myRequests = Object.values(clientRequests||{}).filter(r=>{
     if(r.status!=='pending') return false;
+    if(r.type==='admin_release') return false;
     if(isAdmin()) return true;
     if(dName && r.fromDriver.includes(dName)) return true;
     return false;
   });
+  // Release requests needing 2 admin approvals
+  const myReleases = Object.values(clientRequests||{}).filter(r=>{
+    if(r.status!=='pending'||r.type!=='admin_release') return false;
+    if(isAdmin()) return true;
+    if(dName && r.fromDriver===dName) return true;
+    return false;
+  })
 
   let html = '';
+
+  // Release requests section (admins only)
+  if(myReleases.length){
+    html += `<div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#b45309;padding:.5rem .75rem .25rem;border-bottom:1px solid var(--light);">[Release Requests] (${myReleases.length})</div>`;
+    myReleases.forEach(r=>{
+            const already=(r.approvals||[]).includes(myName);
+      const isMyRelease=!!(dName&&r.fromDriver===dName);
+      const adminApprovals=(r.approvals||[]).filter(a=>{ const u=USERS.find(x=>x.name===a); return u&&u.role==='admin'; });
+      const adminAppCount=adminApprovals.length;
+            const adminSuffix=adminAppCount>0?'('+adminApprovals.map(a=>a.split(' ')[0]).join(', ')+')':''; let statusMsg; if(isMyRelease){ statusMsg='Your approval alone executes this release.'; } else {   const approverNames=adminApprovals.map(a=>a.split(' ')[0]).join(', ');   statusMsg='Admin approvals: '+adminAppCount+'/2'+(approverNames?' ('+approverNames+')':'')+(adminAppCount<2?' - 1 more needed, or original driver can approve alone':''); }
+      html += '<div style="padding:.75rem;border-bottom:1px solid var(--light);background:#fffbeb;">'
+        +'<div style="font-size:.82rem;font-weight:600;margin-bottom:.3rem;color:#92400e;">Client Release Request</div>'
+        +'<div style="font-size:.78rem;color:var(--charcoal);margin-bottom:.3rem;"><strong>'+r.clientName+'</strong> \u2192 <strong>'+(r.toDriver||'').split(' ')[0]+'</strong></div>'
+        +'<div style="font-size:.75rem;color:#888;margin-bottom:.3rem;">By '+(r.submittedBy||'?').split(' ')[0]+' \u00b7 '+new Date(r.ts).toLocaleDateString()+'</div>'
+        +'<div style="font-size:.72rem;margin-bottom:.5rem;color:'+(adminAppCount>=1?'#16a34a':'#92400e')+';">' + statusMsg + '</div>'
+        +(already
+          ? '<div style="font-size:.75rem;color:#16a34a;font-weight:600;">\u2713 You already approved</div>'
+          : '<div style="display:flex;gap:.4rem;">'
+            +'<button onclick="approveRelease(\''+r.id+'\')" style="flex:1;padding:.35rem;background:#6b3fa0;color:#fff;border:none;border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">'+(isMyRelease?'\u2713 Approve (executes now)':'\u2713 Approve')+'</button>'
+            +'<button onclick="denyRelease(\''+r.id+'\')" style="flex:1;padding:.35rem;background:#dc2626;color:#fff;border:none;border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">\u2717 Deny</button>'
+            +'</div>')
+        +'</div>'
+    });
+  }
 
   // Transfer requests section
   if(myRequests.length){
@@ -2217,6 +2283,25 @@ function renderNotifPanel(){
           <button onclick="denyTransfer('${r.id}')" style="flex:1;padding:.35rem;background:#dc2626;color:#fff;border:none;border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">✗ Deny</button>
         </div>
       </div>`;
+    });
+  }
+
+  // Availability override requests — shown to the driver being asked
+  const myOverrides = Object.values(clientRequests||{}).filter(r=>{
+    if(r.status!=='pending'||r.type!=='avail_override') return false;
+    return dName && r.driverName===dName;
+  });
+  if(myOverrides.length){
+    html += `<div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#b45309;padding:.5rem .75rem .25rem;border-bottom:1px solid var(--light);">Override Requests (${myOverrides.length})</div>`;
+    myOverrides.forEach(r=>{
+      html += `<div style="padding:.75rem;border-bottom:1px solid var(--light);background:#fffbeb;">`
+        +`<div style="font-size:.82rem;font-weight:600;margin-bottom:.3rem;">Ride Override Request</div>`
+        +`<div style="font-size:.78rem;color:var(--charcoal);margin-bottom:.3rem;">${r.client} on ${r.date}${r.time?' at '+r.time:''}</div>`
+        +`<div style="font-size:.75rem;color:var(--mid);margin-bottom:.5rem;">Requested by ${r.requestedBy?.split(' ')[0]||'Admin'}. You are marked unavailable at this time.</div>`
+        +`<div style="display:flex;gap:.4rem;">`
+        +`<button onclick="approveOverride('${r.id}')" style="flex:1;padding:.35rem;background:#16a34a;color:#fff;border:none;border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">✓ I can do it</button>`
+        +`<button onclick="denyOverride('${r.id}')" style="flex:1;padding:.35rem;background:#dc2626;color:#fff;border:none;border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">✗ I cannot</button>`
+        +`</div></div>`;
     });
   }
 
@@ -2588,19 +2673,45 @@ function switchMyTab(tab, el){
 // Build a directions deep-link to an address using the driver's default maps app
 // (Apple Maps on iPhone/iPad, Google Maps everywhere else), in driving-navigation mode.
 function mapsHref(addr){
-  const q=encodeURIComponent((addr||'').trim());
-  if(!q) return '';
+  const q=encodeURIComponent((addr||"").trim());
+  if(!q) return "";
   return /iphone|ipad|ipod/i.test(navigator.userAgent)
-    ? 'https://maps.apple.com/?daddr='+q+'&dirflg=d'
-    : 'https://www.google.com/maps/dir/?api=1&destination='+q+'&travelmode=driving';
+    ? "https://maps.apple.com/?daddr="+q+"&dirflg=d"
+    : "https://www.google.com/maps/dir/?api=1&destination="+q+"&travelmode=driving";
 }
-// Render an address as a tappable directions link (falls back to plain text if blank).
 function mapsLink(addr, color){
-  const a=(addr||'').trim();
-  if(!a || a==='\u2014') return escHtml(a||'\u2014');
-  return '<a href="'+mapsHref(a)+'" target="_blank" rel="noopener" onclick="event.stopPropagation();" '
-       + 'style="color:'+(color||'inherit')+';text-decoration:underline;text-underline-offset:2px;">'
+  const a=(addr||"").trim();
+  if(!a || a==="\u2014") return escHtml(a||"\u2014");
+  const attr=escHtml(a).replace(/"/g,"&quot;");
+  return '<a href="'+mapsHref(a)+'" data-addr="'+attr+'" target="_blank" rel="noopener" '
+       + 'onclick="event.stopPropagation();openNav(this.getAttribute(\'data-addr\'));return false;" '
+       + 'style="color:'+(color||"inherit")+';text-decoration:underline;text-underline-offset:2px;">'
        + escHtml(a)+'</a>';
+}
+function openNav(addr){
+  addr=(addr||"").trim(); if(!addr) return;
+  const q=encodeURIComponent(addr);
+  const mapsUrl=mapsHref(addr);
+  const wazeUrl="https://waze.com/ul?q="+q+"&navigate=yes";
+  const back=document.createElement("div");
+  back.style.cssText="position:fixed;inset:0;background:rgba(20,8,40,.55);z-index:11000;display:flex;align-items:flex-end;justify-content:center;padding:0;";
+  const close=()=>back.remove();
+  back.addEventListener("click",e=>{ if(e.target===back) close(); });
+  const go=url=>{ close(); window.open(url,"_blank","noopener"); };
+  const box=document.createElement("div");
+  box.style.cssText="background:#fff;border-radius:18px 18px 0 0;max-width:480px;width:100%;padding:1.1rem 1.2rem 1.4rem;box-shadow:0 -10px 40px rgba(0,0,0,.35);font-family:'DM Sans',sans-serif;";
+  box.innerHTML=
+    '<div style="font-size:.66rem;letter-spacing:1px;text-transform:uppercase;color:#999;margin-bottom:.25rem;">Navigate to</div>'
+    +'<div style="font-size:.92rem;color:#1a0d2e;margin-bottom:1rem;line-height:1.35;font-weight:600;">'+escHtml(addr)+'</div>'
+    +'<div style="display:flex;gap:.6rem;margin-bottom:.6rem;">'
+    +'<button data-u="maps" style="flex:1;padding:.85rem;border:none;border-radius:12px;background:#6b3fa0;color:#fff;font-family:inherit;font-size:.95rem;font-weight:700;cursor:pointer;">Maps</button>'
+    +'<button data-u="waze" style="flex:1;padding:.85rem;border:none;border-radius:12px;background:#33ccff;color:#053b54;font-family:inherit;font-size:.95rem;font-weight:700;cursor:pointer;">Waze</button>'
+    +'</div>'
+    +'<button data-u="cancel" style="width:100%;padding:.7rem;border:none;border-radius:12px;background:none;color:#999;font-family:inherit;font-size:.9rem;font-weight:600;cursor:pointer;">Cancel</button>';
+  box.querySelector('[data-u="maps"]').addEventListener("click",()=>go(mapsUrl));
+  box.querySelector('[data-u="waze"]').addEventListener("click",()=>go(wazeUrl));
+  box.querySelector('[data-u="cancel"]').addEventListener("click",close);
+  back.appendChild(box); document.body.appendChild(back);
 }
 
 function renderConfirmations(){
@@ -2879,13 +2990,7 @@ function buildDriverVCard(driverName){
                   {type:'text/vcard'});
 }
 
-// ── Driver card → PNG ──────────────────────────────────────────────
-// Renders the same card shown in the Drivers tab (photo of driver+vehicle,
-// colored name bar, vehicle, phone) to a PNG File so it can be shared with
-// the client alongside the driver's contact. Cached so the iOS share gesture
-// isn't broken by async image decoding at tap time.
 const _driverCardImgCache = {};
-
 function buildDriverCardImageFile(name){
   const prof    = DRIVER_PROFILES[name]||{};
   const color   = driverColor(name);
@@ -2894,36 +2999,31 @@ function buildDriverCardImageFile(name){
   const photoSrc= (typeof DRIVER_PHOTOS!=='undefined' && DRIVER_PHOTOS[name]) ? DRIVER_PHOTOS[name] : '';
   const initials= name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
   const photoText= contrastText(color, 1);
-
   const S=2, W=300*S, photoH=160*S, vehH=28*S, H=photoH+vehH;
   const FF="-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
-
   const draw=(img)=>{
     const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
     const ctx=cv.getContext('2d');
     ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,W,H);
-    // photo area
     ctx.fillStyle=color; ctx.fillRect(0,0,W,photoH);
     if(img){
       const iw=img.width, ih=img.height, sc=Math.max(W/iw, photoH/ih);
       const dw=iw*sc, dh=ih*sc;
       ctx.save(); ctx.beginPath(); ctx.rect(0,0,W,photoH); ctx.clip();
-      ctx.drawImage(img,(W-dw)/2,0,dw,dh); // object-fit:cover, object-position:top center
+      ctx.drawImage(img,(W-dw)/2,0,dw,dh);
       ctx.restore();
     } else {
       ctx.fillStyle=photoText; ctx.textAlign='center'; ctx.textBaseline='middle';
       ctx.font=`700 ${42*S}px ${FF}`; ctx.fillText(initials, W/2, photoH/2);
     }
-    // vehicle bar (directly under the photo — name is already printed on the photo)
     const vy=photoH;
     ctx.fillStyle='#1a0d2e'; ctx.fillRect(0,vy,W,vehH);
-    ctx.fillStyle='#cccccc'; ctx.font=`500 ${12*S}px ${FF}`;
-    ctx.fillText('\uD83D\uDE97  '+(vehicle||'Vehicle not set'), 12*S, vy+vehH/2);
+    ctx.fillStyle='#cccccc'; ctx.font=`500 ${12*S}px ${FF}`; ctx.textBaseline='middle';
+    ctx.textAlign='left'; ctx.fillText('\uD83D\uDE97  '+(vehicle||'Vehicle not set'), 12*S, vy+vehH/2);
     return new Promise(res=>cv.toBlob(b=>{
       res(b ? new File([b],(name.split(' ')[0]||'Driver')+'-card.png',{type:'image/png'}) : null);
     },'image/png'));
   };
-
   return new Promise((resolve)=>{
     if(!photoSrc){ draw(null).then(resolve); return; }
     const img=new Image();
@@ -2932,18 +3032,16 @@ function buildDriverCardImageFile(name){
     img.src=photoSrc;
   });
 }
-
-// Pre-build (and cache) a driver's card image so it's ready at share time.
 function warmDriverCardImage(name){
   if(!name) return Promise.resolve(null);
   if(!_driverCardImgCache[name]) _driverCardImgCache[name]=buildDriverCardImageFile(name).catch(()=>null);
   return _driverCardImgCache[name];
 }
-// Build all of them in the background once the app is idle.
 function prebuildAllDriverCardImages(){
   if(typeof DRIVERS==='undefined') return;
   DRIVERS.forEach(d=>warmDriverCardImage(d));
 }
+
 
 async function textClient(id){
   const r=rides.find(x=>x.id===id); if(!r) return;
@@ -2951,20 +3049,17 @@ async function textClient(id){
   if(!nums.length){ showToast('No phone numbers to text — add the client\u2019s number first','error'); return; }
   const body=encodeURIComponent(buildConfirmationText(r).message);
 
-  // Share ONLY the assigned driver's phone (vCard "Add to Contacts") and their
-  // driver card image, in ONE navigator.share call, so both arrive before the
-  // SMS opens and we stay inside a single user gesture.
+  // Share ONLY the assigned driver's phone (vCard) and driver card image.
   const assigned=(r.driver||'').trim();
-  // Kick off the card image now; usually already warmed when the ride was opened.
   const cardImgPromise = assigned ? warmDriverCardImage(assigned) : Promise.resolve(null);
   if(navigator.canShare){
     try{
       const files=[];
       if(assigned){
         const prof=DRIVER_PROFILES[assigned]||{};
-        const cardImg=await cardImgPromise;            // driver card image (photo + vehicle + phone)
+        const cardImg=await cardImgPromise;
         if(cardImg) files.push(cardImg);
-        if(prof.phone) files.push(buildDriverVCard(assigned));  // contact card = phone number
+        if(prof.phone) files.push(buildDriverVCard(assigned));
       }
       if(files.length && navigator.canShare({files})){
         await navigator.share({files});
@@ -2985,7 +3080,7 @@ function closeDayModal(){document.getElementById('day-modal').classList.remove('
 function openRideModal(id){
   activeRideId=id;
   const r=rides.find(x=>x.id===id); if(!r) return;
-  if(r.driver) warmDriverCardImage((r.driver||'').trim()); // ready for "Text group" share
+  if(r.driver) warmDriverCardImage((r.driver||"").trim());
   document.getElementById('rm-title').textContent=r.client;
   // driver assign row
   const drRow=document.getElementById('rm-driver-row');
@@ -3047,7 +3142,7 @@ function renderRideView(r){
     ${address ? `<div class="detail-row" style="grid-column:1/-1;">
       <div style="display:flex;align-items:flex-start;gap:.75rem;">
         <i class="ti ti-map-pin" style="font-size:18px;color:var(--mid);margin-top:2px;" aria-hidden="true"></i>
-        <div style="font-size:.88rem;color:var(--black);">${mapsLink(address, 'var(--accent)')}</div>
+        <div style="font-size:.88rem;color:var(--black);">${mapsLink(address, "var(--accent)")}</div>
       </div>
     </div>` : ''}
 
@@ -3056,6 +3151,8 @@ function renderRideView(r){
         <i class="ti ti-notes" style="font-size:18px;color:var(--mid);margin-top:2px;" aria-hidden="true"></i>
         <div>
           <div style="font-size:.88rem;margin-bottom:3px;">${r.pax||1} Passenger${(r.pax||1)>1?'s':''}</div>
+          ${r.checkedBags ? `<div style="font-size:.88rem;margin-bottom:3px;">Checked bags: ${r.checkedBags}</div>` : ''}
+          ${r.carryOnBags ? `<div style="font-size:.88rem;margin-bottom:3px;">Carry-on bags: ${r.carryOnBags}</div>` : ''}
           ${buildFeeMathHTML(r)}
           ${r.terminal ? `<div style="font-size:.88rem;margin-bottom:3px;">${r.terminal} Terminal</div>` : ''}
           ${r.flight   ? `<div style="font-size:.88rem;margin-bottom:3px;">Flight: ${r.flight}</div>` : ''}
@@ -3213,8 +3310,10 @@ function toggleEditMode(on){
   document.getElementById('edit-rt').value       = r.rt||'';
   document.getElementById('edit-rt-date').value  = r.rtDate||r.rtDateAP||'';
   document.getElementById('edit-miles').value    = r.miles||0;
-  document.getElementById('edit-pax').value      = r.pax||1;
-  document.getElementById('edit-flight').value   = r.flight||'';
+  document.getElementById('edit-pax').value           = r.pax||1;
+  document.getElementById('edit-checked-bags').value  = r.checkedBags||0;
+  document.getElementById('edit-carryon-bags').value   = r.carryOnBags||0;
+  document.getElementById('edit-flight').value         = r.flight||'';
   document.getElementById('edit-terminal').value = r.terminal||'';
   document.getElementById('edit-vehicle').value  = r.vehicle||'Sedan';
   document.getElementById('edit-type').value     = r.type||'AP RUN';
@@ -3241,7 +3340,9 @@ async function saveRideEdits(){
   r.rt        = document.getElementById('edit-rt').value;
   r.rtDate    = document.getElementById('edit-rt-date').value;
   r.miles     = parseFloat(document.getElementById('edit-miles').value)||0;
-  r.pax       = parseInt(document.getElementById('edit-pax').value)||1;
+  r.pax        = parseInt(document.getElementById('edit-pax').value)||1;
+  r.checkedBags = parseInt(document.getElementById('edit-checked-bags').value)||0;
+  r.carryOnBags = parseInt(document.getElementById('edit-carryon-bags').value)||0;
   r.flight    = document.getElementById('edit-flight').value.trim();
   r.terminal  = document.getElementById('edit-terminal').value;
   r.vehicle   = document.getElementById('edit-vehicle').value;
@@ -4629,6 +4730,9 @@ function openQuickAddModal(){
   qaAddonState={ premium:false, holiday:false, christmas:false, late:false, traffic:false, fuel:false };
   const xsEl=document.getElementById('qa-xstop'); if(xsEl) xsEl.value=0;
   const wtEl=document.getElementById('qa-wait'); if(wtEl) wtEl.value=0;
+  const pxEl=document.getElementById('qa-pax'); if(pxEl) pxEl.value=1;
+  const cbEl=document.getElementById('qa-checked-bags'); if(cbEl) cbEl.value=0;
+  const coEl=document.getElementById('qa-carryon-bags'); if(coEl) coEl.value=0;
   renderQaAddons(); recalcQa();
   // Default date to today
   const dEl=document.getElementById('qa-date');
@@ -4674,11 +4778,17 @@ async function saveQuickAddRide(){
   if(!client){errEl.textContent='Client name is required.';return;}
   if(!date)  {errEl.textContent='Date is required.';return;}
   errEl.textContent='';
+  const qaType = document.getElementById('qa-type').value;
+  if(qaType==='AP ROUND TRIP'){
+    if(!document.getElementById('qa-leg-run')?.checked||!document.getElementById('qa-leg-pickup')?.checked){
+      errEl.textContent='Check both leg confirmation boxes before saving.'; return;
+    }
+  }
   const ride={
     id:nextId++, client,
     phone:   document.getElementById('qa-phone').value.trim(),
     date, time: document.getElementById('qa-time').value,
-    type:    document.getElementById('qa-type').value,
+    type:    qaType,
     vehicle: document.getElementById('qa-vehicle').value,
     driver:  document.getElementById('qa-driver').value || getMyDriverName() || '',
     price:   parseFloat(document.getElementById('qa-price').value)||0,
@@ -4687,7 +4797,7 @@ async function saveQuickAddRide(){
     flight:  document.getElementById('qa-flight').value.trim(),
     terminal:document.getElementById('qa-terminal').value,
     notes:   document.getElementById('qa-notes').value.trim(),
-    miles:0,pax:1,rt:'',email:document.getElementById('qa-email')?document.getElementById('qa-email').value.trim():'',
+    miles:0,pax:parseInt(document.getElementById('qa-pax')?.value)||1,checkedBags:parseInt(document.getElementById('qa-checked-bags')?.value)||0,carryOnBags:parseInt(document.getElementById('qa-carryon-bags')?.value)||0,rt:'',email:document.getElementById('qa-email')?document.getElementById('qa-email').value.trim():'',
     holiday:qaAddonState.holiday?'Y':'N',christmas:qaAddonState.christmas?'Y':'N',late:qaAddonState.late?'Y':'N',premium:qaAddonState.premium?'Y':'N',fuel:qaAddonState.fuel?'Y':'N',xstop:parseInt(document.getElementById('qa-xstop')?.value)||0,traffic:qaAddonState.traffic?'Y':'N',wait:parseFloat(document.getElementById('qa-wait')?.value)||0,
     confirmed:false, createdBy:currentUser?.name||'',
     newClient: !!(document.getElementById('qa-new-client')?.checked),
@@ -4695,10 +4805,24 @@ async function saveQuickAddRide(){
   touchRide(ride, 'created');
   rides.push(ride);
   if(ride.driver) addNotification(ride.driver,ride,'assigned');
+  let ride2=null;
+  if(qaType==='AP ROUND TRIP'){
+    const rtDate=document.getElementById('qa-rt-date')?.value||date;
+    const rtTime=document.getElementById('qa-rt-time')?.value||'';
+    const rtFlight=document.getElementById('qa-rt-flight')?.value.trim()||'';
+    const rtTerminal=document.getElementById('qa-rt-terminal')?.value||'';
+    ride2={...ride,id:nextId++,type:'AP PICK UP',date:rtDate,time:rtTime,
+      flight:rtFlight,terminal:rtTerminal,
+      notes:(ride.notes?ride.notes+' ':'')+('Return leg \u2014 AP Round Trip ')+date};
+    ride.type='AP RUN';
+    ride.notes=(ride.notes?ride.notes+' ':'')+('Outbound leg \u2014 AP Round Trip ')+rtDate;
+    touchRide(ride2,'created'); rides.push(ride2);
+    if(ride2.driver) addNotification(ride2.driver,ride2,'assigned');
+  }
   await saveRides(); await saveNotifs();
   await upsertClientFromRide(ride);
   closeQuickAddModal();
-  showToast(`Ride added: ${client}`);
+  showToast(qaType==='AP ROUND TRIP'?`AP Round Trip added: ${client} (2 rides)`:`Ride added: ${client}`);
   refreshDash(); renderCal(); renderRides(); updateNotifBadge();
 }
 
@@ -5014,6 +5138,164 @@ function switchDriverTab(tab, el){
   document.getElementById('driver-panel-access').style.display   = tab==='access'  ?'block':'none';
   if(tab==='members') renderDriverMembers();
   if(tab==='access')  renderAccessControl();
+  if(tab==='pricing') renderPricingTracker();
+}
+
+
+// ── Admin Pricing Tracker ─────────────────────────────────────────
+// Computes the expected (should-be) price for a ride from its stored
+// attributes, using the same constants as the quote builder.
+function computeExpectedPrice(ride){
+  const vehicle=ride.vehicle||'Sedan';
+  const base=(typeof BASE!=='undefined'?BASE:{'Sedan':105,'SUV/Van':145,'Premium':185})[vehicle]||105;
+  const miles=parseFloat(ride.miles)||0;
+  const xstop=parseInt(ride.xstop)||0;
+  const wait=parseFloat(ride.wait)||0;
+  const RATE=typeof RATE_PER_MILE!=='undefined'?RATE_PER_MILE:2.50;
+  const WAIT=typeof WAIT_RATE!=='undefined'?WAIT_RATE:60;
+  const AF=typeof ADDONS_FLAT!=='undefined'?ADDONS_FLAT:{premium:30,holiday:30,christmas:35,late:20,traffic:15};
+  const CD=typeof CHRISTMAS_DATES!=='undefined'?CHRISTMAS_DATES:['12-23','12-24','12-25','12-26'];
+  const HD=typeof HOLIDAY_DATES!=='undefined'?HOLIDAY_DATES:['01-01','12-31','07-04','11-25','11-26','11-27','11-28','11-29'];
+  const dateStr=ride.date||'';
+  const timeStr=ride.time||'';
+  const [th=0,tm=0]=(timeStr||'').split(':').map(Number);
+  const mins=th*60+tm;
+  const dt=dateStr?new Date(dateStr+'T12:00:00'):null;
+  const dow=dt?dt.getDay():-1;
+  const isWd=dow>=1&&dow<=5;
+  const mmdd=dateStr.slice(5);
+  const isChristmas=CD.includes(mmdd);
+  const isHoliday=!isChristmas&&HD.includes(mmdd);
+  const isPremium=mins>0&&mins<300;
+  const inAM=mins>=390&&mins<540, inPM=mins>=870&&mins<1140;
+  const isTraffic=isWd&&(inAM||inPM);
+  let sub=base;
+  if(miles>50) sub+=(miles-50)*RATE;
+  if(isPremium) sub+=AF.premium;
+  if(isHoliday) sub+=AF.holiday;
+  if(isChristmas) sub+=AF.christmas;
+  if(ride.late==='Y') sub+=AF.late;
+  if(isTraffic) sub+=AF.traffic;
+  if(xstop>0) sub+=xstop*10;
+  if(wait>0) sub+=wait*WAIT;
+  if(ride.fuel==='Y') sub=sub*1.08;
+  return Math.round(sub*100)/100;
+}
+
+function renderPricingTracker(){
+  const panel=document.getElementById('driver-panel-pricing');
+  if(!panel||!isAdmin()) return;
+  const now=new Date();
+  const selMonth=panel.dataset.month||(now.getFullYear()+'-'+(String(now.getMonth()+1).padStart(2,'0')));
+  const selYear=panel.dataset.year||String(now.getFullYear());
+  const [sy,sm]=selMonth.split('-').map(Number);
+
+  // Build month options (last 24 months)
+  let monthOpts='';
+  for(let y=now.getFullYear();y>=now.getFullYear()-1;y--){
+    for(let mo=12;mo>=1;mo--){
+      if(y===now.getFullYear()&&mo>now.getMonth()+1) continue;
+      const v=y+'-'+String(mo).padStart(2,'0');
+      const lbl=new Date(y,mo-1,1).toLocaleString('default',{month:'long',year:'numeric'});
+      monthOpts+=`<option value="${v}"${v===selMonth?' selected':''}>${lbl}</option>`;
+    }
+  }
+  let yearOpts='';
+  for(let y=now.getFullYear();y>=now.getFullYear()-2;y--){
+    yearOpts+=`<option value="${y}"${String(y)===selYear?' selected':''}>${y}</option>`;
+  }
+
+  // Compute stats per driver
+  const driverStats={};
+  DRIVERS.forEach(d=>{ driverStats[d]={monthly:{total:0,under:0,rides:[]},yearly:{total:0,under:0}}; });
+
+  rides.forEach(r=>{
+    if(!r.driver||!r.date||!driverStats[r.driver]) return;
+    const [ry,rmo]=r.date.split('-').map(Number);
+    const exp=computeExpectedPrice(r);
+    const actual=parseFloat(r.price)||0;
+    const pct=exp>0?((exp-actual)/exp*100):0;
+    const isUnder=pct>15;
+    // Yearly
+    if(String(ry)===selYear){
+      driverStats[r.driver].yearly.total++;
+      if(isUnder) driverStats[r.driver].yearly.under++;
+    }
+    // Monthly
+    if(ry===sy&&rmo===sm){
+      driverStats[r.driver].monthly.total++;
+      if(isUnder){
+        driverStats[r.driver].monthly.under++;
+        driverStats[r.driver].monthly.rides.push({r,exp,actual,pct});
+      }
+    }
+  });
+
+  // Build HTML
+  let html=`<div style="padding:.5rem 0 1rem;">
+    <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem;">
+      <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);">Month</div>
+      <select onchange="document.getElementById('driver-panel-pricing').dataset.month=this.value;renderPricingTracker();"
+        style="padding:.35rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;">${monthOpts}</select>
+      <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-left:.5rem;">Year</div>
+      <select onchange="document.getElementById('driver-panel-pricing').dataset.year=this.value;renderPricingTracker();"
+        style="padding:.35rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;">${yearOpts}</select>
+    </div>
+    <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Pricing Summary</div>
+    <div style="font-size:.72rem;color:var(--mid);margin-bottom:1rem;">Flags rides priced &gt;15% below the calculated rate (base + mileage + auto-detected surcharges).</div>`;
+
+  // Summary table header
+  html+=`<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:.8rem;">
+    <thead><tr style="background:var(--light);text-align:left;">
+      <th style="padding:.4rem .6rem;">Driver</th>
+      <th style="padding:.4rem .6rem;text-align:center;">Monthly Rides</th>
+      <th style="padding:.4rem .6rem;text-align:center;">Monthly Under</th>
+      <th style="padding:.4rem .6rem;text-align:center;">Under %</th>
+      <th style="padding:.4rem .6rem;text-align:center;">Yearly Rides</th>
+      <th style="padding:.4rem .6rem;text-align:center;">Yearly Under</th>
+      <th style="padding:.4rem .6rem;text-align:center;">Yearly %</th>
+    </tr></thead><tbody>`;
+
+  DRIVERS.forEach((d,di)=>{
+    const s=driverStats[d];
+    const mPct=s.monthly.total>0?(s.monthly.under/s.monthly.total*100):0;
+    const yPct=s.yearly.total>0?(s.yearly.under/s.yearly.total*100):0;
+    const mColor=mPct>30?'#dc2626':mPct>15?'#d97706':'#16a34a';
+    const yColor=yPct>30?'#dc2626':yPct>15?'#d97706':'#16a34a';
+    const rowBg=di%2===0?'var(--white)':'#fafafa';
+    html+=`<tr style="border-bottom:1px solid var(--light);background:${rowBg};">
+      <td style="padding:.4rem .6rem;font-weight:600;color:var(--black);">${d.split(' ')[0]} ${d.split(' ').slice(1).join(' ')}</td>
+      <td style="padding:.4rem .6rem;text-align:center;">${s.monthly.total}</td>
+      <td style="padding:.4rem .6rem;text-align:center;color:${s.monthly.under>0?'#dc2626':'var(--mid)'};">${s.monthly.under}</td>
+      <td style="padding:.4rem .6rem;text-align:center;font-weight:700;color:${mColor};">${s.monthly.total>0?mPct.toFixed(1)+'%':'—'}</td>
+      <td style="padding:.4rem .6rem;text-align:center;">${s.yearly.total}</td>
+      <td style="padding:.4rem .6rem;text-align:center;color:${s.yearly.under>0?'#dc2626':'var(--mid)'};">${s.yearly.under}</td>
+      <td style="padding:.4rem .6rem;text-align:center;font-weight:700;color:${yColor};">${s.yearly.total>0?yPct.toFixed(1)+'%':'—'}</td>
+    </tr>`;
+    // Expandable under-priced rides detail
+    if(s.monthly.rides.length){
+      html+=`<tr style="background:#fff8f8;"><td colspan="7" style="padding:.4rem .6rem .75rem;">
+        <div style="font-size:.7rem;font-weight:700;color:#92400e;margin-bottom:.4rem;">Under-priced rides this month (${s.monthly.rides.length}):</div>
+        <table style="width:100%;font-size:.72rem;border-collapse:collapse;">
+          <tr style="color:var(--mid);font-weight:600;"><td style="padding:2px 4px;">Client</td><td>Date</td><td>Type</td><td>Vehicle</td><td>Expected</td><td>Actual</td><td>Under</td></tr>`;
+      s.monthly.rides.forEach(({r,exp,actual,pct})=>{
+        const pctColor=pct>30?'#dc2626':'#d97706';
+        html+=`<tr style="border-top:1px solid #fee2e2;">
+          <td style="padding:2px 4px;">${r.client||'—'}</td>
+          <td>${r.date||''}</td>
+          <td>${r.type||''}</td>
+          <td>${r.vehicle||''}</td>
+          <td style="color:#16a34a;font-weight:600;">$${exp.toFixed(2)}</td>
+          <td style="color:#dc2626;font-weight:600;">$${actual.toFixed(2)}</td>
+          <td style="font-weight:700;color:${pctColor};">${pct.toFixed(1)}%</td>
+        </tr>`;
+      });
+      html+=`</table></td></tr>`;
+    }
+  });
+
+  html+=`</tbody></table></div></div>`;
+  panel.innerHTML=html;
 }
 
 function renderAccessControl(){
@@ -5302,6 +5584,7 @@ function renderDriverSettings(){
   // Access Control tab — admins only
   const accessTab = document.getElementById('dtab-access');
   if(accessTab) accessTab.style.display = adminCheck ? 'inline-block' : 'none';
+  const pricingTab1=document.getElementById('dtab-pricing'); if(pricingTab1) pricingTab1.style.display=adminCheck?'inline-block':'none';
   // Always render Driver Cards and make that tab active by default
   renderDriverMembers();
   const membersPanel = document.getElementById('driver-panel-members');
@@ -5446,6 +5729,37 @@ function renderDriverMembers(){
         ${canEdit?('<div style="display:flex;gap:.4rem;align-items:center;margin-top:.5rem;">'
           +'<input type="text" id="venmo-'+dk+'" value="'+venmo+'" placeholder="@venmohandle" style="flex:1;padding:.35rem .65rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
           +'</div>'
+          +'<div style="margin-top:.6rem;">'
+          +'<div style="font-size:.68rem;color:var(--mid);margin-bottom:3px;">Unavailable time blocks</div>'
+          +'<div style="font-size:.65rem;color:var(--mid);margin-bottom:4px;">Add specific hours you cannot drive</div>'
+          +'<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:.4rem;">'
+          + ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((w,wi)=>
+            '<label style="display:flex;align-items:center;gap:2px;font-size:.65rem;cursor:pointer;">'
+            +'<input type="checkbox" class="avail-hday-'+dk+'" value="'+wi+'" style="accent-color:var(--accent);"/>'+w+'</label>'
+          ).join('')
+          +'</div>'
+          +'<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:.3rem;margin-bottom:.3rem;">'
+          +'<input type="time" id="avail-hfrom-'+dk+'" placeholder="From" style="padding:.3rem;border:1px solid var(--light);border-radius:5px;font-size:.78rem;"/>'
+          +'<input type="time" id="avail-hto-'+dk+'" placeholder="To" style="padding:.3rem;border:1px solid var(--light);border-radius:5px;font-size:.78rem;"/>'
+          +'<button onclick="addUnavailHour(\''+d+'\')" style="padding:.3rem .6rem;background:var(--accent);color:#fff;border:none;border-radius:5px;font-size:.72rem;cursor:pointer;">+</button>'
+          +'</div>'
+          +'<div style="font-size:.62rem;color:var(--mid);margin-bottom:3px;">Or specific date:</div>'
+          +'<div style="display:flex;gap:.3rem;margin-bottom:.4rem;">'
+          +'<input type="date" id="avail-hdate-'+dk+'" style="flex:1;padding:.3rem;border:1px solid var(--light);border-radius:5px;font-size:.75rem;"/>'
+          +'</div>'
+          +(prof.unavailHours||[]).length?
+            '<div style="font-size:.65rem;color:var(--mid);margin-bottom:3px;">Current time blocks:</div>'
+            +(prof.unavailHours||[]).map(blk=>{
+              const dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+              const label=blk.date?blk.date:(blk.days||[]).map(d2=>dayNames[d2]).join('/');
+              return '<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:2px;">'
+                +'<span style="font-size:.72rem;color:var(--black);">'+label+' '+blk.from+'\u2013'+blk.to+'</span>'
+                +'<button onclick="openEditHourModal(\''+d+'\',\''+blk.id+'\')" style="padding:1px 4px;background:#6b3fa0;color:#fff;border:none;border-radius:4px;font-size:.65rem;cursor:pointer;">\u270f\ufe0f</button>'
+                +'<button onclick="removeUnavailHour(\''+d+'\',\''+blk.id+'\')" style="padding:1px 5px;background:#dc2626;color:#fff;border:none;border-radius:4px;font-size:.65rem;cursor:pointer;">\u00d7</button>'
+              +'</div>';
+            }).join('')
+          :''
+          +'</div>'
           +'<button onclick="saveDriverProfile(\''+d+'\')" style="width:100%;margin-top:.6rem;padding:.5rem;background:var(--gold);color:#fff;border:none;border-radius:7px;font-family:\'DM Sans\',sans-serif;font-weight:600;font-size:.82rem;cursor:pointer;">Save My Info</button>')
         :''}
       </div>
@@ -5485,12 +5799,24 @@ async function saveDriverProfile(driverName){
 // ── DRIVER AVAILABILITY ──
 const WEEKDAY_ABBR = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 // A driver is unavailable on a date if it's in their unavailableDates OR the weekday is a standing day off.
-function isDriverAvailable(driverName, dateStr){
+function isDriverAvailable(driverName, dateStr, timeStr){
   if(!dateStr) return true;
   const prof = DRIVER_PROFILES[driverName]||{};
   if((prof.unavailableDates||[]).includes(dateStr)) return false;
   const wd = new Date(dateStr+'T12:00:00').getDay();
   if((prof.weeklyOff||[]).includes(wd)) return false;
+  if(timeStr && (prof.unavailHours||[]).length){
+    const parts=(timeStr||'00:00').split(':').map(Number);
+    const tMins=(parts[0]||0)*60+(parts[1]||0);
+    for(const blk of prof.unavailHours){
+      const fp=(blk.from||'00:00').split(':').map(Number);
+      const tp=(blk.to||'00:00').split(':').map(Number);
+      const fMins=(fp[0]||0)*60+(fp[1]||0);
+      const tMins2=(tp[0]||0)*60+(tp[1]||0);
+      if(blk.date&&blk.date===dateStr&&tMins>=fMins&&tMins<tMins2) return false;
+      if(blk.days&&blk.days.includes(wd)&&tMins>=fMins&&tMins<tMins2) return false;
+    }
+  }
   return true;
 }
 // Build assign-dropdown options, greying out drivers who are unavailable on the given date.
@@ -5529,6 +5855,33 @@ function toggleWeeklyOff(driverName, wd){
   prof.weeklyOff = [...set].sort();
   persistDriverProfiles(); renderDriverMembers();
 }
+function addUnavailHour(driverName){
+  const myDriverName=getMyDriverName();
+  if(!(isAdmin()||myDriverName===driverName)){showToast('You can only edit your own availability','error');return;}
+  const dk=driverName.replace(/ /g,'_');
+  const fromEl=document.getElementById('avail-hfrom-'+dk);
+  const toEl=document.getElementById('avail-hto-'+dk);
+  const dayEls=[...document.querySelectorAll('.avail-hday-'+dk+':checked')];
+  const dateEl=document.getElementById('avail-hdate-'+dk);
+  const from=fromEl?.value; const to=toEl?.value;
+  if(!from||!to){showToast('Set a from and to time','error');return;}
+  if(from>=to){showToast('End time must be after start','error');return;}
+  const prof=DRIVER_PROFILES[driverName]=DRIVER_PROFILES[driverName]||{};
+  if(!prof.unavailHours) prof.unavailHours=[];
+  const blk={id:'uh_'+Date.now(),from,to};
+  if(dateEl?.value) blk.date=dateEl.value;
+  else if(dayEls.length) blk.days=dayEls.map(e=>parseInt(e.value));
+  else{showToast('Select at least one day or a specific date','error');return;}
+  prof.unavailHours.push(blk);
+  persistDriverProfiles(); renderDriverMembers();
+  showToast('Time block added \u2713');
+}
+function removeUnavailHour(driverName,id){
+  const prof=DRIVER_PROFILES[driverName]||{};
+  prof.unavailHours=(prof.unavailHours||[]).filter(b=>b.id!==id);
+  persistDriverProfiles(); renderDriverMembers();
+}
+
 function addUnavailDate(driverName){
   const myDriverName = getMyDriverName();
   if(!(isAdmin() || myDriverName===driverName)){ showToast('You can only edit your own availability','error'); return; }
@@ -7029,8 +7382,6 @@ function enterApp(){
   document.getElementById('paywall-screen').style.display='none';
   document.getElementById('auth-screen').style.display='none';
   document.getElementById('app').style.display='flex';
-  // Pre-render driver cards to PNG in the background so the confirmation-text
-  // share has them ready instantly (keeps the iOS share gesture intact).
   setTimeout(prebuildAllDriverCardImages, 1800);
 
   const admin = currentUser.role === 'admin';
@@ -7048,6 +7399,7 @@ function enterApp(){
   // Access Control tab — admins only
   const accessTab = document.getElementById('dtab-access');
   if(accessTab) accessTab.style.display = admin ? 'inline-block' : 'none';
+  const pricingTab2=document.getElementById('dtab-pricing'); if(pricingTab2) pricingTab2.style.display=admin?'inline-block':'none';
 
   // Pre-render admin tools
   if(admin) setTimeout(function(){ renderAccessControl(); }, 100);
@@ -7649,49 +8001,142 @@ async function releaseClientToDriver(clientName, newDriver){
   const isOwner = !!(c && myDriver && c.drivers.includes(myDriver));
   if(!isAdmin() && !isOwner){ showToast('Only this client\u2019s current driver or an admin can release them','error'); return; }
   if(newDriver===myDriver){ showToast('That\u2019s already your client','error'); return; }
-  if(!confirm('Release '+clientName+' to '+newDriver.split(' ')[0]+'?\n\n• All saved client info moves to '+newDriver.split(' ')[0]+'\n• Upcoming rides switch to '+newDriver.split(' ')[0]+'\u2019s color\n• Past rides stay exactly as they are')) return;
+  if(!confirm('Submit release request: '+clientName+' to '+newDriver.split(' ')[0]+'?\n\nThis requires 2 admin approvals before the release takes effect.')) return;
+  const reqId='rel_'+Date.now();
+  const submitter=currentUser?.name||myDriver||'Unknown';
+  const req={id:reqId,type:'admin_release',clientName,fromDriver:myDriver||submitter,
+    toDriver:newDriver,submittedBy:submitter,approvals:[],status:'pending',ts:new Date().toISOString()};
+  if(!clientRequests) clientRequests={};
+  clientRequests[reqId]=req;
+  await saveClientRequests();
+  ['Kat','Chase','Morgan'].forEach(a=>{
+    addNotification(a,{id:reqId,client:clientName},'transfer_request',
+      '[Release request] '+clientName+' \u2192 '+newDriver.split(' ')[0]+
+      ' | By '+submitter.split(' ')[0]+' | Owner approval alone executes, OR 2 admins needed.');
+  });
+  const currentOwner=(c&&c.drivers&&c.drivers.length)?c.drivers.find(d=>d!==newDriver):null;
+  if(currentOwner && !['Kat','Chase','Morgan'].some(a=>a===currentOwner)){
+    addNotification(currentOwner,{id:reqId,client:clientName},'transfer_request',
+      '[Release request] '+clientName+' \u2192 '+newDriver.split(' ')[0]+
+      ' | Your approval ALONE is enough to execute this. Tap the bell to approve or deny.');
+  }
+  await saveNotifs(); updateNotifBadge();
+  closeClientModal();
+  showToast('Release request submitted \u2014 awaiting 2 admin approvals');
+}
+
+async function _executeRelease(req){
+  const key=req.clientName.toLowerCase();
+  const c=buildClientDB(null)[key];
   let newLogin=null;
-  for(const lg in USER_DRIVER_MAP){ if(USER_DRIVER_MAP[lg]===newDriver){ newLogin=lg; break; } }
-  const today=new Date().toISOString().split('T')[0];
-  let moved=0;
+  for(const lg in USER_DRIVER_MAP){ if(USER_DRIVER_MAP[lg]===req.toDriver){ newLogin=lg; break; } }
+  const today=new Date().toISOString().split('T')[0]; let moved=0;
   rides.forEach(r=>{
-    if(r.client && r.client.toLowerCase()===key && r.date>=today){
-      r.driver=newDriver; if(newLogin) r.createdBy=newLogin; moved++;
+    if(r.client&&r.client.toLowerCase()===key&&r.date>=today){
+      r.driver=req.toDriver; if(newLogin) r.createdBy=newLogin; moved++;
     }
   });
-  // Move ALL of this client's saved data to the new driver. Build the complete contact
-  // record from everything known (saved card + any ride-derived contacts), so nothing is lost
-  // even if the client was only ever ride-derived.
-  const fullRec = {
-    name:    c ? c.name : clientName.trim(),
-    phones:  (c && c.phones && c.phones.length) ? c.phones.map(p=>({label:p.label||'',number:p.number})) : [],
-    emails:  (c && c.emails) ? c.emails.slice() : [],
-    address: c ? (c.address||'') : '',
-    notes:   c ? (c.notes||'') : '',
-    paymentMethod: c ? (c.paymentMethod||'') : '',
-    source:  'client'
+  const fullRec={
+    name:c?c.name:req.clientName.trim(),
+    phones:(c&&c.phones&&c.phones.length)?c.phones.map(p=>({label:p.label||'',number:p.number})):[],
+    emails:(c&&c.emails)?c.emails.slice():[],
+    address:c?(c.address||''):'',notes:c?(c.notes||''):'',
+    paymentMethod:c?(c.paymentMethod||''):'',source:'client'
   };
-  fullRec.phone = fullRec.phones[0] ? fullRec.phones[0].number : '';
-  fullRec.email = fullRec.emails[0] || '';
-  // Remove any existing saved card from every driver…
+  fullRec.phone=fullRec.phones[0]?fullRec.phones[0].number:'';
+  fullRec.email=fullRec.emails[0]||'';
   Object.keys(importedClients).forEach(fd=>{
     const arr=importedClients[fd]||[];
-    const idx=arr.findIndex(x=>x.name && x.name.toLowerCase()===key);
+    const idx=arr.findIndex(x=>x.name&&x.name.toLowerCase()===key);
     if(idx!==-1) arr.splice(idx,1);
   });
-  // …then place the complete card under the new driver.
-  if(!importedClients[newDriver]) importedClients[newDriver]=[];
-  importedClients[newDriver].push(fullRec);
-  await Promise.all([saveRides(), saveImportedClients()]);
-  const byWhom = isAdmin() ? 'An admin' : ((myDriver||'A driver').split(' ')[0]);
-  addNotification(newDriver, {id:Date.now(), client:clientName}, 'transfer_approved',
-    byWhom+' released '+clientName+' to you'+(moved?(' \u00b7 '+moved+' upcoming ride'+(moved!==1?'s':'')):'')+'.');
-  await saveNotifs();
-  updateNotifBadge();
+  if(!importedClients[req.toDriver]) importedClients[req.toDriver]=[];
+  importedClients[req.toDriver].push(fullRec);
+  await Promise.all([saveRides(),saveImportedClients(),saveClientRequests()]);
+  addNotification(req.toDriver,{id:req.id,client:req.clientName},'transfer_approved',
+    req.clientName+' released to you'+(moved?' \u00b7 '+moved+' upcoming ride'+(moved!==1?'s':''):'')+
+    '. Approved by '+req.approvals.join(' & ')+'.');
+  await saveNotifs(); updateNotifBadge();
   renderClients(); refreshDash(); renderCal();
-  closeClientModal();
-  showToast('Released '+clientName+' to '+newDriver.split(' ')[0]+' \u2713'+(moved?(' ('+moved+' upcoming)'):''));
 }
+
+async function approveOverride(reqId){
+  const req=clientRequests[reqId];
+  if(!req||req.type!=='avail_override'){showToast('Not found','error');return;}
+  req.status='approved'; req.approvedAt=new Date().toISOString();
+  await saveClientRequests();
+  addNotification(req.requestedBy,{id:reqId,client:req.client},'transfer_approved',
+    getMyDriverName()?.split(' ')[0]+' approved the override for '+req.client+' on '+req.date+(req.time?' at '+req.time:'')+'. Ride is confirmed.');
+  await saveNotifs(); updateNotifBadge();
+  showToast('\u2713 Override approved \u2014 the assigner has been notified');
+  renderNotifPanel();
+}
+async function denyOverride(reqId){
+  const req=clientRequests[reqId];
+  if(!req||req.type!=='avail_override'){showToast('Not found','error');return;}
+  req.status='denied'; req.deniedAt=new Date().toISOString();
+  await saveClientRequests();
+  addNotification(req.requestedBy,{id:reqId,client:req.client},'transfer_denied',
+    getMyDriverName()?.split(' ')[0]+' cannot do the override for '+req.client+' on '+req.date+(req.time?' at '+req.time:'')+'. Please reassign.');
+  await saveNotifs(); updateNotifBadge();
+  showToast('Override declined \u2014 the assigner has been notified');
+  renderNotifPanel();
+}
+
+async function denyRelease(reqId){
+  const req=clientRequests[reqId];
+  if(!req||req.type!=='admin_release'){showToast('Request not found','error');return;}
+  if(req.status!=='pending'){showToast('Already resolved','error');return;}
+  const myDriverName=getMyDriverName();
+  const isOwner=!!(myDriverName&&myDriverName===req.fromDriver);
+  if(!isAdmin()&&!isOwner){showToast('Only the original driver or an admin can deny this','error');return;}
+  req.status='denied'; req.deniedBy=currentUser?.name; req.deniedAt=new Date().toISOString();
+  await saveClientRequests();
+  addNotification(req.submittedBy||req.fromDriver,{id:reqId,client:req.clientName},'transfer_denied',
+    '[Release denied] '+req.clientName+' \u2192 '+req.toDriver.split(' ')[0]+
+    ' was denied by '+(currentUser?.name||'?').split(' ')[0]+'.');
+  await saveNotifs(); updateNotifBadge();
+  showToast('Release denied \u2014 '+req.clientName+' stays with the original driver');
+  renderNotifPanel();
+}
+
+async function approveRelease(reqId){
+  const req=clientRequests[reqId];
+  if(!req||req.type!=='admin_release'){showToast('Request not found','error');return;}
+  if(req.status!=='pending'){showToast('Already resolved','error');return;}
+  const myName=currentUser?.name;
+  if(!myName){showToast('Not logged in','error');return;}
+  if(!req.approvals) req.approvals=[];
+  if(req.approvals.includes(myName)){showToast('You already approved this','error');return;}
+  const myDriverName=getMyDriverName();
+  const isOwner=!!(myDriverName && myDriverName===req.fromDriver);
+  const canApprove=isAdmin()||isOwner;
+  if(!canApprove){showToast('Only the original driver or an admin can approve','error');return;}
+  req.approvals.push(myName);
+  // Original driver approval alone = execute; admins need 2
+  const adminCount=req.approvals.filter(a=>{
+    const u=USERS.find(x=>x.name===a);
+    return u&&u.role==='admin';
+  }).length;
+  const approved=isOwner||(adminCount>=2);
+  if(approved){
+    req.status='approved'; req.approvedAt=new Date().toISOString();
+    await _executeRelease(req);
+    showToast('\u2713 Release approved \u2014 '+req.clientName+' moved to '+req.toDriver.split(' ')[0]);
+  } else {
+    await saveClientRequests();
+    ['Kat','Chase','Morgan'].filter(a=>!req.approvals.includes(a)).forEach(a=>{
+      addNotification(a,{id:reqId,client:req.clientName},'transfer_request',
+        '[Release 1/2] '+req.clientName+' \u2192 '+req.toDriver.split(' ')[0]+
+        ' | Approved by '+myName.split(' ')[0]+' (1/2) | 1 more admin needed, OR original driver can still approve alone.');
+    });
+    await saveNotifs(); updateNotifBadge();
+    showToast('1/2 admin approvals \u2014 1 more needed');
+  }
+  renderNotifPanel();
+}
+
+
 
 function checkClientConflict(){
   const name=document.getElementById('q-client')?.value?.trim();
@@ -7836,6 +8281,7 @@ function showPage(id, el){
     renderDriverMembers(); // always render Driver Cards
     const at = document.getElementById('dtab-access');
     if(at) at.style.display = (currentUser && currentUser.role==='admin') ? 'inline-block' : 'none';
+    const pricingTab3=document.getElementById('dtab-pricing'); if(pricingTab3) pricingTab3.style.display=(currentUser&&currentUser.role==='admin')?'inline-block':'none';
     if(currentUser && currentUser.role==='admin') renderAccessControl();
   }
   if(id==='chat') initChat();
@@ -8747,4 +9193,107 @@ initApp();
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js"></script>
 
 </body>
-</html>
+</html>function qaTypeChanged(){
+  const t=document.getElementById('qa-type')?.value;
+  const sec=document.getElementById('qa-rt-section');
+  if(sec) sec.style.display=(t==='AP ROUND TRIP')?'block':'none';
+  if(t!=='AP ROUND TRIP'){
+    ['qa-leg-run','qa-leg-pickup'].forEach(id=>{ const el=document.getElementById(id); if(el) el.checked=false; });
+  }
+  qaCheckLegs();
+}
+function qaCheckLegs(){
+  const t=document.getElementById('qa-type')?.value;
+  const saveBtn=document.getElementById('qa-save-btn');
+  if(t!=='AP ROUND TRIP'){ if(saveBtn) saveBtn.disabled=false; return; }
+  const runOk=document.getElementById('qa-leg-run')?.checked;
+  const pickupOk=document.getElementById('qa-leg-pickup')?.checked;
+  if(saveBtn){ saveBtn.disabled=!(runOk&&pickupOk); saveBtn.style.opacity=(runOk&&pickupOk)?'1':'0.45'; }
+}
+
+function qaDriverChanged(){
+  const d=document.getElementById('qa-driver')?.value;
+  const date=document.getElementById('qa-date')?.value;
+  const time=document.getElementById('qa-time')?.value;
+  const warnEl=document.getElementById('qa-avail-warn');
+  if(!warnEl) return;
+  if(!d||!date){ warnEl.style.display='none'; return; }
+  const avail=isDriverAvailable(d, date, time);
+  if(avail){ warnEl.style.display='none'; return; }
+  warnEl.style.display='block';
+  warnEl.innerHTML='\u26a0\ufe0f '+escHtml(d.split(' ')[0])+' is marked unavailable at this time. '
+    +'<span style="font-weight:600;cursor:pointer;text-decoration:underline;" onclick="qaRequestOverride()">Request override</span>';
+}
+function qaRequestOverride(){
+  const d=document.getElementById('qa-driver')?.value;
+  const date=document.getElementById('qa-date')?.value;
+  const time=document.getElementById('qa-time')?.value;
+  const client=document.getElementById('qa-client')?.value.trim()||'a client';
+  if(!d||!date) return;
+  const reqId='ovr_'+Date.now();
+  if(!clientRequests) clientRequests={};
+  clientRequests[reqId]={id:reqId,type:'avail_override',driverName:d,date,time,client,
+    requestedBy:currentUser?.name||'Admin',approvals:[],status:'pending',ts:new Date().toISOString()};
+  saveClientRequests().then(()=>{
+    addNotification(d,{id:reqId,client},'avail_override',
+      (currentUser?.name||'Admin').split(' ')[0]+' wants to assign you a ride for '+client+
+      ' on '+date+(time?' at '+time:'')+'. You are marked unavailable. Please approve or deny.');
+    saveNotifs().then(()=>{
+      updateNotifBadge();
+      const warnEl=document.getElementById('qa-avail-warn');
+      if(warnEl) warnEl.innerHTML='\u23f3 Override request sent to '+escHtml(d.split(' ')[0])+'. Assigner can proceed; driver will confirm.';
+    });
+  });
+}
+
+function openEditHourModal(driverName, id){
+  const prof=DRIVER_PROFILES[driverName]||{};
+  const blk=(prof.unavailHours||[]).find(b=>b.id===id);
+  if(!blk){showToast('Block not found','error');return;}
+  const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const dayChecks=DAYS.map((w,wi)=>{
+    const chk=blk.days&&blk.days.includes(wi)?'checked':'';
+    return '<label style="display:inline-flex;align-items:center;gap:3px;font-size:.78rem;cursor:pointer;"><input type="checkbox" class="edit-hday" value="'+wi+'" '+chk+' style="accent-color:#6b3fa0;"/> '+w+'</label>';
+  }).join(' ');
+  const back=document.createElement('div');
+  back.id='edit-hour-backdrop';
+  back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.55);z-index:11000;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  back.addEventListener('click',e=>{if(e.target===back)back.remove();});
+  const safeName=driverName.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  back.innerHTML=
+    '<div style="background:#fff;border-radius:16px;padding:1.25rem;width:100%;max-width:360px;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
+    +'<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#6b3fa0;margin-bottom:.75rem;">Edit Time Block</div>'
+    +'<div style="margin-bottom:.6rem;display:flex;flex-wrap:wrap;gap:6px;">'+dayChecks+'</div>'
+    +'<div style="font-size:.7rem;color:#888;margin-bottom:.3rem;">Or specific date:</div>'
+    +'<input type="date" id="edit-hdate" value="'+(blk.date||'')+'" style="width:100%;padding:.35rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;margin-bottom:.6rem;"/>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.75rem;">'
+    +'<div><label style="font-size:.7rem;color:#888;display:block;margin-bottom:2px;">From</label><input type="time" id="edit-hfrom" value="'+(blk.from||'')+'" style="width:100%;padding:.35rem;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;"/></div>'
+    +'<div><label style="font-size:.7rem;color:#888;display:block;margin-bottom:2px;">To</label><input type="time" id="edit-hto" value="'+(blk.to||'')+'" style="width:100%;padding:.35rem;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;"/></div>'
+    +'</div>'
+    +'<div style="display:flex;gap:.5rem;">'
+    +'<button onclick="saveEditHour(\''+safeName+'\',\''+id+'\',this)" style="flex:1;padding:.6rem;background:#6b3fa0;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:600;cursor:pointer;">Save</button>'
+    +'<button onclick="document.getElementById(\'edit-hour-backdrop\')?.remove()" style="flex:1;padding:.6rem;background:none;border:1.5px solid #ddd;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:600;color:#666;cursor:pointer;">Cancel</button>'
+    +'</div></div>';
+  document.body.appendChild(back);
+}
+function saveEditHour(driverName, id){
+  const prof=DRIVER_PROFILES[driverName]=DRIVER_PROFILES[driverName]||{};
+  const idx=(prof.unavailHours||[]).findIndex(b=>b.id===id);
+  if(idx<0){showToast('Block not found','error');return;}
+  const from=document.getElementById('edit-hfrom')?.value;
+  const to=document.getElementById('edit-hto')?.value;
+  if(!from||!to){showToast('Set a from and to time','error');return;}
+  if(from>=to){showToast('End time must be after start','error');return;}
+  const dateVal=document.getElementById('edit-hdate')?.value;
+  const dayEls=[...document.querySelectorAll('.edit-hday:checked')];
+  const blk={id,from,to};
+  if(dateVal) blk.date=dateVal;
+  else if(dayEls.length) blk.days=dayEls.map(e=>parseInt(e.value));
+  else{showToast('Select days or a date','error');return;}
+  prof.unavailHours[idx]=blk;
+  document.getElementById('edit-hour-backdrop')?.remove();
+  persistDriverProfiles(); renderDriverMembers();
+  showToast('Time block updated \u2713');
+}
+
+
