@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606034100">
+<meta name="version" content="202606034200">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -6469,6 +6469,7 @@ function enterApp(){
   setupFCMForeground();
   setupPushUI();
   maybeShowNotifPrompt();
+  if(('Notification' in window) && Notification.permission==='granted') registerFcmToken();
   renderAccountPage();
   loadAdminRemovalRequests();
   initPresence();
@@ -7535,7 +7536,7 @@ async function exportReceiptsPDF(){
 // ═══════════════════════════════════════════
 
 // Your FCM VAPID key — get from Firebase Console > Project Settings > Cloud Messaging > Web Push certificates
-const VAPID_KEY = 'PASTE_YOUR_VAPID_KEY_HERE';
+const VAPID_KEY = 'BD1Lw0sVqFArxzBpZevctK7iIGjCLVg7ykuObVE3qE1QAmOfZAY4D5j2nA9AVzXL7ssedRBVnSZTuwZ92DwY-KU';
 
 // Register service worker
 function showInstallHelp(){
@@ -7643,6 +7644,8 @@ function maybePopNotifications(data){
 }
 function fireLocalNotification(title, body){
   if(!('Notification' in window) || Notification.permission!=='granted') return;
+  // When the app is hidden/closed, FCM push handles it — avoid a double alert.
+  if(typeof document!=='undefined' && document.visibilityState==='hidden') return;
   const opts = { body: body||'', icon:'icon-192.png', badge:'icon-192.png', tag:'nda-'+Date.now() };
   try{
     if(navigator.serviceWorker && navigator.serviceWorker.ready){
@@ -7651,6 +7654,25 @@ function fireLocalNotification(title, body){
     } else { new Notification(title, opts); }
   }catch(e){ /* ignore */ }
 }
+// Register this device for Firebase Cloud Messaging so pushes arrive even when the
+// app is fully closed. One token is stored per device under the driver's name.
+function getDeviceKey(){
+  let k = localStorage.getItem('nda-device-key');
+  if(!k){ k = 'd' + Math.random().toString(36).slice(2,12); localStorage.setItem('nda-device-key', k); }
+  return k;
+}
+async function registerFcmToken(){
+  try{
+    if(typeof firebase === 'undefined' || !firebase.messaging) return;
+    if(!('Notification' in window) || Notification.permission !== 'granted') return;
+    if(!VAPID_KEY || VAPID_KEY.indexOf('PASTE_') === 0) return;
+    const driver = getMyDriverName();
+    if(!driver) return;
+    const reg = await navigator.serviceWorker.register('firebase-messaging-sw.js', { scope: 'firebase-cloud-messaging-push-scope' });
+    const token = await firebase.messaging().getToken({ vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
+    if(token){ await storageSet('kat:fcmTokens/'+driver+'/'+getDeviceKey(), token); }
+  }catch(e){ console.warn('FCM token registration failed:', e); }
+}
 async function askNotificationPermission(){
   if(!('Notification' in window)){ showToast('This browser does not support notifications','error'); return; }
   if(Notification.permission==='granted'){ showToast('Notifications are already on ✓'); setupPushUI(); return; }
@@ -7658,7 +7680,7 @@ async function askNotificationPermission(){
   let perm='default';
   try{ perm = await Notification.requestPermission(); }catch(e){}
   setupPushUI();
-  if(perm==='granted') showToast('Notifications on ✓ You’ll be alerted about new rides & messages');
+  if(perm==='granted'){ registerFcmToken(); showToast('Notifications on ✓ You’ll be alerted about new rides & messages'); }
   else showToast('You can turn them on anytime with the bell-tone button up top');
 }
 function maybeShowNotifPrompt(){
@@ -7677,9 +7699,7 @@ function setupFCMForeground(){
   try {
     const messaging = firebase.messaging();
     messaging.onMessage(payload=>{
-      const title = payload.notification?.title || 'NDA';
-      const body  = payload.notification?.body  || '';
-      showToast(title + (body ? ': ' + body : ''));
+      // App is in the foreground; the in-app bell + local pop-up already handle it.
       updateNotifBadge();
     });
   } catch(e){ console.warn('FCM foreground setup:', e); }
@@ -7689,15 +7709,13 @@ function setupFCMForeground(){
 // Since we have no server, we use the Firebase Realtime DB trigger approach:
 // Write a notification request to DB → service worker picks it up
 async function sendPushToDriver(driverName, title, body){
-  if(!fbDB) return;
+  if(!fbDB || !driverName) return;
   try {
-    const token = await storageGet('kat:fcmTokens/'+driverName);
-    if(!token) return; // driver hasn't enabled push
-    // Write push request to Firebase — the service worker polls and shows it
-    await fbRef('nda/kat/pushQueue/'+Date.now()).set({
-      to: driverName, token, title, body, ts: new Date().toISOString()
-    });
-  } catch(e){ console.warn('Push send error:', e); }
+    // Enqueue a push request; the Cloud Function looks up the driver's device tokens
+    // and delivers it (works even when their app is fully closed).
+    const id = Date.now()+'_'+Math.random().toString(36).slice(2,7);
+    await fbRef('nda/kat/pushQueue/'+id).set({ to: driverName, title, body, ts: Date.now() });
+  } catch(e){ console.warn('Push enqueue error:', e); }
 }
 
 // PWA INSTALL PROMPT
