@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606034600">
+<meta name="version" content="202606035200">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -444,11 +444,13 @@ input,select,textarea{font-size:16px;}
       <div>
         <div class="form-group">
           <label>Client name</label>
-          <input type="text" id="q-client" placeholder="Full name" oninput="checkClientConflict()" />
+          <input type="text" id="q-client" placeholder="Full name" list="q-client-list" autocomplete="off" oninput="checkClientConflict();maybeAutofillClient('q')" />
+          <datalist id="q-client-list"></datalist>
           <div id="q-client-status" style="font-size:.78rem;min-height:1.2rem;margin-top:.3rem;"></div>
         </div>
         <div class="form-group"><label>Phone</label><input type="text" id="q-phone" placeholder="404-555-0100" /></div>
         <div class="form-group"><label>Additional numbers on confirmation <span style="text-transform:none;letter-spacing:0;font-weight:400;color:var(--mid);">(comma-separated)</span></label><input type="text" id="q-extra-phones" placeholder="spouse, assistant…  e.g. 404-555-0102, 770-555-0188" /></div>
+        <div class="form-group"><label>Email</label><input type="email" id="q-email" placeholder="client@email.com" /></div>
         <div class="form-group">
           <label>Travel type</label>
           <div class="toggle-group" id="q-type-group">
@@ -594,6 +596,7 @@ input,select,textarea{font-size:16px;}
         <button onclick="exportClientsToCSV()" style="background:none;border:1.5px solid var(--light);border-radius:8px;padding:.5rem .9rem;font-family:'DM Sans',sans-serif;font-size:.82rem;cursor:pointer;color:var(--black);">⬇ Export</button>
       </div>
     </div>
+    <div id="client-import-status" style="margin:.25rem 0;"></div>
     <input type="text" id="client-search" placeholder="Search by name or phone…" oninput="renderClients()" style="width:100%;padding:.55rem .85rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;margin-bottom:1rem;" />
     <div id="client-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.75rem;margin-bottom:1.25rem;"></div>
     <div id="client-list"></div>
@@ -714,7 +717,14 @@ input,select,textarea{font-size:16px;}
         <button id="expenses-edit-btn" onclick="toggleExpensesEdit()" class="btn-secondary" style="font-size:.75rem;padding:.25rem .65rem;">✏️ Edit</button>
       </div>
       <div id="expenses-view" style="display:flex;flex-wrap:wrap;gap:.6rem;"></div>
-      <div id="expenses-edit" style="display:none;"></div>
+      <div id="expenses-edit" style="display:none;">
+        <div id="expenses-fields" style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:.6rem;"></div>
+        <button onclick="addExpenseField()" style="background:none;border:1.5px dashed var(--light);border-radius:8px;padding:.45rem;width:100%;font-family:'DM Sans',sans-serif;font-size:.82rem;color:var(--mid);cursor:pointer;margin-bottom:.6rem;">+ Add expense</button>
+        <div style="display:flex;gap:.5rem;">
+          <button onclick="saveMyExpenses()" class="btn-primary" style="flex:1;padding:.55rem;font-size:.85rem;">Save</button>
+          <button onclick="toggleExpensesEdit(true)" style="flex:1;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;cursor:pointer;color:var(--mid);">Cancel</button>
+        </div>
+      </div>
     </div>
     <div id="income-summary-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.75rem;margin-bottom:1.25rem;"></div>
     <div id="income-tripprofit"></div>
@@ -846,8 +856,21 @@ input,select,textarea{font-size:16px;}
         ✓ Client payment method &amp; notes
       </div>
     </div>
-    <div style="font-size:1.5rem;font-weight:700;color:var(--black);margin-bottom:1rem;">$15<span style="font-size:.9rem;font-weight:400;color:var(--mid);">/month</span></div>
-    <a id="upgrade-cta-btn" href="https://square.link/u/n7LdNRQt" target="_blank" class="btn-primary" style="display:block;width:100%;text-decoration:none;padding:.85rem;margin-bottom:.5rem;">Upgrade Now — $15/mo</a>
+    <!-- Plan choice: monthly vs annual (annual = $150/yr, ~2 months free) -->
+    <div style="display:flex;gap:.6rem;margin-bottom:1rem;text-align:left;">
+      <div style="flex:1;border:1.5px solid var(--light);border-radius:10px;padding:.75rem;">
+        <div style="font-size:.72rem;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.2rem;">Monthly</div>
+        <div style="font-size:1.35rem;font-weight:700;color:var(--black);">$15<span style="font-size:.8rem;font-weight:400;color:var(--mid);">/mo</span></div>
+      </div>
+      <div style="flex:1;border:1.5px solid var(--gold);background:var(--gold-pale);border-radius:10px;padding:.75rem;position:relative;">
+        <div style="position:absolute;top:-9px;right:8px;background:var(--gold);color:#fff;font-size:.6rem;font-weight:600;padding:1px 7px;border-radius:8px;letter-spacing:.5px;">BEST VALUE</div>
+        <div style="font-size:.72rem;letter-spacing:.5px;text-transform:uppercase;color:var(--gold);margin-bottom:.2rem;">Annual</div>
+        <div style="font-size:1.35rem;font-weight:700;color:var(--black);">$150<span style="font-size:.8rem;font-weight:400;color:var(--mid);">/yr</span></div>
+        <div style="font-size:.68rem;color:var(--gold);font-weight:600;margin-top:.15rem;">2 months free</div>
+      </div>
+    </div>
+    <a id="upgrade-cta-annual" href="https://square.link/u/rKbtX1o2" target="_blank" class="btn-primary" style="display:block;width:100%;text-decoration:none;padding:.85rem;margin-bottom:.5rem;">Get Annual — $150/yr (2 months free)</a>
+    <a id="upgrade-cta-btn" href="https://square.link/u/n7LdNRQt" target="_blank" style="display:block;width:100%;text-decoration:none;padding:.7rem;margin-bottom:.5rem;border:1.5px solid var(--gold);border-radius:8px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.9rem;font-weight:600;background:none;">Pay Monthly — $15/mo</a>
     <button onclick="startIncomeTrial()" style="width:100%;padding:.7rem;background:none;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;cursor:pointer;color:var(--mid);margin-bottom:.5rem;">Start 7-day free trial</button>
     <button onclick="closeUpgradeModal()" style="width:100%;padding:.7rem;background:none;border:none;font-family:'DM Sans',sans-serif;font-size:.85rem;cursor:pointer;color:var(--mid);">Not now</button>
   </div>
@@ -1050,8 +1073,9 @@ input,select,textarea{font-size:16px;}
       <button onclick="closeQuickAddModal()" style="background:none;border:none;font-size:1.25rem;cursor:pointer;color:var(--mid);">✕</button>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-      <div class="form-group"><label>Client Name</label><input type="text" id="qa-client" placeholder="Full name" /></div>
+      <div class="form-group"><label>Client Name</label><input type="text" id="qa-client" placeholder="Full name" list="qa-client-list" autocomplete="off" oninput="maybeAutofillClient('qa')" /><datalist id="qa-client-list"></datalist></div>
       <div class="form-group"><label>Phone</label><input type="text" id="qa-phone" placeholder="404-555-0100" /></div>
+      <div class="form-group" style="grid-column:1/-1;"><label>Email</label><input type="email" id="qa-email" placeholder="client@email.com" /></div>
       <div class="form-group"><label>Date</label><input type="date" id="qa-date" /></div>
       <div class="form-group"><label>Time</label><input type="time" id="qa-time" /></div>
       <div class="form-group"><label>Travel Type</label>
@@ -2079,7 +2103,7 @@ async function saveQuote(){
   }
 
   await saveRides(); await saveNotifs();
-  showToast(repeat==='none' ? `Ride saved — $${ride.price}` : `${Math.max(1,Math.min(52,parseInt(document.getElementById('q-repeat-count')?.value)||1))} recurring rides saved — $${ride.price} each`);
+  await upsertClientFromRide(ride);
   // Reset the repeat control back to a single ride so it never carries over to the next booking
   const rp=document.getElementById('q-repeat'); if(rp) rp.value='none';
   const rpo=document.getElementById('q-repeat-opts'); if(rpo) rpo.style.display='none';
@@ -4391,7 +4415,7 @@ function buildUpgradePromptCard(){
     +'<span style="font-size:.78rem;padding:3px 8px;background:rgba(156,39,176,.2);color:#ce93d8;border-radius:5px;">Client payment method & notes</span>'
     +'</div>'
     +'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;">'
-    +'<div style="font-size:1.5rem;font-weight:700;color:#fff;">$15<span style="font-size:.9rem;font-weight:400;color:#9c7bbf;">/month</span></div>'
+    +'<div style="font-size:1.5rem;font-weight:700;color:#fff;">$15<span style="font-size:.9rem;font-weight:400;color:#9c7bbf;">/month</span><span style="display:block;font-size:.72rem;font-weight:400;color:#ce93d8;margin-top:2px;">or $150/yr — 2 months free</span></div>'
     +'<button onclick="renewIncomeUpgrade()" style="padding:.6rem 1.25rem;background:#9c27b0;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.88rem;font-weight:600;cursor:pointer;">Upgrade Now</button>'
     +'</div>'
     +'<div style="margin-top:.75rem;padding-top:.75rem;border-top:1px solid #3d1f6e;">'
@@ -4444,6 +4468,7 @@ function openQuickAddModal(){
   const dEl=document.getElementById('qa-date');
   if(dEl && !dEl.value) dEl.value=new Date().toISOString().split('T')[0];
   const err=document.getElementById('qa-error'); if(err) err.textContent='';
+  populateClientDatalist();
   document.getElementById('quick-add-modal').classList.add('show');
 }
 
@@ -4495,7 +4520,7 @@ async function saveQuickAddRide(){
     flight:  document.getElementById('qa-flight').value.trim(),
     terminal:document.getElementById('qa-terminal').value,
     notes:   document.getElementById('qa-notes').value.trim(),
-    miles:0,pax:1,rt:'',email:'',
+    miles:0,pax:1,rt:'',email:document.getElementById('qa-email')?document.getElementById('qa-email').value.trim():'',
     holiday:qaAddonState.holiday?'Y':'N',christmas:qaAddonState.christmas?'Y':'N',late:qaAddonState.late?'Y':'N',premium:qaAddonState.premium?'Y':'N',fuel:qaAddonState.fuel?'Y':'N',xstop:parseInt(document.getElementById('qa-xstop')?.value)||0,traffic:qaAddonState.traffic?'Y':'N',wait:parseFloat(document.getElementById('qa-wait')?.value)||0,
     confirmed:false, createdBy:currentUser?.name||'',
   };
@@ -4503,6 +4528,7 @@ async function saveQuickAddRide(){
   rides.push(ride);
   if(ride.driver) addNotification(ride.driver,ride,'assigned');
   await saveRides(); await saveNotifs();
+  await upsertClientFromRide(ride);
   closeQuickAddModal();
   showToast(`Ride added: ${client}`);
   refreshDash(); renderCal(); renderRides(); updateNotifBadge();
@@ -4874,6 +4900,7 @@ function renderAccessControl(){
         +'<span style="font-size:.72rem;color:var(--mid);">'+(hasIncome?'Income active'+(incExp?' · exp '+incExp:''):'No income access')+'</span>'
         +'<button onclick="grantUpgrade(this.dataset.u,1)" data-u="'+safeN+'" style="font-size:.68rem;padding:2px 7px;border-radius:5px;border:1px solid #16a34a;color:#16a34a;background:none;cursor:pointer;">+1mo</button>'
         +'<button onclick="grantUpgrade(this.dataset.u,3)" data-u="'+safeN+'" style="font-size:.68rem;padding:2px 7px;border-radius:5px;border:1px solid #16a34a;color:#16a34a;background:none;cursor:pointer;">+3mo</button>'
+        +'<button onclick="grantUpgrade(this.dataset.u,12)" data-u="'+safeN+'" style="font-size:.68rem;padding:2px 7px;border-radius:5px;border:1px solid #7c3aed;color:#7c3aed;background:none;cursor:pointer;">+1yr</button>'
         +'</div>';
 
     return '<div class="access-row" style="flex-direction:column;align-items:stretch;gap:.5rem;padding:1rem 0;">'
@@ -4897,6 +4924,9 @@ function renderAccessControl(){
             +'<span style="font-size:.72rem;color:var(--mid);">'+color+'</span>'
             +'</div>'
           : '')
+      +'<div style="margin-top:.7rem;"><div style="font-size:.7rem;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Password</div>'
+      +'<button onclick="openPwModal(this.dataset.u)" data-u="'+safeN+'" style="font-size:.72rem;padding:4px 11px;border-radius:6px;border:1px solid var(--gold);color:var(--gold);background:none;cursor:pointer;font-family:\'DM Sans\',sans-serif;">🔑 Reset password</button>'
+      +'<div style="font-size:.66rem;color:var(--mid);margin-top:.25rem;">Set a new password if they\u2019re locked out — no current password needed.</div></div>'
       +'</div>'
       +'</div>';
   }).join('');
@@ -5731,6 +5761,28 @@ function addExpenseField(label='', amount=''){
   fieldsEl.appendChild(div);
 }
 
+// Persist the edited monthly-expense rows for the current driver.
+async function saveMyExpenses(){
+  const dName = getMyDriverName() || currentUser?.name;
+  if(!dName){ showToast('Please sign in first','error'); return; }
+  const rows = document.querySelectorAll('#expenses-fields .expense-row');
+  const items = [];
+  rows.forEach(r=>{
+    const label = (r.querySelector('.exp-label')?.value || '').trim();
+    const amount = parseFloat(r.querySelector('.exp-amount')?.value) || 0;
+    if(label && amount > 0) items.push({ label, amount });
+  });
+  if(!driverExpenses) driverExpenses = {};
+  driverExpenses[dName] = items;
+  try {
+    await storageSet('kat:driverExpenses', driverExpenses);
+    showToast('✓ Monthly expenses saved');
+  } catch(e){ console.error(e); showToast('Could not save expenses','error'); return; }
+  toggleExpensesEdit(true);   // close edit mode
+  renderExpensesView();
+  if(typeof renderIncome==='function') renderIncome();
+}
+
 // These users always have free access to everything behind the paywall,
 // regardless of their role or subscription status.
 const FREE_ACCESS_USERS = ['Kat','Chase','Morgan'];
@@ -5796,7 +5848,7 @@ function showIncomeOrUpgrade(el){
       const cta     = document.getElementById('upgrade-cta-btn');
       if(banner) banner.style.display = expired ? 'block' : 'none';
       if(title)  title.textContent    = expired ? 'Renew Income Tracking' : 'Unlock Income Tracking';
-      if(cta)    cta.textContent       = expired ? 'Renew Now — $15/mo' : 'Upgrade Now — $15/mo';
+      if(cta)    cta.textContent       = expired ? 'Renew Monthly — $15/mo' : 'Pay Monthly — $15/mo';
       modal.classList.add('show');
     }
     else showToast('Upgrade to $15/mo to unlock income tracking');
@@ -5821,7 +5873,8 @@ async function grantUpgrade(userName, months=1){
   subscriptions[userName].upgraded = true;
   subscriptions[userName].upgradeExpiresAt = expires.toISOString();
   await saveSubscriptions();
-  showToast(`✓ Income tracking granted to ${userName}`);
+  const durLabel = months===12 ? '1 year' : months+' month'+(months>1?'s':'');
+  showToast(`✓ Income tracking granted to ${userName} (${durLabel})`);
   renderAccessControl();
 }
 
@@ -6635,42 +6688,202 @@ let importedClients = {};
 async function loadImportedClients(){ const d=await storageGet('kat:importedClients'); if(d) importedClients=d; }
 async function saveImportedClients(){ await storageSet('kat:importedClients', importedClients); }
 
+// ═══════════════════════════════════════════
+// CLIENT CONTACTS — multiple phones (labeled) + emails, shared by rides & directory
+// Back-compat: every client still exposes a single primary .phone / .email (= first entry).
+// ═══════════════════════════════════════════
+const _phoneDigits = s => (s||'').replace(/[^0-9+]/g,'');
+function clientPhoneList(rec){
+  if(rec && Array.isArray(rec.phones) && rec.phones.length) return rec.phones.filter(p=>p&&p.number);
+  if(rec && rec.phone) return [{label:'',number:rec.phone}];
+  return [];
+}
+function clientEmailList(rec){
+  if(rec && Array.isArray(rec.emails) && rec.emails.length) return rec.emails.filter(Boolean);
+  if(rec && rec.email) return [rec.email];
+  return [];
+}
+// Add a phone to an array unless its digits already exist. Returns true if newly added.
+function addPhoneUnique(arr, number, label){
+  const d=_phoneDigits(number); if(!d) return false;
+  const ex=arr.find(p=>_phoneDigits(p.number)===d);
+  if(ex){ if(label && !ex.label) ex.label=label; return false; }
+  arr.push({label:label||'', number:(number||'').trim()});
+  return true;
+}
+function addEmailUnique(arr, email){
+  const e=(email||'').trim(); if(!e) return false;
+  if(arr.some(x=>x.toLowerCase()===e.toLowerCase())) return false;
+  arr.push(e); return true;
+}
+
 function buildClientDB(forDriver){
   const db = {};
-  const addEntry = (key,name,phone,driver,ride,address,email,notes,paymentMethod)=>{
-    if(!db[key]) db[key]={name,phone:phone||'',drivers:new Set(),rides:[],lastRide:'',address:address||'',email:email||'',notes:notes||'',paymentMethod:paymentMethod||''};
-    if(driver) db[key].drivers.add(driver);
-    if(phone&&!db[key].phone) db[key].phone=phone;
-    if(email&&!db[key].email) db[key].email=email;
-    if(notes&&!db[key].notes) db[key].notes=notes;
-    if(address&&!db[key].address) db[key].address=address;
-    if(ride){ db[key].rides.push(ride); if(!db[key].lastRide||ride.date>db[key].lastRide) db[key].lastRide=ride.date; }
-  };
+  const ensure=(key,name)=>{ if(!db[key]) db[key]={name,phone:'',email:'',drivers:new Set(),rides:[],lastRide:'',address:'',notes:'',paymentMethod:'',phones:[],emails:[],source:''}; return db[key]; };
   rides.forEach(r=>{
     if(!r.client) return;
     if(forDriver && r.driver!==forDriver && USER_DRIVER_MAP[r.createdBy]!==forDriver && r.createdBy!==forDriver) return;
-    addEntry(r.client.trim().toLowerCase(), r.client.trim(), r.phone, r.driver, r, r.type==='AP RUN'?r.home:r.pickup||r.home||'','','');
+    const key=r.client.trim().toLowerCase();
+    const e=ensure(key, r.client.trim());
+    if(r.driver) e.drivers.add(r.driver);
+    addPhoneUnique(e.phones, r.phone, '');
+    (r.extraPhones||'').split(/[,;]/).forEach(p=>addPhoneUnique(e.phones, p, ''));
+    addEmailUnique(e.emails, r.email);
+    const addr = r.type==='AP RUN'?r.home:(r.pickup||r.home||'');
+    if(addr && !e.address) e.address=addr;
+    e.rides.push(r);
+    if(!e.lastRide || r.date>e.lastRide) e.lastRide=r.date;
   });
   const imported = forDriver ? (importedClients[forDriver]||[]) : Object.values(importedClients).flat();
   imported.forEach(c=>{
     if(!c.name) return;
-    const key = c.name.trim().toLowerCase();
-    addEntry(key,c.name.trim(),c.phone,forDriver,null,c.address,c.email,c.notes,c.paymentMethod||'');
-    // Manual edits are the source of truth — override anything derived from rides
-    if(db[key]){
-      if(c.phone)         db[key].phone=c.phone;
-      if(c.address)       db[key].address=c.address;
-      if(c.email)         db[key].email=c.email;
-      if(c.notes)         db[key].notes=c.notes;
-      if(c.paymentMethod) db[key].paymentMethod=c.paymentMethod;
-      if(!db[key].source) db[key].source='imported';
-    }
+    const key=c.name.trim().toLowerCase();
+    const e=ensure(key, c.name.trim());
+    // Manual record is source of truth → its contacts go first (become primary)
+    const cps=clientPhoneList(c), ces=clientEmailList(c);
+    if(cps.length){ const prev=e.phones; e.phones=[]; cps.forEach(p=>addPhoneUnique(e.phones,p.number,p.label)); prev.forEach(p=>addPhoneUnique(e.phones,p.number,p.label)); }
+    if(ces.length){ const prev=e.emails; e.emails=[]; ces.forEach(x=>addEmailUnique(e.emails,x)); prev.forEach(x=>addEmailUnique(e.emails,x)); }
+    if(c.address)       e.address=c.address;
+    if(c.notes)         e.notes=c.notes;
+    if(c.paymentMethod) e.paymentMethod=c.paymentMethod;
+    e.source = c.source || e.source || 'imported';
   });
-  Object.values(db).forEach(c=>{ c.drivers=[...c.drivers]; });
+  Object.values(db).forEach(c=>{
+    c.drivers=[...c.drivers];
+    c.phone = c.phones[0] ? c.phones[0].number : '';
+    c.email = c.emails[0] || '';
+  });
   return db;
 }
 
+// When a ride is created/edited, make sure the client exists in the creator's saved list,
+// and fold in any new phone/email/address the driver entered.
+async function upsertClientFromRide(ride){
+  if(!ride || !ride.client) return;
+  const driver = clientStoreDriver();
+  if(!driver) return;
+  if(!importedClients[driver]) importedClients[driver]=[];
+  const key = ride.client.trim().toLowerCase();
+  let rec = importedClients[driver].find(c=>c.name && c.name.toLowerCase()===key);
+  const addr = ride.type==='AP RUN'?ride.home:(ride.pickup||ride.home||'');
+  let changed=false;
+  if(!rec){
+    const phones=[]; addPhoneUnique(phones, ride.phone, '');
+    (ride.extraPhones||'').split(/[,;]/).forEach(p=>addPhoneUnique(phones,p,''));
+    const emails=[]; addEmailUnique(emails, ride.email);
+    rec={ name:ride.client.trim(), phones, emails,
+          phone:phones[0]?phones[0].number:'', email:emails[0]||'',
+          address:addr||'', paymentMethod:'', notes:'', source:'client' };
+    importedClients[driver].push(rec);
+    changed=true;
+  } else {
+    if(!Array.isArray(rec.phones)) rec.phones=clientPhoneList(rec);
+    if(!Array.isArray(rec.emails)) rec.emails=clientEmailList(rec);
+    if(addPhoneUnique(rec.phones, ride.phone, '')) changed=true;
+    (ride.extraPhones||'').split(/[,;]/).forEach(p=>{ if(addPhoneUnique(rec.phones,p,'')) changed=true; });
+    if(addEmailUnique(rec.emails, ride.email)) changed=true;
+    if(addr && !rec.address){ rec.address=addr; changed=true; }
+    rec.phone = rec.phones[0] ? rec.phones[0].number : (rec.phone||'');
+    rec.email = rec.emails[0] || (rec.email||'');
+  }
+  if(changed){ try{ await saveImportedClients(); }catch(e){ console.warn('client upsert failed', e); } }
+}
+
+// ── Client-name autocomplete + autofill on the Quote & Add-Ride forms ──
+function clientLookupScope(){ return isAdmin()?null:getMyDriverName(); }
+function populateClientDatalist(){
+  let names;
+  try{ names = Object.values(buildClientDB(clientLookupScope())).map(c=>c.name).sort((a,b)=>a.localeCompare(b)); }
+  catch(e){ return; }
+  const opts = names.map(n=>`<option value="${escAttr(n)}"></option>`).join('');
+  ['q-client-list','qa-client-list'].forEach(id=>{ const dl=document.getElementById(id); if(dl) dl.innerHTML=opts; });
+}
+function maybeAutofillClient(prefix){
+  const nameEl=document.getElementById(prefix+'-client'); if(!nameEl) return;
+  const val=(nameEl.value||'').trim().toLowerCase(); if(!val) return;
+  let db; try{ db=buildClientDB(clientLookupScope()); }catch(e){ return; }
+  const c=db[val]; if(!c) return;
+  const fill=(id,v)=>{ const el=document.getElementById(id); if(el && !el.value && v) el.value=v; };
+  fill(prefix+'-phone', c.phone);
+  fill(prefix+'-email', c.email);
+  const extras=(c.phones||[]).slice(1).map(p=>p.number).filter(Boolean);
+  if(extras.length){ const ex=document.getElementById(prefix+'-extra-phones'); if(ex && !ex.value) ex.value=extras.join(', '); }
+  // Home address → whichever field maps to ride.home for this trip type
+  if(c.address){
+    const type=(document.getElementById(prefix+'-type')||{}).value||'';
+    const homeId = (prefix==='qa') ? 'qa-home' : 'q-dropoff';
+    if(type==='AP PICK UP') fill(homeId, c.address);
+    else fill(prefix+'-pickup', c.address);
+  }
+}
+
+// ── Reusable contact-row UI (multiple labeled phones + emails) for the client modals ──
+function ccPhoneRowHTML(label,number,primary){
+  return '<div class="cc-phone-row" style="display:flex;gap:.35rem;align-items:center;margin-bottom:.35rem;">'
+    + '<label title="Set as primary" style="display:flex;align-items:center;gap:2px;font-size:.62rem;color:var(--mid);cursor:pointer;white-space:nowrap;"><input type="radio" name="cc-phone-primary" '+(primary?'checked':'')+' style="cursor:pointer;" />★</label>'
+    + '<input class="cc-phone-label" placeholder="Label" value="'+escAttr(label||'')+'" style="flex:1;padding:.35rem .5rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;" />'
+    + '<input class="cc-phone-number" type="tel" placeholder="Phone" value="'+escAttr(number||'')+'" style="flex:1.4;padding:.35rem .5rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;" />'
+    + '<button type="button" onclick="this.parentElement.remove()" title="Remove" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.9rem;padding:0 .25rem;">✕</button></div>';
+}
+function ccEmailRowHTML(value,primary){
+  return '<div class="cc-email-row" style="display:flex;gap:.35rem;align-items:center;margin-bottom:.35rem;">'
+    + '<label title="Set as primary" style="display:flex;align-items:center;gap:2px;font-size:.62rem;color:var(--mid);cursor:pointer;white-space:nowrap;"><input type="radio" name="cc-email-primary" '+(primary?'checked':'')+' style="cursor:pointer;" />★</label>'
+    + '<input class="cc-email-value" type="email" placeholder="Email" value="'+escAttr(value||'')+'" style="flex:1;padding:.35rem .5rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;" />'
+    + '<button type="button" onclick="this.parentElement.remove()" title="Remove" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.9rem;padding:0 .25rem;">✕</button></div>';
+}
+function contactRowsHTML(phones, emails){
+  const ps = (phones&&phones.length)?phones:[{label:'',number:''}];
+  const es = (emails&&emails.length)?emails:[''];
+  return '<div style="font-size:.72rem;color:var(--mid);margin-bottom:2px;">Phone numbers <span style="text-transform:none;letter-spacing:0;">— ★ marks the primary</span></div>'
+    + '<div id="cc-phones">'+ps.map((p,i)=>ccPhoneRowHTML(p.label,p.number,i===0)).join('')+'</div>'
+    + '<button type="button" onclick="ccAddPhone()" style="background:none;border:1px dashed var(--light);border-radius:6px;padding:.3rem .6rem;font-family:\'DM Sans\',sans-serif;font-size:.75rem;color:var(--mid);cursor:pointer;margin-bottom:.6rem;">+ Add phone</button>'
+    + '<div style="font-size:.72rem;color:var(--mid);margin-bottom:2px;">Emails <span style="text-transform:none;letter-spacing:0;">— ★ marks the primary</span></div>'
+    + '<div id="cc-emails">'+es.map((e,i)=>ccEmailRowHTML(e,i===0)).join('')+'</div>'
+    + '<button type="button" onclick="ccAddEmail()" style="background:none;border:1px dashed var(--light);border-radius:6px;padding:.3rem .6rem;font-family:\'DM Sans\',sans-serif;font-size:.75rem;color:var(--mid);cursor:pointer;">+ Add email</button>';
+}
+function ccAddPhone(){ const w=document.getElementById('cc-phones'); if(w) w.insertAdjacentHTML('beforeend', ccPhoneRowHTML('','',false)); }
+function ccAddEmail(){ const w=document.getElementById('cc-emails'); if(w) w.insertAdjacentHTML('beforeend', ccEmailRowHTML('',false)); }
+function ccGatherPhones(){
+  const rows=[...document.querySelectorAll('#cc-phones .cc-phone-row')];
+  let primaryIdx = rows.findIndex(r=>r.querySelector('input[type="radio"]')?.checked);
+  const arr = rows.map(r=>({label:(r.querySelector('.cc-phone-label')?.value||'').trim(), number:(r.querySelector('.cc-phone-number')?.value||'').trim()})).filter(p=>p.number);
+  if(primaryIdx>0){ // move chosen primary to the front
+    const rowWithNum = rows.filter(r=>(r.querySelector('.cc-phone-number')?.value||'').trim());
+    const chosen = rows[primaryIdx];
+    const numChosen=(chosen.querySelector('.cc-phone-number')?.value||'').trim();
+    const ci = arr.findIndex(p=>p.number===numChosen);
+    if(ci>0){ const [pri]=arr.splice(ci,1); arr.unshift(pri); }
+  }
+  return arr;
+}
+function ccGatherEmails(){
+  const rows=[...document.querySelectorAll('#cc-emails .cc-email-row')];
+  let primaryIdx = rows.findIndex(r=>r.querySelector('input[type="radio"]')?.checked);
+  const arr = rows.map(r=>(r.querySelector('.cc-email-value')?.value||'').trim()).filter(Boolean);
+  if(primaryIdx>0){
+    const chosen=(rows[primaryIdx].querySelector('.cc-email-value')?.value||'').trim();
+    const ci=arr.findIndex(e=>e===chosen);
+    if(ci>0){ const [pri]=arr.splice(ci,1); arr.unshift(pri); }
+  }
+  return arr;
+}
+// Call/email the number selected in a client-card dropdown
+function ccCallSelected(){ const s=document.getElementById('cc-phone-view'); if(s&&s.value) window.location.href='tel:'+s.value.replace(/[^0-9+]/g,''); }
+function ccEmailSelected(){ const s=document.getElementById('cc-email-view'); if(s&&s.value) window.location.href='mailto:'+s.value; }
+
 let activeClientKey = null;
+
+// Client directory stat-card filters (clickable Total / Multiple drivers / This month)
+let clientStatFilter  = 'all';                                  // 'all' | 'multi' | 'month'
+let clientMonthFilter = new Date().toISOString().slice(0,7);    // 'YYYY-MM'
+function setClientStatFilter(f){
+  // Clicking the active multi/month card again clears back to "all"
+  clientStatFilter = (clientStatFilter===f && f!=='all') ? 'all' : f;
+  renderClients();
+}
+function setClientMonth(m){
+  if(m){ clientMonthFilter = m; clientStatFilter = 'month'; renderClients(); }
+}
 
 function renderClients(){
   if(!document.getElementById('client-list')) return;
@@ -6684,22 +6897,51 @@ function renderClients(){
   const viewAs = admin?(dfEl.value||null):myDriver;
   const db = buildClientDB(viewAs);
   const q  = (document.getElementById('client-search')?.value||'').toLowerCase().trim();
-  let clients = Object.values(db);
-  if(q) clients=clients.filter(c=>c.name.toLowerCase().includes(q)||(c.phone&&c.phone.includes(q)));
-  clients.sort((a,b)=>a.name.localeCompare(b.name));
+  let baseClients = Object.values(db);
+  if(q) baseClients=baseClients.filter(c=>c.name.toLowerCase().includes(q)||(c.phone&&c.phone.includes(q)));
+  baseClients.sort((a,b)=>a.name.localeCompare(b.name));
   const allDB = buildClientDB(null);
   const multiCount = Object.values(allDB).filter(c=>c.drivers.length>1).length;
+  const selMonth = clientMonthFilter;
+  const inMonth  = c => c.lastRide && c.lastRide.startsWith(selMonth);
+  const monthCount = baseClients.filter(inMonth).length;
   const statCards = admin
-    ?[{label:'Total Clients',val:Object.keys(allDB).length,color:'var(--gold)'},{label:'Multiple Drivers',val:multiCount,color:'#dc2626'},{label:'This Month',val:(()=>{const m=new Date().toISOString().slice(0,7);return clients.filter(c=>c.lastRide&&c.lastRide.startsWith(m)).length;})(),color:'var(--green)'}]
-    :[{label:'My Clients',val:clients.length,color:'var(--gold)'},{label:'Active This Month',val:(()=>{const m=new Date().toISOString().slice(0,7);return clients.filter(c=>c.lastRide&&c.lastRide.startsWith(m)).length;})(),color:'var(--green)'},{label:'Total Rides',val:clients.reduce((s,c)=>s+c.rides.length,0),color:'#1e88e5'}];
-  const _cst=document.getElementById('client-stats'); if(_cst) _cst.innerHTML=statCards.map(s=>`<div style="background:var(--surface);border-radius:8px;padding:.65rem 1rem;text-align:center;min-width:110px;"><div style="font-size:.65rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);">${s.label}</div><div style="font-size:1.4rem;font-weight:700;color:${s.color};">${s.val}</div></div>`).join('');
-  if(!clients.length){const _clt=document.getElementById('client-list'); if(_clt) _clt.innerHTML='<div style="text-align:center;padding:2rem;color:var(--mid);">No clients yet.<br><span style="font-size:.85rem;">Import from Excel/CSV or save a ride to add clients automatically.</span></div>';return;}
+    ?[{label:'Total Clients',val:Object.keys(allDB).length,color:'var(--gold)',filter:'all'},
+      {label:'Multiple Drivers',val:multiCount,color:'#dc2626',filter:'multi'},
+      {label:'This Month',val:monthCount,color:'var(--green)',filter:'month'}]
+    :[{label:'My Clients',val:baseClients.length,color:'var(--gold)',filter:'all'},
+      {label:'Active This Month',val:monthCount,color:'var(--green)',filter:'month'},
+      {label:'Total Rides',val:baseClients.reduce((s,c)=>s+c.rides.length,0),color:'#1e88e5'}];
+  const _cst=document.getElementById('client-stats'); if(_cst) _cst.innerHTML=statCards.map(s=>{
+    const active = s.filter && clientStatFilter===s.filter;
+    const clickable = !!s.filter;
+    return `<div ${clickable?`onclick="setClientStatFilter('${s.filter}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setClientStatFilter('${s.filter}');}" title="Click to filter"`:''} style="background:${active?'var(--gold-pale)':'var(--surface)'};border:1.5px solid ${active?'var(--gold)':'transparent'};border-radius:8px;padding:.65rem 1rem;text-align:center;min-width:110px;${clickable?'cursor:pointer;':''}transition:background .15s,border-color .15s;"><div style="font-size:.65rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);">${s.label}</div><div style="font-size:1.4rem;font-weight:700;color:${s.color};">${s.val}</div></div>`;
+  }).join('');
+  // Apply the active stat-card filter to the displayed list
+  let clients = baseClients;
+  if(clientStatFilter==='multi')      clients = baseClients.filter(c=>c.drivers.length>1);
+  else if(clientStatFilter==='month') clients = baseClients.filter(inMonth);
+  // Active-filter bar (with month picker when filtering by month)
+  let filterBar = '';
+  if(clientStatFilter==='month'){
+    filterBar = `<div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.75rem;padding:.5rem .75rem;background:var(--gold-pale);border-radius:8px;">
+      <span style="font-size:.78rem;color:var(--gold);font-weight:600;">📅 Clients with rides in</span>
+      <input type="month" id="client-month-picker" value="${selMonth}" onchange="setClientMonth(this.value)" style="padding:.35rem .6rem;border:1.5px solid var(--gold);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.82rem;color:var(--black);" />
+      <button onclick="setClientStatFilter('all')" style="margin-left:auto;font-size:.74rem;padding:3px 10px;border-radius:6px;border:1px solid var(--gold);background:none;color:var(--gold);cursor:pointer;font-family:'DM Sans',sans-serif;">Clear filter</button>
+    </div>`;
+  } else if(clientStatFilter==='multi'){
+    filterBar = `<div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.75rem;padding:.5rem .75rem;background:#fff5f5;border-radius:8px;">
+      <span style="font-size:.78rem;color:#dc2626;font-weight:600;">⚠ Showing clients with multiple drivers</span>
+      <button onclick="setClientStatFilter('all')" style="margin-left:auto;font-size:.74rem;padding:3px 10px;border-radius:6px;border:1px solid #dc2626;background:none;color:#dc2626;cursor:pointer;font-family:'DM Sans',sans-serif;">Clear filter</button>
+    </div>`;
+  }
+  if(!clients.length){const _clt=document.getElementById('client-list'); if(_clt) _clt.innerHTML=filterBar+'<div style="text-align:center;padding:2rem;color:var(--mid);">'+(baseClients.length?'No clients match this filter.':'No clients yet.<br><span style="font-size:.85rem;">Import from Excel/CSV or save a ride to add clients automatically.</span>')+'</div>';return;}
   const viewName = viewAs ? viewAs.split(' ')[0] : null;
   const headerRow = `<div style="display:flex;align-items:center;gap:.85rem;padding:.3rem 1rem .5rem;font-size:.66rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);">
       <div style="flex:1;">Client${viewName?' · '+escHtml(viewName)+"'s directory":''}</div>
       <div style="white-space:nowrap;">Total billed</div>
     </div>`;
-  const _clt=document.getElementById('client-list'); if(_clt) _clt.innerHTML=headerRow+clients.map(c=>{
+  const _clt=document.getElementById('client-list'); if(_clt) _clt.innerHTML=filterBar+headerRow+clients.map(c=>{
     const multi=admin&&c.drivers.length>1;
     const bg=c.drivers[0]?driverColor(c.drivers[0]):'#888888';
     const ini=c.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
@@ -6791,10 +7033,7 @@ function buildClientModalHTML(cl, sorted, total, hasUpgrade, pmOptions, safeName
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;">'
     + '<div style="grid-column:1/-1;"><div style="font-size:.72rem;color:var(--mid);margin-bottom:2px;">Name'+(nameLocked?' (from ride history — locked)':'')+'</div>'
     +   '<input type="text" id="client-edit-name" value="'+escAttr(cl.name)+'"'+(nameLocked?' disabled':'')+' style="width:100%;padding:.35rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;'+(nameLocked?'background:#f1ecf9;color:var(--mid);':'')+'box-sizing:border-box;" /></div>'
-    + '<div><div style="font-size:.72rem;color:var(--mid);margin-bottom:2px;">Phone</div>'
-    +   '<input type="tel" id="client-edit-phone" value="'+escAttr(cl.phone||'')+'" style="width:100%;padding:.35rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;box-sizing:border-box;" /></div>'
-    + '<div><div style="font-size:.72rem;color:var(--mid);margin-bottom:2px;">Email</div>'
-    +   '<input type="email" id="client-edit-email" value="'+escAttr(cl.email||'')+'" style="width:100%;padding:.35rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;box-sizing:border-box;" /></div>'
+    + '<div style="grid-column:1/-1;">'+contactRowsHTML(cl.phones, cl.emails)+'</div>'
     + '<div style="grid-column:1/-1;"><div style="font-size:.72rem;color:var(--mid);margin-bottom:2px;">Address</div>'
     +   '<input type="text" id="client-edit-address" value="'+escAttr(cl.address||'')+'" style="width:100%;padding:.35rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;box-sizing:border-box;" /></div>'
     + '</div>'
@@ -6815,12 +7054,47 @@ function buildClientModalHTML(cl, sorted, total, hasUpgrade, pmOptions, safeName
       + '</select></div>'
     : '';
 
-  return '<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem;">'
-    + (cl.phone?'<a href="tel:'+cl.phone+'" style="padding:.4rem .85rem;background:var(--surface);border-radius:7px;font-size:.85rem;color:var(--black);text-decoration:none;border:1px solid var(--light);">'+cl.phone+'</a>':'')
+  // Owner driver (non-admin): release this client to another driver without approval.
+  const _myDriver = getMyDriverName();
+  const isMyClient = !admin && _myDriver && cl.drivers.includes(_myDriver);
+  const releaseBlock = isMyClient
+    ? '<div style="background:#eef6ff;border:1px solid #b8d4f3;border-radius:8px;padding:.75rem;margin-bottom:.75rem;">'
+      + '<div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#1e4f87;margin-bottom:.35rem;">Release to another driver</div>'
+      + '<div style="font-size:.74rem;color:var(--mid);margin-bottom:.45rem;">Hand this client off — no admin approval needed. Their card and upcoming rides move over; your past rides stay yours.</div>'
+      + '<select onchange="if(this.value)releaseClientToDriver(\''+safeName+'\', this.value)" style="width:100%;padding:.4rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;">'
+      + '<option value="">— Release to driver —</option>'
+      + DRIVERS.filter(function(d){ return d!==_myDriver; }).map(function(d){ return '<option value="'+escAttr(d)+'">'+escAttr(d)+'</option>'; }).join('')
+      + '</select></div>'
+    : '';
+  const phoneArr=(cl.phones||[]), emailArr=(cl.emails||[]);
+  let phoneUI='';
+  if(phoneArr.length===1){
+    const p=phoneArr[0];
+    phoneUI='<a href="tel:'+escAttr(_phoneDigits(p.number))+'" style="padding:.4rem .85rem;background:var(--surface);border-radius:7px;font-size:.85rem;color:var(--black);text-decoration:none;border:1px solid var(--light);">📞 '+(p.label?escAttr(p.label)+': ':'')+escAttr(p.number)+'</a>';
+  } else if(phoneArr.length>1){
+    phoneUI='<div style="display:flex;gap:.3rem;align-items:center;">'
+      +'<select id="cc-phone-view" style="padding:.4rem .6rem;border:1px solid var(--light);border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;background:var(--surface);max-width:200px;">'
+      + phoneArr.map(function(p){ return '<option value="'+escAttr(p.number)+'">'+(p.label?escAttr(p.label)+': ':'')+escAttr(p.number)+'</option>'; }).join('')
+      +'</select>'
+      +'<button onclick="ccCallSelected()" title="Call selected" style="padding:.4rem .7rem;background:var(--gold);color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:.82rem;">📞</button></div>';
+  }
+  let emailUI='';
+  if(emailArr.length===1){
+    emailUI='<a href="mailto:'+escAttr(emailArr[0])+'" style="padding:.4rem .85rem;background:var(--surface);border-radius:7px;font-size:.85rem;color:var(--black);text-decoration:none;border:1px solid var(--light);">✉ '+escAttr(emailArr[0])+'</a>';
+  } else if(emailArr.length>1){
+    emailUI='<div style="display:flex;gap:.3rem;align-items:center;">'
+      +'<select id="cc-email-view" style="padding:.4rem .6rem;border:1px solid var(--light);border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;background:var(--surface);max-width:200px;">'
+      + emailArr.map(function(e){ return '<option value="'+escAttr(e)+'">'+escAttr(e)+'</option>'; }).join('')
+      +'</select>'
+      +'<button onclick="ccEmailSelected()" title="Email selected" style="padding:.4rem .7rem;background:var(--gold);color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:.82rem;">✉</button></div>';
+  }
+  return '<div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem;">'
+    + phoneUI + emailUI
     + '<div style="padding:.4rem .85rem;background:var(--surface);border-radius:7px;font-size:.85rem;border:1px solid var(--light);">'+cl.rides.length+' rides</div>'
     + (total?'<div style="padding:.4rem .85rem;background:var(--surface);border-radius:7px;font-size:.85rem;color:var(--green);font-weight:600;border:1px solid var(--light);">$'+total.toFixed(2)+' total</div>':'')
     + '</div>'
     + reassignBlock
+    + releaseBlock
     + editSection
     + pmSelect
     + (admin&&cl.drivers.length>1?'<div style="margin-bottom:.75rem;padding:.4rem .75rem;background:#fff5f5;border-radius:6px;font-size:.78rem;color:#dc2626;">Shared by: '+cl.drivers.join(', ')+'</div>':'')
@@ -6865,8 +7139,7 @@ function openAddClientModal(){
   document.getElementById('client-modal-body').innerHTML =
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.75rem;">'
     + '<div style="grid-column:1/-1;"><div style="font-size:.72rem;color:var(--mid);margin-bottom:2px;">Name *</div><input type="text" id="newclient-name" placeholder="Full name" style="width:100%;padding:.4rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;" /></div>'
-    + '<div><div style="font-size:.72rem;color:var(--mid);margin-bottom:2px;">Phone</div><input type="tel" id="newclient-phone" style="width:100%;padding:.4rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;" /></div>'
-    + '<div><div style="font-size:.72rem;color:var(--mid);margin-bottom:2px;">Email</div><input type="email" id="newclient-email" style="width:100%;padding:.4rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;" /></div>'
+    + '<div style="grid-column:1/-1;">'+contactRowsHTML([],[])+'</div>'
     + '<div style="grid-column:1/-1;"><div style="font-size:.72rem;color:var(--mid);margin-bottom:2px;">Address</div><input type="text" id="newclient-address" style="width:100%;padding:.4rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;" /></div>'
     + '</div>'
     + pm
@@ -6884,10 +7157,13 @@ async function saveNewClient(){
   if(!importedClients[myDriver]) importedClients[myDriver]=[];
   const key = name.toLowerCase();
   if(importedClients[myDriver].some(c=>c.name.toLowerCase()===key)){ showToast('You already have a client by that name','error'); return; }
+  const phones = ccGatherPhones();
+  const emails = ccGatherEmails();
   importedClients[myDriver].push({
     name,
-    phone:  (document.getElementById('newclient-phone')?.value||'').trim(),
-    email:  (document.getElementById('newclient-email')?.value||'').trim(),
+    phones, emails,
+    phone:  phones[0] ? phones[0].number : '',
+    email:  emails[0] || '',
     address:(document.getElementById('newclient-address')?.value||'').trim(),
     paymentMethod: document.getElementById('newclient-pm')?.value || '',
     notes:  document.getElementById('newclient-notes')?.value || '',
@@ -6904,18 +7180,23 @@ async function saveClientDetails(origName, nameLocked){
   if(!myDriver){ showToast('Could not determine your account','error'); return; }
   if(!importedClients[myDriver]) importedClients[myDriver]=[];
   const newName = nameLocked ? origName : ((document.getElementById('client-edit-name')?.value||'').trim() || origName);
-  const phone   = (document.getElementById('client-edit-phone')?.value||'').trim();
-  const email   = (document.getElementById('client-edit-email')?.value||'').trim();
+  const phones  = ccGatherPhones();
+  const emails  = ccGatherEmails();
   const address = (document.getElementById('client-edit-address')?.value||'').trim();
   const key = origName.toLowerCase();
   let rec = importedClients[myDriver].find(c=>c.name.toLowerCase()===key);
   if(!rec){
     // No manual override yet — seed one from the current derived values, then apply edits
     const db = buildClientDB(myDriver); const cur = db[key] || {};
-    rec = {name:newName, phone:'', email:'', address:'', paymentMethod:cur.paymentMethod||'', notes:cur.notes||'', source:'client'};
+    rec = {name:newName, phones:[], emails:[], phone:'', email:'', address:'', paymentMethod:cur.paymentMethod||'', notes:cur.notes||'', source:'client'};
     importedClients[myDriver].push(rec);
   }
-  rec.name = newName; rec.phone = phone; rec.email = email; rec.address = address;
+  rec.name = newName;
+  rec.phones = phones;
+  rec.emails = emails;
+  rec.phone = phones[0] ? phones[0].number : '';   // primary mirror for back-compat
+  rec.email = emails[0] || '';
+  rec.address = address;
   await saveImportedClients();
   renderClients();
   openClientModal(newName); // reopen with fresh values
@@ -6974,6 +7255,60 @@ async function reassignClientDriver(clientName, newDriver){
 
 function closeClientModal(){ document.getElementById('client-modal').classList.remove('show'); activeClientKey=null; }
 
+// A driver may hand off (release) their OWN client to another driver with no approval.
+// Admins can also do it (fallback when the original driver is unavailable).
+// Moves the client card + FUTURE rides to the new driver; PAST rides stay for income history.
+async function releaseClientToDriver(clientName, newDriver){
+  if(!newDriver) return;
+  const key = clientName.toLowerCase();
+  const c = buildClientDB(null)[key];
+  const myDriver = getMyDriverName();
+  const isOwner = !!(c && myDriver && c.drivers.includes(myDriver));
+  if(!isAdmin() && !isOwner){ showToast('Only this client\u2019s current driver or an admin can release them','error'); return; }
+  if(newDriver===myDriver){ showToast('That\u2019s already your client','error'); return; }
+  if(!confirm('Release '+clientName+' to '+newDriver.split(' ')[0]+'?\n\n• All saved client info moves to '+newDriver.split(' ')[0]+'\n• Upcoming rides switch to '+newDriver.split(' ')[0]+'\u2019s color\n• Past rides stay exactly as they are')) return;
+  let newLogin=null;
+  for(const lg in USER_DRIVER_MAP){ if(USER_DRIVER_MAP[lg]===newDriver){ newLogin=lg; break; } }
+  const today=new Date().toISOString().split('T')[0];
+  let moved=0;
+  rides.forEach(r=>{
+    if(r.client && r.client.toLowerCase()===key && r.date>=today){
+      r.driver=newDriver; if(newLogin) r.createdBy=newLogin; moved++;
+    }
+  });
+  // Move ALL of this client's saved data to the new driver. Build the complete contact
+  // record from everything known (saved card + any ride-derived contacts), so nothing is lost
+  // even if the client was only ever ride-derived.
+  const fullRec = {
+    name:    c ? c.name : clientName.trim(),
+    phones:  (c && c.phones && c.phones.length) ? c.phones.map(p=>({label:p.label||'',number:p.number})) : [],
+    emails:  (c && c.emails) ? c.emails.slice() : [],
+    address: c ? (c.address||'') : '',
+    notes:   c ? (c.notes||'') : '',
+    paymentMethod: c ? (c.paymentMethod||'') : '',
+    source:  'client'
+  };
+  fullRec.phone = fullRec.phones[0] ? fullRec.phones[0].number : '';
+  fullRec.email = fullRec.emails[0] || '';
+  // Remove any existing saved card from every driver…
+  Object.keys(importedClients).forEach(fd=>{
+    const arr=importedClients[fd]||[];
+    const idx=arr.findIndex(x=>x.name && x.name.toLowerCase()===key);
+    if(idx!==-1) arr.splice(idx,1);
+  });
+  // …then place the complete card under the new driver.
+  if(!importedClients[newDriver]) importedClients[newDriver]=[];
+  importedClients[newDriver].push(fullRec);
+  await Promise.all([saveRides(), saveImportedClients()]);
+  const byWhom = isAdmin() ? 'An admin' : ((myDriver||'A driver').split(' ')[0]);
+  addNotification(newDriver, {id:Date.now(), client:clientName}, 'transfer_approved',
+    byWhom+' released '+clientName+' to you'+(moved?(' \u00b7 '+moved+' upcoming ride'+(moved!==1?'s':'')):'')+'.');
+  await saveNotifs();
+  updateNotifBadge();
+  renderClients(); refreshDash(); renderCal();
+  closeClientModal();
+  showToast('Released '+clientName+' to '+newDriver.split(' ')[0]+' \u2713'+(moved?(' ('+moved+' upcoming)'):''));
+}
 
 function checkClientConflict(){
   const name=document.getElementById('q-client')?.value?.trim();
@@ -7109,7 +7444,7 @@ function showPage(id, el){
   window.scrollTo(0,0);
   // Page-specific render
   if(id==='dashboard') refreshDash();
-  if(id==='quote'){ renderAddons(); updateTripFields(); calcQuote(); if(gmapsLoaded) setTimeout(initAddressAutocomplete, 100); }
+  if(id==='quote'){ renderAddons(); updateTripFields(); calcQuote(); populateClientDatalist(); if(gmapsLoaded) setTimeout(initAddressAutocomplete, 100); }
   if(id==='calendar') renderCal();
   if(id==='clients') renderClients();
   if(id==='documents') renderDocuments();
@@ -7710,56 +8045,6 @@ async function registerSW(){
   } catch(e) {
     console.warn('SW registration failed:', e);
   }
-}
-
-// Request push permission and get FCM token
-async function requestPushPermission(){
-  if(VAPID_KEY === 'PASTE_YOUR_VAPID_KEY_HERE'){ showToast('Push notifications aren\u2019t set up yet \u2014 using in-app alerts for now.'); return; }
-  if(!('Notification' in window)){ showToast('Push notifications not supported on this browser','error'); return; }
-  const permission = await Notification.requestPermission();
-  if(permission !== 'granted'){ showToast('Notifications blocked — enable in browser settings','error'); return; }
-  try {
-    const messaging = firebase.messaging();
-    const token = await messaging.getToken({ vapidKey: VAPID_KEY });
-    if(token){
-      // Save token to Firebase under this driver's name
-      const dName = currentUser?.name||'unknown';
-      await storageSet('kat:fcmTokens/'+dName, token);
-      console.log('FCM token saved for', dName);
-      showToast('Push notifications enabled ✓');
-      updateNotifToggle(true);
-    }
-  } catch(e) {
-    console.warn('FCM token error:', e);
-    showToast('Could not enable notifications: '+e.message,'error');
-  }
-}
-
-// Disable push for this device
-async function disablePush(){
-  try {
-    const messaging = firebase.messaging();
-    await messaging.deleteToken();
-    const dName = currentUser?.name||'unknown';
-    await storageSet('kat:fcmTokens/'+dName, null);
-    showToast('Push notifications disabled');
-    updateNotifToggle(false);
-  } catch(e) { console.warn('Disable push error:', e); }
-}
-
-// Check if push is currently enabled for this user
-async function isPushEnabled(){
-  if(!('Notification' in window)) return false;
-  if(Notification.permission !== 'granted') return false;
-  const dName = currentUser?.name||'unknown';
-  const token = await storageGet('kat:fcmTokens/'+dName);
-  return !!token;
-}
-
-// Update the notification toggle button in topbar
-function updateNotifToggle(enabled){
-  const btn = document.getElementById('notif-push-btn');
-  if(btn) btn.title = enabled ? 'Push notifications ON — click to disable' : 'Enable push notifications';
 }
 
 // Show push toggle in topbar after login
