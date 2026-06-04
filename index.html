@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606035200">
+<meta name="version" content="202606035300">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -447,6 +447,10 @@ input,select,textarea{font-size:16px;}
           <input type="text" id="q-client" placeholder="Full name" list="q-client-list" autocomplete="off" oninput="checkClientConflict();maybeAutofillClient('q')" />
           <datalist id="q-client-list"></datalist>
           <div id="q-client-status" style="font-size:.78rem;min-height:1.2rem;margin-top:.3rem;"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:.5rem;margin:-.25rem 0 .65rem;">
+          <input type="checkbox" id="q-new-client" style="width:15px;height:15px;cursor:pointer;accent-color:var(--gold);" />
+          <label for="q-new-client" style="font-size:.82rem;cursor:pointer;color:var(--black);">New client — first time with NDA</label>
         </div>
         <div class="form-group"><label>Phone</label><input type="text" id="q-phone" placeholder="404-555-0100" /></div>
         <div class="form-group"><label>Additional numbers on confirmation <span style="text-transform:none;letter-spacing:0;font-weight:400;color:var(--mid);">(comma-separated)</span></label><input type="text" id="q-extra-phones" placeholder="spouse, assistant…  e.g. 404-555-0102, 770-555-0188" /></div>
@@ -1076,6 +1080,10 @@ input,select,textarea{font-size:16px;}
       <div class="form-group"><label>Client Name</label><input type="text" id="qa-client" placeholder="Full name" list="qa-client-list" autocomplete="off" oninput="maybeAutofillClient('qa')" /><datalist id="qa-client-list"></datalist></div>
       <div class="form-group"><label>Phone</label><input type="text" id="qa-phone" placeholder="404-555-0100" /></div>
       <div class="form-group" style="grid-column:1/-1;"><label>Email</label><input type="email" id="qa-email" placeholder="client@email.com" /></div>
+      <div style="grid-column:1/-1;display:flex;align-items:center;gap:.5rem;margin-top:-.25rem;">
+        <input type="checkbox" id="qa-new-client" style="width:15px;height:15px;cursor:pointer;accent-color:var(--gold);" />
+        <label for="qa-new-client" style="font-size:.82rem;cursor:pointer;color:var(--black);">New client — first time with NDA</label>
+      </div>
       <div class="form-group"><label>Date</label><input type="date" id="qa-date" /></div>
       <div class="form-group"><label>Time</label><input type="time" id="qa-time" /></div>
       <div class="form-group"><label>Travel Type</label>
@@ -2074,7 +2082,8 @@ async function saveQuote(){
     ...Object.fromEntries(Object.keys(addonState).map(k=>[k,addonState[k]?'Y':'N'])),
     xstop: extraStops,
     wait:parseFloat(document.getElementById('q-wait').value)||0,
-    confirmed:false, createdBy:currentUser?.name||''
+    confirmed:false, createdBy:currentUser?.name||'',
+    newClient: !!(document.getElementById('q-new-client')?.checked),
   };
   touchRide(ride, 'created');
 
@@ -2107,6 +2116,7 @@ async function saveQuote(){
   // Reset the repeat control back to a single ride so it never carries over to the next booking
   const rp=document.getElementById('q-repeat'); if(rp) rp.value='none';
   const rpo=document.getElementById('q-repeat-opts'); if(rpo) rpo.style.display='none';
+  const qnc=document.getElementById('q-new-client'); if(qnc) qnc.checked=false;
   refreshDash(); updateNotifBadge(); renderCal();
 }
 
@@ -2339,6 +2349,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
                 <div style="text-align:right;">
                   <div class="week-ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}</div>
                   <span class="badge ${badge}" style="font-size:.6rem;">${r.type.split(' ')[0]}</span>
+                  ${r.newClient?'<div style="font-size:.58rem;font-weight:700;letter-spacing:.5px;background:#f59e0b;color:#fff;border-radius:4px;padding:1px 5px;margin-top:2px;white-space:nowrap;">New Client</div>':''}
                 </div>
               </div>`;
             }).join('')
@@ -2377,7 +2388,7 @@ function renderMonthView(containerId, monthDate, driverFilter, jumpFn){
       const check=r.confirmSent?'<span style="font-weight:900;">✓</span> ':'';
       const tc=contrastText(c);
       const lbl=`${r.time?r.time+' ':''}${(r.client||'').split(' ')[0]}`;
-      return `<div class="month-pill" style="background:${c};color:${tc};" title="${r.confirmSent?'✓ Confirmed · ':''}${(r.client||'')} · ${r.type} · $${r.price}" onclick="event.stopPropagation();openRideModal(${r.id})">${check}${lbl}</div>`;
+      return `<div class="month-pill" style="background:${c};color:${tc};${r.newClient?'white-space:normal;':''}" title="${r.confirmSent?'✓ Confirmed · ':''}${r.newClient?'★ New Client · ':''}${(r.client||'')} · ${r.type} · $${r.price}" onclick="event.stopPropagation();openRideModal(${r.id})">${check}${lbl}${r.newClient?`<br><span style="font-size:.52rem;font-weight:700;letter-spacing:.4px;opacity:.95;">New Client</span>`:''}</div>`;
     }).join('');
     const more=extra>0?`<div class="month-more">+${extra} more</div>`:'';
     const hol=isHoliday?`<span class="month-holiday" title="${HOLIDAY_NAMES[mmdd]||'Holiday'} — $${CHRISTMAS_DATES.includes(mmdd)?35:30} surcharge">✨ +$${CHRISTMAS_DATES.includes(mmdd)?35:30}</span>`:'';
@@ -4468,6 +4479,7 @@ function openQuickAddModal(){
   const dEl=document.getElementById('qa-date');
   if(dEl && !dEl.value) dEl.value=new Date().toISOString().split('T')[0];
   const err=document.getElementById('qa-error'); if(err) err.textContent='';
+  const qanc=document.getElementById('qa-new-client'); if(qanc) qanc.checked=false;
   populateClientDatalist();
   document.getElementById('quick-add-modal').classList.add('show');
 }
@@ -4523,6 +4535,7 @@ async function saveQuickAddRide(){
     miles:0,pax:1,rt:'',email:document.getElementById('qa-email')?document.getElementById('qa-email').value.trim():'',
     holiday:qaAddonState.holiday?'Y':'N',christmas:qaAddonState.christmas?'Y':'N',late:qaAddonState.late?'Y':'N',premium:qaAddonState.premium?'Y':'N',fuel:qaAddonState.fuel?'Y':'N',xstop:parseInt(document.getElementById('qa-xstop')?.value)||0,traffic:qaAddonState.traffic?'Y':'N',wait:parseFloat(document.getElementById('qa-wait')?.value)||0,
     confirmed:false, createdBy:currentUser?.name||'',
+    newClient: !!(document.getElementById('qa-new-client')?.checked),
   };
   touchRide(ride, 'created');
   rides.push(ride);
