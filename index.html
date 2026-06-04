@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606047100">
+<meta name="version" content="202606047200">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2585,6 +2585,24 @@ function switchMyTab(tab, el){
 // Driver marks that they've texted each client to confirm tomorrow's ride.
 // Marking "sent" flips ride.confirmSent → a bold ✓ appears on the calendar title.
 // ═══════════════════════════════════════════
+// Build a directions deep-link to an address using the driver's default maps app
+// (Apple Maps on iPhone/iPad, Google Maps everywhere else), in driving-navigation mode.
+function mapsHref(addr){
+  const q=encodeURIComponent((addr||'').trim());
+  if(!q) return '';
+  return /iphone|ipad|ipod/i.test(navigator.userAgent)
+    ? 'https://maps.apple.com/?daddr='+q+'&dirflg=d'
+    : 'https://www.google.com/maps/dir/?api=1&destination='+q+'&travelmode=driving';
+}
+// Render an address as a tappable directions link (falls back to plain text if blank).
+function mapsLink(addr, color){
+  const a=(addr||'').trim();
+  if(!a || a==='\u2014') return escHtml(a||'\u2014');
+  return '<a href="'+mapsHref(a)+'" target="_blank" rel="noopener" onclick="event.stopPropagation();" '
+       + 'style="color:'+(color||'inherit')+';text-decoration:underline;text-underline-offset:2px;">'
+       + escHtml(a)+'</a>';
+}
+
 function renderConfirmations(){
   const panel=document.getElementById('my-confirm-panel');
   if(!panel) return;
@@ -2658,7 +2676,7 @@ function renderConfirmations(){
         <span style="font-size:.85rem;font-weight:700;color:${c};">${r.time||'—'}</span>
       </div>
       <div style="font-size:.78rem;color:var(--mid);margin-bottom:.2rem;">${escHtml(r.type||'')} · ${escHtml(r.vehicle||'')}</div>
-      <div style="font-size:.78rem;color:var(--mid);margin-bottom:.5rem;">${escHtml(r.pickup||'—')} → ${escHtml(r.home||'—')}</div>
+      <div style="font-size:.78rem;color:var(--mid);margin-bottom:.5rem;">${mapsLink(r.pickup, c)} → ${mapsLink(r.home, c)}</div>
       <div style="font-size:.82rem;margin-bottom:.6rem;">${phoneLink}</div>
       ${msgSection}
       ${btn}${stamp}
@@ -3029,7 +3047,7 @@ function renderRideView(r){
     ${address ? `<div class="detail-row" style="grid-column:1/-1;">
       <div style="display:flex;align-items:flex-start;gap:.75rem;">
         <i class="ti ti-map-pin" style="font-size:18px;color:var(--mid);margin-top:2px;" aria-hidden="true"></i>
-        <div style="font-size:.88rem;color:var(--black);">${address}</div>
+        <div style="font-size:.88rem;color:var(--black);">${mapsLink(address, 'var(--accent)')}</div>
       </div>
     </div>` : ''}
 
