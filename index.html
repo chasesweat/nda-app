@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606049910">
+<meta name="version" content="202606049911">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2890,6 +2890,12 @@ function renderConfirmations(){
     if(!imgEl) return;
     warmDriverCardImage(r.driver.trim()).then(function(file){
       if(!file){ if(loaderEl) loaderEl.textContent='No card photo'; return; }
+      // Store the File so textClient can use it without any async wait
+      const files=[file];
+      const prof=DRIVER_PROFILES[r.driver.trim()]||{};
+      if(prof.phone) files.push(buildDriverVCard(r.driver.trim()));
+      _confirmShareFiles[r.id]=files;
+      // Show the preview
       const url=URL.createObjectURL(file);
       imgEl.onload=function(){ URL.revokeObjectURL(url); };
       imgEl.src=url;
@@ -3139,6 +3145,9 @@ function buildDriverVCard(driverName){
 }
 
 const _driverCardImgCache = {};
+// Pre-built share payloads keyed by ride id — populated when To Confirm renders
+// so textClient can grab files synchronously inside the user-gesture window
+const _confirmShareFiles = {};
 function buildDriverCardImageFile(name){
   const prof     = DRIVER_PROFILES[name]||{};
   const photoSrc = (typeof DRIVER_PHOTOS!=='undefined' && DRIVER_PHOTOS[name]) ? DRIVER_PHOTOS[name] : '';
@@ -3209,36 +3218,42 @@ async function textClient(id){
   const _conf=buildConfirmationText(r);
   const _fullMsg=_conf.message+(_conf.instructions?'\n\n'+_conf.instructions:'');
 
-  const assigned=(r.driver||'').trim();
+  // Use pre-built files (ready synchronously, built when To Confirm screen rendered)
+  // This keeps us inside the browser's user-gesture window for navigator.share
+  let files=_confirmShareFiles[id]||[];
 
-  // Build attachments: driver card image + vCard
-  const files=[];
-  if(assigned){
-    const cardImg=await warmDriverCardImage(assigned);
-    if(cardImg) files.push(cardImg);
-    const prof=DRIVER_PROFILES[assigned]||{};
-    if(prof.phone) files.push(buildDriverVCard(assigned));
-  }
-
-  // Single navigator.share call with BOTH files and text —
-  // user picks Messages once and everything (headshot card + text) is pre-loaded.
-  if(navigator.canShare && files.length){
-    const shareData={ files, text:_fullMsg };
-    if(navigator.canShare(shareData)){
+  // Fallback: build now if not pre-built (e.g. opened directly from ride modal)
+  if(!files.length){
+    const assigned=(r.driver||'').trim();
+    if(assigned){
       try{
-        await navigator.share(shareData);
-        return; // share sheet handled it
-      } catch(e){
-        if(e.name==='AbortError') return; // user cancelled
-        console.warn('share with files failed, falling back to SMS URL',e);
-      }
+        const cardImg=await warmDriverCardImage(assigned);
+        if(cardImg) files=[cardImg];
+        const prof=DRIVER_PROFILES[assigned]||{};
+        if(prof.phone) files.push(buildDriverVCard(assigned));
+      }catch(e){ files=[]; }
     }
   }
 
-  // Fallback: SMS URL with text only
+  // Try navigator.share with files + text in one call
+  if(navigator.canShare && files.length){
+    const shareData={ files, text:_fullMsg };
+    try{
+      if(navigator.canShare(shareData)){
+        await navigator.share(shareData);
+        return;
+      }
+    }catch(e){
+      if(e.name==='AbortError') return;
+      console.warn('share with files failed, falling back',e);
+    }
+  }
+
+  // Fallback: SMS URL (text only — file sharing not supported on this browser)
   const sep=/iphone|ipad|ipod|mac/i.test(navigator.userAgent)?'&':'?';
   window.location.href='sms:'+nums.join(',')+sep+'body='+encodeURIComponent(_fullMsg);
 }
+
 
 function closeDayModal(){document.getElementById('day-modal').classList.remove('show');}
 
