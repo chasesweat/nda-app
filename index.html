@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606049000">
+<meta name="version" content="202606049900">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -433,6 +433,7 @@ input,select,textarea{font-size:16px;}
         <div class="page-sub" id="dash-date"></div>
       </div>
     </div>
+    <div id="dash-morgan-counter" style="margin-bottom:1.5rem;"></div>
     <div id="dash-income-overview" style="margin-bottom:1.5rem;"></div>
     <div id="dash-confirmations" style="margin-bottom:1.5rem;"></div>
     <div id="dash-fees" style="margin-bottom:1.5rem;"></div>
@@ -937,7 +938,7 @@ input,select,textarea{font-size:16px;}
     <!-- EDIT MODE -->
     <div id="rm-edit-mode" style="display:none;">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-        <div class="form-group"><label>Client Name</label><input type="text" id="edit-client" /></div>
+        <div class="form-group"><label>Client Name</label><input type="text" id="edit-client" list="qa-client-list" autocomplete="off" oninput="populateClientDatalist();maybeAutofillClient('edit')" /></div>
         <div class="form-group"><label>Phone</label><input type="text" id="edit-phone" /></div>
         <div class="form-group" style="grid-column:1/-1;"><label>Additional numbers on confirmation <span style="text-transform:none;letter-spacing:0;font-weight:400;color:var(--mid);">(comma-separated)</span></label><input type="text" id="edit-extra-phones" placeholder="404-555-0102, 770-555-0188" /></div>
         <div class="form-group"><label>Email</label><input type="text" id="edit-email" /></div>
@@ -1160,7 +1161,7 @@ input,select,textarea{font-size:16px;}
           <option>Premium</option>
         </select>
       </div>
-      <div class="form-group"><label>Driver</label>
+      <div class="form-group"><label>Assign Driver</label>
         <select id="qa-driver" onchange="qaDriverChanged()"></select>
         <div id="qa-avail-warn" style="display:none;margin-top:.3rem;padding:.35rem .6rem;background:#fef3c7;border-radius:6px;font-size:.75rem;color:#92400e;"></div>
       </div>
@@ -1804,7 +1805,7 @@ window.onGoogleMapsReady = function(){
 
 function initAddressAutocomplete(){
   if(!document.getElementById('q-pickup')) return;
-  const addressIds = ['q-pickup','q-dropoff','edit-pickup','edit-home'];
+  const addressIds = ['q-pickup','q-dropoff','edit-pickup','edit-home','qa-pickup','qa-home'];
   addressIds.forEach(id=>{
     const el = document.getElementById(id);
     if(!el || el.dataset.acInit) return;
@@ -2087,7 +2088,7 @@ function exportClientsToCSV(){
 }
 function exportCalendar(target){
   // Build an .ics of upcoming rides; Apple/Google/Outlook all import .ics.
-  const now=new Date(); const todayStr=now.toISOString().split('T')[0];
+  const now=new Date(); const todayStr=toDateStr(now);
   const dName=getMyDriverName();
   let list=rides.filter(r=>r.date && r.date>=todayStr);
   if(dName && !isAdmin()) list=list.filter(r=>typeof isMyRide==='function'?isMyRide(r):r.driver===dName);
@@ -2534,10 +2535,11 @@ function renderWeekView(containerId, weekStart, driverFilter){
                   <div class="week-ride-client" style="color:${tc};">${r.confirmSent?'<span style="color:var(--green);font-weight:900;">✓ </span>':''}${r.client}</div>
                   <div class="week-ride-detail" style="color:${tc};opacity:.78;">${r.vehicle} · ${r.driver?r.driver.split(' ')[0]:'Unassigned'}${ic?` · <span style="color:#e0245e;font-weight:700;">❤️${ic}</span>`:''}</div>
                 </div>
-                <div style="text-align:right;">
+                <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
                   <div class="week-ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}</div>
                   <span class="badge ${badge}" style="font-size:.6rem;">${r.type.split(' ')[0]}</span>
-                  ${r.newClient?'<div style="font-size:.58rem;font-weight:700;letter-spacing:.5px;background:#f59e0b;color:#fff;border-radius:4px;padding:1px 5px;margin-top:2px;white-space:nowrap;">New Client</div>':''}
+                  ${r.createdBy==='Morgan'?'<span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#5c6bc0;color:#fff;font-size:.5rem;font-weight:700;flex-shrink:0;" title="Created by Morgan">MN</span>':''}
+                  ${r.newClient?'<div style="font-size:.58rem;font-weight:700;letter-spacing:.5px;background:#f59e0b;color:#fff;border-radius:4px;padding:1px 5px;white-space:nowrap;">New Client</div>':''}
                 </div>
               </div>`;
             }).join('')
@@ -2696,7 +2698,7 @@ function renderMyCal(){
     renderWeekView('my-cal-grid', myCalWeekStart, isMyRide);
   }
   // upcoming list (separate tab) — clearly split: rides I'm driving vs rides I scheduled (I confirm)
-  const todayStr=new Date().toISOString().split('T')[0];
+  const todayStr=toDateStr(new Date());
   const ul=document.getElementById('my-rides-list');
   if(ul){
     const driving = rides.filter(r=>isMyDrivingRide(r) && r.date>=todayStr && r.status!=='cancelled')
@@ -2858,6 +2860,7 @@ function renderConfirmations(){
       <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.6rem;">
         <button onclick="copyConfirmation(${r.id})" style="${btnStyle}">📋 Copy text</button>
         ${recips.length?`<button onclick="textClient(${r.id})" style="${btnStyle}">💬 Text group</button>`:''}
+        <button onclick="shareClientVCard(${r.id})" style="${btnStyle}">👤 Client vCard</button>
         ${conf.instructions?`<button onclick="copyInstructions(${r.id})" style="${btnStyle}">📋 Copy instructions</button>`:''}
       </div>`;
     return `<div style="border:1.5px solid ${c};border-left:5px solid ${c};border-radius:12px;padding:.9rem 1rem;margin-bottom:.75rem;background:${sent?c+'33':'var(--white)'};">
@@ -3049,6 +3052,46 @@ function confirmationRecipients(r){
 }
 
 // Builds a vCard (.vcf) File for the given driver so the client can tap "Add to Contacts".
+function buildClientVCard(r){
+  const name=(r.client||"").trim();
+  const parts=name.split(" ");
+  const first=parts[0]||"", last=parts.slice(1).join(" ")||"";
+  const phone=(r.phone||"").replace(/[^0-9+]/g,"");
+  const email=(r.email||"").trim();
+  const flight=(r.flight||"").trim();
+  const note=[
+    r.type||"",
+    r.date?fmtDate(r.date):"",
+    flight?"Flight: "+flight:"",
+    r.terminal?"Terminal: "+r.terminal:""
+  ].filter(Boolean).join(" \u00b7 ");
+  const lines=[
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    "FN:"+name,
+    "N:"+last+";"+first+";;;",
+    phone ? "TEL;TYPE=CELL:"+phone : null,
+    email ? "EMAIL:"+email : null,
+    note  ? "NOTE:"+note  : null,
+    "END:VCARD"
+  ].filter(Boolean).join("\r\n");
+  return new File([lines], (first||"client")+"-contact.vcf", {type:"text/vcard"});
+}
+async function shareClientVCard(id){
+  const r=rides.find(x=>x.id===id); if(!r) return;
+  const vcf=buildClientVCard(r);
+  if(navigator.canShare && navigator.canShare({files:[vcf]})){
+    try{ await navigator.share({files:[vcf],title:r.client+" · contact"}); }
+    catch(e){ if(e.name!=="AbortError") console.warn("vcard share failed",e); }
+  } else {
+    // Fallback: download the file
+    const url=URL.createObjectURL(vcf);
+    const a=document.createElement("a"); a.href=url;
+    a.download=vcf.name; document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },1000);
+  }
+}
+
 function buildDriverVCard(driverName){
   const prof = DRIVER_PROFILES[driverName] || {};
   const phone = (prof.phone||'').replace(/[^0-9+]/g,'');
@@ -3806,7 +3849,7 @@ async function approveTransfer(reqId){
   req.decidedAt=new Date().toISOString();
 
   // Reassign future rides only if scope includes rides
-  const today=new Date().toISOString().split('T')[0];
+  const today=toDateStr(new Date());
   let reassigned=0;
   if(req.scope !== 'client_only'){
     rides.forEach(r=>{
@@ -4409,7 +4452,7 @@ async function renderCostCalc(){
   }
   // Default date = today
   const dEl = document.getElementById('cc-date');
-  if(dEl && !dEl.value) dEl.value = new Date().toISOString().slice(0,10);
+  if(dEl && !dEl.value) dEl.value = toDateStr(new Date());
   // Restore saved home address
   const hEl = document.getElementById('cc-home');
   if(hEl && !hEl.value && costCalcHome) hEl.value = costCalcHome;
@@ -4564,7 +4607,7 @@ function addCostRow(){
   const v = computeCostValues();
   if(!v.fare && !v.miles){ showToast('Enter a fare and miles first','error'); return; }
   costCalcLog.unshift({
-    date: document.getElementById('cc-date').value || new Date().toISOString().slice(0,10),
+    date: document.getElementById('cc-date').value || toDateStr(new Date()),
     client: document.getElementById('cc-client').value.trim(),
     payment: document.getElementById('cc-payment').value,
     owner: v.owner || ccMyName(),
@@ -4842,6 +4885,9 @@ async function startIncomeTrial(){
 // ── QUICK ADD RIDE ──
 
 function openQuickAddModal(){
+  // Ensure address autocomplete is wired for this modal's fields
+  if(window.google && google.maps) initAddressAutocomplete();
+
   // Populate the driver dropdown, defaulting to the creator
   const sel=document.getElementById('qa-driver');
   const mine=defaultRideDriver();
@@ -4857,7 +4903,7 @@ function openQuickAddModal(){
   renderQaAddons(); recalcQa();
   // Default date to today
   const dEl=document.getElementById('qa-date');
-  if(dEl && !dEl.value) dEl.value=new Date().toISOString().split('T')[0];
+  if(dEl && !dEl.value) dEl.value=toDateStr(new Date());
   const err=document.getElementById('qa-error'); if(err) err.textContent='';
   const qanc=document.getElementById('qa-new-client'); if(qanc) qanc.checked=false;
   populateClientDatalist();
@@ -5117,8 +5163,11 @@ function renderRides(){
 // ═══════════════════════════════════════════
 function refreshDash(){
   if(!document.getElementById('upcoming-list')) return;
-  const now=new Date(), todayStr=now.toISOString().split('T')[0];
+  const now=new Date(), todayStr=toDateStr(now);
   document.getElementById('dash-date').textContent=now.toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+
+  // Morgan dispatch counter
+  renderMorganCounter();
 
   // Income overview (only if the user has the upgrade / is admin)
   renderDashIncome();
@@ -5158,8 +5207,7 @@ function renderDashConfirmations(){
   const box = document.getElementById('dash-confirmations');
   if(!box) return;
   if(!hasIncomeAccess()){ box.innerHTML=''; return; }
-  const t = new Date(); t.setDate(t.getDate()+1);
-  const tomorrow = t.toISOString().split('T')[0];
+  const tomorrow = toDateStr(addDays(new Date(),1));
   let due = rides.filter(r=>{
     if(r.date!==tomorrow || r.confirmSent || r.status==='cancelled') return false;
     // You confirm rides YOU scheduled (matches the My Rides → To Confirm tab)
@@ -5224,7 +5272,7 @@ async function markDashFeePaid(dName, dir, cp){
 function renderDashFees(){
   const box=document.getElementById('dash-fees'); if(!box) return;
   const dName=getMyDriverName(); if(!dName&&!isAdmin()){ box.innerHTML=''; return; }
-  const today=new Date().toISOString().split('T')[0];
+  const today=toDateStr(new Date());
 
   // Compute all unpaid fees for this driver
   const owedToMe={}, iOwe={};
@@ -5283,7 +5331,7 @@ function renderDashIncome(){
   const start=new Date(now.getFullYear(),now.getMonth(),1);
   const end=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59);
   const dName=getMyDriverName();
-  const todayStr=now.toISOString().split('T')[0];
+  const todayStr=toDateStr(now);
   const inMonth=r=>{ if(!r.date) return false; const d=new Date(r.date+'T12:00:00'); return d>=start&&d<=end; };
   // Only count COMPLETED rides — those on previous days, or explicitly marked completed/paid. Exclude cancelled.
   const isCompleted=r=> r.status!=='cancelled' && ((r.status==='completed'||r.status==='paid') || (r.date && r.date < todayStr));
@@ -5814,7 +5862,7 @@ function renderDriverSettings(){
   const membersTab = document.getElementById('dtab-members');
   if(membersTab) membersTab.classList.add('active');
   const grid=document.getElementById('driver-settings-grid');
-  const todayStr=new Date().toISOString().split('T')[0];
+  const todayStr=toDateStr(new Date());
   const admin=isAdmin();
   grid.innerHTML=DRIVERS.map(d=>`
     <div class="driver-card">
@@ -6259,6 +6307,9 @@ async function setDriverColor(name, color){
 }
 
 // ── LOGIN NAME → FULL DRIVER NAME MAP ──
+// Proxy map: login → driver they dispatch for (these logins' rides count as that driver's)
+const PROXY_MAP = { 'Morgan': 'Kathleen Herringdine' };
+
 const USER_DRIVER_MAP = {
   'Kat':      'Kathleen Herringdine',
   'Michael':  'Michael Herringdine',
@@ -6367,7 +6418,7 @@ function getMyOutsideRidesAsRides(){
 
 function openOutsideRideModal(){
   if(!hasIncomeAccess()){ showToast('Income upgrade required','error'); return; }
-  const today = new Date().toISOString().split('T')[0];
+  const today = toDateStr(new Date());
   const dNameForMpg = getMyDriverName()||currentUser?.name;
   const mpgSet = parseFloat(DRIVER_PROFILES[dNameForMpg]?.mpg)||0;
   const milesHint = mpgSet
@@ -7091,6 +7142,207 @@ function renderCautiousList(){
       +'<div style="font-size:.82rem;color:#78350f;font-style:italic;">'+escHtml(e.reason)+'</div></div>'+btn+'</div>';
   }).join('');
 }
+function toggleClientSelectMode(){
+  clientSelectMode=!clientSelectMode;
+  if(!clientSelectMode) selectedClients.clear();
+  const btn=document.getElementById("client-select-btn");
+  if(btn){
+    btn.textContent=clientSelectMode?"\u2715 Cancel":"\u2611 Select";
+    btn.style.background=clientSelectMode?"#fef3c7":"";
+    btn.style.borderColor=clientSelectMode?"#d97706":"var(--light)";
+    btn.style.color=clientSelectMode?"#92400e":"";
+  }
+  updateClientDeleteBar();
+  renderClients();
+}
+function toggleClientSelect(name){
+  if(selectedClients.has(name)) selectedClients.delete(name);
+  else selectedClients.add(name);
+  updateClientDeleteBar();
+  renderClients();
+}
+function updateClientDeleteBar(){
+  const bar=document.getElementById("client-delete-bar"); if(!bar) return;
+  const n=selectedClients.size;
+  if(!clientSelectMode||n===0){ bar.style.display="none"; return; }
+  bar.style.display="flex";
+  const lbl=document.getElementById("client-delete-label");
+  if(lbl) lbl.textContent="Delete "+n+" client"+(n===1?"":"s");
+}
+async function deleteSelectedClients(){
+  const names=[...selectedClients]; if(!names.length) return;
+  const driver=clientStoreDriver()||getMyDriverName();
+  const db=buildClientDB(driver);
+  const hasRidesAny=names.some(n=>{ const c=Object.values(db).find(x=>x.name===n); return c&&c.rides.length>0; });
+  const msg="Delete "+names.length+" client"+(names.length===1?"":"s")+"?"+(hasRidesAny?"\n\nSome have ride history \u2014 contact details removed, rides remain.":"");
+  if(!confirm(msg)) return;
+  names.forEach(name=>{
+    if(importedClients[driver]){
+      const key=Object.keys(importedClients[driver]).find(k=>k.toLowerCase()===name.toLowerCase());
+      if(key) delete importedClients[driver][key];
+    }
+  });
+  await persistImportedClients();
+  selectedClients.clear(); clientSelectMode=false;
+  const btn=document.getElementById("client-select-btn");
+  if(btn){ btn.textContent="\u2611 Select"; btn.style.background=""; btn.style.borderColor="var(--light)"; btn.style.color=""; }
+  updateClientDeleteBar(); renderClients();
+  showToast(names.length+" client"+(names.length===1?" deleted":" deleted"));
+}
+
+// ── Restored missing functions ──────────────────────────────────────
+
+function closeClientModal(){
+  const m=document.getElementById('client-modal');
+  if(m) m.style.display='none';
+  const b=document.getElementById('backdrop');
+  if(b) b.style.display='none';
+}
+
+function checkClientConflict(){
+  const name=(document.getElementById('q-client')?.value||'').trim();
+  const statusEl=document.getElementById('q-client-status');
+  if(!statusEl) return;
+  if(!name){ statusEl.innerHTML=''; return; }
+  const allDB=buildClientDB(null);
+  const match=Object.values(allDB).find(function(c){ return c.name.toLowerCase()===name.toLowerCase(); });
+  const myDriver=getMyDriverName();
+  if(!match){ statusEl.innerHTML=''; return; }
+  if(match.drivers.includes(myDriver)){
+    const wDiv=document.createElement('div');
+    wDiv.style.cssText='background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:.4rem .75rem;font-size:.78rem;color:#166534;margin-top:3px;';
+    const wA=document.createElement('a'); wA.href='#'; wA.textContent='View history';
+    wA.style.cssText='color:#166534;font-weight:600;';
+    wA.onclick=function(e){ openClientModal(name,e); return false; };
+    wDiv.appendChild(document.createTextNode('\u2713 Your client \u00b7 '+match.rides.length+' previous ride'+(match.rides.length!==1?'s':'')+' \u00b7 '));
+    wDiv.appendChild(wA); statusEl.innerHTML=''; statusEl.appendChild(wDiv);
+  } else if(match.drivers.length){
+    const wDiv2=document.createElement('div');
+    wDiv2.style.cssText='background:#fff5f5;border:1px solid #fca5a5;border-radius:6px;padding:.4rem .75rem;font-size:.78rem;color:#dc2626;margin-top:3px;';
+    const dNames=match.drivers.map(function(d){return d.split(' ')[0];}).join(', ');
+    wDiv2.textContent='\u26a0 Client of '+dNames+' \u00b7 ';
+    const wA2=document.createElement('a'); wA2.href='#'; wA2.textContent='View history';
+    wA2.style.cssText='color:#dc2626;font-weight:600;';
+    wA2.onclick=function(e){ openClientModal(name,e); return false; };
+    wDiv2.appendChild(wA2); statusEl.innerHTML=''; statusEl.appendChild(wDiv2);
+  }
+}
+
+async function approveOverride(reqId){
+  const req=(clientRequests||{})[reqId]; if(!req) return;
+  req.status='approved'; req.approvedBy=currentUser?.name; req.approvedAt=new Date().toISOString();
+  await saveClientRequests();
+  addNotification(req.requestedBy?(USER_DRIVER_MAP[req.requestedBy]||req.requestedBy):req.driverName,
+    {id:reqId,client:req.client},'assigned',
+    '\u2713 Override approved \u2014 you\u2019re on for '+req.client+' on '+req.date+(req.time?' at '+req.time:''));
+  await saveNotifs();
+  renderNotifPanel(); showToast('\u2713 Override approved');
+}
+
+async function denyOverride(reqId){
+  const req=(clientRequests||{})[reqId]; if(!req) return;
+  req.status='denied'; req.deniedBy=currentUser?.name; req.deniedAt=new Date().toISOString();
+  await saveClientRequests();
+  renderNotifPanel(); showToast('Override denied');
+}
+
+async function _executeRelease(req){
+  req.status='approved'; req.approvedAt=new Date().toISOString();
+  // Move client record from fromDriver's imported list to toDriver's
+  const fromKey=Object.keys(USER_DRIVER_MAP).find(function(k){return USER_DRIVER_MAP[k]===req.fromDriver;});
+  const toKey=Object.keys(USER_DRIVER_MAP).find(function(k){return USER_DRIVER_MAP[k]===req.toDriver;});
+  const fromLogin=fromKey||req.fromDriver, toLogin=toKey||req.toDriver;
+  if(fromLogin&&toLogin&&importedClients[fromLogin]){
+    const arr=importedClients[fromLogin];
+    const idx=Array.isArray(arr)
+      ?arr.findIndex(function(c){return c.name&&c.name.toLowerCase()===(req.clientName||'').toLowerCase();})
+      :-1;
+    if(idx>=0){
+      const rec=arr.splice(idx,1)[0];
+      if(!importedClients[toLogin]) importedClients[toLogin]=[];
+      importedClients[toLogin].push(rec);
+      await persistImportedClients();
+    }
+  }
+  // Reassign future rides to the new driver
+  const today=toDateStr(new Date()); let moved=0;
+  rides.forEach(function(r){
+    if(r.client&&r.client.toLowerCase()===(req.clientName||'').toLowerCase()&&r.date>=today&&r.status!=='cancelled'){
+      r.driver=req.toDriver; moved++;
+    }
+  });
+  if(moved) await saveRides();
+  await saveClientRequests();
+  addNotification(req.toDriver,{id:req.id,client:req.clientName},'transfer_approved',
+    '\u2713 Client '+req.clientName+' has been transferred to you');
+  await saveNotifs();
+}
+
+async function approveRelease(reqId){
+  const req=(clientRequests||{})[reqId]; if(!req) return;
+  const myName=currentUser?.name; if(!myName) return;
+  if(!req.approvals) req.approvals=[];
+  if(req.approvals.includes(myName)) return;
+  req.approvals.push(myName);
+  const myDriver=USER_DRIVER_MAP[myName]||PROXY_MAP[myName];
+  const isOwner=myDriver===req.fromDriver;
+  const adminApprovals=req.approvals.filter(function(a){ const u=USERS.find(function(x){return x.name===a;}); return u&&u.role==='admin'; }).length;
+  if(isOwner||adminApprovals>=2){
+    await _executeRelease(req);
+    showToast('\u2713 Release approved \u2014 client transferred');
+  } else {
+    req.status='pending';
+    await saveClientRequests();
+    // Notify remaining admins
+    const ADMINS_LIST=['Kat','Chase','Morgan'];
+    ADMINS_LIST.forEach(function(a){
+      if(!req.approvals.includes(a)){
+        addNotification(USER_DRIVER_MAP[a]||PROXY_MAP[a]||a,{id:reqId,client:req.clientName},'admin_release',
+          'Release of '+req.clientName+' needs your approval ('+adminApprovals+'/2)');
+      }
+    });
+    await saveNotifs();
+    showToast('Approval recorded ('+adminApprovals+'/2)');
+  }
+  renderNotifPanel();
+}
+
+async function denyRelease(reqId){
+  const req=(clientRequests||{})[reqId]; if(!req) return;
+  req.status='denied'; req.deniedBy=currentUser?.name; req.deniedAt=new Date().toISOString();
+  await saveClientRequests();
+  const notifyDriver=req.submittedBy?(USER_DRIVER_MAP[req.submittedBy]||PROXY_MAP[req.submittedBy]||req.submittedBy):req.fromDriver;
+  addNotification(notifyDriver,{id:reqId,client:req.clientName},'transfer_denied',
+    'Release of '+req.clientName+' was denied by '+(currentUser?.name||'admin').split(' ')[0]);
+  await saveNotifs();
+  renderNotifPanel(); showToast('Release denied');
+}
+
+// ── Morgan's dispatch counter (only shown when Morgan is logged in) ──
+function renderMorganCounter(){
+  const box=document.getElementById('dash-morgan-counter'); if(!box) return;
+  if(!currentUser||currentUser.name!=='Morgan'){ box.innerHTML=''; return; }
+  const todayStr=toDateStr(new Date());
+  const weekStart=toDateStr(addDays(new Date(),-new Date().getDay()));
+  const monthStr=toDateStr(new Date()).slice(0,7);
+  const myRides=rides.filter(function(r){ return r.createdBy==='Morgan'&&r.status!=='cancelled'; });
+  const todayCount=myRides.filter(function(r){ return r.date===todayStr; }).length;
+  const weekCount=myRides.filter(function(r){ return r.date>=weekStart; }).length;
+  const monthCount=myRides.filter(function(r){ return r.date.startsWith(monthStr); }).length;
+  box.innerHTML='<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">Rides Created by Me</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.6rem;">'
+    +'<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.65rem;text-align:center;">'
+    +'<div style="font-size:.65rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);">Today</div>'
+    +'<div style="font-size:1.6rem;font-weight:700;color:var(--gold);">'+todayCount+'</div></div>'
+    +'<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.65rem;text-align:center;">'
+    +'<div style="font-size:.65rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);">This Week</div>'
+    +'<div style="font-size:1.6rem;font-weight:700;color:var(--gold);">'+weekCount+'</div></div>'
+    +'<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.65rem;text-align:center;">'
+    +'<div style="font-size:.65rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);">This Month</div>'
+    +'<div style="font-size:1.6rem;font-weight:700;color:var(--gold);">'+monthCount+'</div></div>'
+    +'</div>';
+}
+
 function toggleCautiousList(){
   const panel=document.getElementById('cautious-list-panel'), btn=document.getElementById('cautious-list-btn');
   if(!panel) return; const open=panel.style.display==='none'||!panel.style.display;
@@ -7799,7 +8051,11 @@ function buildClientDB(forDriver){
   const ensure=(key,name)=>{ if(!db[key]) db[key]={name,phone:'',email:'',drivers:new Set(),rides:[],lastRide:'',address:'',notes:'',paymentMethod:'',phones:[],emails:[],source:''}; return db[key]; };
   rides.forEach(r=>{
     if(!r.client) return;
-    if(forDriver && r.driver!==forDriver && USER_DRIVER_MAP[r.createdBy]!==forDriver && r.createdBy!==forDriver) return;
+    if(forDriver){
+      // Only include rides CREATED by this driver — not rides they were merely assigned to
+      const rideOwner=USER_DRIVER_MAP[r.createdBy]||PROXY_MAP[r.createdBy]||r.createdBy;
+      if(rideOwner!==forDriver) return;
+    }
     const key=r.client.trim().toLowerCase();
     const e=ensure(key, r.client.trim());
     if(r.driver) e.drivers.add(r.driver);
@@ -7811,7 +8067,21 @@ function buildClientDB(forDriver){
     e.rides.push(r);
     if(!e.lastRide || r.date>e.lastRide) e.lastRide=r.date;
   });
-  const imported = forDriver ? (importedClients[forDriver]||[]) : Object.values(importedClients).flat();
+  // Collect imported clients for this driver AND any proxy logins (e.g. Morgan stores under 'Morgan' but shows for Kat)
+  let imported;
+  if(forDriver){
+    const proxyLogins=Object.keys(PROXY_MAP).filter(k=>PROXY_MAP[k]===forDriver);
+    const directLogins=Object.keys(USER_DRIVER_MAP).filter(k=>USER_DRIVER_MAP[k]===forDriver);
+    const allKeys=[...directLogins,...proxyLogins,forDriver];
+    imported=[];
+    allKeys.forEach(k=>{
+      const d=importedClients[k];
+      if(Array.isArray(d)) imported.push(...d);
+      else if(d&&typeof d==='object') imported.push(...Object.values(d));
+    });
+  } else {
+    imported=Object.values(importedClients).flat();
+  }
   imported.forEach(c=>{
     if(!c.name) return;
     const key=c.name.trim().toLowerCase();
@@ -7835,6 +8105,11 @@ function buildClientDB(forDriver){
 
 // When a ride is created/edited, make sure the client exists in the creator's saved list,
 // and fold in any new phone/email/address the driver entered.
+async function clientStoreDriver(){
+  // Returns the login name used as the key in importedClients for the current user.
+  return currentUser ? currentUser.name : null;
+}
+
 async function upsertClientFromRide(ride){
   if(!ride || !ride.client) return;
   const driver = clientStoreDriver();
@@ -7867,7 +8142,10 @@ async function upsertClientFromRide(ride){
 }
 
 // ── Client-name autocomplete + autofill on the Quote & Add-Ride forms ──
-function clientLookupScope(){ return isAdmin()?null:getMyDriverName(); }
+function clientLookupScope(){
+  // Always scope to your own client list — proxy map handles Morgan→Kat
+  return (currentUser && PROXY_MAP[currentUser.name]) || getMyDriverName();
+}
 function populateClientDatalist(){
   let names;
   try{ names = Object.values(buildClientDB(clientLookupScope())).map(c=>c.name).sort((a,b)=>a.localeCompare(b)); }
@@ -7963,7 +8241,7 @@ let activeClientKey = null;
 
 // Client directory stat-card filters (clickable Total / Multiple drivers / This month)
 let clientStatFilter  = 'all';                                  // 'all' | 'multi' | 'month'
-let clientMonthFilter = new Date().toISOString().slice(0,7);    // 'YYYY-MM'
+let clientMonthFilter = toDateStr(new Date()).slice(0,7);    // 'YYYY-MM'
 function setClientStatFilter(f){
   // Clicking the active multi/month card again clears back to "all"
   clientStatFilter = (clientStatFilter===f && f!=='all') ? 'all' : f;
@@ -7979,10 +8257,11 @@ function renderClients(){
   const myDriver = getMyDriverName();
   document.getElementById('client-page-title').textContent = admin?'Client Directory':'My Clients';
   document.getElementById('client-page-sub').textContent   = admin?'All drivers — search before booking to check for conflicts':'Your personal client list — private to you';
+  // Client lists are private — everyone (including admins) sees only their own.
+  // Morgan is a proxy for Kat: her viewAs resolves to Kathleen Herringdine.
   const dfEl = document.getElementById('client-driver-filter');
-  dfEl.style.display = admin?'block':'none';
-  if(admin && dfEl.options.length<=1) DRIVERS.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=d.split(' ')[0];dfEl.appendChild(o);});
-  const viewAs = admin?(dfEl.value||null):myDriver;
+  if(dfEl) dfEl.style.display='none';
+  const viewAs = (currentUser && PROXY_MAP[currentUser.name]) || myDriver;
   const db = buildClientDB(viewAs);
   const q  = (document.getElementById('client-search')?.value||'').toLowerCase().trim();
   let baseClients = Object.values(db);
@@ -8029,574 +8308,61 @@ function renderClients(){
       <div style="flex:1;">Client${viewName?' · '+escHtml(viewName)+"'s directory":''}</div>
       <div style="white-space:nowrap;">Total billed</div>
     </div>`;
-  const _clt=document.getElementById('client-list'); if(_clt) _clt.innerHTML=filterBar+headerRow+clients.map(c=>{
-    const multi=admin&&c.drivers.length>1;
-    const bg=c.drivers[0]?driverColor(c.drivers[0]):'#888888';
-    const ini=c.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
-    // When filtered to one driver, label their relationship; otherwise list assigned drivers.
-    let badges='';
+  const _clt=document.getElementById('client-list'); if(_clt) _clt.innerHTML=filterBar+headerRow+clients.map(function(c){
+    var multi=admin&&c.drivers.length>1;
+    var bg=c.drivers[0]?driverColor(c.drivers[0]):'#888888';
+    var ini=c.name.split(' ').map(function(n){return n[0]||'';}).join('').slice(0,2).toUpperCase();
+    var badges='';
     if(admin && viewAs){
-      const ownsIt = c.rides.some(r=>USER_DRIVER_MAP[r.createdBy]===viewAs || r.createdBy===viewAs);
-      const drivesIt = c.drivers.includes(viewAs);
-      const roleClean = ownsIt && drivesIt ? 'Your client · you drive' : ownsIt ? 'Your client' : drivesIt ? 'Assigned to you' : '';
-      const col=driverColor(viewAs);
-      badges = roleClean?`<span style="font-size:.72rem;padding:2px 7px;border-radius:10px;background:${col}22;color:${col};border:1px solid ${col}45;">${roleClean}</span>`:'';
+      var ownsIt=c.rides.some(function(r){return USER_DRIVER_MAP[r.createdBy]===viewAs||r.createdBy===viewAs;});
+      var drivesIt=c.drivers.includes(viewAs);
+      var roleClean=ownsIt&&drivesIt?'Your client · you drive':ownsIt?'Your client':drivesIt?'Assigned to you':'';
+      var col=driverColor(viewAs);
+      badges=roleClean?'<span style="font-size:.72rem;padding:2px 7px;border-radius:10px;background:'+col+'22;color:'+col+';border:1px solid '+col+'45;">'+roleClean+'</span>':'';
     } else if(admin){
-      badges=c.drivers.map(d=>`<span style="font-size:.72rem;padding:2px 7px;border-radius:10px;background:${driverColor(d)}22;color:${driverColor(d)};border:1px solid ${driverColor(d)}55;">${d.split(' ')[0]}</span>`).join(' ');
+      badges=c.drivers.map(function(d){return '<span style="font-size:.72rem;padding:2px 7px;border-radius:10px;background:'+driverColor(d)+'22;color:'+driverColor(d)+';border:1px solid '+driverColor(d)+'55;">'+d.split(' ')[0]+'</span>';}).join(' ');
     }
-    const pmBadge=hasIncomeAccess()&&c.paymentMethod?'<span style="font-size:.68rem;padding:1px 6px;border-radius:4px;background:#f3eeff;color:#6d28d9;">'+c.paymentMethod+'</span>':'';
-    const imp=c.source==='imported'&&!c.rides.length?`<span style="font-size:.68rem;padding:1px 5px;border-radius:4px;background:#e0e7ff;color:#3730a3;">imported</span>`:'';
-    const total=c.rides.reduce((s,r)=>s+(parseFloat(r.price)||0),0);
-    return `<div onclick="openClientModal('${c.name.replace(/'/g,"\'")}',event)" style="display:flex;align-items:center;gap:.85rem;padding:.75rem 1rem;border-radius:10px;margin-bottom:.4rem;border:1.5px solid ${multi?'#fca5a5':'var(--light)'};background:${multi?'#fff5f5':'var(--white)'};cursor:pointer;" onmouseover="this.style.background='var(--gold-pale)'" onmouseout="this.style.background='${multi?'#fff5f5':'var(--white)'}'">
-      <div style="width:36px;height:36px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:.82rem;flex-shrink:0;">${ini}</div>
-      <div style="flex:1;min-width:0;">
-        <div style="font-weight:600;font-size:.92rem;color:var(--black);">${c.name}${multi?' <span style="font-size:.68rem;color:#dc2626;font-weight:700;">⚠ MULTIPLE DRIVERS</span>':''} ${imp}</div>
-        <div style="font-size:.78rem;color:var(--mid);">${c.phone||'No phone'} · ${c.rides.length} ride${c.rides.length!==1?'s':''}</div>
-        ${(badges||pmBadge)?('<div style="margin-top:3px;">'+pmBadge+badges+'</div>'):''}
-      </div>
-      <div style="text-align:right;white-space:nowrap;">
-        <div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:.5px;">Total billed</div>
-        <div style="font-size:.85rem;color:var(--green);font-weight:600;">${c.rides.length?'$'+total.toFixed(0):'—'}</div>
-      </div>
-    </div>`;
+    var pmBadge=hasIncomeAccess()&&c.paymentMethod?'<span style="font-size:.68rem;padding:1px 6px;border-radius:4px;background:#f3eeff;color:#6d28d9;">'+c.paymentMethod+'</span>':'';
+    var imp=c.source==='imported'&&!c.rides.length?'<span style="font-size:.68rem;padding:1px 5px;border-radius:4px;background:#e0e7ff;color:#3730a3;">imported</span>':'';
+    var total=c.rides.reduce(function(s,r){return s+(parseFloat(r.price)||0);},0);
+    var sel=clientSelectMode, chk=selectedClients.has(c.name);
+    var cbg=chk?'var(--gold-pale)':multi?'#fff5f5':'var(--white)';
+    var cbr=chk?'var(--gold)':multi?'#fca5a5':'var(--light)';
+    var safeName=escAttr(c.name);
+    var clickFn=sel?'toggleClientSelect(&quot;'+c.name.replace(/"/g,'&quot;')+'&quot;)':'openClientModal(&quot;'+c.name.replace(/"/g,'&quot;')+'&quot;,event)';
+    var checkbox=sel
+      ?('<input type="checkbox"'+(chk?' checked':'')
+        +' data-cname="'+safeName+'"'
+        +' onclick="event.stopPropagation()"'
+        +' onchange="toggleClientSelect(this.dataset.cname)"'
+        +' style="width:18px;height:18px;accent-color:var(--gold);cursor:pointer;flex-shrink:0;" />')
+      :'';
+    return '<div data-cname="'+safeName+'" onclick="'+clickFn+'" style="display:flex;align-items:center;gap:.85rem;padding:.75rem 1rem;border-radius:10px;margin-bottom:.4rem;border:1.5px solid '+cbr+';background:'+cbg+';cursor:pointer;">'
+      +checkbox
+      +'<div style="width:36px;height:36px;border-radius:50%;background:'+bg+';display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:.82rem;flex-shrink:0;">'+ini+'</div>'
+      +'<div style="flex:1;min-width:0;">'
+      +'<div style="font-weight:600;font-size:.92rem;color:var(--black);">'+escHtml(c.name)+(multi?' <span style="font-size:.68rem;color:#dc2626;font-weight:700;">⚠ MULTIPLE DRIVERS</span>':'')+' '+imp+'</div>'
+      +'<div style="font-size:.78rem;color:var(--mid);">'+(c.phone||'No phone')+' · '+c.rides.length+' ride'+(c.rides.length!==1?'s':'')+'</div>'
+      +(viewAs==='Kathleen Herringdine'?(function(){
+          var mCnt=c.rides.filter(function(r){return r.createdBy==='Morgan';}).length;
+          var kCnt=c.rides.length-mCnt;
+          if(!mCnt&&!kCnt) return '';
+          var chips='';
+          var KC='<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#9c27b0;color:#fff;font-size:.55rem;font-weight:700;flex-shrink:0;">KH</span>';
+          var MC='<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#5c6bc0;color:#fff;font-size:.55rem;font-weight:700;flex-shrink:0;">MN</span>';
+          if(kCnt>0) chips+=KC+'<span style="font-size:.65rem;color:var(--mid);margin-left:2px;margin-right:5px;">'+kCnt+'</span>';
+          if(mCnt>0) chips+=MC+'<span style="font-size:.65rem;color:var(--mid);margin-left:2px;">'+mCnt+'</span>';
+          return '<div style="display:flex;align-items:center;gap:2px;margin-top:3px;">'+chips+'</div>';
+        }()):'')   
+      +((badges||pmBadge)?('<div style="margin-top:3px;">'+pmBadge+badges+'</div>'):'')
+      +'</div>'
+      +'<div style="text-align:right;white-space:nowrap;">'
+      +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:.5px;">Total billed</div>'
+      +'<div style="font-size:.85rem;color:var(--green);font-weight:600;">'+(c.rides.length?'$'+total.toFixed(0):'—')+'</div>'
+      +'</div></div>';
   }).join('');
 }
 
-function openRideFromClient(clientName){
-  closeClientModal();
-  setTimeout(()=>{
-    if(typeof openQuickAddModal==='function') openQuickAddModal();
-    setTimeout(()=>{
-      const el=document.getElementById('qa-client');
-      if(el){ el.value=clientName; maybeAutofillClient('qa'); }
-      const errEl=document.getElementById('qa-error'); if(errEl) errEl.textContent='';
-    },60);
-  },120);
-}
-
-function openClientModal(clientName,e){
-  e?.stopPropagation();
-  const admin=isAdmin();
-  const db=buildClientDB(admin?null:getMyDriverName());
-  const c=db[clientName.toLowerCase()]; if(!c) return;
-  activeClientKey=clientName;
-  document.getElementById('client-modal-name').textContent=c.name;
-  updateTransferBtn(c);
-  const sorted=[...c.rides].sort((a,b)=>b.date.localeCompare(a.date));
-  const total=c.rides.reduce((s,r)=>s+(parseFloat(r.price)||0),0);
-  const hasUpgrade = hasIncomeAccess();
-  const pmOptions = ['Cash','Venmo','Zelle','CashApp','Card','Check','Other'];
-  const safeName = c.name.replace(/'/g,"\\'");
-  document.getElementById('client-modal-body').innerHTML = buildClientModalHTML(c, sorted, total, hasUpgrade, pmOptions, safeName, admin);
-    document.getElementById('client-modal').classList.add('show');
-}
-
-
-function buildClientModalHTML(cl, sorted, total, hasUpgrade, pmOptions, safeName, admin){
-  const addRideBtn = '<div style="margin-bottom:.85rem;">'
-    +'<button onclick="openRideFromClient(\''+safeName+'\')" '
-    +'style="width:100%;padding:.6rem;background:var(--gold);color:#fff;border:none;border-radius:10px;'
-    +'font-family:\'DM Sans\',sans-serif;font-size:.9rem;font-weight:700;cursor:pointer;">'
-    +'\u2795 Add Ride for This Client</button>'
-    +'</div>';
-  const pmSelect = hasUpgrade
-    ? '<div style="background:var(--surface);border-radius:8px;padding:.75rem;margin-bottom:.75rem;">'
-      + '<div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Premium fields</div>'
-      + '<div style="margin-bottom:.5rem;">'
-      + '<div style="font-size:.78rem;color:var(--mid);margin-bottom:3px;">Preferred payment</div>'
-      + '<select id="client-payment-method" onchange="saveClientPremiumFields(\''+safeName+'\')" style="width:100%;padding:.35rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;">'
-      + '<option value="">Not set</option>'
-      + pmOptions.map(function(o){ return '<option value="'+o+'"'+(cl.paymentMethod===o?' selected':'')+'>'+o+'</option>'; }).join('')
-      + '</select></div>'
-      + '<div><div style="font-size:.78rem;color:var(--mid);margin-bottom:3px;">Notes</div>'
-      + '<textarea id="client-notes-field" rows="2" onblur="saveClientPremiumFields(\''+safeName+'\')" placeholder="Preferences, special instructions..." style="width:100%;padding:.35rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;resize:vertical;">'+(cl.notes||'')+'</textarea>'
-      + '</div></div>'
-    : '<div style="background:var(--surface);border-radius:8px;padding:.65rem .85rem;margin-bottom:.75rem;display:flex;align-items:center;justify-content:space-between;gap:.75rem;">'
-      + '<div style="font-size:.78rem;color:var(--mid);">Upgrade to add payment method & notes</div>'
-      + '<button onclick="showIncomeOrUpgrade()" style="font-size:.72rem;padding:.25rem .65rem;background:var(--gold);color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">$15/mo</button>'
-      + '</div>';
-
-  let rideHistory = '';
-  if(sorted.length){
-    rideHistory = '<div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Ride history</div>';
-    sorted.slice(0,8).forEach(function(r){
-      const rc = rideColor(r);
-      rideHistory += '<div onclick="openRideModal('+r.id+');closeClientModal();" style="display:flex;align-items:center;gap:.6rem;padding:.5rem .75rem;border-radius:8px;border-left:4px solid '+rc+';background:'+rc+'10;margin-bottom:.35rem;cursor:pointer;">'
-        +'<div style="min-width:70px;font-size:.8rem;font-weight:500;color:'+rc+';">'+fmtDateShort(r.date)+'</div>'
-        +'<div style="flex:1;font-size:.82rem;">'+r.type+' \xb7 '+(r.driver?r.driver.split(' ')[0]:'Unassigned')+'</div>'
-        +'<div style="font-size:.82rem;font-weight:600;color:var(--green);">$'+r.price+'</div></div>';
-    });
-    if(sorted.length>8) rideHistory += '<div style="text-align:center;font-size:.78rem;color:var(--mid);">+' + (sorted.length-8) + ' more</div>';
-  } else {
-    rideHistory = '<div style="color:var(--mid);font-size:.85rem;">No rides yet.</div>';
-  }
-
-  const hasRides = sorted.length>0;
-  const nameLocked = hasRides; // name is tied to ride records when rides exist
-  const editSection =
-      '<div style="background:var(--surface);border-radius:8px;padding:.75rem;margin-bottom:.75rem;">'
-    + '<div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Contact details</div>'
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;">'
-    + '<div style="grid-column:1/-1;"><div style="font-size:.72rem;color:var(--mid);margin-bottom:2px;">Name'+(nameLocked?' (from ride history — locked)':'')+'</div>'
-    +   '<input type="text" id="client-edit-name" value="'+escAttr(cl.name)+'"'+(nameLocked?' disabled':'')+' style="width:100%;padding:.35rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;'+(nameLocked?'background:#f1ecf9;color:var(--mid);':'')+'box-sizing:border-box;" /></div>'
-    + '<div style="grid-column:1/-1;">'+contactRowsHTML(cl.phones, cl.emails)+'</div>'
-    + '<div style="grid-column:1/-1;"><div style="font-size:.72rem;color:var(--mid);margin-bottom:2px;">Address</div>'
-    +   '<input type="text" id="client-edit-address" value="'+escAttr(cl.address||'')+'" style="width:100%;padding:.35rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;box-sizing:border-box;" /></div>'
-    + '</div>'
-    + '<div style="display:flex;gap:.5rem;margin-top:.6rem;">'
-    +   '<button onclick="saveClientDetails(\''+safeName+'\','+(nameLocked?'true':'false')+')" style="flex:1;padding:.45rem;background:var(--gold);color:#fff;border:none;border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">Save details</button>'
-    +   '<button onclick="deleteClientManual(\''+safeName+'\','+(hasRides?'true':'false')+')" style="padding:.45rem .8rem;background:none;color:var(--red);border:1.5px solid var(--red);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">Delete</button>'
-    + '</div></div>';
-
-  // Admin-only: directly move this client (and all their rides) to the correct driver
-  const currentDriverLabel = cl.drivers.length ? cl.drivers.map(d=>d.split(' ')[0]).join(', ') : 'Unassigned';
-  const reassignBlock = admin
-    ? '<div style="background:#fff8f0;border:1px solid #f3d9b8;border-radius:8px;padding:.75rem;margin-bottom:.75rem;">'
-      + '<div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#b5651d;margin-bottom:.35rem;">Assigned driver · currently ' + escAttr(currentDriverLabel) + '</div>'
-      + '<div style="font-size:.74rem;color:var(--mid);margin-bottom:.45rem;">Attached to the wrong driver from an import? Pick the correct one — this moves all of this client\u2019s rides.</div>'
-      + '<select onchange="if(this.value)reassignClientDriver(\''+safeName+'\', this.value)" style="width:100%;padding:.4rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;">'
-      + '<option value="">— Reassign to driver —</option>'
-      + DRIVERS.map(function(d){ return '<option value="'+escAttr(d)+'"'+(cl.drivers.length===1&&cl.drivers[0]===d?' selected':'')+'>'+escAttr(d)+'</option>'; }).join('')
-      + '</select></div>'
-    : '';
-
-  // Owner driver (non-admin): release this client to another driver without approval.
-  const _myDriver = getMyDriverName();
-  const isMyClient = !admin && _myDriver && cl.drivers.includes(_myDriver);
-  const releaseBlock = isMyClient
-    ? '<div style="background:#eef6ff;border:1px solid #b8d4f3;border-radius:8px;padding:.75rem;margin-bottom:.75rem;">'
-      + '<div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#1e4f87;margin-bottom:.35rem;">Release to another driver</div>'
-      + '<div style="font-size:.74rem;color:var(--mid);margin-bottom:.45rem;">Hand this client off — no admin approval needed. Their card and upcoming rides move over; your past rides stay yours.</div>'
-      + '<select onchange="if(this.value)releaseClientToDriver(\''+safeName+'\', this.value)" style="width:100%;padding:.4rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;">'
-      + '<option value="">— Release to driver —</option>'
-      + DRIVERS.filter(function(d){ return d!==_myDriver; }).map(function(d){ return '<option value="'+escAttr(d)+'">'+escAttr(d)+'</option>'; }).join('')
-      + '</select></div>'
-    : '';
-  const phoneArr=(cl.phones||[]), emailArr=(cl.emails||[]);
-  let phoneUI='';
-  if(phoneArr.length===1){
-    const p=phoneArr[0];
-    phoneUI='<a href="tel:'+escAttr(_phoneDigits(p.number))+'" style="padding:.4rem .85rem;background:var(--surface);border-radius:7px;font-size:.85rem;color:var(--black);text-decoration:none;border:1px solid var(--light);">📞 '+(p.label?escAttr(p.label)+': ':'')+escAttr(p.number)+'</a>';
-  } else if(phoneArr.length>1){
-    phoneUI='<div style="display:flex;gap:.3rem;align-items:center;">'
-      +'<select id="cc-phone-view" style="padding:.4rem .6rem;border:1px solid var(--light);border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;background:var(--surface);max-width:200px;">'
-      + phoneArr.map(function(p){ return '<option value="'+escAttr(p.number)+'">'+(p.label?escAttr(p.label)+': ':'')+escAttr(p.number)+'</option>'; }).join('')
-      +'</select>'
-      +'<button onclick="ccCallSelected()" title="Call selected" style="padding:.4rem .7rem;background:var(--gold);color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:.82rem;">📞</button></div>';
-  }
-  let emailUI='';
-  if(emailArr.length===1){
-    emailUI='<a href="mailto:'+escAttr(emailArr[0])+'" style="padding:.4rem .85rem;background:var(--surface);border-radius:7px;font-size:.85rem;color:var(--black);text-decoration:none;border:1px solid var(--light);">✉ '+escAttr(emailArr[0])+'</a>';
-  } else if(emailArr.length>1){
-    emailUI='<div style="display:flex;gap:.3rem;align-items:center;">'
-      +'<select id="cc-email-view" style="padding:.4rem .6rem;border:1px solid var(--light);border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;background:var(--surface);max-width:200px;">'
-      + emailArr.map(function(e){ return '<option value="'+escAttr(e)+'">'+escAttr(e)+'</option>'; }).join('')
-      +'</select>'
-      +'<button onclick="ccEmailSelected()" title="Email selected" style="padding:.4rem .7rem;background:var(--gold);color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:.82rem;">✉</button></div>';
-  }
-  return '<div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem;">'
-    + phoneUI + emailUI
-    + '<div style="padding:.4rem .85rem;background:var(--surface);border-radius:7px;font-size:.85rem;border:1px solid var(--light);">'+cl.rides.length+' rides</div>'
-    + (total?'<div style="padding:.4rem .85rem;background:var(--surface);border-radius:7px;font-size:.85rem;color:var(--green);font-weight:600;border:1px solid var(--light);">$'+total.toFixed(2)+' total</div>':'')
-    + '</div>'
-    + reassignBlock
-    + releaseBlock
-    + editSection
-    + addRideBtn
-    + buildCautionBtnHTML(cl, safeName)
-    + pmSelect
-    + (admin&&cl.drivers.length>1?'<div style="margin-bottom:.75rem;padding:.4rem .75rem;background:#fff5f5;border-radius:6px;font-size:.78rem;color:#dc2626;">Shared by: '+cl.drivers.join(', ')+'</div>':'')
-    + rideHistory;
-}
-
-async function saveClientPremiumFields(clientName){
-  const pm    = document.getElementById('client-payment-method')?.value || '';
-  const notes = document.getElementById('client-notes-field')?.value || '';
-  const myDriver = getMyDriverName() || currentUser?.name;
-  if(!myDriver) return;
-  if(!importedClients[myDriver]) importedClients[myDriver] = [];
-  const key = clientName.toLowerCase();
-  const existing = importedClients[myDriver].find(function(cl){ return cl.name.toLowerCase()===key; });
-  if(existing){
-    existing.paymentMethod = pm;
-    existing.notes = notes;
-  } else {
-    const db = buildClientDB(myDriver);
-    const cl = db[key];
-    if(cl) importedClients[myDriver].push({name:cl.name, phone:cl.phone||'', address:cl.address||'', email:cl.email||'', paymentMethod:pm, notes:notes, source:'client'});
-  }
-  await saveImportedClients();
-}
-
-
-function escAttr(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
-
-// Open the client modal in "add new client" mode
-function openAddClientModal(){
-  activeClientKey = null;
-  document.getElementById('client-modal-name').textContent = 'Add Client';
-  const tb = document.getElementById('client-transfer-btn'); if(tb) tb.style.display='none';
-  const pmOptions = ['Cash','Venmo','Zelle','CashApp','Card','Check','Other'];
-  const hasUpgrade = hasIncomeAccess();
-  const pm = hasUpgrade
-    ? '<div style="margin-bottom:.5rem;"><div style="font-size:.72rem;color:var(--mid);margin-bottom:2px;">Preferred payment</div>'
-      + '<select id="newclient-pm" style="width:100%;padding:.35rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;"><option value="">Not set</option>'
-      + pmOptions.map(o=>'<option value="'+o+'">'+o+'</option>').join('') + '</select></div>'
-      + '<div><div style="font-size:.72rem;color:var(--mid);margin-bottom:2px;">Notes</div><textarea id="newclient-notes" rows="2" style="width:100%;padding:.35rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;box-sizing:border-box;resize:vertical;"></textarea></div>'
-    : '';
-  document.getElementById('client-modal-body').innerHTML =
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.75rem;">'
-    + '<div style="grid-column:1/-1;"><div style="font-size:.72rem;color:var(--mid);margin-bottom:2px;">Name *</div><input type="text" id="newclient-name" placeholder="Full name" style="width:100%;padding:.4rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;" /></div>'
-    + '<div style="grid-column:1/-1;">'+contactRowsHTML([],[])+'</div>'
-    + '<div style="grid-column:1/-1;"><div style="font-size:.72rem;color:var(--mid);margin-bottom:2px;">Address</div><input type="text" id="newclient-address" style="width:100%;padding:.4rem .6rem;border:1px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;" /></div>'
-    + '</div>'
-    + pm
-    + '<button onclick="saveNewClient()" style="width:100%;margin-top:.75rem;padding:.6rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">Save client</button>';
-  document.getElementById('client-modal').classList.add('show');
-}
-
-function clientStoreDriver(){ return getMyDriverName() || currentUser?.name; }
-
-async function saveNewClient(){
-  const name = (document.getElementById('newclient-name')?.value||'').trim();
-  if(!name){ showToast('Enter a client name','error'); return; }
-  const myDriver = clientStoreDriver();
-  if(!myDriver){ showToast('Could not determine your account','error'); return; }
-  if(!importedClients[myDriver]) importedClients[myDriver]=[];
-  const key = name.toLowerCase();
-  if(importedClients[myDriver].some(c=>c.name.toLowerCase()===key)){ showToast('You already have a client by that name','error'); return; }
-  const phones = ccGatherPhones();
-  const emails = ccGatherEmails();
-  importedClients[myDriver].push({
-    name,
-    phones, emails,
-    phone:  phones[0] ? phones[0].number : '',
-    email:  emails[0] || '',
-    address:(document.getElementById('newclient-address')?.value||'').trim(),
-    paymentMethod: document.getElementById('newclient-pm')?.value || '',
-    notes:  document.getElementById('newclient-notes')?.value || '',
-    source:'client'
-  });
-  await saveImportedClients();
-  closeClientModal();
-  renderClients();
-  showToast('Client added ✓');
-}
-
-async function saveClientDetails(origName, nameLocked){
-  const myDriver = clientStoreDriver();
-  if(!myDriver){ showToast('Could not determine your account','error'); return; }
-  if(!importedClients[myDriver]) importedClients[myDriver]=[];
-  const newName = nameLocked ? origName : ((document.getElementById('client-edit-name')?.value||'').trim() || origName);
-  const phones  = ccGatherPhones();
-  const emails  = ccGatherEmails();
-  const address = (document.getElementById('client-edit-address')?.value||'').trim();
-  const key = origName.toLowerCase();
-  let rec = importedClients[myDriver].find(c=>c.name.toLowerCase()===key);
-  if(!rec){
-    // No manual override yet — seed one from the current derived values, then apply edits
-    const db = buildClientDB(myDriver); const cur = db[key] || {};
-    rec = {name:newName, phones:[], emails:[], phone:'', email:'', address:'', paymentMethod:cur.paymentMethod||'', notes:cur.notes||'', source:'client'};
-    importedClients[myDriver].push(rec);
-  }
-  rec.name = newName;
-  rec.phones = phones;
-  rec.emails = emails;
-  rec.phone = phones[0] ? phones[0].number : '';   // primary mirror for back-compat
-  rec.email = emails[0] || '';
-  rec.address = address;
-  await saveImportedClients();
-  renderClients();
-  openClientModal(newName); // reopen with fresh values
-  showToast('Client updated ✓');
-}
-
-async function deleteClientManual(name, hasRides){
-  if(!confirm('Delete '+name+' from your client list?'+(hasRides?'\n\nThis client has ride history, so they will still appear from those rides. Only your saved contact details/notes will be removed.':''))) return;
-  const myDriver = clientStoreDriver();
-  if(myDriver && importedClients[myDriver]){
-    const key = name.toLowerCase();
-    importedClients[myDriver] = importedClients[myDriver].filter(c=>c.name.toLowerCase()!==key);
-    await saveImportedClients();
-  }
-  closeClientModal();
-  renderClients();
-  showToast(hasRides?'Saved details removed':'Client deleted');
-}
-
-// Admin: directly reassign a client (and ALL their rides + ownership) to the correct driver.
-// Fixes clients accidentally attached to the wrong driver during a calendar import.
-async function reassignClientDriver(clientName, newDriver){
-  if(!isAdmin()){ showToast('Only an admin can reassign clients','error'); return; }
-  if(!newDriver) return;
-  const key = clientName.toLowerCase();
-  // Reverse-map the full driver name → login, so ownership (createdBy) follows too
-  let newLogin = null;
-  for(const lg in USER_DRIVER_MAP){ if(USER_DRIVER_MAP[lg]===newDriver){ newLogin = lg; break; } }
-  if(!confirm('Reassign all of '+clientName+'\u2019s rides to '+newDriver.split(' ')[0]+'?')) return;
-  let count = 0;
-  rides.forEach(r=>{
-    if(r.client && r.client.toLowerCase()===key){
-      r.driver = newDriver;
-      if(newLogin) r.createdBy = newLogin;
-      count++;
-    }
-  });
-  // Move the saved client card to the new driver
-  Object.keys(importedClients).forEach(fd=>{
-    if(fd===newDriver) return;
-    const arr = importedClients[fd]||[];
-    const idx = arr.findIndex(c=>c.name.toLowerCase()===key);
-    if(idx!==-1){
-      const rec = arr.splice(idx,1)[0];
-      if(!importedClients[newDriver]) importedClients[newDriver]=[];
-      if(!importedClients[newDriver].some(c=>c.name.toLowerCase()===key)) importedClients[newDriver].push(rec);
-    }
-  });
-  await Promise.all([saveRides(), saveImportedClients()]);
-  renderClients();
-  if(typeof refreshDash==='function') refreshDash();
-  if(typeof renderCal==='function') renderCal();
-  openClientModal(clientName);
-  showToast('Reassigned '+count+' ride'+(count!==1?'s':'')+' to '+newDriver.split(' ')[0]+' ✓');
-}
-
-function closeClientModal(){ document.getElementById('client-modal').classList.remove('show'); activeClientKey=null; }
-
-// A driver may hand off (release) their OWN client to another driver with no approval.
-// Admins can also do it (fallback when the original driver is unavailable).
-// Moves the client card + FUTURE rides to the new driver; PAST rides stay for income history.
-async function releaseClientToDriver(clientName, newDriver){
-  if(!newDriver) return;
-  const key = clientName.toLowerCase();
-  const c = buildClientDB(null)[key];
-  const myDriver = getMyDriverName();
-  const isOwner = !!(c && myDriver && c.drivers.includes(myDriver));
-  if(!isAdmin() && !isOwner){ showToast('Only this client\u2019s current driver or an admin can release them','error'); return; }
-  if(newDriver===myDriver){ showToast('That\u2019s already your client','error'); return; }
-  if(!confirm('Submit release request: '+clientName+' to '+newDriver.split(' ')[0]+'?\n\nThis requires 2 admin approvals before the release takes effect.')) return;
-  const reqId='rel_'+Date.now();
-  const submitter=currentUser?.name||myDriver||'Unknown';
-  const req={id:reqId,type:'admin_release',clientName,fromDriver:myDriver||submitter,
-    toDriver:newDriver,submittedBy:submitter,approvals:[],status:'pending',ts:new Date().toISOString()};
-  if(!clientRequests) clientRequests={};
-  clientRequests[reqId]=req;
-  await saveClientRequests();
-  ['Kat','Chase','Morgan'].forEach(a=>{
-    addNotification(a,{id:reqId,client:clientName},'transfer_request',
-      '[Release request] '+clientName+' \u2192 '+newDriver.split(' ')[0]+
-      ' | By '+submitter.split(' ')[0]+' | Owner approval alone executes, OR 2 admins needed.');
-  });
-  const currentOwner=(c&&c.drivers&&c.drivers.length)?c.drivers.find(d=>d!==newDriver):null;
-  if(currentOwner && !['Kat','Chase','Morgan'].some(a=>a===currentOwner)){
-    addNotification(currentOwner,{id:reqId,client:clientName},'transfer_request',
-      '[Release request] '+clientName+' \u2192 '+newDriver.split(' ')[0]+
-      ' | Your approval ALONE is enough to execute this. Tap the bell to approve or deny.');
-  }
-  await saveNotifs(); updateNotifBadge();
-  closeClientModal();
-  showToast('Release request submitted \u2014 awaiting 2 admin approvals');
-}
-
-async function _executeRelease(req){
-  const key=req.clientName.toLowerCase();
-  const c=buildClientDB(null)[key];
-  let newLogin=null;
-  for(const lg in USER_DRIVER_MAP){ if(USER_DRIVER_MAP[lg]===req.toDriver){ newLogin=lg; break; } }
-  const today=new Date().toISOString().split('T')[0]; let moved=0;
-  rides.forEach(r=>{
-    if(r.client&&r.client.toLowerCase()===key&&r.date>=today){
-      r.driver=req.toDriver; if(newLogin) r.createdBy=newLogin; moved++;
-    }
-  });
-  const fullRec={
-    name:c?c.name:req.clientName.trim(),
-    phones:(c&&c.phones&&c.phones.length)?c.phones.map(p=>({label:p.label||'',number:p.number})):[],
-    emails:(c&&c.emails)?c.emails.slice():[],
-    address:c?(c.address||''):'',notes:c?(c.notes||''):'',
-    paymentMethod:c?(c.paymentMethod||''):'',source:'client'
-  };
-  fullRec.phone=fullRec.phones[0]?fullRec.phones[0].number:'';
-  fullRec.email=fullRec.emails[0]||'';
-  Object.keys(importedClients).forEach(fd=>{
-    const arr=importedClients[fd]||[];
-    const idx=arr.findIndex(x=>x.name&&x.name.toLowerCase()===key);
-    if(idx!==-1) arr.splice(idx,1);
-  });
-  if(!importedClients[req.toDriver]) importedClients[req.toDriver]=[];
-  importedClients[req.toDriver].push(fullRec);
-  await Promise.all([saveRides(),saveImportedClients(),saveClientRequests()]);
-  addNotification(req.toDriver,{id:req.id,client:req.clientName},'transfer_approved',
-    req.clientName+' released to you'+(moved?' \u00b7 '+moved+' upcoming ride'+(moved!==1?'s':''):'')+
-    '. Approved by '+req.approvals.join(' & ')+'.');
-  await saveNotifs(); updateNotifBadge();
-  renderClients(); refreshDash(); renderCal();
-}
-
-async function approveOverride(reqId){
-  const req=clientRequests[reqId];
-  if(!req||req.type!=='avail_override'){showToast('Not found','error');return;}
-  req.status='approved'; req.approvedAt=new Date().toISOString();
-  await saveClientRequests();
-  addNotification(req.requestedBy,{id:reqId,client:req.client},'transfer_approved',
-    getMyDriverName()?.split(' ')[0]+' approved the override for '+req.client+' on '+req.date+(req.time?' at '+req.time:'')+'. Ride is confirmed.');
-  await saveNotifs(); updateNotifBadge();
-  showToast('\u2713 Override approved \u2014 the assigner has been notified');
-  renderNotifPanel();
-}
-async function denyOverride(reqId){
-  const req=clientRequests[reqId];
-  if(!req||req.type!=='avail_override'){showToast('Not found','error');return;}
-  req.status='denied'; req.deniedAt=new Date().toISOString();
-  await saveClientRequests();
-  addNotification(req.requestedBy,{id:reqId,client:req.client},'transfer_denied',
-    getMyDriverName()?.split(' ')[0]+' cannot do the override for '+req.client+' on '+req.date+(req.time?' at '+req.time:'')+'. Please reassign.');
-  await saveNotifs(); updateNotifBadge();
-  showToast('Override declined \u2014 the assigner has been notified');
-  renderNotifPanel();
-}
-
-async function denyRelease(reqId){
-  const req=clientRequests[reqId];
-  if(!req||req.type!=='admin_release'){showToast('Request not found','error');return;}
-  if(req.status!=='pending'){showToast('Already resolved','error');return;}
-  const myDriverName=getMyDriverName();
-  const isOwner=!!(myDriverName&&myDriverName===req.fromDriver);
-  if(!isAdmin()&&!isOwner){showToast('Only the original driver or an admin can deny this','error');return;}
-  req.status='denied'; req.deniedBy=currentUser?.name; req.deniedAt=new Date().toISOString();
-  await saveClientRequests();
-  addNotification(req.submittedBy||req.fromDriver,{id:reqId,client:req.clientName},'transfer_denied',
-    '[Release denied] '+req.clientName+' \u2192 '+req.toDriver.split(' ')[0]+
-    ' was denied by '+(currentUser?.name||'?').split(' ')[0]+'.');
-  await saveNotifs(); updateNotifBadge();
-  showToast('Release denied \u2014 '+req.clientName+' stays with the original driver');
-  renderNotifPanel();
-}
-
-async function approveRelease(reqId){
-  const req=clientRequests[reqId];
-  if(!req||req.type!=='admin_release'){showToast('Request not found','error');return;}
-  if(req.status!=='pending'){showToast('Already resolved','error');return;}
-  const myName=currentUser?.name;
-  if(!myName){showToast('Not logged in','error');return;}
-  if(!req.approvals) req.approvals=[];
-  if(req.approvals.includes(myName)){showToast('You already approved this','error');return;}
-  const myDriverName=getMyDriverName();
-  const isOwner=!!(myDriverName && myDriverName===req.fromDriver);
-  const canApprove=isAdmin()||isOwner;
-  if(!canApprove){showToast('Only the original driver or an admin can approve','error');return;}
-  req.approvals.push(myName);
-  // Original driver approval alone = execute; admins need 2
-  const adminCount=req.approvals.filter(a=>{
-    const u=USERS.find(x=>x.name===a);
-    return u&&u.role==='admin';
-  }).length;
-  const approved=isOwner||(adminCount>=2);
-  if(approved){
-    req.status='approved'; req.approvedAt=new Date().toISOString();
-    await _executeRelease(req);
-    showToast('\u2713 Release approved \u2014 '+req.clientName+' moved to '+req.toDriver.split(' ')[0]);
-  } else {
-    await saveClientRequests();
-    ['Kat','Chase','Morgan'].filter(a=>!req.approvals.includes(a)).forEach(a=>{
-      addNotification(a,{id:reqId,client:req.clientName},'transfer_request',
-        '[Release 1/2] '+req.clientName+' \u2192 '+req.toDriver.split(' ')[0]+
-        ' | Approved by '+myName.split(' ')[0]+' (1/2) | 1 more admin needed, OR original driver can still approve alone.');
-    });
-    await saveNotifs(); updateNotifBadge();
-    showToast('1/2 admin approvals \u2014 1 more needed');
-  }
-  renderNotifPanel();
-}
-
-
-
-function checkClientConflict(){
-  const name=document.getElementById('q-client')?.value?.trim();
-  const phone=(document.getElementById('q-phone')?.value||'').replace(/\D/g,'');
-  const warningEl=document.getElementById('client-conflict-warning');
-  if(!warningEl) return;
-  if((!name||name.length<3)&&phone.length<10){warningEl.innerHTML='';return;}
-  const db=buildClientDB(null);
-  const matches=Object.values(db).filter(c=>{
-    const nameMatch=name&&name.length>=3&&c.name.toLowerCase().includes(name.toLowerCase());
-    const phoneMatch=phone.length>=10&&c.phone&&c.phone.replace(/\D/g,'')===phone;
-    if(name&&name.length>=3&&phone.length>=10) return nameMatch&&phoneMatch;
-    if(phone.length>=10) return phoneMatch;
-    return nameMatch;
-  });
-  if(!matches.length){warningEl.innerHTML='';return;}
-  const match=matches[0];
-  const myDriver=getMyDriverName();
-  const isMyClient=myDriver&&match.drivers.includes(myDriver);
-  if(isMyClient){
-    warningEl.innerHTML=`<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:.4rem .75rem;font-size:.78rem;color:#166534;margin-top:3px;">✓ Your client · ${match.rides.length} previous rides · <a href="#" onclick="openClientModal('${match.name.replace(/'/g,"\'")}',event);return false;" style="color:#166534;font-weight:600;">View history</a></div>`;
-  } else if(match.drivers.length){
-    warningEl.innerHTML=`<div style="background:#fff5f5;border:1px solid #fca5a5;border-radius:6px;padding:.4rem .75rem;font-size:.78rem;color:#dc2626;margin-top:3px;">⚠ Client of <strong>${match.drivers.map(d=>d.split(' ')[0]).join(', ')}</strong> · <a href="#" onclick="openClientModal('${match.name.replace(/'/g,"\'")}',event);return false;" style="color:#dc2626;font-weight:600;">View details</a></div>`;
-  } else { warningEl.innerHTML=''; }
-}
-
-function importClientsFromFile(input){
-  const file=input.files[0]; if(!file) return;
-  const statusEl=document.getElementById('client-import-status');
-  statusEl.innerHTML=`<div style="color:var(--mid);font-size:.82rem;">Reading file…</div>`;
-  const reader=new FileReader();
-  reader.onload=async(e)=>{
-    try{
-      let rows=[];
-      if(file.name.endsWith('.csv')){
-        rows=parseCSV(e.target.result);
-      } else {
-        await loadXLSX();
-        const data=new Uint8Array(e.target.result);
-        const wb=XLSX.read(data,{type:'array'});
-        rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
-      }
-      const myDriver=getMyDriverName()||currentUser?.name;
-      if(!importedClients[myDriver]) importedClients[myDriver]=[];
-      let added=0,skipped=0;
-      rows.forEach(row=>{
-        const name=String(row['Name']||row['name']||row['Client']||row['Full Name']||row['CLIENT']||'').trim();
-        const phone=String(row['Phone']||row['phone']||row['Phone Number']||row['PHONE']||'').trim();
-        const email=String(row['Email']||row['email']||row['EMAIL']||'').trim();
-        const address=String(row['Address']||row['address']||row['Home Address']||'').trim();
-        const notes=String(row['Notes']||row['notes']||row['NOTES']||'').trim();
-        if(!name){skipped++;return;}
-        if(importedClients[myDriver].some(c=>c.name.toLowerCase()===name.toLowerCase())){skipped++;return;}
-        const paymentMethod=String(row['Payment Method']||row['PaymentMethod']||row['payment_method']||row['Payment']||'').trim();
-        importedClients[myDriver].push({name,phone,email,address,notes,paymentMethod,source:'imported'});
-        added++;
-      });
-      await saveImportedClients();
-      statusEl.innerHTML=`<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:.5rem .85rem;font-size:.82rem;color:#166534;">✓ Imported ${added} clients · ${skipped} skipped (duplicates or blank)</div>`;
-      renderClients();
-      input.value='';
-    } catch(err){
-      statusEl.innerHTML=`<div style="background:#fff5f5;border:1px solid #fca5a5;border-radius:6px;padding:.5rem .85rem;font-size:.82rem;color:#dc2626;">Import failed: ${err.message}<br>Columns needed: Name, Phone, Email, Address, Notes</div>`;
-    }
-  };
-  if(file.name.endsWith('.csv')) reader.readAsText(file);
-  else reader.readAsArrayBuffer(file);
-}
-
-function parseCSV(text){
-  const lines=text.split('\n').filter(l=>l.trim());
-  if(!lines.length) return [];
-  const headers=lines[0].split(',').map(h=>h.replace(/"/g,'').trim());
-  return lines.slice(1).map(line=>{
-    const vals=line.split(',').map(v=>v.replace(/"/g,'').trim());
-    const obj={};
-    headers.forEach((h,i)=>{obj[h]=vals[i]||'';});
-    return obj;
-  });
-}
-
-
-function buildUserChips(){
-  const sel=document.getElementById('user-select');
-  sel.innerHTML=`<option value="">— Choose your name —</option>`+
-    USERS.map(u=>`<option value="${u.name}">${u.name}</option>`).join('');
-}
 let selectedUser=null;
 function selectUser(name){
   selectedUser=name||null;
@@ -8671,12 +8437,112 @@ function showPage(id, el){
 function fmtDate(ds){if(!ds)return'—';const[y,m,d]=ds.split('-');return new Date(y,m-1,d).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'});}
 function fmtDateShort(ds){if(!ds)return'—';const[y,m,d]=ds.split('-');return new Date(y,m-1,d).toLocaleDateString('en-US',{month:'short',day:'numeric'});}
 function fmtTs(ts){const d=new Date(ts);return d.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}
+function escAttr(s){ return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function openAddClientModal(){
+  const back=document.createElement('div');
+  back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:12000;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  back.addEventListener('click',function(e){ if(e.target===back) back.remove(); });
+  back.innerHTML=
+    '<div style="background:var(--white);border-radius:16px;max-width:380px;width:100%;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
+    +'<div style="font-size:1rem;font-weight:700;color:var(--black);margin-bottom:.75rem;">\u2795 Add Client</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-bottom:.5rem;">'
+    +'<div style="grid-column:1/-1;"><label style="font-size:.7rem;color:#888;display:block;margin-bottom:2px;">Full Name <span style="color:#dc2626;">*</span></label>'
+    +'<input id="ac-name" type="text" placeholder="e.g. Jane Smith" style="width:100%;padding:.35rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;" /></div>'
+    +'<div><label style="font-size:.7rem;color:#888;display:block;margin-bottom:2px;">Phone</label>'
+    +'<input id="ac-phone" type="text" placeholder="404-555-0100" style="width:100%;padding:.35rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;" /></div>'
+    +'<div><label style="font-size:.7rem;color:#888;display:block;margin-bottom:2px;">Email</label>'
+    +'<input id="ac-email" type="email" placeholder="client@email.com" style="width:100%;padding:.35rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;" /></div>'
+    +'</div>'
+    +'<label style="font-size:.7rem;color:#888;display:block;margin-bottom:2px;">Notes (optional)</label>'
+    +'<textarea id="ac-notes" rows="2" placeholder="Any notes..." style="width:100%;padding:.4rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;resize:vertical;box-sizing:border-box;margin-bottom:.5rem;"></textarea>'
+    +'<div id="ac-err" style="font-size:.75rem;color:#dc2626;min-height:1rem;margin-bottom:.4rem;"></div>'
+    +'<div style="display:flex;gap:.5rem;">'
+    +'<button onclick="submitAddClient()" style="flex:1;padding:.6rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.88rem;cursor:pointer;">Save Client</button>'
+    +'<button onclick="this.closest(\'[style*=z-index]\').remove()" style="flex:1;padding:.6rem;background:none;border:1.5px solid #ddd;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:600;font-size:.88rem;cursor:pointer;color:#666;">Cancel</button>'
+    +'</div></div>';
+  document.body.appendChild(back);
+  setTimeout(function(){ var el=document.getElementById('ac-name'); if(el) el.focus(); },100);
+}
+
+async function submitAddClient(){
+  const name=(document.getElementById('ac-name')?.value||'').trim();
+  const errEl=document.getElementById('ac-err');
+  if(!name){ if(errEl) errEl.textContent='Name is required.'; return; }
+  const driver=clientStoreDriver(); if(!driver){ showToast('Not logged in','error'); return; }
+  if(!importedClients[driver]) importedClients[driver]=[];
+  const key=name.toLowerCase();
+  if(importedClients[driver].find(function(c){ return c.name&&c.name.toLowerCase()===key; })){
+    if(errEl) errEl.textContent='This client already exists in your list.'; return;
+  }
+  importedClients[driver].push({
+    name:name,
+    phone:document.getElementById('ac-phone')?.value.trim()||'',
+    email:document.getElementById('ac-email')?.value.trim()||'',
+    notes:document.getElementById('ac-notes')?.value.trim()||'',
+    source:'client', addedAt:new Date().toISOString()
+  });
+  await persistImportedClients();
+  document.querySelector('[style*="z-index: 12000"],[style*="z-index:12000"]')?.remove();
+  renderClients(); showToast('\u2713 Client added');
+}
+
+function importClientsFromFile(input){
+  const file=input.files[0]; if(!file) return;
+  input.value='';
+  const driver=clientStoreDriver(); if(!driver){ showToast('Not logged in','error'); return; }
+  if(file.name.match(/\.xlsx?$/i)){ showToast('Please export your spreadsheet as CSV first, then import','error'); return; }
+  const reader=new FileReader();
+  reader.onload=async function(e){
+    const text=e.target.result;
+    const lines=text.split(/\r?\n/).filter(function(l){ return l.trim(); });
+    if(!lines.length){ showToast('File appears empty','error'); return; }
+    // Detect header row
+    const firstLow=lines[0].toLowerCase();
+    const hasHeader=/name|phone|email/.test(firstLow);
+    const dataLines=hasHeader?lines.slice(1):lines;
+    if(!importedClients[driver]) importedClients[driver]=[];
+    let added=0, skipped=0;
+    dataLines.forEach(function(line){
+      const cols=line.split(',').map(function(c){ return c.replace(/^["']|["']$/g,'').trim(); });
+      const name=cols[0]; if(!name) return;
+      const key=name.toLowerCase();
+      if(importedClients[driver].find(function(c){ return c.name&&c.name.toLowerCase()===key; })){ skipped++; return; }
+      importedClients[driver].push({
+        name:name,
+        phone:cols[1]||'',
+        email:cols[2]||'',
+        notes:cols[3]||'',
+        source:'imported', addedAt:new Date().toISOString()
+      });
+      added++;
+    });
+    await persistImportedClients();
+    renderClients();
+    showToast(added+' client'+(added===1?' imported':' imported')+(skipped?' ('+skipped+' skipped — already exist)':''));
+  };
+  reader.readAsText(file);
+}
+
 function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function showToast(msg,type){const t=document.getElementById('toast');t.textContent=msg;t.style.background=type==='error'?'#b03a2e':'#2e6b46';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000);}
 
 // ═══════════════════════════════════════════
 // BOOT
 // ═══════════════════════════════════════════
+// buildUserChips is defined inline here so the BOOT call below works
+function buildUserChips(){
+  const sel=document.getElementById('user-select');
+  if(!sel) return;
+  // Keep the placeholder, rebuild the rest
+  while(sel.options.length>1) sel.remove(1);
+  USERS.filter(u=>!u.disabled).forEach(function(u){
+    const o=document.createElement('option');
+    o.value=u.name; o.textContent=u.name;
+    sel.appendChild(o);
+  });
+}
+
 buildUserChips();
 calcQuote();
 // Safety net — if initApp hangs for any reason, show auth after 5 seconds
@@ -8793,7 +8659,7 @@ function renderReceipts(){
 // ── UPLOAD MODAL ──
 function openReceiptUpload(){
   if(!hasIncomeAccess()){ showToast('Income upgrade required','error'); return; }
-  const today = new Date().toISOString().split('T')[0];
+  const today = toDateStr(new Date());
   // Create modal
   const modal = document.createElement('div');
   modal.id = 'receipt-upload-modal';
