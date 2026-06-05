@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606047800">
+<meta name="version" content="202606048200">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -108,6 +108,7 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
 .addon-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.5rem;margin-top:4px;}
 .addon-chip{padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;background:var(--white);color:var(--mid);font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:500;cursor:pointer;text-align:center;transition:all .15s;}
 .addon-chip.on{border-color:var(--gold);background:var(--gold-pale);color:var(--gold);font-weight:600;}
+.addon-chip.disabled{opacity:.4;cursor:not-allowed;pointer-events:none;}
 .toggle-btn.on{border-color:var(--gold);background:var(--gold-pale);color:var(--gold);font-weight:600;}
 .quote-line{display:flex;justify-content:space-between;font-size:.88rem;padding:.4rem 0;border-bottom:1px solid #3d1f6e;}
 .quote-total{margin-top:1.25rem;padding-top:1rem;border-top:2px solid var(--gold);display:flex;justify-content:space-between;align-items:center;}
@@ -432,6 +433,7 @@ input,select,textarea{font-size:16px;}
     </div>
     <div id="dash-income-overview" style="margin-bottom:1.5rem;"></div>
     <div id="dash-confirmations" style="margin-bottom:1.5rem;"></div>
+    <div id="dash-fees" style="margin-bottom:1.5rem;"></div>
     <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.75rem;" id="dash-upcoming-label">Your upcoming rides</div>
     <div id="upcoming-list"></div>
   </div>
@@ -488,7 +490,7 @@ input,select,textarea{font-size:16px;}
           <label>Date & Time</label>
           <div style="display:flex;gap:.5rem;">
             <input type="date" id="q-date" onchange="onDateChange()" style="flex:1;" />
-            <input type="time" id="q-time" onchange="calcQuote()" style="flex:1;" />
+            <input type="time" id="q-time" onchange="onTimeChange()" style="flex:1;" />
           </div>
         </div>
         <div id="q-ap-rt-fields" style="display:none;">
@@ -933,8 +935,7 @@ input,select,textarea{font-size:16px;}
         <div class="form-group"><label>Email</label><input type="text" id="edit-email" /></div>
         <div class="form-group"><label>Date</label><input type="date" id="edit-date" /></div>
         <div class="form-group"><label>Time</label><input type="time" id="edit-time" /></div>
-        <div class="form-group"><label>Return Time</label><input type="time" id="edit-rt" /></div>
-        <div class="form-group"><label>Return Date</label><input type="date" id="edit-rt-date" /></div>
+        <div id="edit-rt-group"><div class="form-group"><label>Return Time</label><input type="time" id="edit-rt" /></div><div class="form-group"><label>Return Date</label><input type="date" id="edit-rt-date" /></div></div>
         <div class="form-group"><label>Miles</label><input type="number" id="edit-miles" min="0" step="0.1" /></div>
         <div class="form-group"><label>Passengers</label><input type="number" id="edit-pax" min="1" max="14" /></div>
         <div class="form-group"><label>Checked Bags</label><input type="number" id="edit-checked-bags" min="0" /></div>
@@ -947,7 +948,7 @@ input,select,textarea{font-size:16px;}
           <select id="edit-vehicle"><option>Sedan</option><option>SUV/Van</option><option>Premium</option></select>
         </div>
         <div class="form-group"><label>Travel Type</label>
-          <select id="edit-type"><option>AP ROUND TRIP</option><option>AP RUN</option><option>AP PICK UP</option><option>ROUND TRIP</option><option>ONE WAY</option></select>
+          <select id="edit-type" onchange="editTypeChanged()"><option>AP ROUND TRIP</option><option>AP RUN</option><option>AP PICK UP</option><option>ROUND TRIP</option><option>ONE WAY</option></select>
         </div>
         <div class="form-group"><label>Driver</label>
           <select id="edit-driver"><option value="">Unassigned</option></select>
@@ -975,6 +976,7 @@ input,select,textarea{font-size:16px;}
     <div class="modal-footer">
       <button id="rm-delete-btn" class="btn-danger" onclick="deleteRide(activeRideId)">Delete Ride</button>
       <button id="rm-cancelride-btn" class="btn-secondary" onclick="cancelRide(activeRideId)" style="color:#b03a2e;border-color:#b03a2e;">🚫 Cancel Ride</button>
+      <button id="rm-paid-btn" class="btn-secondary" onclick="toggleRidePaid(activeRideId)" style="color:var(--green);border-color:var(--green);">💰 Mark Paid</button>
       <button class="btn-secondary" onclick="openDuplicateModal(activeRideId)" style="color:var(--gold);border-color:var(--gold);">⧉ Duplicate</button>
       <button class="btn-secondary" onclick="closeRideModal()">Close</button>
     </div>
@@ -1555,6 +1557,7 @@ async function initApp() {
     await loadSubscriptions();
     await loadImportedClients();
     await loadClientRequests();
+  await loadGlobalSettings();
     await loadExpenses();
     await loadOutsideRides();
     await loadReceipts();
@@ -1594,6 +1597,7 @@ const RATE_PER_MILE  = 2.50;
 const WAIT_RATE      = 60;
 const ADDONS_FLAT    = { premium:30, holiday:30, christmas:35, late:20, traffic:15 };
 let addonState = { premium:false, holiday:false, christmas:false, late:false, fuel:false, traffic:false };
+let globalSettings = { fuelEnabled: true }; // admin-controlled global pricing flags;
 let extraStops = 0; // extra pickups at $10 each
 
 function changeStops(delta){
@@ -1972,7 +1976,7 @@ function setVehicle(v, btn){
   calcQuote();
 }
 function onDateChange(){
-  // Auto-flag holiday/Christmas surcharges from the chosen date, then recalc.
+  // Auto-flag surcharges from the chosen date, then recalc.
   const dv=(document.getElementById('q-date')||{}).value;
   if(dv){
     const mmdd=dv.slice(5); // 'MM-DD'
@@ -1981,6 +1985,8 @@ function onDateChange(){
     } else if(typeof HOLIDAY_DATES!=='undefined' && HOLIDAY_DATES.includes(mmdd)){
       addonState.holiday=true; addonState.christmas=false;
     }
+    // Fuel: always on when globally enabled
+    if(globalSettings.fuelEnabled !== false) addonState.fuel=true;
     const notice=document.getElementById('holiday-notice');
     if(notice){
       const name=(typeof HOLIDAY_NAMES!=='undefined') ? HOLIDAY_NAMES[mmdd] : '';
@@ -2005,11 +2011,43 @@ const ADDON_LABELS = { premium:'Premium hours', holiday:'Holiday', christmas:'Ch
 function renderAddons(){
   const box=document.getElementById('q-addons');
   if(!box) return;
-  box.innerHTML=Object.keys(ADDON_LABELS).map(k=>
-    `<div class="addon-chip${addonState[k]?' on':''}" onclick="toggleAddon('${k}')">${ADDON_LABELS[k]}</div>`
-  ).join('');
+  const fuelOff = globalSettings.fuelEnabled === false;
+  box.innerHTML=Object.keys(ADDON_LABELS).map(k=>{
+    const disabled = k==='fuel' && fuelOff;
+    const cls = 'addon-chip'+(addonState[k]?' on':'')+(disabled?' disabled':'');
+    const title = disabled ? 'title="Fuel surcharge disabled by admin"' : '';
+    return `<div class="${cls}" onclick="toggleAddon('${k}')" ${title}>${ADDON_LABELS[k]}`
+      +(disabled?' <span style="font-size:.65em;opacity:.6;">(off)</span>':'')
+      +'</div>';
+  }).join('');
 }
+// Auto-detect time-based surcharges (premium hours before 5am; traffic on weekday rush)
+function onTimeChange(){
+  const tv=(document.getElementById('q-time')||{}).value;
+  const dv=(document.getElementById('q-date')||{}).value;
+  if(tv){
+    const [th,tm]=(tv||'').split(':').map(Number);
+    const mins=(th||0)*60+(tm||0);
+    // Fuel: always on when globally enabled (in case date was set before time)
+    if(dv && globalSettings.fuelEnabled !== false) addonState.fuel=true;
+    // Premium hours: before 5:00 AM
+    addonState.premium = mins > 0 && mins < 300;
+    // Traffic: weekday AM rush (6:30–9:00) or PM rush (14:30–19:00)
+    if(dv){
+      const dow=new Date(dv+'T12:00:00').getDay();
+      const isWd=dow>=1&&dow<=5;
+      const inAM=mins>=390&&mins<540;
+      const inPM=mins>=870&&mins<1140;
+      addonState.traffic = isWd&&(inAM||inPM);
+    }
+  }
+  renderAddons(); calcQuote();
+}
+
 function toggleAddon(k){
+  if(k==='fuel' && globalSettings.fuelEnabled===false){
+    showToast('Fuel surcharge is currently disabled by admin','error'); return;
+  }
   addonState[k]=!addonState[k];
   // Holiday and Christmas are mutually exclusive
   if(k==='holiday'&&addonState.holiday) addonState.christmas=false;
@@ -2422,7 +2460,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
     const isHoliday=ALL_HOLIDAY_MMDD.includes(mmdd);
     const holName=HOLIDAY_NAMES[mmdd]||'';
     const holFee=CHRISTMAS_DATES.includes(mmdd)?35:30;
-    let dayRides=rides.filter(r=>r.date===ds);
+    let dayRides=rides.filter(r=>r.date===ds && r.status!=='cancelled');
     if(typeof driverFilter==='function') dayRides=dayRides.filter(driverFilter);
     else if(driverFilter&&driverFilter!=='group') dayRides=dayRides.filter(r=>r.driver===driverFilter);
     dayRides.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
@@ -2483,7 +2521,7 @@ function renderMonthView(containerId, monthDate, driverFilter, jumpFn){
     const isToday=ds===today;
     const mmdd=ds.slice(5);
     const isHoliday=ALL_HOLIDAY_MMDD.includes(mmdd);
-    let dayRides=rides.filter(r=>r.date===ds);
+    let dayRides=rides.filter(r=>r.date===ds && r.status!=='cancelled');
     if(typeof driverFilter==='function') dayRides=dayRides.filter(driverFilter);
     else if(driverFilter&&driverFilter!=='group') dayRides=dayRides.filter(r=>r.driver===driverFilter);
     dayRides.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
@@ -2845,7 +2883,6 @@ function buildConfirmationText(r){
   const start         = (r.pickup||'').trim();   // where the client is picked up
   const dest          = (r.home||'').trim();     // drop-off / destination
   const type          = (r.type||'').toUpperCase();
-
   const driverLine = sameDriver
     ? 'I will be driving you.'
     : 'My partner '+assigned+' will be driving you on my behalf. '+assigned+' is copied on this message.';
@@ -3113,6 +3150,7 @@ function renderRideView(r){
 
   document.getElementById('rm-detail-grid').innerHTML=`
     ${r.status==='cancelled'?`<div style="grid-column:1/-1;background:#fdecea;border:1.5px solid #e6a8a0;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#b03a2e;font-weight:700;font-size:.9rem;">🚫 CANCELLED${r.cancelledBy?' · by '+escHtml(String(r.cancelledBy)):''} — tap “Reactivate Ride” below to restore.</div>`:''}
+    ${r.status==='paid'?`<div style="grid-column:1/-1;background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#16a34a;font-weight:700;font-size:.9rem;">✅ CLIENT PAID${r.paidBy?' · marked by '+escHtml(String(r.paidBy)):''}</div>`:''}
     <div style="grid-column:1/-1;background:${color}66;border-left:5px solid ${color};border-radius:8px;padding:.85rem 1rem;margin-bottom:.5rem;">
       <div style="font-size:1.05rem;font-weight:600;color:var(--black);margin-bottom:.2rem;">${r.type} — ${r.client} <span style="font-weight:400;font-size:.88rem;color:${color};">(${driverFirst})</span></div>
       <div style="font-size:.78rem;color:var(--mid);">Created by ${r.createdBy||'—'}</div>
@@ -3235,6 +3273,13 @@ function buildRideLifecycle(r){
   </div>`;
 }
 
+async function toggleRidePaid(id){
+  const r=rides.find(x=>x.id===id); if(!r||r.status==='cancelled') return;
+  await setRideStatus(id, r.status==='paid'?'scheduled':'paid');
+  const btn=document.getElementById('rm-paid-btn');
+  if(btn) btn.style.fontWeight=r.status==='paid'?'700':'400';
+}
+
 async function setRideStatus(id, status){
   const r = rides.find(x=>x.id===id); if(!r) return;
   r.status = status;
@@ -3243,6 +3288,10 @@ async function setRideStatus(id, status){
   await saveRides();
   renderRideView(r);
   if(typeof refreshDash==='function') refreshDash();
+  const paidBtn=document.getElementById('rm-paid-btn');
+  if(paidBtn){ paidBtn.textContent=r.status==='paid'?'💰 Paid ✓':'💰 Mark Paid';
+    paidBtn.style.fontWeight=r.status==='paid'?'700':'400';
+    paidBtn.style.background=r.status==='paid'?'#f0fdf4':''; }
   if(document.getElementById('page-income')?.classList.contains('active') && typeof renderIncome==='function') renderIncome();
   showToast('Status: '+(RIDE_STAGE_LABEL[status]||status));
 }
@@ -3281,6 +3330,12 @@ async function reactivateRide(id){
   showToast('Ride reactivated');
 }
 
+function editTypeChanged(){
+  const t=document.getElementById('edit-type')?.value||'';
+  const g=document.getElementById('edit-rt-group');
+  if(g) g.style.display=(t==='ROUND TRIP'||t==='AP ROUND TRIP')?'contents':'none';
+}
+
 function toggleEditMode(on){
   document.getElementById('rm-view-mode').style.display  = on?'none':'block';
   document.getElementById('rm-edit-mode').style.display  = on?'block':'none';
@@ -3311,6 +3366,7 @@ function toggleEditMode(on){
   document.getElementById('edit-rt-date').value  = r.rtDate||r.rtDateAP||'';
   document.getElementById('edit-miles').value    = r.miles||0;
   document.getElementById('edit-pax').value           = r.pax||1;
+  editTypeChanged(); // show/hide return date+time based on type
   document.getElementById('edit-checked-bags').value  = r.checkedBags||0;
   document.getElementById('edit-carryon-bags').value   = r.carryOnBags||0;
   document.getElementById('edit-flight').value         = r.flight||'';
@@ -4775,13 +4831,17 @@ async function saveQuickAddRide(){
   const client=document.getElementById('qa-client').value.trim();
   const date  =document.getElementById('qa-date').value;
   const errEl =document.getElementById('qa-error');
-  if(!client){errEl.textContent='Client name is required.';return;}
-  if(!date)  {errEl.textContent='Date is required.';return;}
+  if(!client){errEl.textContent='Client name is required.'; _reenableBtn(); return;}
+  if(!date)  {errEl.textContent='Date is required.'; _reenableBtn(); return;}
   errEl.textContent='';
+  const saveBtn=document.getElementById('qa-save-btn');
+  if(saveBtn&&saveBtn.disabled) return;   // already submitting
+  if(saveBtn){ saveBtn.disabled=true; saveBtn.style.opacity='0.55'; }
+  const _reenableBtn=()=>{ if(saveBtn){ saveBtn.disabled=false; saveBtn.style.opacity='1'; } };
   const qaType = document.getElementById('qa-type').value;
   if(qaType==='AP ROUND TRIP'){
     if(!document.getElementById('qa-leg-run')?.checked||!document.getElementById('qa-leg-pickup')?.checked){
-      errEl.textContent='Check both leg confirmation boxes before saving.'; return;
+      errEl.textContent='Check both leg confirmation boxes before saving.'; _reenableBtn(); return;
     }
   }
   const ride={
@@ -4822,6 +4882,7 @@ async function saveQuickAddRide(){
   await saveRides(); await saveNotifs();
   await upsertClientFromRide(ride);
   closeQuickAddModal();
+  _reenableBtn();
   showToast(qaType==='AP ROUND TRIP'?`AP Round Trip added: ${client} (2 rides)`:`Ride added: ${client}`);
   refreshDash(); renderCal(); renderRides(); updateNotifBadge();
 }
@@ -5000,6 +5061,9 @@ function refreshDash(){
   // Confirmations due for tomorrow's rides
   renderDashConfirmations();
 
+  // 15% finder fees owed / to be paid
+  renderDashFees();
+
   // "Your upcoming rides" — ONLY rides this user is DRIVING (rides they scheduled for others live in Confirmations)
   const dName=getMyDriverName();
   const lbl=document.getElementById('dash-upcoming-label');
@@ -5078,6 +5142,72 @@ function buildDashUpgradeBanner(){
     +'<span style="font-size:.8rem;color:#9482bf;">or $150/yr &nbsp;\u00b7&nbsp; 7-day free trial</span>'
     +'</div>'
     +'</div>';
+}
+
+
+// Dashboard 15% finder-fee summary — unpaid fees owed to/by the logged-in driver
+async function markDashFeePaid(dName, dir, cp){
+  const key=dName+':'+dir+':'+cp;
+  if(!feePayments[key]) feePayments[key]={};
+  feePayments[key].paid=true;
+  feePayments[key].paidAt=new Date().toISOString();
+  await saveFeePayments();
+  renderDashFees();
+  showToast('\u2713 Fee marked as paid');
+}
+
+function renderDashFees(){
+  const box=document.getElementById('dash-fees'); if(!box) return;
+  const dName=getMyDriverName(); if(!dName&&!isAdmin()){ box.innerHTML=''; return; }
+  const today=new Date().toISOString().split('T')[0];
+
+  // Compute all unpaid fees for this driver
+  const owedToMe={}, iOwe={};
+  rides.forEach(r=>{
+    if(!r.date||r.date>today||r.status==='cancelled'||parseFloat(r.price||0)<=0) return;
+    const owner=r.createdBy?(USER_DRIVER_MAP[r.createdBy]||null):null;
+    const driver=r.driver||null;
+    if(!owner||!driver||owner===driver) return;
+    const fee=parseFloat(r.price)*0.15;
+    const paidOwe=!!(feePayments[owner+':recv:'+driver]||{}).paid;
+    const paidRecv=!!(feePayments[owner+':recv:'+driver]||{}).paid;
+    if(dName){
+      if(owner===dName&&!paidRecv){ const k=driver; (owedToMe[k]=owedToMe[k]||{fee:0,n:0}); owedToMe[k].fee+=fee; owedToMe[k].n++; }
+      if(driver===dName&&!paidOwe){ const k=owner; (iOwe[k]=iOwe[k]||{fee:0,n:0}); iOwe[k].fee+=fee; iOwe[k].n++; }
+    }
+  });
+  const hasOwed=Object.keys(owedToMe).length, hasOwe=Object.keys(iOwe).length;
+  if(!hasOwed&&!hasOwe){ box.innerHTML=''; return; }
+
+  let html='<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">15% Fees — To Be Paid</div>'
+    +'<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:12px;overflow:hidden;">';
+
+  if(hasOwed){
+    html+='<div style="font-size:.72rem;font-weight:600;color:var(--green);padding:.45rem .85rem;border-bottom:1px solid var(--light);background:#f0fdf4;">Owed to you</div>';
+    Object.entries(owedToMe).forEach(([name,v])=>{
+      html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.6rem .85rem;border-bottom:1px solid var(--light);gap:.6rem;">'
+        +'<div><div style="font-size:.86rem;font-weight:600;">'+escHtml(name.split(' ')[0])+'</div>'
+        +'<div style="font-size:.72rem;color:var(--mid);">'+v.n+' ride'+(v.n!==1?'s':'')+' · $'+v.fee.toFixed(2)+'</div></div>'
+        +'<button onclick="markDashFeePaid(\''+escAttr(dName)+'\',\'recv\',\''+escAttr(name)+'\')" '
+        +'style="padding:.3rem .75rem;background:var(--green);color:#fff;border:none;border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;white-space:nowrap;">Mark Paid</button>'
+        +'</div>';
+    });
+  }
+  if(hasOwe){
+    html+='<div style="font-size:.72rem;font-weight:600;color:#dc2626;padding:.45rem .85rem;border-bottom:1px solid var(--light);background:#fff5f5;">You owe</div>';
+    Object.entries(iOwe).forEach(([name,v])=>{
+      html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.6rem .85rem;border-bottom:1px solid var(--light);gap:.6rem;">'
+        +'<div><div style="font-size:.86rem;font-weight:600;">'+escHtml(name.split(' ')[0])+'</div>'
+        +'<div style="font-size:.72rem;color:var(--mid);">'+v.n+' ride'+(v.n!==1?'s':'')+' · $'+v.fee.toFixed(2)+'</div></div>'
+        +'<button onclick="markDashFeePaid(\''+escAttr(name)+'\',\'recv\',\''+escAttr(dName)+'\')" '
+        +'style="padding:.3rem .75rem;background:#dc2626;color:#fff;border:none;border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;white-space:nowrap;">Mark Paid</button>'
+        +'</div>';
+    });
+  }
+
+  html+='<div style="padding:.5rem .85rem;font-size:.72rem;color:var(--mid);">View full breakdown in <span onclick="nav(\'income\')" style="color:var(--accent);cursor:pointer;text-decoration:underline;">Income</span></div>'
+    +'</div>';
+  box.innerHTML=html;
 }
 
 function renderDashIncome(){
@@ -5182,6 +5312,14 @@ function computeExpectedPrice(ride){
   return Math.round(sub*100)/100;
 }
 
+async function toggleGlobalFuel(){
+  globalSettings.fuelEnabled = globalSettings.fuelEnabled === false ? true : false;
+  await saveGlobalSettings();
+  renderPricingTracker();
+  renderAddons(); // update quote form chip if open
+  showToast('Fuel surcharge '+(globalSettings.fuelEnabled!==false?'enabled':'disabled')+'\u2713');
+}
+
 function renderPricingTracker(){
   const panel=document.getElementById('driver-panel-pricing');
   if(!panel||!isAdmin()) return;
@@ -5232,7 +5370,21 @@ function renderPricingTracker(){
   });
 
   // Build HTML
+  // ── Global pricing settings card (admin-only) ──
+  const fuelOn = globalSettings.fuelEnabled !== false;
   let html=`<div style="padding:.5rem 0 1rem;">
+    <div style="background:var(--surface);border:1.5px solid var(--light);border-radius:12px;padding:.85rem 1rem;margin-bottom:1.25rem;">
+      <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">Global Pricing Settings</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;">
+        <div>
+          <div style="font-size:.88rem;font-weight:600;color:var(--black);">Fuel surcharge (8%)</div>
+          <div style="font-size:.75rem;color:var(--mid);">When ON, fuel is auto-applied to every new quote. Admins can still remove it per quote.</div>
+        </div>
+        <div onclick="toggleGlobalFuel()" style="width:46px;height:26px;border-radius:13px;background:${fuelOn?'#16a34a':'#ccc'};cursor:pointer;position:relative;flex-shrink:0;transition:background .2s;">
+          <div style="position:absolute;top:3px;${fuelOn?'right:3px':'left:3px'};width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:all .2s;"></div>
+        </div>
+      </div>
+    </div>
     <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem;">
       <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);">Month</div>
       <select onchange="document.getElementById('driver-panel-pricing').dataset.month=this.value;renderPricingTracker();"
@@ -7550,6 +7702,16 @@ function maybeAutofillClient(prefix){
     if(type==='AP PICK UP') fill(homeId, c.address);
     else fill(prefix+'-pickup', c.address);
   }
+  // Pax + bags from most recent ride — fill if still at the default value
+  const fillNum=(id,v,def)=>{ const el=document.getElementById(id); if(el&&(el.value===''||el.value==def)&&v!==undefined) el.value=v; };
+  const latestRide=(c.rides||[]).slice().sort((a,b)=>b.date.localeCompare(a.date))[0];
+  if(latestRide){
+    fillNum(prefix+'-pax',          latestRide.pax||1,          1);
+    fillNum(prefix+'-checked-bags', latestRide.checkedBags||0,  0);
+    fillNum(prefix+'-carryon-bags', latestRide.carryOnBags||0,  0);
+  }
+  // Re-run quote calc if on the quote form so price reflects updated pax
+  if(prefix==='q' && typeof calcQuote==='function') calcQuote();
 }
 
 // ── Reusable contact-row UI (multiple labeled phones + emails) for the client modals ──
@@ -7709,6 +7871,18 @@ function renderClients(){
   }).join('');
 }
 
+function openRideFromClient(clientName){
+  closeClientModal();
+  setTimeout(()=>{
+    if(typeof openQuickAddModal==='function') openQuickAddModal();
+    setTimeout(()=>{
+      const el=document.getElementById('qa-client');
+      if(el){ el.value=clientName; maybeAutofillClient('qa'); }
+      const errEl=document.getElementById('qa-error'); if(errEl) errEl.textContent='';
+    },60);
+  },120);
+}
+
 function openClientModal(clientName,e){
   e?.stopPropagation();
   const admin=isAdmin();
@@ -7728,6 +7902,12 @@ function openClientModal(clientName,e){
 
 
 function buildClientModalHTML(cl, sorted, total, hasUpgrade, pmOptions, safeName, admin){
+  const addRideBtn = '<div style="margin-bottom:.85rem;">'
+    +'<button onclick="openRideFromClient(\''+safeName+'\')" '
+    +'style="width:100%;padding:.6rem;background:var(--gold);color:#fff;border:none;border-radius:10px;'
+    +'font-family:\'DM Sans\',sans-serif;font-size:.9rem;font-weight:700;cursor:pointer;">'
+    +'\u2795 Add Ride for This Client</button>'
+    +'</div>';
   const pmSelect = hasUpgrade
     ? '<div style="background:var(--surface);border-radius:8px;padding:.75rem;margin-bottom:.75rem;">'
       + '<div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Premium fields</div>'
@@ -7831,6 +8011,7 @@ function buildClientModalHTML(cl, sorted, total, hasUpgrade, pmOptions, safeName
     + reassignBlock
     + releaseBlock
     + editSection
+    + addRideBtn
     + pmSelect
     + (admin&&cl.drivers.length>1?'<div style="margin-bottom:.75rem;padding:.4rem .75rem;background:#fff5f5;border-radius:6px;font-size:.78rem;color:#dc2626;">Shared by: '+cl.drivers.join(', ')+'</div>':'')
     + rideHistory;
