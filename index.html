@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606049919">
+<meta name="version" content="202606049922">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -374,7 +374,7 @@ input,select,textarea{font-size:16px;}
       <input type="checkbox" id="stay-logged-in" checked style="width:auto;cursor:pointer;margin:0;" />
       Stay logged in on this device
     </label>
-    <button class="btn-primary" onclick="login()">Sign In</button>
+    <button id="biometric-btn" onclick="authenticateWithBiometric()" style="display:none;width:100%;padding:.75rem;margin-bottom:.6rem;background:#1a0d2e;color:#fff;border:none;border-radius:10px;font-family:'DM Sans',sans-serif;font-size:.95rem;font-weight:600;cursor:pointer;align-items:center;justify-content:center;gap:.5rem;"><span style="font-size:1.1em;">&#x1F513;</span> Use Face ID / Touch ID</button><button class="btn-primary" onclick="login()">Sign In</button>
     <div class="auth-error" id="auth-error"></div>
   </div>
 </div>
@@ -1613,6 +1613,7 @@ async function initApp() {
     await loadDocs();
     await loadDaySelfie();
   await loadDriverSettings();
+  await loadBiometricCreds();
     await loadFeePayments();
     nextId = rides.length ? Math.max(...rides.map(r=>r.id||0)) + 1 : 100;
     setupRealtimeListeners();
@@ -2869,8 +2870,9 @@ function openNav(addr){
 }
 
 function renderConfirmations(){
-  // Clear stale pre-built share files to avoid memory leaks
+  // Clear stale share files and sent-state on each render
   Object.keys(_confirmShareFiles).forEach(function(k){ delete _confirmShareFiles[k]; });
+  Object.keys(_sentParts).forEach(function(k){ delete _sentParts[k]; });
   const panel=document.getElementById('my-confirm-panel');
   if(!panel) return;
 
@@ -2890,7 +2892,7 @@ function renderConfirmations(){
   const admin=isAdmin();
   const dName=getMyDriverName();
   // The SCHEDULER confirms: a non-admin sees rides they scheduled (own), even if someone else drives.
-  let list=rides.filter(r=>r.date===tomorrow && r.status!=='cancelled' && isMyScheduledRide(r));
+  let list=rides.filter(r=>r.date===tomorrow && r.status!=='cancelled' && !r.confirmSent && isMyScheduledRide(r));
   list.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
 
   const sentCount=list.filter(r=>r.confirmSent).length;
@@ -2923,22 +2925,33 @@ function renderConfirmations(){
     const btnStyle="flex:1;min-width:120px;padding:.5rem;border:1.5px solid "+c+";border-radius:8px;background:var(--white);color:"+c+";font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;";
     const groupLine=recips.length?`<div style="font-size:.72rem;color:var(--mid);margin-bottom:.45rem;">👥 Group text to ${recips.length} number${recips.length===1?'':'s'}: ${escHtml(recips.map(x=>x.name).join(', '))}</div>`:`<div style="font-size:.72rem;color:var(--red);margin-bottom:.45rem;">No numbers yet — add the client's number to this ride.</div>`;
     const drvPreviewId='dc-prev-'+r.id;
+    const bBase='display:flex;align-items:center;gap:.45rem;padding:.55rem .75rem;'
+      +'border:1.5px solid var(--light);border-radius:9px;background:var(--white);'
+      +'font-family:\'DM Sans\',sans-serif;font-size:.8rem;font-weight:600;'
+      +'color:var(--black);cursor:pointer;flex:1 1 auto;min-width:140px;'
+      +'transition:border-color .15s,color .15s,background .15s;';
+    const chkSpan='<span class="cpart-chk" style="display:none;color:#16a34a;margin-left:auto;">&#10003;</span>';
+    const pid=r.id;
     const msgSection=`
-      <div style="margin-bottom:.75rem;"><div style="font-size:.68rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Driver card · shared with text</div><div style="width:280px;max-width:100%;"><img id="${drvPreviewId}" src="" alt="Driver card" style="width:100%;border-radius:8px;border:1px solid var(--light);display:none;" /></div><div id="${drvPreviewId}-loader" style="font-size:.75rem;color:var(--mid);font-style:italic;">${r.driver?'Building card…':'No driver assigned'}</div></div>
+      <div style="margin-bottom:1rem;">
+        <div style="font-size:.68rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Driver card preview</div>
+        <div style="width:280px;max-width:100%;">
+          <img id="${drvPreviewId}" src="" alt="Driver card" style="width:100%;border-radius:8px;border:1px solid var(--light);display:none;" />
+        </div>
+        <div id="${drvPreviewId}-loader" style="font-size:.75rem;color:var(--mid);font-style:italic;">${r.driver?'Building card…':'No driver assigned'}</div>
       </div>
-      <div style="font-size:.68rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.3rem;">Text to send</div>
-      <div style="background:#f7f4ee;border:1px solid #e6ddd0;border-radius:8px;padding:.6rem .7rem;margin-bottom:.5rem;font-size:.78rem;line-height:1.5;color:#333;white-space:pre-wrap;max-height:200px;overflow:auto;">${escHtml(conf.message)}</div>
-      ${conf.instructions?`
-        <div style="font-size:.68rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.3rem;">Pickup instructions (send as 2nd text)</div>
-        <div style="background:#f7f4ee;border:1px solid #e6ddd0;border-radius:8px;padding:.6rem .7rem;margin-bottom:.5rem;font-size:.78rem;line-height:1.5;color:#333;white-space:pre-wrap;max-height:200px;overflow:auto;">${escHtml(conf.instructions)}</div>`:''}
+      <div style="font-size:.68rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Send each piece separately — tap to send, checkmark confirms</div>
+      <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.75rem;">
+        <button id="cpart-${pid}-text"    onclick="sendConfText(${pid})"         style="${bBase}">&#x1F4AC; Confirmation text${chkSpan}</button>
+        ${conf.instructions?`<button id="cpart-${pid}-inst"    onclick="sendConfInstructions(${pid})"  style="${bBase}">&#x1F4CD; Pickup instructions${chkSpan}</button>`:''}
+        <button id="cpart-${pid}-selfie"  onclick="sendSelfiePic(${pid})"        style="${bBase}">&#x1F933; Selfie request${chkSpan}</button>
+        <button id="cpart-${pid}-vcard"   onclick="sendDriverVCard(${pid})"      style="${bBase}">&#x1F464; Driver vCard${chkSpan}</button>
+        <button id="cpart-${pid}-card"    onclick="sendDriverCard(${pid})"       style="${bBase}">&#x1F5BC; Driver card image${chkSpan}</button>
+        <button id="cpart-${pid}-phone"   onclick="sendClientPhone(${pid})"      style="${bBase}">&#x1F4F1; Client phone to driver${chkSpan}</button>
+      </div>
       ${groupLine}
-      <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.6rem;">
-        <button onclick="copyConfirmation(${r.id})" style="${btnStyle}">📋 Copy text</button>
-        ${recips.length?`<button onclick="textClient(${r.id})" style="${btnStyle}">💬 Text group</button>`:''}
-        <button onclick="shareClientVCard(${r.id})" style="${btnStyle}">👤 Client vCard</button>
-        ${conf.instructions?`<button onclick="copyInstructions(${r.id})" style="${btnStyle}">📋 Copy instructions</button>`:''}
-      </div>`;
-    return `<div style="border:1.5px solid ${c};border-left:5px solid ${c};border-radius:12px;padding:.9rem 1rem;margin-bottom:.75rem;background:${sent?c+'33':'var(--white)'};">
+    `
+    return `<div id="conf-card-${r.id}" style="border:1.5px solid ${c};border-left:5px solid ${c};border-radius:12px;padding:.9rem 1rem;margin-bottom:.75rem;background:${sent?c+'33':'var(--white)'};">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.3rem;flex-wrap:wrap;">
         <div style="display:flex;align-items:center;gap:.5rem;">
           <span style="font-size:.95rem;font-weight:700;color:var(--black);cursor:pointer;" onclick="openRideModal(${r.id})">${sent?'<span style=\"color:var(--green);font-weight:900;\">✓ </span>':''}${escHtml(r.client||'—')}</span>
@@ -2986,22 +2999,37 @@ function renderConfirmations(){
 async function toggleConfirmSent(id){
   const r=rides.find(x=>x.id===id);
   if(!r) return;
+  const wasConfirmed=r.confirmSent;
   r.confirmSent=!r.confirmSent;
   touchRide(r, r.confirmSent ? 'marked confirmation sent' : 'unmarked confirmation');
   if(r.confirmSent){
     r.confirmSentBy=currentUser?.name||'';
     r.confirmSentAt=Date.now();
+    // Animate card out before re-rendering
+    const card=document.getElementById('conf-card-'+id);
+    if(card){
+      card.style.transition='opacity .35s,transform .35s,max-height .4s';
+      card.style.opacity='0';
+      card.style.transform='translateY(-8px) scale(.98)';
+      card.style.maxHeight='0';
+      card.style.overflow='hidden';
+      card.style.marginBottom='0';
+      card.style.paddingTop='0';
+      card.style.paddingBottom='0';
+    }
   } else {
     delete r.confirmSentBy;
     delete r.confirmSentAt;
   }
   await saveRides();
-  renderConfirmations();
-  renderCal();
-  renderMyCal();
-  renderRides();
-  if(typeof refreshDash==='function') refreshDash();
-  showToast(r.confirmSent?'Marked as confirmed ✓':'Confirmation cleared');
+  setTimeout(function(){
+    renderConfirmations();
+    renderCal();
+    renderMyCal();
+    renderRides();
+    if(typeof refreshDash==='function') refreshDash();
+  }, r.confirmSent?400:0);
+  showToast(r.confirmSent?'Confirmed ✓ — removed from list':'Confirmation cleared');
 }
 
 // ── Confirmation-text generator (ported from the "Confirmation Sheet" Apps Script) ──
@@ -3237,6 +3265,8 @@ const _driverCardImgCache = {};
 // Pre-built share payloads keyed by ride id — populated when To Confirm renders
 // so textClient can grab files synchronously inside the user-gesture window
 const _confirmShareFiles = {};
+// Tracks which parts have been sent per ride — { rideId: Set of partKeys }
+const _sentParts = {};
 function buildDriverCardImageFile(name){
   const prof     = DRIVER_PROFILES[name]||{};
   const photoSrc = (typeof DRIVER_PHOTOS!=='undefined' && DRIVER_PHOTOS[name]) ? DRIVER_PHOTOS[name] : '';
@@ -6201,6 +6231,8 @@ function renderDriverMembers(){
           :''}  
         ${editField('Notes',prof.notes,'prof-notes','Any notes…')}
         ${canEdit?('<div style="margin:.6rem 0;padding-top:.55rem;border-top:1px solid var(--light);">'
+          
+          +(myDriverName===d?'<button type="button" onclick="manageBiometric(\''+d+'\')" style="width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;font-size:.82rem;font-weight:600;color:var(--black);cursor:pointer;margin-bottom:.45rem;">&#x1F510; Biometric &mdash; <span style="font-weight:400;color:var(--mid);font-size:.72rem;">'+((biometricCreds[d]||[]).length?'set up':'not set up')+'</span></button>':'')
           +'<button type="button" onclick="toggleConfTemplates(\''+dk+'\')" style="width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;font-family:\'DM Sans\',sans-serif;font-size:.82rem;font-weight:600;color:var(--black);cursor:pointer;">✉️ My confirmation templates ▾ <span style="font-weight:400;color:var(--mid);font-size:.72rem;">'+((prof.confirmTemplate||prof.pickupInstructions)?'custom set':'using defaults')+'</span></button>'
           +'<div id="conf-templates-'+dk+'" style="display:none;margin-top:.6rem;">'
           +'<div style="background:#f3eeff;border:1px solid #d9c9f5;border-radius:8px;padding:.6rem .7rem;margin-bottom:.6rem;">'
@@ -7688,6 +7720,324 @@ async function saveDriverTemplate(driverName){
   showToast('\u2713 Templates saved for '+driverName.split(' ')[0]);
 }
 
+// ══════════════════════════════════════════════════════════════
+// BIOMETRIC LOGIN  (WebAuthn / Passkeys)
+// - registerBiometric(userName)  — called after first password login
+// - authenticateWithBiometric()  — called on app load if creds exist
+// - removeBiometric(userName)    — lets user delete their passkey
+// ══════════════════════════════════════════════════════════════
+
+let biometricCreds = {}; // { 'Chase': ['base64id1','base64id2'], ... }
+
+async function loadBiometricCreds(){
+  try{
+    const d = await storageGet('kat:biometricCreds');
+    if(d && typeof d==='object') biometricCreds = d;
+  }catch(e){ biometricCreds = {}; }
+  refreshBiometricButton();
+}
+
+async function saveBiometricCreds(){
+  try{ await storageSet('kat:biometricCreds', biometricCreds); }catch(e){}
+}
+
+// Returns true if device supports platform biometrics
+function biometricSupported(){
+  return !!(window.PublicKeyCredential &&
+    typeof navigator.credentials?.create === 'function' &&
+    typeof navigator.credentials?.get === 'function');
+}
+
+// Returns true if any passkey is stored in Firebase (any user)
+function anyPasskeyStored(){
+  return Object.values(biometricCreds).some(function(arr){ return arr && arr.length > 0; });
+}
+
+// Show/hide the biometric button on the auth screen
+function refreshBiometricButton(){
+  const btn = document.getElementById('biometric-btn');
+  if(!btn) return;
+  const show = biometricSupported() && anyPasskeyStored();
+  btn.style.display = show ? 'flex' : 'none';
+}
+
+// Called after a successful password login — offers to set up biometric
+async function offerBiometricSetup(userName){
+  if(!biometricSupported()) return;
+  // Don't offer if they already have one on this device
+  // (we can't check which creds are on-device, so always offer)
+  const toast = document.createElement('div');
+  toast.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);'
+    +'background:#1a0d2e;color:#fff;border-radius:12px;padding:.75rem 1.25rem;'
+    +'font-size:.85rem;font-family:\'DM Sans\',sans-serif;z-index:99999;'
+    +'display:flex;align-items:center;gap:.75rem;box-shadow:0 4px 20px rgba(0,0,0,.4);'
+    +'max-width:90vw;';
+  toast.innerHTML = '<span style="font-size:1.2rem;">🔐</span>'
+    +'<span>Enable Face ID / Touch ID for faster login?</span>'
+    +'<button onclick="registerBiometric(\''+userName.replace(/'/g,"\\'")+'\')'
+    +'; this.closest(\'div\').remove();" '
+    +'style="background:#9c27b0;color:#fff;border:none;border-radius:7px;'
+    +'padding:.3rem .75rem;font-family:\'DM Sans\',sans-serif;font-weight:700;'
+    +'font-size:.82rem;cursor:pointer;white-space:nowrap;">Set up</button>'
+    +'<button onclick="this.closest(\'div\').remove()" '
+    +'style="background:none;border:1.5px solid rgba(255,255,255,.3);color:rgba(255,255,255,.7);'
+    +'border-radius:7px;padding:.3rem .6rem;font-family:\'DM Sans\',sans-serif;'
+    +'font-size:.82rem;cursor:pointer;">Not now</button>';
+  document.body.appendChild(toast);
+  // Auto-dismiss after 12 seconds
+  setTimeout(function(){ if(toast.parentNode) toast.remove(); }, 12000);
+}
+
+async function registerBiometric(userName){
+  if(!biometricSupported()){
+    showToast('Biometric login not supported on this device', 'error'); return;
+  }
+  try{
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const userId    = crypto.getRandomValues(new Uint8Array(16));
+    const credential = await navigator.credentials.create({
+      publicKey:{
+        challenge,
+        rp:{ name:'Northwest Drivers Association', id:location.hostname },
+        user:{ id:userId, name:userName, displayName:userName },
+        pubKeyCredParams:[
+          { alg:-7,   type:'public-key' },  // ES256 (most common)
+          { alg:-257, type:'public-key' },  // RS256 (fallback)
+        ],
+        authenticatorSelection:{
+          authenticatorAttachment:'platform', // built-in biometric only
+          requireResidentKey: false,
+          userVerification:'required',        // must pass biometric check
+        },
+        timeout:60000,
+        attestation:'none',
+      }
+    });
+    // Store the credential ID (base64) — private key stays on device
+    const rawId = new Uint8Array(credential.rawId);
+    const credId = btoa(String.fromCharCode.apply(null, rawId));
+    if(!biometricCreds[userName]) biometricCreds[userName] = [];
+    if(!biometricCreds[userName].includes(credId)){
+      biometricCreds[userName].push(credId);
+    }
+    await saveBiometricCreds();
+    refreshBiometricButton();
+    showToast('\u2713 Face ID / Touch ID enabled for '+userName.split(' ')[0]);
+  }catch(e){
+    if(e.name==='NotAllowedError') showToast('Biometric setup cancelled', 'error');
+    else if(e.name==='InvalidStateError') showToast('A passkey is already registered on this device');
+    else{ console.warn('Biometric registration error:',e); showToast('Could not set up biometric: '+e.message,'error'); }
+  }
+}
+
+async function authenticateWithBiometric(){
+  if(!biometricSupported() || !anyPasskeyStored()) return;
+  const btn = document.getElementById('biometric-btn');
+  if(btn){ btn.disabled=true; btn.textContent='\uD83D\uDD10 Checking\u2026'; }
+  try{
+    // Build the list of known credential IDs for allowCredentials
+    const allowCreds = [];
+    Object.values(biometricCreds).forEach(function(ids){
+      (ids||[]).forEach(function(id){
+        try{
+          const bytes = Uint8Array.from(atob(id), function(c){ return c.charCodeAt(0); });
+          allowCreds.push({ type:'public-key', id:bytes });
+        }catch(e){}
+      });
+    });
+    if(!allowCreds.length){ if(btn){ btn.disabled=false; refreshBiometricButton(); } return; }
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const assertion = await navigator.credentials.get({
+      publicKey:{
+        challenge,
+        allowCredentials: allowCreds,
+        userVerification:'required',
+        timeout:60000,
+        rpId: location.hostname,
+      }
+    });
+    // Match returned credential ID against stored IDs to find the user
+    const returnedId = btoa(String.fromCharCode.apply(null, new Uint8Array(assertion.rawId)));
+    let matchedUser = null;
+    for(const entry of Object.entries(biometricCreds)){
+      if((entry[1]||[]).includes(returnedId)){ matchedUser = entry[0]; break; }
+    }
+    if(!matchedUser){
+      showToast('Biometric not recognised — please sign in with your password', 'error');
+      if(btn){ btn.disabled=false; btn.innerHTML='<span style="font-size:1.1em;">\uD83D\uDD13</span> Use Face ID / Touch ID'; }
+      return;
+    }
+    const user = USERS.find(function(u){ return u.name===matchedUser; });
+    if(!user || user.disabled){
+      showToast('Account disabled — contact an admin', 'error');
+      if(btn){ btn.disabled=false; refreshBiometricButton(); }
+      return;
+    }
+    currentUser = user;
+    try{ localStorage.setItem('nda-session', user.name); }catch(e){}
+    enterApp();
+  }catch(e){
+    if(e.name!=='NotAllowedError') console.warn('Biometric auth error:',e);
+    if(btn){ btn.disabled=false; btn.innerHTML='<span style="font-size:1.1em;">\uD83D\uDD13</span> Use Face ID / Touch ID'; }
+  }
+}
+
+// Removes all passkeys for a user (e.g. from their profile settings)
+function manageBiometric(userName){
+  const hasCreds=biometricCreds[userName]&&biometricCreds[userName].length>0;
+  if(hasCreds){
+    if(confirm("Remove biometric login for "+userName.split(' ')[0]+"? You'll need to set it up again from your device.")){
+      removeBiometric(userName);
+    }
+  } else {
+    // No creds yet — offer to set up
+    registerBiometric(userName);
+  }
+}
+
+async function removeBiometric(userName){
+  if(!userName) return;
+  delete biometricCreds[userName];
+  await saveBiometricCreds();
+  refreshBiometricButton();
+  showToast('\u2713 Biometric removed for '+userName.split(' ')[0]);
+}
+
+
+// Mark a confirmation part as sent and update button appearance
+function markPartSent(rideId, partKey){
+  if(!_sentParts[rideId]) _sentParts[rideId]=new Set();
+  _sentParts[rideId].add(partKey);
+  const btn=document.getElementById('cpart-'+rideId+'-'+partKey);
+  if(btn){
+    btn.style.borderColor='#16a34a';
+    btn.style.color='#16a34a';
+    btn.style.background='#f0fdf4';
+    const chk=btn.querySelector('.cpart-chk');
+    if(chk) chk.style.display='inline';
+  }
+}
+
+// ── Individual confirmation part actions ─────────────────────────────
+
+function sendConfText(id){
+  const r=rides.find(x=>x.id===id); if(!r) return;
+  const nums=confirmationRecipients(r).map(x=>x.phone);
+  if(!nums.length){ showToast('No phone numbers — add the client\'s number first','error'); return; }
+  const conf=buildConfirmationText(r);
+  const sep=/iphone|ipad|ipod|mac/i.test(navigator.userAgent)?'&':'?';
+  window.location.href='sms:'+nums.join(',')+sep+'body='+encodeURIComponent(conf.message);
+  markPartSent(id,'text');
+}
+
+function sendConfInstructions(id){
+  const r=rides.find(x=>x.id===id); if(!r) return;
+  const conf=buildConfirmationText(r);
+  if(!conf.instructions){ showToast('No pickup instructions for this ride type'); return; }
+  const nums=confirmationRecipients(r).map(x=>x.phone);
+  if(navigator.share && navigator.canShare){
+    navigator.share({ text: conf.instructions })
+      .then(function(){ markPartSent(id,'inst'); })
+      .catch(function(e){ if(e.name!=='AbortError'){ copyToClipboard(conf.instructions,'Instructions copied — paste into message'); markPartSent(id,'inst'); } });
+  } else {
+    const sep=/iphone|ipad|ipod|mac/i.test(navigator.userAgent)?'&':'?';
+    window.location.href='sms:'+nums.join(',')+sep+'body='+encodeURIComponent(conf.instructions);
+    markPartSent(id,'inst');
+  }
+}
+
+async function sendSelfiePic(id){
+  const r=rides.find(x=>x.id===id); if(!r) return;
+  const selfieDataUrl=getDriverSelfie((r.driver||'').trim());
+  if(!selfieDataUrl){ showToast('No selfie card available','error'); return; }
+  const blob=dataURLtoBlob(selfieDataUrl);
+  if(!blob){ showToast('Could not load selfie card','error'); return; }
+  const file=new File([blob],'day-of-travel-request.jpg',{type:blob.type});
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{
+      await navigator.share({files:[file]});
+      markPartSent(id,'selfie');
+    }catch(e){
+      if(e.name!=='AbortError') console.warn('selfie share failed',e);
+    }
+  } else {
+    // Fallback: download it
+    const url=URL.createObjectURL(file);
+    const a=document.createElement('a'); a.href=url; a.download='day-of-travel-request.jpg';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1000);
+    markPartSent(id,'selfie');
+    showToast('Selfie card downloaded — attach manually in Messages');
+  }
+}
+
+async function sendDriverVCard(id){
+  const r=rides.find(x=>x.id===id); if(!r || !r.driver) return;
+  const vcf=buildDriverVCard(r.driver.trim());
+  if(navigator.canShare && navigator.canShare({files:[vcf]})){
+    try{
+      await navigator.share({files:[vcf]});
+      markPartSent(id,'vcard');
+    }catch(e){
+      if(e.name!=='AbortError') console.warn('vcard share failed',e);
+    }
+  } else {
+    const url=URL.createObjectURL(vcf);
+    const a=document.createElement('a'); a.href=url; a.download=vcf.name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1000);
+    markPartSent(id,'vcard');
+  }
+}
+
+async function sendDriverCard(id){
+  const r=rides.find(x=>x.id===id); if(!r || !r.driver) return;
+  const files=_confirmShareFiles[id]||[];
+  const cardFile=files.find(function(f){ return f.type==='image/png'; })
+    || await warmDriverCardImage(r.driver.trim());
+  if(!cardFile){ showToast('Driver card not ready — try again in a moment','error'); return; }
+  if(navigator.canShare && navigator.canShare({files:[cardFile]})){
+    try{
+      await navigator.share({files:[cardFile]});
+      markPartSent(id,'card');
+    }catch(e){
+      if(e.name!=='AbortError') console.warn('card share failed',e);
+    }
+  } else {
+    // Clipboard fallback
+    if(window.ClipboardItem && navigator.clipboard && navigator.clipboard.write){
+      try{
+        await navigator.clipboard.write([new ClipboardItem({'image/png':cardFile})]);
+        markPartSent(id,'card');
+        showToast('\uD83D\uDCCB Driver card copied — long-press in Messages to paste');
+      }catch(e){
+        showToast('Could not copy driver card on this browser','error');
+      }
+    } else {
+      showToast('Driver card sharing not supported on this browser','error');
+    }
+  }
+}
+
+
+// Send client's phone number to the assigned driver(s)
+function sendClientPhone(id){
+  const r=rides.find(x=>x.id===id); if(!r) return;
+  const clientName=r.client||'your client';
+  const clientPhone=(r.phone||'').replace(/[^0-9+]/g,'');
+  if(!clientPhone){ showToast('No phone number on file for this client','error'); return; }
+  // Build message to send to driver(s)
+  const msg=clientName+'\'s number: '+r.phone+'\nFor your '+r.type+' on '+(r.date||'')+(r.time?' at '+r.time:'');
+  // Get the assigned driver's number(s)
+  const driverNums=[];
+  if(r.driver){ const p=(DRIVER_PROFILES[r.driver]||{}).phone; if(p) driverNums.push(p.replace(/[^0-9+]/g,'')); }
+  if(r.xxl && r.driver2){ const p=(DRIVER_PROFILES[r.driver2]||{}).phone; if(p) driverNums.push(p.replace(/[^0-9+]/g,'')); }
+  if(!driverNums.length){ showToast('No phone number on file for the assigned driver','error'); return; }
+  const sep=/iphone|ipad|ipod|mac/i.test(navigator.userAgent)?'&':'?';
+  window.location.href='sms:'+driverNums.join(',')+sep+'body='+encodeURIComponent(msg);
+  markPartSent(id,'phone');
+}
+
 function toggleCautiousList(){
   const panel=document.getElementById('cautious-list-panel'), btn=document.getElementById('cautious-list-btn');
   if(!panel) return; const open=panel.style.display==='none'||!panel.style.display;
@@ -8728,6 +9078,8 @@ function login(){
       localStorage.setItem('nda-session', user.name);
     } else { localStorage.removeItem('nda-session'); }
   }catch(e){}
+  // Offer biometric setup on first login (non-blocking)
+  setTimeout(function(){ offerBiometricSetup(user.name); }, 800);
   // Base app is free — disabled users see the disabled screen, everyone else enters
   enterApp();
 }
