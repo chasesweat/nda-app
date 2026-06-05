@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606049922">
+<meta name="version" content="202606049924">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2941,13 +2941,27 @@ function renderConfirmations(){
         <div id="${drvPreviewId}-loader" style="font-size:.75rem;color:var(--mid);font-style:italic;">${r.driver?'Building card…':'No driver assigned'}</div>
       </div>
       <div style="font-size:.68rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Send each piece separately — tap to send, checkmark confirms</div>
-      <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.75rem;">
-        <button id="cpart-${pid}-text"    onclick="sendConfText(${pid})"         style="${bBase}">&#x1F4AC; Confirmation text${chkSpan}</button>
-        ${conf.instructions?`<button id="cpart-${pid}-inst"    onclick="sendConfInstructions(${pid})"  style="${bBase}">&#x1F4CD; Pickup instructions${chkSpan}</button>`:''}
-        <button id="cpart-${pid}-selfie"  onclick="sendSelfiePic(${pid})"        style="${bBase}">&#x1F933; Selfie request${chkSpan}</button>
-        <button id="cpart-${pid}-vcard"   onclick="sendDriverVCard(${pid})"      style="${bBase}">&#x1F464; Driver vCard${chkSpan}</button>
-        <button id="cpart-${pid}-card"    onclick="sendDriverCard(${pid})"       style="${bBase}">&#x1F5BC; Driver card image${chkSpan}</button>
-        <button id="cpart-${pid}-phone"   onclick="sendClientPhone(${pid})"      style="${bBase}">&#x1F4F1; Client phone to driver${chkSpan}</button>
+      <div style="display:flex;flex-direction:column;gap:.35rem;margin-bottom:.75rem;">
+        ${[
+          ['text',   '&#x1F4AC; Confirmation text',   true],
+          conf.instructions ? ['inst','&#x1F4CD; Pickup instructions', true] : null,
+          ['selfie', '&#x1F933; Selfie request',       true],
+          ['vcard',  '&#x1F464; Driver vCard',         true],
+          ['card',   '&#x1F5BC; Driver card',          true],
+          ['phone',  '&#x1F4F1; Client phone to driver',true],
+        ].filter(Boolean).map(function(item){
+          const key=item[0], label=item[1];
+          const cStyle='padding:.55rem .6rem;border:1.5px solid var(--light);border-radius:0 9px 9px 0;'
+            +'background:var(--white);font-family:\'DM Sans\',sans-serif;font-size:.82rem;'
+            +'cursor:pointer;color:var(--mid);flex-shrink:0;transition:all .15s;'
+            +'border-left:none;';
+          return '<div style="display:flex;gap:0;">'
+            +'<button id="cpart-'+pid+'-'+key+'" onclick="'+(key==='phone'?'sendClientPhone':'sendConf'===key.slice(0,7)?'sendConf'+key[0].toUpperCase()+key.slice(1):{'selfie':'sendSelfiePic','vcard':'sendDriverVCard','card':'sendDriverCard'}[key]||'sendConfText')+'('+pid+')" '
+            +'style="'+bBase+'border-radius:9px 0 0 9px;border-right:none;flex:1;">'+label+chkSpan+'</button>'
+            +'<button id="ccopy-'+pid+'-'+key+'" onclick="copyConfPart('+pid+',\''+key+'\')" '
+            +'title="Copy to clipboard" style="'+cStyle+'">&#x1F4CB;</button>'
+            +'</div>';
+        }).join('')}
       </div>
       ${groupLine}
     `
@@ -8020,23 +8034,156 @@ async function sendDriverCard(id){
 }
 
 
+// ── Helper: open the group SMS thread for this ride ─────────────────
+
+// Copy a confirmation part to clipboard (emergency manual copy)
+async function copyConfPart(id, partKey){
+  const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
+  const conf=buildConfirmationText(r);
+  let ok=false;
+  if(partKey==='text'){
+    ok=copyToClipboard(conf.message,'Confirmation text copied');
+  } else if(partKey==='inst'){
+    if(!conf.instructions){ showToast('No instructions for this ride type'); return; }
+    ok=copyToClipboard(conf.instructions,'Instructions copied');
+  } else if(partKey==='selfie'){
+    const dataUrl=getDriverSelfie((r.driver||'').trim());
+    if(!dataUrl){ showToast('No selfie card available','error'); return; }
+    ok=await copyImageToClipboard(dataUrl);
+    if(ok) showToast('\uD83D\uDCCB Selfie card copied to clipboard');
+    else showToast('Image copy not supported on this browser \u2014 use Send button instead','error');
+  } else if(partKey==='card'){
+    const files=_confirmShareFiles[id]||[];
+    const cardFile=files.find(function(f){ return f.type==='image/png'; })
+      || await warmDriverCardImage((r.driver||'').trim());
+    if(!cardFile){ showToast('Driver card not ready','error'); return; }
+    if(window.ClipboardItem && navigator.clipboard && navigator.clipboard.write){
+      try{
+        await navigator.clipboard.write([new ClipboardItem({'image/png':cardFile})]);
+        ok=true; showToast('\uD83D\uDDBC\uFE0F Driver card copied to clipboard');
+      }catch(e){ showToast('Image copy not supported on this browser','error'); }
+    } else { showToast('Clipboard image copy not supported on this browser','error'); }
+  } else if(partKey==='vcard'){
+    if(!r.driver) return;
+    const vcf=buildDriverVCard(r.driver.trim());
+    const url=URL.createObjectURL(vcf);
+    const a=document.createElement('a'); a.href=url; a.download=vcf.name; a.style.display='none';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1000);
+    ok=true; showToast('\uD83D\uDC64 Driver vCard downloaded');
+  } else if(partKey==='phone'){
+    const phone=r.phone||'';
+    if(!phone){ showToast('No client phone on file','error'); return; }
+    ok=copyToClipboard(phone,'Client phone number copied');
+  }
+  if(ok){
+    // Turn the copy button green
+    const btn=document.getElementById('ccopy-'+id+'-'+partKey);
+    if(btn){ btn.style.color='#16a34a'; btn.style.borderColor='#16a34a'; btn.style.background='#f0fdf4'; }
+  }
+}
+
+function openGroupThread(id, body){
+  const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
+  const nums=confirmationRecipients(r).map(function(x){ return x.phone; });
+  if(!nums.length) return;
+  const sep=/iphone|ipad|ipod|mac/i.test(navigator.userAgent)?'&':'?';
+  window.location.href='sms:'+nums.join(',')+sep+'body='+encodeURIComponent(body||'');
+}
+
+// ── Helper: copy image data-url to clipboard silently ────────────────
+async function copyImageToClipboard(dataUrl){
+  if(!window.ClipboardItem || !navigator.clipboard || !navigator.clipboard.write) return false;
+  try{
+    const blob=dataURLtoBlob(dataUrl); if(!blob) return false;
+    await navigator.clipboard.write([new ClipboardItem({[blob.type]:blob})]);
+    return true;
+  }catch(e){ return false; }
+}
+
+// ── Individual confirmation send actions ─────────────────────────────
+
+function sendConfText(id){
+  const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
+  const conf=buildConfirmationText(r);
+  openGroupThread(id, conf.message);
+  markPartSent(id,'text');
+}
+
+function sendConfInstructions(id){
+  const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
+  const conf=buildConfirmationText(r);
+  if(!conf.instructions){ showToast('No pickup instructions for this ride type'); return; }
+  openGroupThread(id, conf.instructions);
+  markPartSent(id,'inst');
+}
+
+async function sendSelfiePic(id){
+  const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
+  const selfieDataUrl=getDriverSelfie((r.driver||'').trim());
+  if(!selfieDataUrl){ showToast('No selfie card available','error'); return; }
+  const copied=await copyImageToClipboard(selfieDataUrl);
+  openGroupThread(id, '');
+  markPartSent(id,'selfie');
+  if(copied) setTimeout(function(){ showToast('\uD83D\uDCCB Selfie card on clipboard \u2014 long-press in Messages to paste'); },700);
+  else setTimeout(function(){ showToast('Selfie card could not be copied on this browser'); },700);
+}
+
+async function sendDriverVCard(id){
+  const r=rides.find(function(x){ return x.id===id; }); if(!r || !r.driver) return;
+  // Download the vCard file
+  const vcf=buildDriverVCard(r.driver.trim());
+  const url=URL.createObjectURL(vcf);
+  const a=document.createElement('a'); a.href=url; a.download=vcf.name; a.style.display='none';
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1000);
+  // Then open the group thread
+  openGroupThread(id, '');
+  markPartSent(id,'vcard');
+  setTimeout(function(){ showToast('\uD83D\uDC64 Driver contact downloaded \u2014 attach from your files in Messages'); },700);
+}
+
+async function sendDriverCard(id){
+  const r=rides.find(function(x){ return x.id===id; }); if(!r || !r.driver) return;
+  // Get pre-built card or build now
+  const files=_confirmShareFiles[id]||[];
+  const cardFile=files.find(function(f){ return f.type==='image/png'; })
+    || await warmDriverCardImage(r.driver.trim());
+  if(!cardFile){ showToast('Driver card not ready \u2014 try again in a moment','error'); return; }
+  // Copy to clipboard
+  let copied=false;
+  if(window.ClipboardItem && navigator.clipboard && navigator.clipboard.write){
+    try{
+      await navigator.clipboard.write([new ClipboardItem({'image/png':cardFile})]);
+      copied=true;
+    }catch(e){ console.warn('clipboard write failed',e); }
+  }
+  // Open the group thread
+  openGroupThread(id, '');
+  markPartSent(id,'card');
+  const msg=copied
+    ?'\uD83D\uDDBC\uFE0F Driver card on clipboard \u2014 long-press in Messages to paste'
+    :'Driver card sharing not supported on this browser \u2014 use the preview above';
+  setTimeout(function(){ showToast(msg); },700);
+}
+
 // Send client's phone number to the assigned driver(s)
 function sendClientPhone(id){
-  const r=rides.find(x=>x.id===id); if(!r) return;
-  const clientName=r.client||'your client';
+  const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
   const clientPhone=(r.phone||'').replace(/[^0-9+]/g,'');
   if(!clientPhone){ showToast('No phone number on file for this client','error'); return; }
-  // Build message to send to driver(s)
+  const clientName=r.client||'your client';
   const msg=clientName+'\'s number: '+r.phone+'\nFor your '+r.type+' on '+(r.date||'')+(r.time?' at '+r.time:'');
-  // Get the assigned driver's number(s)
+  // Send to driver(s)
   const driverNums=[];
   if(r.driver){ const p=(DRIVER_PROFILES[r.driver]||{}).phone; if(p) driverNums.push(p.replace(/[^0-9+]/g,'')); }
-  if(r.xxl && r.driver2){ const p=(DRIVER_PROFILES[r.driver2]||{}).phone; if(p) driverNums.push(p.replace(/[^0-9+]/g,'')); }
+  if(r.xxl&&r.driver2){ const p=(DRIVER_PROFILES[r.driver2]||{}).phone; if(p) driverNums.push(p.replace(/[^0-9+]/g,'')); }
   if(!driverNums.length){ showToast('No phone number on file for the assigned driver','error'); return; }
   const sep=/iphone|ipad|ipod|mac/i.test(navigator.userAgent)?'&':'?';
   window.location.href='sms:'+driverNums.join(',')+sep+'body='+encodeURIComponent(msg);
   markPartSent(id,'phone');
 }
+
 
 function toggleCautiousList(){
   const panel=document.getElementById('cautious-list-panel'), btn=document.getElementById('cautious-list-btn');
