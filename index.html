@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606049931">
+<meta name="version" content="202606049933">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2946,124 +2946,120 @@ function openNav(addr){
 }
 
 function renderConfirmations(){
-  // Clear stale share files and sent-state on each render
-  Object.keys(_confirmShareFiles).forEach(function(k){ delete _confirmShareFiles[k]; });
-  Object.keys(_sentParts).forEach(function(k){ delete _sentParts[k]; });
   const panel=document.getElementById('my-confirm-panel');
-  if(!panel) return;
+  if(!panel){ console.warn('no my-confirm-panel'); return; }
 
-  
-  const today=toDateStr(new Date());
-  const tomorrow=toDateStr(addDays(new Date(),1));
-  const admin=isAdmin();
-  const dName=getMyDriverName();
-  // Show tomorrow's unconfirmed rides; fall back to today's if none tomorrow
-  let list=rides.filter(r=>r.date===tomorrow && r.status!=='cancelled' && !r.confirmSent && isMyScheduledRide(r));
-  if(!list.length){
-    list=rides.filter(r=>r.date===today && r.status!=='cancelled' && !r.confirmSent && isMyScheduledRide(r));
+  // Ensure panel is visible
+  panel.style.display='block';
+
+  try{
+    const today=toDateStr(new Date());
+    const tomorrow=toDateStr(addDays(new Date(),1));
+
+    // Build ride list — show today or tomorrow unconfirmed rides scheduled by this user
+    let dateLabel=tomorrow;
+    let list=rides.filter(function(r){
+      return r.date===tomorrow && r.status!=='cancelled' && !r.confirmSent && isMyScheduledRide(r);
+    });
+    if(!list.length){
+      list=rides.filter(function(r){
+        return r.date===today && r.status!=='cancelled' && !r.confirmSent && isMyScheduledRide(r);
+      });
+      dateLabel=today;
+    }
+    list.sort(function(a,b){ return (a.time||'').localeCompare(b.time||''); });
+
+    if(!list.length){
+      panel.innerHTML='<div style="padding:1.5rem 0;">'
+        +'<div style="font-size:.95rem;color:var(--mid);margin-bottom:.5rem;">No unconfirmed rides for today or tomorrow.</div>'
+        +'<div style="font-size:.8rem;color:var(--mid);">Rides you schedule will appear here the day before so you can send confirmation texts.</div>'
+        +'</div>';
+      return;
+    }
+
+    // Render each ride card
+    const cards=list.map(function(r){
+      const c=rideColor(r);
+      const tc='#fff';
+      const conf=buildConfirmationText(r);
+      const recips=confirmationRecipients(r);
+      const groupLine=recips.length
+        ?('<div style="font-size:.72rem;color:var(--mid);margin-bottom:.4rem;">\uD83D\uDC65 Group text to '+recips.length+' numbers: '+recips.map(function(x){return x.name;}).join(', ')+'</div>')
+        :'';
+      const phone=(r.phone||'').trim();
+      const phoneLink=phone?('<a href="tel:'+phone.replace(/[^0-9+]/g,'')+'" onclick="event.stopPropagation()" style="color:'+c+';font-weight:600;text-decoration:none;">\uD83D\uDCDE '+phone+'</a>'):'';
+      const drvPreviewId='dc-prev-'+r.id;
+      const pid=r.id;
+      const bBase='display:flex;align-items:center;gap:.45rem;padding:.55rem .75rem;border:1.5px solid var(--light);border-radius:9px;background:var(--white);font-family:\'DM Sans\',sans-serif;font-size:.8rem;font-weight:600;color:var(--black);cursor:pointer;flex:1 1 auto;min-width:140px;transition:border-color .15s,color .15s,background .15s;';
+      const cCopy='padding:.55rem .6rem;border:1.5px solid var(--light);border-radius:0 9px 9px 0;background:var(--white);font-size:.82rem;cursor:pointer;color:var(--mid);flex-shrink:0;border-left:none;';
+      const chk='<span class="cpart-chk" style="display:none;color:#16a34a;margin-left:auto;">&#10003;</span>';
+
+      const btnRow=function(key,label,fn){
+        return '<div style="display:flex;gap:0;">'
+          +'<button id="cpart-'+pid+'-'+key+'" onclick="'+fn+'('+pid+')" style="'+bBase+'border-radius:9px 0 0 9px;border-right:none;flex:1;">'+label+chk+'</button>'
+          +'<button id="ccopy-'+pid+'-'+key+'" onclick="copyConfPart('+pid+',\''+key+'\')" title="Copy" style="'+cCopy+'border-radius:0 9px 9px 0;">&#x1F4CB;</button>'
+          +'</div>';
+      };
+
+      const buttons='<div style="display:flex;flex-direction:column;gap:.35rem;margin-bottom:.75rem;">'
+        +btnRow('text','&#x1F4AC; Confirmation text','sendConfText')
+        +(conf.instructions?btnRow('inst','&#x1F4CD; Pickup instructions','sendConfInstructions'):'')
+        +btnRow('selfie','&#x1F933; Selfie request','sendSelfiePic')
+        +btnRow('vcard','&#x1F464; Driver vCard','sendDriverVCard')
+        +btnRow('card','&#x1F5BC; Driver card','sendDriverCard')
+        +btnRow('phone','&#x1F4F1; Client phone to driver','sendClientPhone')
+        +'</div>';
+
+      return '<div id="conf-card-'+r.id+'" style="border:1.5px solid '+c+';border-left:5px solid '+c+';border-radius:12px;padding:.9rem 1rem;margin-bottom:.75rem;background:var(--white);">'
+        +'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem;margin-bottom:.4rem;">'
+        +'<div>'
+        +'<div style="font-size:.88rem;font-weight:700;color:var(--black);">'+escHtml(r.client||'Unknown client')+'</div>'
+        +'<div style="font-size:.75rem;color:var(--mid);">'+r.type+' \u00b7 '+r.vehicle+' \u00b7 '+(r.driver?r.driver.split(' ')[0]:'Unassigned')+'</div>'
+        +(phoneLink?'<div style="margin-top:3px;">'+phoneLink+'</div>':'')
+        +'</div>'
+        +'<div style="font-size:.82rem;font-weight:700;color:var(--mid);white-space:nowrap;">'+(r.time||'')+'</div>'
+        +'</div>'
+        +'<div style="margin-bottom:.6rem;">'
+        +'<div style="width:280px;max-width:100%;margin-bottom:.3rem;">'
+        +'<img id="'+drvPreviewId+'" src="" alt="Driver card" style="width:100%;border-radius:8px;border:1px solid var(--light);display:none;" />'
+        +'</div>'
+        +'<div id="'+drvPreviewId+'-loader" style="font-size:.72rem;color:var(--mid);font-style:italic;">'+(r.driver?'Building card\u2026':'No driver assigned')+'</div>'
+        +'</div>'
+        +buttons
+        +groupLine
+        +'<button onclick="toggleConfirmSent('+r.id+')" style="width:100%;padding:.6rem;background:none;border:1.5px solid var(--green);color:var(--green);border-radius:8px;font-weight:700;cursor:pointer;font-size:.85rem;font-family:\'DM Sans\',sans-serif;">Mark confirmation text sent</button>'
+        +'</div>';
+    }).join('');
+
+    panel.innerHTML='<div style="font-size:.78rem;color:var(--mid);background:var(--surface);border-radius:8px;padding:.5rem .7rem;margin-bottom:1rem;">&#x1F4CB; Rides for '+fmtDate(dateLabel)+' that need confirmation texts</div>'
+      +cards;
+
+    // Populate driver card previews
+    list.forEach(function(r){
+      if(!r.driver) return;
+      const imgEl=document.getElementById('dc-prev-'+r.id);
+      const loaderEl=document.getElementById('dc-prev-'+r.id+'-loader');
+      if(!imgEl) return;
+      warmDriverCardImage(r.driver.trim()).then(function(file){
+        if(!file){ if(loaderEl) loaderEl.textContent='No card photo'; return; }
+        const ds=driverSettings[r.driver.trim()]||{};
+        const prof=DRIVER_PROFILES[r.driver.trim()]||{};
+        const allFiles=[file];
+        if(prof.phone) allFiles.push(buildDriverVCard(r.driver.trim()));
+        _confirmShareFiles[r.id]=allFiles;
+        const url=URL.createObjectURL(file);
+        imgEl.onload=function(){ URL.revokeObjectURL(url); };
+        imgEl.src=url;
+        imgEl.style.display='block';
+        if(loaderEl) loaderEl.style.display='none';
+      }).catch(function(){ if(loaderEl) loaderEl.textContent=''; });
+    });
+
+  }catch(e){
+    panel.innerHTML='<div style="padding:1rem;color:#c00;font-size:.85rem;border:1.5px solid #c00;border-radius:8px;">'
+      +'<strong>Error loading confirmations:</strong><br>'+e.message+'</div>';
+    console.warn('renderConfirmations error:',e);
   }
-  list.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
-
-  const sentCount=0; // sentCount: all listed rides are unconfirmed by definition
-  const header=`
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:.4rem;">
-      <div>
-        <div style="font-size:1.05rem;font-weight:700;">Tomorrow — ${fmtDate(tomorrow)}</div>
-        <div style="font-size:.82rem;color:var(--mid);">${list.length} ride${list.length===1?'':'s'} you scheduled · ${sentCount} confirmed</div>
-      </div>
-    </div>
-    <div style="font-size:.78rem;color:var(--mid);background:var(--surface);border-radius:8px;padding:.5rem .7rem;margin-bottom:1rem;">📋 You confirm rides <strong>you scheduled</strong> — even when another driver is driving them.</div>`;
-
-  if(!list.length){
-    panel.innerHTML=header+`<p style="color:var(--mid);font-size:.9rem;">No rides you scheduled for tomorrow.</p>`;
-    return;
-  }
-
-  panel.innerHTML=header+list.map(r=>{
-    const c=rideColor(r);
-    const sent=!!r.confirmSent;
-    const phone=(r.phone||'').trim();
-    const phoneLink=phone?`<a href="tel:${phone.replace(/[^0-9+]/g,'')}" onclick="event.stopPropagation();" style="color:${c};font-weight:600;text-decoration:none;">📞 ${phone}</a>`:`<span style="color:var(--mid);">No phone on file</span>`;
-    const driverBadge=admin?`<span style="font-size:.68rem;padding:1px 7px;border-radius:6px;background:${c}22;color:${c};font-weight:600;">${r.driver?r.driver.split(' ')[0]:'Unassigned'}</span>`:'';
-    const stamp=sent&&r.confirmSentBy?`<div style="font-size:.7rem;color:var(--mid);margin-top:.35rem;">Sent by ${escHtml(String(r.confirmSentBy))}${r.confirmSentAt?' · '+fmtTs(r.confirmSentAt):''}</div>`:'';
-    const btn=sent
-      ? `<button onclick="toggleConfirmSent(${r.id})" style="width:100%;padding:.6rem;border:none;border-radius:8px;background:var(--green);color:#fff;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:700;cursor:pointer;">✓ Confirmation text sent</button>`
-      : `<button onclick="toggleConfirmSent(${r.id})" style="width:100%;padding:.6rem;border:1.5px solid var(--green);border-radius:8px;background:var(--white);color:var(--green);font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">Mark confirmation text sent</button>`;
-    const conf=buildConfirmationText(r);
-    const recips=confirmationRecipients(r);
-    const btnStyle="flex:1;min-width:120px;padding:.5rem;border:1.5px solid "+c+";border-radius:8px;background:var(--white);color:"+c+";font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;";
-    const groupLine=recips.length?`<div style="font-size:.72rem;color:var(--mid);margin-bottom:.45rem;">👥 Group text to ${recips.length} number${recips.length===1?'':'s'}: ${escHtml(recips.map(x=>x.name).join(', '))}</div>`:`<div style="font-size:.72rem;color:var(--red);margin-bottom:.45rem;">No numbers yet — add the client's number to this ride.</div>`;
-    const drvPreviewId='dc-prev-'+r.id;
-    const bBase='display:flex;align-items:center;gap:.45rem;padding:.55rem .75rem;'
-      +'border:1.5px solid var(--light);border-radius:9px;background:var(--white);'
-      +'font-family:\'DM Sans\',sans-serif;font-size:.8rem;font-weight:600;'
-      +'color:var(--black);cursor:pointer;flex:1 1 auto;min-width:140px;'
-      +'transition:border-color .15s,color .15s,background .15s;';
-    const cCopy='padding:.55rem .6rem;border:1.5px solid var(--light);border-radius:0 9px 9px 0;background:var(--white);font-size:.82rem;cursor:pointer;color:var(--mid);flex-shrink:0;border-left:none;';
-    const chkSpan='<span class="cpart-chk" style="display:none;color:#16a34a;margin-left:auto;">&#10003;</span>';
-    const pid=r.id;
-    const msgSection=`
-      <div style="margin-bottom:1rem;">
-        <div style="font-size:.68rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Driver card preview</div>
-        <div style="width:280px;max-width:100%;">
-          <img id="${drvPreviewId}" src="" alt="Driver card" style="width:100%;border-radius:8px;border:1px solid var(--light);display:none;" />
-        </div>
-        <div id="${drvPreviewId}-loader" style="font-size:.75rem;color:var(--mid);font-style:italic;">${r.driver?'Building card…':'No driver assigned'}</div>
-      </div>
-      <div style="font-size:.68rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Send each piece separately — tap to send, checkmark confirms</div>
-      <div style="display:flex;flex-direction:column;gap:.35rem;margin-bottom:.75rem;">
-        <div style="display:flex;gap:0;"><button id="cpart-${pid}-text"   onclick="sendConfText(${pid})"         style="${bBase}border-radius:9px 0 0 9px;border-right:none;flex:1;">&#x1F4AC; Confirmation text${chkSpan}</button><button id="ccopy-${pid}-text"   onclick="copyConfPart(${pid},'text')"   title="Copy" style="${cCopy}">&#x1F4CB;</button></div>
-        ${conf.instructions?`<div style="display:flex;gap:0;"><button id="cpart-${pid}-inst"   onclick="sendConfInstructions(${pid})" style="${bBase}border-radius:9px 0 0 9px;border-right:none;flex:1;">&#x1F4CD; Pickup instructions${chkSpan}</button><button id="ccopy-${pid}-inst"   onclick="copyConfPart(${pid},'inst')"   title="Copy" style="${cCopy}">&#x1F4CB;</button></div>`:''}
-        <div style="display:flex;gap:0;"><button id="cpart-${pid}-selfie" onclick="sendSelfiePic(${pid})"        style="${bBase}border-radius:9px 0 0 9px;border-right:none;flex:1;">&#x1F933; Selfie request${chkSpan}</button><button id="ccopy-${pid}-selfie" onclick="copyConfPart(${pid},'selfie')" title="Copy" style="${cCopy}">&#x1F4CB;</button></div>
-        <div style="display:flex;gap:0;"><button id="cpart-${pid}-vcard"  onclick="sendDriverVCard(${pid})"      style="${bBase}border-radius:9px 0 0 9px;border-right:none;flex:1;">&#x1F464; Driver vCard${chkSpan}</button><button id="ccopy-${pid}-vcard"  onclick="copyConfPart(${pid},'vcard')"  title="Copy" style="${cCopy}">&#x1F4CB;</button></div>
-        <div style="display:flex;gap:0;"><button id="cpart-${pid}-card"   onclick="sendDriverCard(${pid})"       style="${bBase}border-radius:9px 0 0 9px;border-right:none;flex:1;">&#x1F5BC; Driver card${chkSpan}</button><button id="ccopy-${pid}-card"   onclick="copyConfPart(${pid},'card')"   title="Copy" style="${cCopy}">&#x1F4CB;</button></div>
-        <div style="display:flex;gap:0;"><button id="cpart-${pid}-phone"  onclick="sendClientPhone(${pid})"      style="${bBase}border-radius:9px 0 0 9px;border-right:none;flex:1;">&#x1F4F1; Client phone to driver${chkSpan}</button><button id="ccopy-${pid}-phone"  onclick="copyConfPart(${pid},'phone')"  title="Copy" style="${cCopy}">&#x1F4CB;</button></div>
-      </div>
-      ${groupLine}
-    `
-    return `<div id="conf-card-${r.id}" style="border:1.5px solid ${c};border-left:5px solid ${c};border-radius:12px;padding:.9rem 1rem;margin-bottom:.75rem;background:${sent?c+'33':'var(--white)'};">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.3rem;flex-wrap:wrap;">
-        <div style="display:flex;align-items:center;gap:.5rem;">
-          <span style="font-size:.95rem;font-weight:700;color:var(--black);cursor:pointer;" onclick="openRideModal(${r.id})">${sent?'<span style=\"color:var(--green);font-weight:900;\">✓ </span>':''}${escHtml(r.client||'—')}</span>
-          ${driverBadge}
-        </div>
-        <span style="font-size:.85rem;font-weight:700;color:${c};">${r.time||'—'}</span>
-      </div>
-      <div style="font-size:.78rem;color:var(--mid);margin-bottom:.2rem;">${escHtml(r.type||'')} · ${escHtml(r.vehicle||'')}</div>
-      <div style="font-size:.78rem;color:var(--mid);margin-bottom:.5rem;">${mapsLink(r.pickup, c)} → ${mapsLink(r.home, c)}</div>
-      <div style="font-size:.82rem;margin-bottom:.6rem;">${phoneLink}</div>
-      ${msgSection}
-      ${btn}${stamp}
-    </div>`;
-  }).join('');
-
-  // Populate driver card image previews after DOM is ready
-  list.forEach(function(r){
-    if(!r.driver) return;
-    const imgEl=document.getElementById('dc-prev-'+r.id);
-    const loaderEl=document.getElementById('dc-prev-'+r.id+'-loader');
-    if(!imgEl) return;
-    warmDriverCardImage(r.driver.trim()).then(function(file){
-      if(!file){ if(loaderEl) loaderEl.textContent='No card photo'; return; }
-      // Store the File so textClient can use it without any async wait
-      const files=[file];
-      const prof=DRIVER_PROFILES[r.driver.trim()]||{};
-      if(prof.phone) files.push(buildDriverVCard(r.driver.trim()));
-      // Add day-of-travel selfie request image
-      const selfieDataUrl=getDriverSelfie(r.driver.trim());
-      if(selfieDataUrl){
-        const selfieBlob=dataURLtoBlob(selfieDataUrl);
-        if(selfieBlob) files.push(new File([selfieBlob],'day-of-travel.jpg',{type:selfieBlob.type}));
-      }
-      _confirmShareFiles[r.id]=files;
-      // Show the preview
-      const url=URL.createObjectURL(file);
-      imgEl.onload=function(){ URL.revokeObjectURL(url); };
-      imgEl.src=url;
-      imgEl.style.display='block';
-      if(loaderEl) loaderEl.style.display='none';
-    }).catch(function(){ if(loaderEl) loaderEl.textContent=''; });
-  });
 }
 
 async function toggleConfirmSent(id){
