@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606049928">
+<meta name="version" content="202606049929">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2969,6 +2969,10 @@ function renderConfirmations(){
   const dName=getMyDriverName();
   // The SCHEDULER confirms: a non-admin sees rides they scheduled (own), even if someone else drives.
   let list=rides.filter(r=>r.date===tomorrow && r.status!=='cancelled' && !r.confirmSent && isMyScheduledRide(r));
+  // Also check today if 'tomorrow' yields nothing (handles late-night dispatch)
+  if(!list.length){
+    list=rides.filter(r=>r.date===today && r.status!=='cancelled' && !r.confirmSent && isMyScheduledRide(r));
+  }
   list.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
 
   const sentCount=list.filter(r=>r.confirmSent).length;
@@ -3006,6 +3010,7 @@ function renderConfirmations(){
       +'font-family:\'DM Sans\',sans-serif;font-size:.8rem;font-weight:600;'
       +'color:var(--black);cursor:pointer;flex:1 1 auto;min-width:140px;'
       +'transition:border-color .15s,color .15s,background .15s;';
+    const cCopy='padding:.55rem .6rem;border:1.5px solid var(--light);border-radius:0 9px 9px 0;background:var(--white);font-size:.82rem;cursor:pointer;color:var(--mid);flex-shrink:0;border-left:none;';
     const chkSpan='<span class="cpart-chk" style="display:none;color:#16a34a;margin-left:auto;">&#10003;</span>';
     const pid=r.id;
     const msgSection=`
@@ -3018,26 +3023,12 @@ function renderConfirmations(){
       </div>
       <div style="font-size:.68rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Send each piece separately — tap to send, checkmark confirms</div>
       <div style="display:flex;flex-direction:column;gap:.35rem;margin-bottom:.75rem;">
-        ${[
-          ['text',   '&#x1F4AC; Confirmation text',   true],
-          conf.instructions ? ['inst','&#x1F4CD; Pickup instructions', true] : null,
-          ['selfie', '&#x1F933; Selfie request',       true],
-          ['vcard',  '&#x1F464; Driver vCard',         true],
-          ['card',   '&#x1F5BC; Driver card',          true],
-          ['phone',  '&#x1F4F1; Client phone to driver',true],
-        ].filter(Boolean).map(function(item){
-          const key=item[0], label=item[1];
-          const cStyle='padding:.55rem .6rem;border:1.5px solid var(--light);border-radius:0 9px 9px 0;'
-            +'background:var(--white);font-family:\'DM Sans\',sans-serif;font-size:.82rem;'
-            +'cursor:pointer;color:var(--mid);flex-shrink:0;transition:all .15s;'
-            +'border-left:none;';
-          return '<div style="display:flex;gap:0;">'
-            +'<button id="cpart-'+pid+'-'+key+'" onclick="'+(key==='phone'?'sendClientPhone':'sendConf'===key.slice(0,7)?'sendConf'+key[0].toUpperCase()+key.slice(1):{'selfie':'sendSelfiePic','vcard':'sendDriverVCard','card':'sendDriverCard'}[key]||'sendConfText')+'('+pid+')" '
-            +'style="'+bBase+'border-radius:9px 0 0 9px;border-right:none;flex:1;">'+label+chkSpan+'</button>'
-            +'<button id="ccopy-'+pid+'-'+key+'" onclick="copyConfPart('+pid+',\''+key+'\')" '
-            +'title="Copy to clipboard" style="'+cStyle+'">&#x1F4CB;</button>'
-            +'</div>';
-        }).join('')}
+        <div style="display:flex;gap:0;"><button id="cpart-${pid}-text"   onclick="sendConfText(${pid})"         style="${bBase}border-radius:9px 0 0 9px;border-right:none;flex:1;">&#x1F4AC; Confirmation text${chkSpan}</button><button id="ccopy-${pid}-text"   onclick="copyConfPart(${pid},'text')"   title="Copy" style="${cCopy}">&#x1F4CB;</button></div>
+        ${conf.instructions?`<div style="display:flex;gap:0;"><button id="cpart-${pid}-inst"   onclick="sendConfInstructions(${pid})" style="${bBase}border-radius:9px 0 0 9px;border-right:none;flex:1;">&#x1F4CD; Pickup instructions${chkSpan}</button><button id="ccopy-${pid}-inst"   onclick="copyConfPart(${pid},'inst')"   title="Copy" style="${cCopy}">&#x1F4CB;</button></div>`:''}
+        <div style="display:flex;gap:0;"><button id="cpart-${pid}-selfie" onclick="sendSelfiePic(${pid})"        style="${bBase}border-radius:9px 0 0 9px;border-right:none;flex:1;">&#x1F933; Selfie request${chkSpan}</button><button id="ccopy-${pid}-selfie" onclick="copyConfPart(${pid},'selfie')" title="Copy" style="${cCopy}">&#x1F4CB;</button></div>
+        <div style="display:flex;gap:0;"><button id="cpart-${pid}-vcard"  onclick="sendDriverVCard(${pid})"      style="${bBase}border-radius:9px 0 0 9px;border-right:none;flex:1;">&#x1F464; Driver vCard${chkSpan}</button><button id="ccopy-${pid}-vcard"  onclick="copyConfPart(${pid},'vcard')"  title="Copy" style="${cCopy}">&#x1F4CB;</button></div>
+        <div style="display:flex;gap:0;"><button id="cpart-${pid}-card"   onclick="sendDriverCard(${pid})"       style="${bBase}border-radius:9px 0 0 9px;border-right:none;flex:1;">&#x1F5BC; Driver card${chkSpan}</button><button id="ccopy-${pid}-card"   onclick="copyConfPart(${pid},'card')"   title="Copy" style="${cCopy}">&#x1F4CB;</button></div>
+        <div style="display:flex;gap:0;"><button id="cpart-${pid}-phone"  onclick="sendClientPhone(${pid})"      style="${bBase}border-radius:9px 0 0 9px;border-right:none;flex:1;">&#x1F4F1; Client phone to driver${chkSpan}</button><button id="ccopy-${pid}-phone"  onclick="copyConfPart(${pid},'phone')"  title="Copy" style="${cCopy}">&#x1F4CB;</button></div>
       </div>
       ${groupLine}
     `
