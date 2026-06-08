@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606089960">
+<meta name="version" content="202606089966">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -997,6 +997,14 @@ input,select,textarea{font-size:16px;}
           <div>✓ Payment method &amp; notes</div><div>✓ Client of other driver alerts</div>
         </div>
       </div>
+      <div>
+        <div style="font-size:.64rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#dc2626;margin-bottom:.4rem;">🚨 Safety &amp; Traffic</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.2rem .6rem;font-size:.79rem;color:var(--black);line-height:1.6;">
+          <div>✓ SOS emergency button</div><div>✓ Live GPS on personal SOS</div>
+          <div>✓ Instant team-wide alert</div><div>✓ Sound alert opt-in</div>
+          <div>✓ Live traffic overlay</div><div>✓ GDOT 511 &amp; Waze links</div>
+        </div>
+      </div>
     </div>
     <!-- Plan choice: monthly vs annual -->
     <div style="display:flex;gap:.6rem;margin-bottom:1rem;text-align:left;">
@@ -1744,6 +1752,31 @@ async function initApp() {
 // ════════════════════════════════════════════
 // SOS SYSTEM
 // ════════════════════════════════════════════
+// ════════════════════════════════════════════
+// SOS SOUND ALERT
+// ════════════════════════════════════════════
+try{window._sosSoundEnabled=localStorage.getItem('nda_sos_sound')==='1';}catch(e){window._sosSoundEnabled=false;}
+function playSOSAlertSound(){
+  if(!window._sosSoundEnabled) return;
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    [0,0.65,1.3].forEach(function(offset){
+      const osc=ctx.createOscillator(),g=ctx.createGain();
+      osc.connect(g);g.connect(ctx.destination);osc.type='sawtooth';
+      const t=ctx.currentTime+offset;
+      osc.frequency.setValueAtTime(600,t);osc.frequency.exponentialRampToValueAtTime(1100,t+0.32);osc.frequency.exponentialRampToValueAtTime(600,t+0.55);
+      g.gain.setValueAtTime(0.35,t);g.gain.setValueAtTime(0.35,t+0.48);g.gain.linearRampToValueAtTime(0,t+0.6);
+      osc.start(t);osc.stop(t+0.6);
+    });
+  }catch(e){}
+}
+function toggleSOSSound(){
+  window._sosSoundEnabled=!window._sosSoundEnabled;
+  try{localStorage.setItem('nda_sos_sound',window._sosSoundEnabled?'1':'0');}catch(e){}
+  const b=document.getElementById('sos-sound-btn');
+  if(b){b.textContent=window._sosSoundEnabled?'🔔 Sound ON':'🔕 Sound OFF';b.style.background=window._sosSoundEnabled?'#16a34a':'#2d1460';}
+  if(window._sosSoundEnabled) playSOSAlertSound();
+}
 let activeSOS = null; // {id, sender, senderDriver, message, time, active}
 
 async function loadSOS(){
@@ -1845,7 +1878,10 @@ function showSOSActivePopup(){
   const existing=document.getElementById('sos-active-overlay'); if(existing) existing.remove();
   if(!activeSOS||!activeSOS.active) return;
   const isSender=(getMyDriverName()===activeSOS.senderDriver)||(currentUser?.name===activeSOS.sender);
-  const timeStr=new Date(activeSOS.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  const _sosD=new Date(activeSOS.time);
+  const dateTimeStr=_sosD.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'})+' at '+_sosD.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  const typeIcon=(activeSOS.type==='ride')?'🚗':'🚨';
+  const typeLabel=(activeSOS.type==='ride')?'Ride Emergency':'Personal Emergency';
   const ov=document.createElement('div');
   ov.id='sos-active-overlay'; ov.className='sos-overlay';
   ov.innerHTML='<div class="sos-box">'
@@ -1854,13 +1890,16 @@ function showSOSActivePopup(){
     +'<div style="font-size:1rem;font-weight:700;color:#fff;text-align:center;margin-bottom:.35rem;">'+(isSender?'Your alert is active':'<strong>'+escHtml(activeSOS.senderDriver.split(' ')[0])+'</strong> needs help!')+'</div>'
     +(activeSOS.message?'<div style="font-size:.9rem;color:#ffaaaa;text-align:center;margin-bottom:.35rem;">'+escHtml(activeSOS.message)+'</div>':'')
     +(activeSOS.location?'<div style="text-align:center;margin-bottom:.4rem;"><a href="https://maps.google.com/?q='+activeSOS.location.lat+','+activeSOS.location.lng+'" target="_blank" style="display:inline-block;padding:.4rem 1rem;background:#1d4ed8;color:#fff;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;font-weight:700;text-decoration:none;">📍 View my location</a></div>':'')
-    +'<div style="font-size:.78rem;color:#ff8888;text-align:center;margin-bottom:1rem;">Sent at '+timeStr+'</div>'
+    +'<div style="font-size:.8rem;font-weight:700;text-align:center;background:#2a0000;padding:.3rem .75rem;border-radius:7px;margin-bottom:.35rem;">'+typeIcon+' '+typeLabel+'</div>'
+    +'<div style="font-size:.82rem;font-weight:700;color:#ff8888;text-align:center;margin-bottom:.9rem;">⏰ '+dateTimeStr+'</div>'
     +'<div style="display:flex;flex-direction:column;gap:.5rem;">'
     +(!isSender?'<button onclick="respondSOSHelp(\''+activeSOS.id+'\')" style="padding:.75rem;background:#16a34a;color:#fff;border:none;border-radius:10px;font-family:\'DM Sans\',sans-serif;font-size:.95rem;font-weight:700;cursor:pointer;">I can help \u2192 Notify '+escHtml(activeSOS.senderDriver.split(' ')[0])+'</button>':'')
     +(isSender?'<button onclick="clearSOS(\''+activeSOS.id+'\')" style="padding:.75rem;background:#16a34a;color:#fff;border:none;border-radius:10px;font-family:\'DM Sans\',sans-serif;font-size:.95rem;font-weight:700;cursor:pointer;">\u2713 I\'m OK \u2014 Clear SOS</button>':'')
     +'<button onclick="_markSOSSeen(\''+activeSOS.id+'\')" style="padding:.65rem;background:none;border:1.5px solid #555;color:#ccc;border-radius:10px;font-family:\'DM Sans\',sans-serif;font-size:.9rem;font-weight:600;cursor:pointer;">Got it \u2014 don\'t show again</button>'
+    +'<button id="sos-sound-btn" onclick="toggleSOSSound()" style="padding:.45rem;background:'+(window._sosSoundEnabled?'#16a34a':'#2d1460')+';color:#fff;border:1px solid #555;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">'+(window._sosSoundEnabled?'🔔 Sound\u2009ON':'🔕 Sound\u2009OFF')+'</button>'
     +'</div></div>';
   document.body.appendChild(ov);
+  playSOSAlertSound();
 }
 
 async function _markSOSSeen(sosId){
@@ -3907,8 +3946,7 @@ function renderRideView(r){
   const canSeeContact = (currentUser && currentUser.name === r.createdBy)
     || (_myDName && _myDName === r.driver)
     || (r.xxl && _myDName && _myDName === r.driver2);
-  const _pairedRide = r.pairId ? (rides||[]).find(function(x){ return x.id!==r.id && x.pairId===r.pairId; }) : null;
-  const _pairLabel = _pairedRide ? (_pairedRide.type==='AP PICK UP' ? '\u2708\ufe0f View return leg \u2192' : '\u2708\ufe0f View outbound leg \u2192') : null;
+  // Paired ride handled via _pairedRideForBtn below
   const apType = r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP';
   const _flightNum = (r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'').toUpperCase();
   const _isPickup  = (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP');
@@ -4112,7 +4150,7 @@ async function cancelRide(id){
   // (owner knows their own rides; only non-owners need the heads-up)
   if(r.driver){
     const cancellerDriver = currentUser?.name ? (USER_DRIVER_MAP[currentUser.name]||null) : null;
-    const clientOwner    = r.createdBy ? (USER_DRIVER_MAP[r.createdBy]||null) : null;
+    const clientOwner    = getClientOwner(r.client);
     const driverIsOwner  = clientOwner && clientOwner === r.driver;
     const driverIsCanceller = cancellerDriver === r.driver;
     if(!driverIsOwner && !driverIsCanceller){
@@ -5771,19 +5809,17 @@ function buildUpgradePromptCard(){
     +'</div>';
 }
 
-function getClientFeeOwner(clientName,drivingDriver){
+// Client ownership: only the owner creates rides for their clients.
+// Morgan sometimes creates rides for Kat's clients — Morgan → Kat.
+// No history lookup needed. Just use createdBy.
+function getClientOwner(clientName){
   if(!clientName) return null;
   const key=(clientName||'').toLowerCase().trim();
-  const counts={};
-  (rides||[]).forEach(function(r){
-    if(!r.client||r.client.toLowerCase().trim()!==key) return;
-    const c=r.clientOwner||(r.createdBy?(USER_DRIVER_MAP[r.createdBy]||PROXY_MAP[r.createdBy]||null):null);
-    if(c&&c!==drivingDriver) counts[c]=(counts[c]||0)+1;
-  });
-  let best=null,bestN=0;
-  Object.entries(counts).forEach(function([d,n]){ if(n>bestN){best=d;bestN=n;} });
-  return best;
+  const r=(rides||[]).find(function(r){ return r.client&&r.client.toLowerCase().trim()===key&&r.createdBy; });
+  if(!r) return null;
+  return r.createdBy==='Morgan' ? (USER_DRIVER_MAP['Kat']||'Kathleen Herringdine') : (USER_DRIVER_MAP[r.createdBy]||null);
 }
+function getClientFeeOwner(clientName,drivingDriver){ return getClientOwner(clientName); }
 function renewIncomeUpgrade(){
   showIncomeOrUpgrade(null);
 }
@@ -5956,7 +5992,7 @@ async function saveQuickAddRide(){
     newClient: !!(document.getElementById('qa-new-client')?.checked),
   };
   touchRide(ride, 'created');
-  ride.clientOwner = getClientFeeOwner(ride.client, ride.driver) || (USER_DRIVER_MAP[currentUser?.name]||getMyDriverName()||'');
+  ride.clientOwner = currentUser?.name==='Morgan' ? (USER_DRIVER_MAP['Kat']||'Kathleen Herringdine') : (USER_DRIVER_MAP[currentUser?.name]||getMyDriverName()||'');
   let _driverNeedsOverride = false;
   if(ride.driver && !isDriverAvailable(ride.driver, ride.date, ride.time)){
     _reenableBtn();
@@ -6421,7 +6457,7 @@ function renderDashFees(){
   const owedToMe={}, iOwe={};
   rides.forEach(r=>{
     if(!r.date||r.date>today||r.status==='cancelled'||parseFloat(r.price||0)<=0) return;
-    const owner=r.clientOwner||(r.createdBy?(USER_DRIVER_MAP[r.createdBy]||PROXY_MAP[r.createdBy]||null):null);
+    const owner=r.createdBy==='Morgan'?(USER_DRIVER_MAP['Kat']||'Kathleen Herringdine'):(USER_DRIVER_MAP[r.createdBy]||null);
     const driver=r.driver||null;
     if(!owner||!driver||owner===driver) return;
     const fee=parseFloat(r.price)*0.15;
@@ -7929,6 +7965,24 @@ function renderIncome(){
   // Everyone — including admins — only ever sees their OWN income. No driver picker.
   if(filterRow) filterRow.style.display = 'none';
   dName = myName;
+  (function(){
+    const _myLinked=(driverSettings[myName]||{}).linkedWith;
+    const _on=window._showCombinedIncome===true;
+    let _tr=document.getElementById('income-combine-row');
+    if(_myLinked&&!_tr){
+      const t=document.createElement('div');
+      t.id='income-combine-row';
+      t.style.cssText='display:flex;align-items:center;gap:.65rem;margin-bottom:.75rem;padding:.55rem .85rem;background:#1e0f3d;border-radius:10px;border:1px solid var(--pur3);flex-wrap:wrap;';
+      t.innerHTML='<span style="font-size:.88rem;font-weight:700;color:#fff;">🔗 Linked with '+escHtml(_myLinked.split(' ')[0])+'</span>'
+        +'<button id="income-combine-btn" onclick="window._showCombinedIncome=!window._showCombinedIncome;try{localStorage.setItem(\'nda_combine_income\',window._showCombinedIncome?\'1\':\'0\');}catch(e){}renderIncome();" '
+        +'style="padding:.35rem .85rem;background:'+(_on?'var(--accent)':'none')+';color:'+(_on?'#fff':'#c4b0e0')+';border:1.5px solid var(--accent);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;font-weight:700;cursor:pointer;">'+(_on?'\u2714 Combined view ON':'Show combined income')+'</button>';
+      const el=document.getElementById('income-summary-cards');
+      if(el&&el.parentNode) el.parentNode.insertBefore(t,el);
+    } else if(_tr){
+      const b=document.getElementById('income-combine-btn');
+      if(b){b.style.background=_on?'var(--accent)':'none';b.style.color=_on?'#fff':'#c4b0e0';b.textContent=_on?'\u2714 Combined view ON':'Show combined income';}
+    } else if(!_myLinked&&_tr){_tr.remove();}
+  })();
   // personalView = showing one specific person's full P&L (own outside rides, expenses, vehicle cost).
   // True for any non-admin, and for an admin viewing their OWN income.
   const personalView = (!admin && !!myName) || (admin && !!dName && dName===myName);
@@ -7937,9 +7991,11 @@ function renderIncome(){
   document.getElementById('income-subtitle').textContent =
     (dName||'All Drivers') + (label?' · '+label:'');
 
+  // Combined income: also include linked partner's rides when toggle is on
+  const _incLinked=(window._showCombinedIncome===true&&myName)?(driverSettings[myName]||{}).linkedWith:null;
   // Filter rides
   let filtered = rides.filter(r=>{
-    if(dName && r.driver!==dName) return false;
+    if(dName && r.driver!==dName && (!_incLinked||r.driver!==_incLinked)) return false;
     if(!r.date||r.price===0) return false;
     if(r.status==='cancelled') return false;
     if(start && end){
@@ -9796,6 +9852,7 @@ function showAuthScreen(){
 function enterApp(){
   _notifFirstLoad = true; // re-seed on login so existing notifications don't all re-pop
   try{ localStorage.setItem('nda_auth_user', currentUser?.name||''); }catch(e){}
+  try{ window._showCombinedIncome = localStorage.getItem('nda_combine_income')==='1'; }catch(e){ window._showCombinedIncome=false; }
   setTimeout(function(){ if(typeof loadGoogleMapsAPI==='function') loadGoogleMapsAPI(); }, 800);
   setTimeout(function(){ if(typeof check24hOverrides==='function') check24hOverrides(); }, 2500);
   setTimeout(function(){ if(typeof checkForActiveSOSOnLogin==='function') checkForActiveSOSOnLogin(); }, 2000);
