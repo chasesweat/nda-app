@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606089970">
+<meta name="version" content="202606089979">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -357,7 +357,7 @@ input,select,textarea{font-size:16px;}
   <div onclick="nav('documents')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">📁 Documents</div>
   <div onclick="nav('traffic')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#f5a623;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🚦 Traffic</div>
   <div onclick="closeMenu(); promptInstall();" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">📲 Install app</div>
-  <div onclick="closeMenu(); window.open('nwda-tutorial.html?u='+encodeURIComponent(currentUser?.name||''),'_blank');" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#ce93d8;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">📚 Driver Tutorial</div>
+  <div onclick="closeMenu(); window.open('nwda-tutorial.html','_blank');" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#ce93d8;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">📚 Driver Tutorial</div>
   <div onclick="closeMenu(); openMergeRequestModal();" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#a78bfa;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🔗 Request Profile Merge</div>
   <div id="menu-myrides" onclick="nav('myrides')" style="display:none;padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#ce93d8;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;font-weight:500;">🗓 My Rides</div>
   <div id="menu-account" onclick="nav('account')" style="display:none;padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#ce93d8;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;font-weight:500;">👤 My Account</div>
@@ -1620,8 +1620,8 @@ function setupRealtimeListeners(){
     if(snap.exists()){
       const val = snap.val();
       // Firebase stores arrays as objects — convert back
-      if(Array.isArray(val)) rides = val;
-      else rides = Object.values(val||{});
+      if(Array.isArray(val)) rides = val.filter(function(r){return r&&r.id!=null;});
+      else rides = Object.values(val||{}).filter(function(r){return r&&r.id!=null;});
       // Re-render if app is visible
       if(document.getElementById('app').style.display!=='none'){
         refreshDash(); renderCal(); renderRides();
@@ -1752,9 +1752,7 @@ async function initApp() {
 // ════════════════════════════════════════════
 // SOS SYSTEM
 // ════════════════════════════════════════════
-// ════════════════════════════════════════════
-// SOS SOUND ALERT
-// ════════════════════════════════════════════
+// SOS SOUND
 try{window._sosSoundEnabled=localStorage.getItem('nda_sos_sound')==='1';}catch(e){window._sosSoundEnabled=false;}
 function playSOSAlertSound(){
   if(!window._sosSoundEnabled) return;
@@ -1764,8 +1762,12 @@ function playSOSAlertSound(){
       const osc=ctx.createOscillator(),g=ctx.createGain();
       osc.connect(g);g.connect(ctx.destination);osc.type='sawtooth';
       const t=ctx.currentTime+offset;
-      osc.frequency.setValueAtTime(600,t);osc.frequency.exponentialRampToValueAtTime(1100,t+0.32);osc.frequency.exponentialRampToValueAtTime(600,t+0.55);
-      g.gain.setValueAtTime(0.35,t);g.gain.setValueAtTime(0.35,t+0.48);g.gain.linearRampToValueAtTime(0,t+0.6);
+      osc.frequency.setValueAtTime(600,t);
+      osc.frequency.exponentialRampToValueAtTime(1100,t+0.32);
+      osc.frequency.exponentialRampToValueAtTime(600,t+0.55);
+      g.gain.setValueAtTime(0.35,t);
+      g.gain.setValueAtTime(0.35,t+0.48);
+      g.gain.linearRampToValueAtTime(0,t+0.6);
       osc.start(t);osc.stop(t+0.6);
     });
   }catch(e){}
@@ -1774,7 +1776,8 @@ function toggleSOSSound(){
   window._sosSoundEnabled=!window._sosSoundEnabled;
   try{localStorage.setItem('nda_sos_sound',window._sosSoundEnabled?'1':'0');}catch(e){}
   const b=document.getElementById('sos-sound-btn');
-  if(b){b.textContent=window._sosSoundEnabled?'🔔 Sound ON':'🔕 Sound OFF';b.style.background=window._sosSoundEnabled?'#16a34a':'#2d1460';}
+  if(b){b.textContent=window._sosSoundEnabled?'🔔 Sound ON':'🔕 Sound OFF';
+        b.style.background=window._sosSoundEnabled?'#16a34a':'#2d1460';}
   if(window._sosSoundEnabled) playSOSAlertSound();
 }
 let activeSOS = null; // {id, sender, senderDriver, message, time, active}
@@ -1815,33 +1818,15 @@ function _sosStep1Html(){
 }
 function _sosPickType(type){
   const inner=document.getElementById('sos-inner'); if(!inner) return;
-  window._sosLocation=null;
-  if(type==='personal'&&navigator.geolocation){
-    inner.innerHTML='<div style="text-align:center;padding:1.5rem;">'
-      +'<div style="font-size:1.8rem;margin-bottom:.5rem;">🚨</div>'
-      +'<div style="font-size:1rem;font-weight:700;color:#ff8888;margin-bottom:.4rem;">Personal Emergency</div>'
-      +'<div style="font-size:.88rem;color:#ffaaaa;font-weight:600;">📍 Getting your location...</div>'
-      +'</div>';
-    navigator.geolocation.getCurrentPosition(
-      function(pos){ window._sosLocation={lat:pos.coords.latitude,lng:pos.coords.longitude}; _showSOSMsgStep(type,'📍 Location will be shared'); },
-      function(){ _showSOSMsgStep(type,'\u26a0\ufe0f Location unavailable \u2014 message only'); },
-      {timeout:6000,maximumAge:30000,enableHighAccuracy:true}
-    );
-    return;
-  }
-  _showSOSMsgStep(type, null);
-}
-function _showSOSMsgStep(type, locNote){
-  const inner=document.getElementById('sos-inner'); if(!inner) return;
   const icon=type==='personal'?'🚨':'🚗';
   const label=type==='personal'?'Personal Emergency':'Ride Emergency';
   inner.innerHTML='<div style="font-size:1.8rem;text-align:center;margin-bottom:.4rem;">'+icon+'</div>'
     +'<div style="font-size:1.05rem;font-weight:800;color:#ff8888;text-align:center;margin-bottom:.3rem;">'+label+'</div>'
-    +(locNote?'<div style="font-size:.82rem;font-weight:700;text-align:center;color:#ffaaaa;background:#2a0000;padding:.35rem .75rem;border-radius:8px;margin-bottom:.65rem;">'+locNote+'</div>':'')
+    +'<div style="font-size:.85rem;color:#ffaaaa;font-weight:600;text-align:center;margin-bottom:.85rem;">Add a message so the team knows what\'s happening.</div>'
     +'<div class="form-group"><label style="font-size:.82rem;font-weight:700;color:#ff8888;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:.35rem;">Message (optional)</label>'
-    +'<input id="sos-msg2" type="text" placeholder="e.g. car trouble, need help" style="width:100%;padding:.65rem .85rem;background:#2a0000;border:1.5px solid #ff4444;border-radius:9px;color:#fff;font-family:\'DM Sans\',sans-serif;font-size:.9rem;" /></div>'
+    +'<input id="sos-msg2" type="text" placeholder="e.g. I-285 exit 12, flat tire" style="width:100%;padding:.65rem .85rem;background:#2a0000;border:1.5px solid #ff4444;border-radius:9px;color:#fff;font-family:\'DM Sans\',sans-serif;font-size:.9rem;" /></div>'
     +'<div style="display:flex;gap:.5rem;margin-top:.75rem;">'
-    +'<button onclick="const i=document.getElementById(\'sos-inner\');const t=document.createElement(\'div\');t.innerHTML=_sosStep1Html();i.replaceWith(t.firstElementChild);window._sosLocation=null;" '
+    +'<button onclick="const i=document.getElementById(\'sos-inner\');const t=document.createElement(\'div\');t.innerHTML=_sosStep1Html();i.replaceWith(t.firstElementChild);" '
     +'style="flex:1;padding:.7rem;background:none;border:1.5px solid #555;color:#ccc;border-radius:9px;font-family:\'DM Sans\',sans-serif;font-weight:600;cursor:pointer;">← Back</button>'
     +'<button id="sos-send2" style="flex:2;padding:.7rem;background:#dc2626;color:#fff;border:none;border-radius:9px;font-family:\'DM Sans\',sans-serif;font-weight:800;font-size:.95rem;cursor:pointer;">Send SOS Now</button>'
     +'</div>';
@@ -1852,20 +1837,15 @@ function _showSOSMsgStep(type, locNote){
   },80);
 }
 
-async function confirmSOS(message,sosType){
+async function confirmSOS(message){
   const myDriver=getMyDriverName()||currentUser?.name||'Unknown';
   const sosId='sos_'+Date.now();
-  const _loc=window._sosLocation||null;
-  activeSOS={id:sosId,sender:currentUser?.name||myDriver,senderDriver:myDriver,
-    message:message||'',type:sosType||'personal',location:_loc,
-    time:new Date().toISOString(),active:true,seenBy:[currentUser?.name||myDriver],respondedBy:[]};
-  window._sosLocation=null;
+  activeSOS={id:sosId, sender:currentUser?.name||myDriver, senderDriver:myDriver, message:message||'', time:new Date().toISOString(), active:true, seenBy:[], respondedBy:[]};
   await saveSOS();
   // Notify ALL drivers in the group
   const allRecips=[...new Set([...DRIVERS,...Object.keys(USER_DRIVER_MAP).map(k=>USER_DRIVER_MAP[k])])].filter(Boolean);
   const senderFirst=myDriver.split(' ')[0];
-  const _ml=activeSOS.location?(' 📍 maps.google.com/?q='+activeSOS.location.lat.toFixed(5)+','+activeSOS.location.lng.toFixed(5)):'';
-  const msgText='🚘 SOS from '+senderFirst+(message?' \u2014 '+message:'')+_ml+'! They need immediate help.';
+  const msgText='\uD83D\uDE98 SOS from '+senderFirst+(message?' \u2014 '+message:'')+'! They need immediate help.';
   allRecips.forEach(function(d){ if(d!==myDriver) addNotification(d,{sosId:sosId},'sos',msgText); });
   // Also notify by login name for admins
   ['Kat','Chase','Morgan'].forEach(function(a){ if(a!==currentUser?.name) addNotification(USER_DRIVER_MAP[a]||PROXY_MAP[a]||a,{sosId:sosId},'sos',msgText); });
@@ -1889,29 +1869,14 @@ function showSOSActivePopup(){
     +'<div style="font-size:1.25rem;font-weight:800;color:#ff4444;text-align:center;margin:.5rem 0;">SOS ALERT</div>'
     +'<div style="font-size:1rem;font-weight:700;color:#fff;text-align:center;margin-bottom:.35rem;">'+(isSender?'Your alert is active':'<strong>'+escHtml(activeSOS.senderDriver.split(' ')[0])+'</strong> needs help!')+'</div>'
     +(activeSOS.message?'<div style="font-size:.9rem;color:#ffaaaa;text-align:center;margin-bottom:.35rem;">'+escHtml(activeSOS.message)+'</div>':'')
-    +(activeSOS.location?'<div style="text-align:center;margin-bottom:.4rem;"><a href="https://maps.google.com/?q='+activeSOS.location.lat+','+activeSOS.location.lng+'" target="_blank" style="display:inline-block;padding:.4rem 1rem;background:#1d4ed8;color:#fff;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;font-weight:700;text-decoration:none;">📍 View my location</a></div>':'')
     +'<div style="font-size:.8rem;font-weight:700;text-align:center;background:#2a0000;padding:.3rem .75rem;border-radius:7px;margin-bottom:.35rem;">'+typeIcon+' '+typeLabel+'</div>'
     +'<div style="font-size:.82rem;font-weight:700;color:#ff8888;text-align:center;margin-bottom:.9rem;">⏰ '+dateTimeStr+'</div>'
     +'<div style="display:flex;flex-direction:column;gap:.5rem;">'
     +(!isSender?'<button onclick="respondSOSHelp(\''+activeSOS.id+'\')" style="padding:.75rem;background:#16a34a;color:#fff;border:none;border-radius:10px;font-family:\'DM Sans\',sans-serif;font-size:.95rem;font-weight:700;cursor:pointer;">I can help \u2192 Notify '+escHtml(activeSOS.senderDriver.split(' ')[0])+'</button>':'')
     +(isSender?'<button onclick="clearSOS(\''+activeSOS.id+'\')" style="padding:.75rem;background:#16a34a;color:#fff;border:none;border-radius:10px;font-family:\'DM Sans\',sans-serif;font-size:.95rem;font-weight:700;cursor:pointer;">\u2713 I\'m OK \u2014 Clear SOS</button>':'')
-    +'<button onclick="_markSOSSeen(\''+activeSOS.id+'\')" style="padding:.65rem;background:none;border:1.5px solid #555;color:#ccc;border-radius:10px;font-family:\'DM Sans\',sans-serif;font-size:.9rem;font-weight:600;cursor:pointer;">Got it \u2014 don\'t show again</button>'
-    +'<button id="sos-sound-btn" onclick="toggleSOSSound()" style="padding:.45rem;background:'+(window._sosSoundEnabled?'#16a34a':'#2d1460')+';color:#fff;border:1px solid #555;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">'+(window._sosSoundEnabled?'🔔 Sound\u2009ON':'🔕 Sound\u2009OFF')+'</button>'
+    +'<button onclick="document.getElementById(\'sos-active-overlay\').remove()" style="padding:.65rem;background:none;border:1.5px solid #555;color:#aaa;border-radius:10px;font-family:\'DM Sans\',sans-serif;font-size:.9rem;cursor:pointer;">Dismiss for now</button>'
     +'</div></div>';
   document.body.appendChild(ov);
-  playSOSAlertSound();
-}
-
-async function _markSOSSeen(sosId){
-  if(!activeSOS||activeSOS.id!==sosId) return;
-  if(!activeSOS.seenBy) activeSOS.seenBy=[];
-  const uid=currentUser?.name||getMyDriverName()||'';
-  if(!activeSOS.seenBy.includes(uid)) activeSOS.seenBy.push(uid);
-  // Auto-clear once all users have seen it
-  const _total=(typeof USERS!=='undefined'&&Array.isArray(USERS))?USERS.length:0;
-  if(_total>0&&activeSOS.seenBy.length>=_total) activeSOS.active=false;
-  await saveSOS();
-  document.getElementById('sos-active-overlay')?.remove();
 }
 
 async function respondSOSHelp(sosId){
@@ -1962,7 +1927,7 @@ function startSOSPolling(){
     }
     // Update SOS button visibility
     const sosBtn=document.getElementById('sos-btn');
-    if(sosBtn&&currentUser) sosBtn.style.display=hasIncomeAccess()?'':'none';
+    if(sosBtn&&currentUser) sosBtn.style.display='';
   }, 90000);
 }
 
@@ -2072,7 +2037,7 @@ function maybShowTutorialBanner(){
     +'</div>';
   document.body.appendChild(b);
   b.querySelector('#tut-close-now').onclick=function(){ b.remove(); };
-  b.querySelector('#tut-open').onclick=function(){ b.remove(); window.open('nwda-tutorial.html?u='+encodeURIComponent(currentUser?.name||''),'_blank'); };
+  b.querySelector('#tut-open').onclick=function(){ b.remove(); window.open('nwda-tutorial.html','_blank'); };
   b.querySelector('#tut-never').onclick=function(){ localStorage.setItem('nda_tutorial_dismissed','forever'); b.remove(); };
 }
 // ── In-app tutorial tip bubbles ──
@@ -2369,6 +2334,7 @@ function initAddressAutocomplete(){
           resetMileage();
           debounceMileage();
         }
+        if(id==='qa-pickup'||id==='qa-home') qaDebounceDistance();
       });
       el.addEventListener('keydown', e=>{ if(e.key==='Enter') e.preventDefault(); });
       el.dataset.acInit = '1';
@@ -2782,6 +2748,7 @@ async function saveQuote(){
 // NOTIFICATIONS
 // ═══════════════════════════════════════════
 function addNotification(driverName, ride, action, customMsg){
+  if(action==='assigned'&&currentUser&&driverName===(USER_DRIVER_MAP[currentUser.name]||'')) return;
   if(!notifications[driverName]) notifications[driverName]=[];
   const msg = customMsg || (action==='assigned'
     ? `New ride assigned: ${ride.client} on ${fmtDateShort(ride.date)} at ${ride.time||'—'} ($${ride.price})`
@@ -2803,7 +2770,12 @@ function updateNotifBadge(){
   const myName = currentUser.name;
 
   // Count unread ride notifications
-  const unreadRide = dName ? (notifications[dName]||[]).filter(n=>!n.read).length : 0;
+  const unreadRide = dName ? (notifications[dName]||[]).filter(function(n){
+    if(!n||n.read) return false;
+    // Don't count ride notifications the current user themselves created
+    if(n.createdBy && n.createdBy===(currentUser?.name||'')) return false;
+    return true;
+  }).length : 0;
 
   // Count pending transfer requests relevant to this user
   const pendingTransfers = Object.values(clientRequests||{}).filter(r=>{
@@ -3492,7 +3464,7 @@ function renderConfirmations(){
 }
 
 async function toggleConfirmSent(id){
-  const r=rides.find(x=>x.id===id);
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id)));
   if(!r) return;
   const wasConfirmed=r.confirmSent;
   r.confirmSent=!r.confirmSent;
@@ -3659,12 +3631,12 @@ function fallbackCopy(str,label){
   }catch(e){ showToast('Copy failed — long-press the text to copy','error'); }
 }
 function copyConfirmation(id){
-  const r=rides.find(x=>x.id===id); if(!r) return;
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   const c=buildConfirmationText(r);
   const full=c.message+(c.instructions?'\n\n'+c.instructions:'');
   copyToClipboard(full,'Confirmation text copied');
 }
-function copyInstructions(id){ const r=rides.find(x=>x.id===id); if(r) copyToClipboard(buildConfirmationText(r).instructions,'Pickup instructions copied'); }
+function copyInstructions(id){ const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(r) copyToClipboard(buildConfirmationText(r).instructions,'Pickup instructions copied'); }
 // Builds the confirmation group-text recipients for a ride, each labeled with a name
 // where the app knows it. Always: client + any client-requested extra numbers + the
 // main (owner) driver + the assigned driver. If the sender is Kat or Morgan, adds both.
@@ -3723,7 +3695,7 @@ function buildClientVCard(r){
   return new File([lines], (first||"client")+"-contact.vcf", {type:"text/vcard"});
 }
 async function shareClientVCard(id){
-  const r=rides.find(x=>x.id===id); if(!r) return;
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   const vcf=buildClientVCard(r);
   if(navigator.canShare && navigator.canShare({files:[vcf]})){
     try{ await navigator.share({files:[vcf],title:r.client+" · contact"}); }
@@ -3829,7 +3801,7 @@ function prebuildAllDriverCardImages(){
 
 
 async function textClient(id){
-  const r=rides.find(x=>x.id===id); if(!r) return;
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   const nums=confirmationRecipients(r).map(x=>x.phone);
   if(!nums.length){ showToast('No phone numbers to text \u2014 add the client\u2019s number first','error'); return; }
   const _conf=buildConfirmationText(r);
@@ -3914,7 +3886,7 @@ function closeDayModal(){document.getElementById('day-modal').classList.remove('
 // ═══════════════════════════════════════════
 function openRideModal(id){
   activeRideId=id;
-  const r=rides.find(x=>x.id===id); if(!r) return;
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   if(r.driver) warmDriverCardImage((r.driver||"").trim());
   document.getElementById('rm-title').textContent=r.client;
   // driver assign row
@@ -3946,7 +3918,8 @@ function renderRideView(r){
   const canSeeContact = (currentUser && currentUser.name === r.createdBy)
     || (_myDName && _myDName === r.driver)
     || (r.xxl && _myDName && _myDName === r.driver2);
-  // Paired ride handled via _pairedRideForBtn below
+  const _pairedRide = r.pairId ? (rides||[]).find(function(x){ return x.id!==r.id && x.pairId===r.pairId; }) : null;
+  const _pairLabel = _pairedRide ? (_pairedRide.type==='AP PICK UP' ? '\u2708\ufe0f View return leg \u2192' : '\u2708\ufe0f View outbound leg \u2192') : null;
   const apType = r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP';
   const _flightNum = (r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'').toUpperCase();
   const _isPickup  = (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP');
@@ -4096,14 +4069,14 @@ function buildRideLifecycle(r){
 }
 
 async function toggleRidePaid(id){
-  const r=rides.find(x=>x.id===id); if(!r||r.status==='cancelled') return;
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r||r.status==='cancelled') return;
   await setRideStatus(id, r.status==='paid'?'scheduled':'paid');
   const btn=document.getElementById('rm-paid-btn');
   if(btn) btn.style.fontWeight=r.status==='paid'?'700':'400';
 }
 
 async function setRideStatus(id, status){
-  const r = rides.find(x=>x.id===id); if(!r) return;
+  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   r.status = status;
   if(status==='paid'){ r.paidAt = Date.now(); r.paidBy = currentUser?.name||''; }
   else { delete r.paidAt; delete r.paidBy; }
@@ -4136,7 +4109,7 @@ function setCancelBtn(cancelled){
   cb.style.borderColor = cancelled ? 'var(--green)' : '#b03a2e';
 }
 async function cancelRide(id){
-  const r = rides.find(x=>x.id===id); if(!r) return;
+  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   if(r.status==='cancelled'){ return reactivateRide(id); }
   // Only the client's owner (or an admin) may cancel
   const myDrv = getMyDriverName();
@@ -4150,7 +4123,7 @@ async function cancelRide(id){
   // (owner knows their own rides; only non-owners need the heads-up)
   if(r.driver){
     const cancellerDriver = currentUser?.name ? (USER_DRIVER_MAP[currentUser.name]||null) : null;
-    const clientOwner    = getClientOwner(r.client);
+    const clientOwner    = r.createdBy ? (USER_DRIVER_MAP[r.createdBy]||null) : null;
     const driverIsOwner  = clientOwner && clientOwner === r.driver;
     const driverIsCanceller = cancellerDriver === r.driver;
     if(!driverIsOwner && !driverIsCanceller){
@@ -4164,7 +4137,7 @@ async function cancelRide(id){
   showToast('Ride cancelled');
 }
 async function reactivateRide(id){
-  const r = rides.find(x=>x.id===id); if(!r) return;
+  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   r.status='scheduled'; delete r.cancelledAt; delete r.cancelledBy;
   await saveRides();
   refreshAllRideViews(r); setCancelBtn(false);
@@ -4331,7 +4304,7 @@ function showUnheartConfirm(id){
   back.querySelector('#uhc-no').addEventListener('click',function(){ back.remove(); });
   back.querySelector('#uhc-yes').addEventListener('click',async function(){
     back.remove();
-    const r=rides.find(x=>x.id===id); if(!r) return;
+    const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
     const me=myInterestKey(); if(!me) return;
     if(r.interest && r.interest[me]){ delete r.interest[me]; }
     if(r.interest && Object.keys(r.interest).length===0) delete r.interest;
@@ -4343,7 +4316,7 @@ function showUnheartConfirm(id){
   });
 }
 async function toggleInterest(id){
-  const r = rides.find(x=>x.id===id);
+  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id)));
   if(!r) return;
   const me = myInterestKey();
   if(!me){ showToast('Could not identify your driver profile','error'); return; }
@@ -4409,7 +4382,7 @@ function buildFeeMathHTML(r){
 
 let _feeEdit=null;
 function openFeeEditor(id){
-  const r = rides.find(x=>x.id===id); if(!r) return;
+  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   if(typeof canDeleteRide==='function' && !canDeleteRide(r)){ showToast("You can't edit this fee",'error'); return; }
   const sec = document.getElementById('rm-fee-section'); if(!sec) return;
   const price = parseFloat(r.price)||0;
@@ -4477,7 +4450,7 @@ function recalcFeeEdit(setAmount){
 }
 
 async function saveFeeEdit(id){
-  const r = rides.find(x=>x.id===id); if(!r) return;
+  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   if(typeof canDeleteRide==='function' && !canDeleteRide(r)){ showToast("You can't edit this fee",'error'); return; }
   const amtEl=document.getElementById('fee-edit-amount');
   const noteEl=document.getElementById('fee-edit-note');
@@ -4503,7 +4476,7 @@ async function saveFeeEdit(id){
 }
 
 function cancelFeeEdit(id){
-  const r = rides.find(x=>x.id===id); if(!r) return;
+  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   renderRideView(r);
 }
 
@@ -4984,7 +4957,7 @@ function openRideFromChat(id){
   setTimeout(function(){ openRideModal(id); }, 150);
 }
 async function claimRideFromOfferings(id){
-  const r=rides.find(x=>x.id===id); if(!r) return;
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   const myDriver=getMyDriverName();
   if(!myDriver){ showToast('You need a driver profile to claim rides','error'); return; }
   if(r.status==='cancelled'){ showToast('This ride is cancelled','error'); return; }
@@ -5003,7 +4976,7 @@ async function claimRideFromOfferings(id){
   showToast('\u2705 You\u2019re on it! Ride assigned to you.');
 }
 async function shareRideToOfferings(id){
-  const r=rides.find(x=>x.id===id); if(!r) return;
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   if(r.status==='cancelled'){ showToast('Cannot share a cancelled ride','error'); return; }
   const msg={
     sender: currentUser?.name||'',
@@ -5028,6 +5001,7 @@ async function shareRideToOfferings(id){
 // \u2500\u2500 TEAM CHAT init
 async function initChat(){
   const stored = await storageGet('kat:chatLastRead');
+  try{ const _cao=await storageGet('kat:clientAddresses'); if(_cao) clientAddressOverrides=JSON.parse(_cao); }catch(e){}
   if(stored) chatLastRead = stored;
   listenAllChat();          // discover ALL channels (group + every DM I'm part of), even ones others started
   listenChatTyping();
@@ -5820,15 +5794,12 @@ function buildUpgradePromptCard(){
     +'</div>';
 }
 
-// Client ownership: only the owner creates rides for their clients.
-// Morgan sometimes creates rides for Kat's clients — Morgan → Kat.
-// No history lookup needed. Just use createdBy.
 function getClientOwner(clientName){
   if(!clientName) return null;
   const key=(clientName||'').toLowerCase().trim();
   const r=(rides||[]).find(function(r){ return r.client&&r.client.toLowerCase().trim()===key&&r.createdBy; });
   if(!r) return null;
-  return r.createdBy==='Morgan' ? (USER_DRIVER_MAP['Kat']||'Kathleen Herringdine') : (USER_DRIVER_MAP[r.createdBy]||null);
+  return r.createdBy==='Morgan'?(USER_DRIVER_MAP['Kat']||'Kathleen Herringdine'):(USER_DRIVER_MAP[r.createdBy]||null);
 }
 function getClientFeeOwner(clientName,drivingDriver){ return getClientOwner(clientName); }
 function renewIncomeUpgrade(){
@@ -5888,31 +5859,32 @@ function checkQaClientOwnership(){
   const owner=getClientFeeOwner(cName,myDriver);
   if(owner&&owner!==myDriver){
     wEl.style.display=''; wEl.style.gridColumn='1/-1';
-    const _of=escHtml(owner.split(' ')[0]);
-    wEl.innerHTML='<div style="margin-bottom:.45rem;">\u26a0\ufe0f <strong>'+escHtml(cName)+'</strong> is in <strong>'+_of+'\u2019s</strong> client list.</div>'
-      +'<button onclick="requestClientFromWarning(\''+escAttr(cName)+'\',\''+escAttr(owner)+'\')" '
-      +'style="padding:.4rem .85rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;font-weight:700;cursor:pointer;">🔗 Request this client \u2192</button>';
+    wEl.innerHTML='\u26a0\ufe0f <strong>'+escHtml(cName)+'</strong> is in <strong>'+escHtml(owner.split(' ')[0])+'\u2019s</strong> client list. Driving their client generates a <strong>15% fee to '+escHtml(owner.split(' ')[0])+'</strong>. '
+      +'<button onclick="requestClientFromWarning(\''+escHtml(cName)+'\')" style="margin-left:.35rem;padding:2px 10px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;font-weight:700;cursor:pointer;">\uD83D\uDD17 Request this client \u2192</button>';
   } else { wEl.style.display='none'; }
 }
-function requestClientFromWarning(clientName,ownerDriver){
-  const ownerFirst=(ownerDriver||'').split(' ')[0];
-  const reqId='xfer_'+Date.now();
-  const myDriver=getMyDriverName()||currentUser?.name||'';
+async function requestClientFromWarning(clientName){
+  const myDriver = getMyDriverName(); if(!myDriver || !clientName) return;
+  const owner = getClientOwner(clientName); if(!owner||owner===myDriver) return;
+  const reqId = 'req_'+Date.now();
+  const req = { id:reqId, type:'transfer_request', status:'pending',
+    fromDriver:myDriver, toDriver:owner, clientName:clientName, ts:Date.now(),
+    msg: myDriver.split(' ')[0]+' is requesting '+clientName+' from '+owner.split(' ')[0] };
   if(!clientRequests) clientRequests={};
-  clientRequests[reqId]={id:reqId,type:'transfer_request',clientName:clientName,fromDriver:ownerDriver,toDriver:myDriver,submittedBy:currentUser?.name||'',approvals:[],status:'pending',ts:Date.now()};
-  saveClientRequests().then(function(){
-    addNotification(ownerDriver,{id:reqId,client:clientName},'transfer_request',
-      myDriver.split(' ')[0]+' is requesting to take '+escHtml(clientName)+' as their own client. Open the Clients section to approve or deny.');
-    ['Kat','Chase','Morgan'].forEach(function(a){
-      if(a!==currentUser?.name&&USER_DRIVER_MAP[a]!==ownerDriver)
-        addNotification(USER_DRIVER_MAP[a]||PROXY_MAP[a]||a,{id:reqId,client:clientName},'transfer_request',
-          myDriver.split(' ')[0]+' requested '+escHtml(clientName)+' from '+escHtml(ownerFirst)+'.');
-    });
-    saveNotifs().then(function(){ updateNotifBadge(); });
+  clientRequests[reqId]=req;
+  await saveClientRequests();
+  addNotification(owner,{id:reqId,client:clientName},'transfer_request',
+    '\uD83D\uDD17 '+myDriver.split(' ')[0]+' wants to take over '+clientName+'. Tap bell to approve or deny.');
+  ADMINS.forEach(function(a){
+    const d=USER_DRIVER_MAP[a]||a;
+    if(d!==owner&&d!==myDriver) addNotification(d,{id:reqId,client:clientName},'transfer_request',req.msg);
   });
+  await saveNotifs();
+  updateNotifBadge();
+  showToast('\uD83D\uDD17 Request sent to '+owner.split(' ')[0]);
+  // Update warning to show request sent
   const wEl=document.getElementById('qa-client-warn');
-  if(wEl) wEl.innerHTML='<div style="color:#16a34a;font-weight:700;">\u2713 Request sent to '+escHtml(ownerFirst)+' and admins.</div>';
-  showToast('🔗 Client request sent to '+escHtml(ownerFirst));
+  if(wEl) wEl.innerHTML='\u2705 Request sent to '+escHtml(owner.split(' ')[0])+' \u2014 you\'ll be notified when they respond.';
 }
 function closeQuickAddModal(){
   document.getElementById('quick-add-modal').classList.remove('show');
@@ -5929,6 +5901,47 @@ function toggleQaAddon(k){
   if(k==='christmas' && qaAddonState.christmas) qaAddonState.holiday=false;
   if(k==='holiday' && qaAddonState.holiday) qaAddonState.christmas=false;
   renderQaAddons(); recalcQa();
+}
+// Airport coords (ATL)
+const _ATL_ADDR='Hartsfield-Jackson Atlanta International Airport, Atlanta, GA';
+let _qaDistTimer=null;
+function qaDebounceDistance(){
+  clearTimeout(_qaDistTimer);
+  _qaDistTimer=setTimeout(qaCalcDistance, 1400);
+}
+async function qaCalcDistance(){
+  const typeEl=document.getElementById('qa-type'); if(!typeEl) return;
+  const t=typeEl.value||'';
+  const isAP=t==='AP RUN'||t==='AP PICK UP'||t==='AP ROUND TRIP';
+  const pickupEl=document.getElementById('qa-pickup');
+  const homeEl=document.getElementById('qa-home');
+  const addr=isAP?(t==='AP PICK UP'?(homeEl&&homeEl.value):(pickupEl&&pickupEl.value)):(pickupEl&&pickupEl.value);
+  if(!addr||addr.length<5) return;
+  const noteEl=document.getElementById('qa-price-note'); if(!noteEl) return;
+  if(!gmapsLoaded){ loadGoogleMapsAPI(); }
+  if(!gmapsLoaded) return;
+  try{
+    const dest=isAP?_ATL_ADDR:(document.getElementById('qa-home')?.value||'');
+    if(!dest||dest.length<5) return;
+    const orig=addr;
+    const svc=new google.maps.DistanceMatrixService();
+    svc.getDistanceMatrix({origins:[orig],destinations:[dest],travelMode:google.maps.TravelMode.DRIVING,unitSystem:google.maps.UnitSystem.IMPERIAL},function(res,status){
+      if(status!=='OK') return;
+      const el=res.rows[0]&&res.rows[0].elements[0];
+      if(!el||el.status!=='OK') return;
+      const mi=Math.round(el.distance.value/1609.34);
+      const over=Math.max(0,mi-50);
+      const overChg=isAP?over*3:over*2;
+      const miNote=over>0?` · ${mi} mi — +$${overChg} overage`:` · ${mi} mi`;
+      const cur=noteEl.textContent||'';
+      noteEl.textContent=cur.replace(/ · \d+ mi[^$]*(?:\+\$\d+ overage)?/,'')+(miNote);
+      // Auto-add overage to price
+      if(over>0){
+        const prEl=document.getElementById('qa-price');
+        if(prEl){ const base=parseFloat(prEl.value)||0; prEl.value=Math.round(base+overChg); recalcQa(); }
+      }
+    });
+  }catch(e){}
 }
 function recalcQa(){
   const veh=document.getElementById('qa-vehicle')?.value||'Sedan';
@@ -6003,7 +6016,7 @@ async function saveQuickAddRide(){
     newClient: !!(document.getElementById('qa-new-client')?.checked),
   };
   touchRide(ride, 'created');
-  ride.clientOwner = currentUser?.name==='Morgan' ? (USER_DRIVER_MAP['Kat']||'Kathleen Herringdine') : (USER_DRIVER_MAP[currentUser?.name]||getMyDriverName()||'');
+  ride.clientOwner = currentUser?.name==='Morgan'?(USER_DRIVER_MAP['Kat']||'Kathleen Herringdine'):(USER_DRIVER_MAP[currentUser?.name]||getMyDriverName()||'');
   let _driverNeedsOverride = false;
   if(ride.driver && !isDriverAvailable(ride.driver, ride.date, ride.time)){
     _reenableBtn();
@@ -6037,9 +6050,48 @@ async function saveQuickAddRide(){
   showToast(qaType==='AP ROUND TRIP'?`AP Round Trip added: ${client} (2 rides)`:`Ride added: ${client}`);
   refreshDash(); renderCal(); renderRides(); updateNotifBadge();
   if(_driverNeedsOverride) await sendAvailOverrideRequest(ride, currentUser?.name||'');
-  showPolicyTextPrompt(client, ride.phone);
+  // Offer to save address as default if it differs from what was suggested
+  const _usedAddr = ride.type==='AP PICK UP' ? (ride.home||'') : (ride.pickup||'');
+  if(hasIncomeAccess() && _usedAddr && _qaAutofilledData.client.toLowerCase()===client.toLowerCase() && _usedAddr!==_qaAutofilledData.addr){
+    offerSaveDefaultAddress(client, _usedAddr);
+  } else { showPolicyTextPrompt(client, ride.phone); }
+  _qaAutofilledData={addr:'',phone:'',client:'',prefix:''};
 }
 
+// ── SAVE CLIENT ADDRESS (multi-address) ──
+function offerSaveDefaultAddress(clientName, newAddr){
+  const ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.8);z-index:14000;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  const first=(clientName.trim().split(' ')[0])||clientName;
+  const _key=clientName.trim().toLowerCase();
+  const _existing=getClientAddresses(_key);
+  const hasExisting=_existing.length>0;
+  const PRESET=['Home','Office','Airport Hotel','Vacation Home','Other'];
+  const labelOpts=PRESET.map(function(l){return '<option>'+l+'</option>';}).join('');
+  ov.innerHTML='<div style="background:var(--white);border-radius:16px;max-width:390px;width:100%;padding:1.35rem;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
+    +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.35rem;">📍 Save address for '+escHtml(first)+'?</div>'
+    +'<div style="font-size:.84rem;color:#555;margin-bottom:.75rem;line-height:1.45;">'+escHtml(newAddr)+'</div>'
+    +'<label style="font-size:.75rem;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:#666;display:block;margin-bottom:.3rem;">Label</label>'
+    +'<select id="_addr-label" style="width:100%;padding:.55rem .7rem;border:1.5px solid #d1d5db;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.93rem;font-weight:700;color:#1a0830;background:#fff;margin-bottom:.65rem;">'+labelOpts+'</select>'
+    +(hasExisting?'<label style="display:flex;align-items:center;gap:.45rem;font-size:.88rem;font-weight:700;color:#333;margin-bottom:.75rem;cursor:pointer;"><input type="checkbox" id="_addr-default" checked style="width:15px;height:15px;accent-color:#7c3aed;"> Set as default</label>':'')
+    +'<div style="display:flex;gap:.6rem;">'
+    +'<button id="_addr-yes" style="flex:1;padding:.7rem;background:#7c3aed;color:#fff;border:none;border-radius:10px;font-family:\'DM Sans\',sans-serif;font-weight:800;font-size:.93rem;cursor:pointer;">💾 Save</button>'
+    +'<button id="_addr-no" style="flex:1;padding:.7rem;background:#f3f4f6;color:#333;border:none;border-radius:10px;font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.93rem;cursor:pointer;">Skip</button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+  const _close=function(save){
+    if(save){
+      const label=document.getElementById('_addr-label')?.value||'Home';
+      const makeDefault=hasExisting?(document.getElementById('_addr-default')?.checked!==false):true;
+      setClientAddress(_key,label,newAddr,makeDefault);
+      showToast('✓ '+label+' saved for '+first);
+    }
+    document.body.removeChild(ov);
+    showPolicyTextPrompt(clientName,'');
+  };
+  document.getElementById('_addr-yes').onclick=function(){_close(true);};
+  document.getElementById('_addr-no').onclick=function(){_close(false);};
+}
 // ── DUPLICATE RIDE ──
 // CLIENT BOOKING-POLICY TEXT (offered after a ride is saved)
 function policyTextMessage(firstName){
@@ -6143,7 +6195,7 @@ function showPolicyTextPrompt(clientName, phone){
 let dupSourceId = null;
 
 function openDuplicateModal(id){
-  const r = rides.find(x=>x.id===id); if(!r) return;
+  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   dupSourceId = id;
   document.getElementById('dup-modal-sub').textContent = `Copying: ${r.client} · ${r.type} · $${r.price}`;
   document.getElementById('dup-date').value = r.date || '';
@@ -6212,7 +6264,7 @@ async function assignDriver(){
 }
 
 async function deleteRide(id){
-  const r=rides.find(x=>x.id===id);
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id)));
   if(!canDeleteRide(r)){ showToast('You can only delete rides you created.','error'); return; }
   if(!confirm('Delete this ride?')) return;
   rides=rides.filter(r=>r.id!==id);
@@ -7976,24 +8028,6 @@ function renderIncome(){
   // Everyone — including admins — only ever sees their OWN income. No driver picker.
   if(filterRow) filterRow.style.display = 'none';
   dName = myName;
-  (function(){
-    const _myLinked=(driverSettings[myName]||{}).linkedWith;
-    const _on=window._showCombinedIncome===true;
-    let _tr=document.getElementById('income-combine-row');
-    if(_myLinked&&!_tr){
-      const t=document.createElement('div');
-      t.id='income-combine-row';
-      t.style.cssText='display:flex;align-items:center;gap:.65rem;margin-bottom:.75rem;padding:.55rem .85rem;background:#1e0f3d;border-radius:10px;border:1px solid var(--pur3);flex-wrap:wrap;';
-      t.innerHTML='<span style="font-size:.88rem;font-weight:700;color:#fff;">🔗 Linked with '+escHtml(_myLinked.split(' ')[0])+'</span>'
-        +'<button id="income-combine-btn" onclick="window._showCombinedIncome=!window._showCombinedIncome;try{localStorage.setItem(\'nda_combine_income\',window._showCombinedIncome?\'1\':\'0\');}catch(e){}renderIncome();" '
-        +'style="padding:.35rem .85rem;background:'+(_on?'var(--accent)':'none')+';color:'+(_on?'#fff':'#c4b0e0')+';border:1.5px solid var(--accent);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;font-weight:700;cursor:pointer;">'+(_on?'\u2714 Combined view ON':'Show combined income')+'</button>';
-      const el=document.getElementById('income-summary-cards');
-      if(el&&el.parentNode) el.parentNode.insertBefore(t,el);
-    } else if(_tr){
-      const b=document.getElementById('income-combine-btn');
-      if(b){b.style.background=_on?'var(--accent)':'none';b.style.color=_on?'#fff':'#c4b0e0';b.textContent=_on?'\u2714 Combined view ON':'Show combined income';}
-    } else if(!_myLinked&&_tr){_tr.remove();}
-  })();
   // personalView = showing one specific person's full P&L (own outside rides, expenses, vehicle cost).
   // True for any non-admin, and for an admin viewing their OWN income.
   const personalView = (!admin && !!myName) || (admin && !!dName && dName===myName);
@@ -8002,8 +8036,23 @@ function renderIncome(){
   document.getElementById('income-subtitle').textContent =
     (dName||'All Drivers') + (label?' · '+label:'');
 
-  // Combined income: also include linked partner's rides when toggle is on
-  const _incLinked=(window._showCombinedIncome===true&&myName)?(driverSettings[myName]||{}).linkedWith:null;
+  const _myl=currentUser?.name||'';
+  const _lp=(driverSettings[_myl]||{}).linkedWith||null;
+  if(_lp){
+    const _on=window._showCombinedIncome===true;
+    const _st=document.getElementById('income-subtitle');
+    if(_st){
+      let _cb=document.getElementById('income-combine-btn');
+      if(!_cb){_cb=document.createElement('button');_cb.id='income-combine-btn';
+        _cb.style.cssText='margin-left:.5rem;padding:.3rem .7rem;border-radius:8px;border:1.5px solid var(--pur3);font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;';
+        _st.parentNode.insertBefore(_cb,_st.nextSibling);}
+      _cb.textContent=_on?'?? Combined: ON':'?? Combined: OFF';
+      _cb.style.background=_on?'#7c3aed':'#f3f4f6';_cb.style.color=_on?'#fff':'#333';
+      _cb.onclick=function(){window._showCombinedIncome=!window._showCombinedIncome;
+        try{localStorage.setItem('nda_combine_income',window._showCombinedIncome?'1':'0');}catch(e){}renderIncome();};
+    }
+  }else{const _old=document.getElementById('income-combine-btn');if(_old)_old.remove();}
+  const _incLinked=(window._showCombinedIncome===true&&_myl&&_lp)?_lp:null;
   // Filter rides
   let filtered = rides.filter(r=>{
     if(dName && r.driver!==dName && (!_incLinked||r.driver!==_incLinked)) return false;
@@ -9862,14 +9911,13 @@ function showAuthScreen(){
 
 function enterApp(){
   _notifFirstLoad = true; // re-seed on login so existing notifications don't all re-pop
-  try{ localStorage.setItem('nda_auth_user', currentUser?.name||''); }catch(e){}
-  try{ window._showCombinedIncome = localStorage.getItem('nda_combine_income')==='1'; }catch(e){ window._showCombinedIncome=false; }
   setTimeout(function(){ if(typeof loadGoogleMapsAPI==='function') loadGoogleMapsAPI(); }, 800);
   setTimeout(function(){ if(typeof check24hOverrides==='function') check24hOverrides(); }, 2500);
   setTimeout(function(){ if(typeof checkForActiveSOSOnLogin==='function') checkForActiveSOSOnLogin(); }, 2000);
-  const sosBtnEl=document.getElementById('sos-btn'); if(sosBtnEl) sosBtnEl.style.display=hasIncomeAccess()?'':'none';
+  const sosBtnEl=document.getElementById('sos-btn'); if(sosBtnEl) sosBtnEl.style.display='';
   if(typeof startSOSPolling==='function') startSOSPolling();
   setTimeout(maybShowTutorialBanner, 1200);
+  try{window._showCombinedIncome=localStorage.getItem('nda_combine_income')==='1';}catch(e){window._showCombinedIncome=false;}
   document.getElementById('paywall-screen').style.display='none';
   document.getElementById('auth-screen').style.display='none';
   document.getElementById('app').style.display='flex';
@@ -10062,12 +10110,54 @@ function maybeAutofillClient(prefix){
   fill(prefix+'-email', c.email);
   const extras=(c.phones||[]).slice(1).map(p=>p.number).filter(Boolean);
   if(extras.length){ const ex=document.getElementById(prefix+'-extra-phones'); if(ex && !ex.value) ex.value=extras.join(', '); }
-  // Home address → whichever field maps to ride.home for this trip type
-  if(c.address){
+  // Home address — global override first, then client record, then latest ride
+  const _clientKey=(nameEl.value||'').trim().toLowerCase();
+  const _addrSrc = getClientDefaultAddress(_clientKey) || c.address || (()=>{
+    const lr=(c.rides||[]).slice().sort((a,b)=>b.date.localeCompare(a.date))[0];
+    return lr ? (lr.home||lr.pickup||'') : '';
+  })();
+  if(_addrSrc){
     const type=(document.getElementById(prefix+'-type')||{}).value||'';
     const homeId = (prefix==='qa') ? 'qa-home' : 'q-dropoff';
-    if(type==='AP PICK UP') fill(homeId, c.address);
-    else fill(prefix+'-pickup', c.address);
+    const addrField = (type==='AP PICK UP') ? homeId : prefix+'-pickup';
+    const addrEl = document.getElementById(addrField);
+    if(addrEl && !addrEl.value){
+      addrEl.value = _addrSrc;
+      addrEl.dispatchEvent(new Event('input',{bubbles:true}));
+      if(prefix==='q') { resetMileage(); debounceMileage(); }
+      if(prefix==='qa') qaDebounceDistance();
+    }
+  }
+  // Record what was suggested so we can detect edits at save
+  const _nameEl2=document.getElementById(prefix+'-client');
+  _qaAutofilledData={addr:_addrSrc||'',phone:c.phone||'',client:(_nameEl2?.value||'').trim(),prefix:prefix};
+  // Show saved-address picker if client has multiple addresses
+  if(prefix==='qa'){
+    const _addrs=getClientAddresses(_clientKey);
+    const _pickerId='qa-addr-picker';
+    let _picker=document.getElementById(_pickerId);
+    if(!_picker){ _picker=document.createElement('div'); _picker.id=_pickerId; _picker.style.cssText='margin-top:.35rem;display:flex;flex-wrap:wrap;gap:.35rem;'; const _pu=document.getElementById('qa-pickup'); if(_pu&&_pu.parentNode) _pu.parentNode.insertBefore(_picker,_pu.nextSibling); }
+    _picker.innerHTML='';
+    if(_addrs.length>1){
+      _addrs.forEach(function(a){
+        const b=document.createElement('button');
+        b.type='button';
+        b.style.cssText='padding:3px 10px;border-radius:12px;border:1.5px solid #7c3aed;background:'+(a.isDefault?'#7c3aed':'#f5f3ff')+';color:'+(a.isDefault?'#fff':'#4a1f8c')+';font-size:.78rem;font-weight:700;cursor:pointer;font-family:\'DM Sans\',sans-serif;';
+        b.textContent=a.label+(a.isDefault?' ✓':'');
+        b.onclick=function(){
+          const typeEl=document.getElementById('qa-type');
+          const t=(typeEl&&typeEl.value)||'';
+          const homeId='qa-home';
+          const addrField=(t==='AP PICK UP')?homeId:'qa-pickup';
+          const el=document.getElementById(addrField);
+          if(el){el.value=a.address;el.dispatchEvent(new Event('input',{bubbles:true}));qaDebounceDistance();}
+          _qaAutofilledData.addr=a.address;
+          _addrs.forEach(function(x){x.isDefault=false;});a.isDefault=true;
+          _picker.querySelectorAll('button').forEach(function(bb,i){bb.style.background=_addrs[i]&&_addrs[i].isDefault?'#7c3aed':'#f5f3ff';bb.style.color=_addrs[i]&&_addrs[i].isDefault?'#fff':'#4a1f8c';bb.textContent=_addrs[i]?_addrs[i].label+(_addrs[i].isDefault?' ✓':''):bb.textContent;});
+        };
+        _picker.appendChild(b);
+      });
+    }
   }
   // Pax + bags from most recent ride — fill if still at the default value
   const fillNum=(id,v,def)=>{ const el=document.getElementById(id); if(el&&(el.value===''||el.value==def)&&v!==undefined) el.value=v; };
@@ -10080,6 +10170,34 @@ function maybeAutofillClient(prefix){
   // Re-run quote calc if on the quote form so price reflects updated pax
   if(prefix==='q' && typeof calcQuote==='function') calcQuote();
   checkCautiousForForm(prefix);
+}
+
+// Track autofilled values for change detection on save
+let _qaAutofilledData={addr:'',phone:'',client:'',prefix:''};
+let clientAddressOverrides={};  // global: client key → [{label, address, isDefault}]
+
+function getClientDefaultAddress(clientKey){
+  const s=clientAddressOverrides[clientKey];
+  if(!s) return '';
+  if(typeof s==='string') return s; // backward compat
+  const d=s.find(function(a){return a.isDefault;})||s[0];
+  return d?d.address:'';
+}
+function getClientAddresses(clientKey){
+  const s=clientAddressOverrides[clientKey];
+  if(!s) return [];
+  if(typeof s==='string') return [{label:'Default',address:s,isDefault:true}];
+  return Array.isArray(s)?s:[];
+}
+function setClientAddress(clientKey, label, address, makeDefault){
+  if(!clientAddressOverrides[clientKey]) clientAddressOverrides[clientKey]=[];
+  if(typeof clientAddressOverrides[clientKey]==='string')
+    clientAddressOverrides[clientKey]=[{label:'Default',address:clientAddressOverrides[clientKey],isDefault:true}];
+  const existing=clientAddressOverrides[clientKey].findIndex(function(a){return a.address===address||a.label.toLowerCase()===label.toLowerCase();});
+  if(existing>=0) clientAddressOverrides[clientKey][existing]={label,address,isDefault:makeDefault||clientAddressOverrides[clientKey][existing].isDefault};
+  else clientAddressOverrides[clientKey].push({label,address,isDefault:makeDefault||false});
+  if(makeDefault) clientAddressOverrides[clientKey].forEach(function(a,i){if(i!==clientAddressOverrides[clientKey].findIndex(function(x){return x.address===address;})) a.isDefault=false;});
+  storageSet('kat:clientAddresses',JSON.stringify(clientAddressOverrides)).catch(function(){});
 }
 
 // ── Reusable contact-row UI (multiple labeled phones + emails) for the client modals ──
@@ -10291,7 +10409,7 @@ document.getElementById('pw-input').addEventListener('keydown',e=>{if(e.key==='E
 
 function logout(){
   stopPresence();
-  try{ localStorage.removeItem('nda-session'); localStorage.removeItem('nda_auth_user'); }catch(e){}
+  try{ localStorage.removeItem('nda-session'); }catch(e){}
   currentUser=null; selectedUser=null;
   document.getElementById('auth-screen').style.display='flex';
   document.getElementById('app').style.display='none';
@@ -11223,13 +11341,15 @@ function maybePopNotifications(data){
     if(_notifShown.has(key)) return;
     _notifShown.add(key);
     const _myName = currentUser?.name||'';
-    if(!n.read && n.osNotif !== false && (!n.createdBy || n.createdBy !== _myName)) fireLocalNotification('Northwest Drivers', n.msg || 'New update');
+    const _isRecent = n.ts && (Date.now() - n.ts) < 120000;
+    const _notSelf = n.createdBy && n.createdBy !== _myName;
+    if(!n.read && n.osNotif !== false && _isRecent && _notSelf) fireLocalNotification('Northwest Drivers', n.msg || 'New update');
   });
 }
 function fireLocalNotification(title, body){
   if(!('Notification' in window) || Notification.permission!=='granted') return;
   if(typeof document!=='undefined' && document.visibilityState==='hidden') return;
-  const opts = { body: body||'', icon:'icon-192.png', badge:'icon-192.png', tag:'nda-'+Date.now() };
+  const opts = { body: body||'', icon:'https://chasesweat.github.io/nda-app/icon-192.png', badge:'https://chasesweat.github.io/nda-app/icon-192.png', tag:'nda-'+Date.now() };
   try{
     if(navigator.serviceWorker && navigator.serviceWorker.ready){
       navigator.serviceWorker.ready.then(reg=> reg.showNotification(title, opts))
