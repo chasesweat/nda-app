@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606049933">
+<meta name="version" content="202606089946">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -336,6 +336,7 @@ input,select,textarea{font-size:16px;}
   <div onclick="nav('drivers')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🚘 Drivers</div>
   <div onclick="nav('chat')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">💬 Chat <span id="chat-badge" style="display:none;margin-left:4px;background:#dc2626;color:#fff;font-size:.6rem;font-weight:700;border-radius:50%;width:16px;height:16px;line-height:16px;text-align:center;display:inline-block;">●</span></div>
   <div onclick="nav('documents')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">📁 Documents</div>
+  <div onclick="nav('traffic')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#f5a623;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🚦 Traffic</div>
   <div onclick="closeMenu(); promptInstall();" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">📲 Install app</div>
   <div id="menu-myrides" onclick="nav('myrides')" style="display:none;padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#ce93d8;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;font-weight:500;">🗓 My Rides</div>
   <div id="menu-account" onclick="nav('account')" style="display:none;padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#ce93d8;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;font-weight:500;">👤 My Account</div>
@@ -662,6 +663,18 @@ input,select,textarea{font-size:16px;}
   <div id="flights-rides-list" style="display:flex;flex-direction:column;gap:.5rem;"></div>
 </div>
 
+  <div class="page" id="page-traffic" style="padding:1rem 1rem 6rem;">
+    <div class="page-title">Live Traffic</div>
+    <div class="page-sub">Real-time Atlanta-area traffic conditions</div>
+    <div id="traffic-map" style="width:100%;height:62vh;border-radius:12px;overflow:hidden;border:1.5px solid var(--light);background:var(--surface);margin-top:.75rem;"></div>
+    <div id="traffic-fallback" style="display:none;font-size:.82rem;color:var(--mid);margin-top:.75rem;"></div>
+    <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.85rem;">
+      <a href="https://www.google.com/maps/@33.749,-84.388,11z/data=!5m1!1e1" target="_blank" rel="noopener" style="flex:1;min-width:140px;text-align:center;padding:.6rem;background:var(--accent);color:#fff;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;text-decoration:none;">↗ Google Maps Traffic</a>
+      <a href="https://www.waze.com/live-map" target="_blank" rel="noopener" style="flex:1;min-width:140px;text-align:center;padding:.6rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;text-decoration:none;">↗ Waze Live Map</a>
+      <a href="https://511ga.org/" target="_blank" rel="noopener" style="flex:1;min-width:140px;text-align:center;padding:.6rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;text-decoration:none;">↗ GDOT 511 GA</a>
+    </div>
+  </div>
+
 <div class="page" id="page-clients">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:.75rem;">
       <div>
@@ -943,7 +956,7 @@ input,select,textarea{font-size:16px;}
         <div style="font-size:.64rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#9c27b0;margin-bottom:.4rem;">💰 Per-Ride Earnings</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:.2rem .6rem;font-size:.79rem;color:var(--black);line-height:1.6;">
           <div>✓ Gross · Cost · Net per ride</div><div>✓ Gas from MPG &amp; fuel price</div>
-          <div>✓ Custom maintenance $/mi</div><div>✓ Private tip entry per ride</div>
+          <div>✓ Custom maintenance $/mi</div><div>✓ Tip entry per ride</div>
           <div>✓ 15% fee log &amp; payment tracking</div>
         </div>
       </div>
@@ -2371,6 +2384,7 @@ async function saveQuote(){
   const rpo=document.getElementById('q-repeat-opts'); if(rpo) rpo.style.display='none';
   const qnc=document.getElementById('q-new-client'); if(qnc) qnc.checked=false;
   refreshDash(); updateNotifBadge(); renderCal();
+  showPolicyTextPrompt(client, ride.phone);
 }
 
 
@@ -2382,7 +2396,7 @@ function addNotification(driverName, ride, action, customMsg){
   const msg = customMsg || (action==='assigned'
     ? `New ride assigned: ${ride.client} on ${fmtDateShort(ride.date)} at ${ride.time||'—'} ($${ride.price})`
     : `Ride updated: ${ride.client}`);
-  notifications[driverName].unshift({ rideId:ride.id, read:false, msg, ts:Date.now() });
+  notifications[driverName].unshift({ rideId:ride.id, read:false, msg, ts:Date.now(), createdBy:currentUser?.name||'' });
   // Fire push notification to driver's phone
   if(action==='assigned'){
     sendPushToDriver(driverName, '🚗 New ride assigned — NDA', `${ride.client} · ${fmtDateShort(ride.date)} ${ride.time||''}`);
@@ -2423,23 +2437,28 @@ function handleNotifClick(el){
   const driverName=el.dataset.dname;
   const idx=parseInt(el.dataset.nidx);
   const notifList=notifications[driverName]||[];
-  // Reverse was applied in slice — un-reverse to get real index
-  const realIdx=notifList.length-1-idx;
-  const n=notifList[realIdx];
+  // List is shown newest-first (no reverse) — idx maps directly to the array index.
+  const n=notifList[idx];
   if(!n) return;
-  // Close panel + mark read
   const panel=document.getElementById("notif-panel");
   if(panel) panel.style.display="none";
-  n.read=true; saveNotifs(); updateNotifBadge();
-  // Navigate
-  const rideId=n.rideId;
+  // Capture routing info, then REMOVE this notification from the list entirely
+  const type=n.type, rideId=n.rideId, channel=n.channel, msg=n.msg||n.message||"";
+  notifList.splice(idx,1);
+  saveNotifs(); updateNotifBadge();
+  try{ renderNotifPanel(); }catch(e){}
+  // Route to wherever the notification came from
+  if(type==='chat'){
+    nav("chat");
+    if(channel && channel!=='group') setTimeout(function(){ try{ switchChatChannel(channel); }catch(e){} }, 220);
+    return;
+  }
   if(typeof rideId==='number'){
     const ride=rides.find(x=>x.id===rideId);
-    if(ride){ nav("calendar"); setTimeout(()=>openRideModal(rideId),150); return; }
+    if(ride){ nav("calendar"); setTimeout(function(){ openRideModal(rideId); },150); return; }
   }
-  const msg=n.msg||n.message||"";
+  if(/transfer|release|override|client/i.test(msg)){ nav("clients"); return; }
   if(/chat|message/i.test(msg)){ nav("chat"); return; }
-  if(/client|transfer|release/i.test(msg)){ nav("clients"); return; }
   nav("calendar");
 }
 
@@ -2448,7 +2467,7 @@ function renderNotifPanel(){
   if(!panel) return;
   const dName   = getMyDriverName();
   const myName  = currentUser?.name;
-  const myNotifs = dName ? (notifications[dName]||[]).slice().reverse() : [];
+  const myNotifs = dName ? (notifications[dName]||[]).slice() : [];
 
   // Pending transfer requests (excluding admin_release — shown separately below)
   const myRequests = Object.values(clientRequests||{}).filter(r=>{
@@ -2953,6 +2972,10 @@ function renderConfirmations(){
   panel.style.display='block';
 
   try{
+    if(!confTextEnabled(getMyDriverName())){
+      panel.innerHTML='<div style="padding:1.5rem 0;"><div style="font-size:.95rem;color:var(--mid);margin-bottom:.5rem;">Schedule Confirmation is turned off.</div><div style="font-size:.8rem;color:var(--mid);">Turn them back on from your card under Team.</div></div>';
+      return;
+    }
     const today=toDateStr(new Date());
     const tomorrow=toDateStr(addDays(new Date(),1));
 
@@ -3124,12 +3147,12 @@ function buildConfirmationText(r){
   const flightNum     = flight.replace(/[^A-Za-z0-9]/g,'').toUpperCase();
   // Flight tracking only for AP PICK UP — driver is meeting a landing flight
   // AP RUN = going TO airport, no tracking needed
+  const type          = (r.type||'').toUpperCase();
   const isPickupType  = type==='AP PICK UP'||type==='AP ROUND TRIP';
   const flightLink    = (flightNum&&isPickupType) ? '\u2708\uFE0F Track your flight live:\nhttps://www.google.com/search?q='+flightNum+'+flight+tracking\n\n' : '';
   const terminalVal   = (r.terminal||'').trim();
   const start         = (r.pickup||'').trim();   // where the client is picked up
   const dest          = (r.home||'').trim();     // drop-off / destination
-  const type          = (r.type||'').toUpperCase();
   const driverLine = sameDriver
     ? 'I will be driving you.'
     : 'My partner '+assigned+' will be driving you on my behalf. '+assigned+' is copied on this message.';
@@ -3514,6 +3537,19 @@ function renderRideView(r){
   const color = rideColor(r);
   const feeBreak = buildFeeBreakdown(r);
   const apType = r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP';
+  const _flightNum = (r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'').toUpperCase();
+  const _isPickup  = (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP');
+  const flightRowHtml = r.flight
+    ? '<div style="font-size:.88rem;margin-bottom:3px;">Flight: ' + (_isPickup && _flightNum
+        ? '<a href="https://www.google.com/search?q='+_flightNum+'+flight+tracking" target="_blank" rel="noopener" style="color:#4285f4;font-weight:600;text-decoration:underline;">'+escHtml(r.flight)+' \u2708\uFE0F Track live</a>'
+        : escHtml(r.flight)) + '</div>'
+    : '';
+  const tsaRowHtml = (r.type==='AP RUN')
+    ? '<div style="font-size:.88rem;margin-bottom:3px;"><a href="https://redesign.atl.com/security-wait-times/" target="_blank" rel="noopener" style="color:#4285f4;font-weight:600;text-decoration:underline;">\uD83D\uDD12 TSA Wait Times \u2014 ATL</a></div>'
+    : '';
+  const shareOfferingsBtn = (r.status!=='cancelled')
+    ? '<div class="detail-row" style="grid-column:1/-1;margin-top:.25rem;"><button onclick="shareRideToOfferings('+r.id+')" style="width:100%;padding:.55rem;background:none;border:1.5px solid #9c27b0;color:#9c27b0;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.84rem;font-weight:600;cursor:pointer;">\uD83D\uDCE4 Post to Offerings</button></div>'
+    : '';
   const address = r.type==='AP RUN' ? r.home :
                   r.type==='AP PICK UP' ? r.pickup : r.home;
 
@@ -3562,7 +3598,8 @@ function renderRideView(r){
           ${r.carryOnBags ? `<div style="font-size:.88rem;margin-bottom:3px;">Carry-on bags: ${r.carryOnBags}</div>` : ''}
           ${buildFeeMathHTML(r)}
           ${r.terminal ? `<div style="font-size:.88rem;margin-bottom:3px;">${r.terminal} Terminal</div>` : ''}
-          ${r.flight   ? `<div style="font-size:.88rem;margin-bottom:3px;">Flight: ${r.flight}</div>` : ''}
+          ${flightRowHtml}
+          ${tsaRowHtml}
           ${r.miles    ? `<div style="font-size:.82rem;color:var(--mid);">${r.miles} miles</div>` : ''}
         </div>
       </div>
@@ -3588,6 +3625,7 @@ function renderRideView(r){
         <span style="font-size:.88rem;font-weight:500;color:${r.confirmed?'var(--green)':'var(--mid)'};">${r.confirmed?'Confirmed':'Pending confirmation'}</span>
       </div>
     </div>
+    ${shareOfferingsBtn}
     ${buildRideLifecycle(r)}
   `;
 }
@@ -4230,6 +4268,9 @@ function nav(id){
     } else if(id === 'costcalc'){
       if(hasIncomeAccess()){ showPage('costcalc', null); }
       else { showIncomeOrUpgrade(null); }
+    } else if(id === 'traffic'){
+      if(hasIncomeAccess()){ showPage('traffic', null); }
+      else { showIncomeOrUpgrade(null); }
     } else if(id === 'access'){
       showPage('drivers', null);
       setTimeout(function(){
@@ -4387,6 +4428,53 @@ let openedDMs      = new Set(); // DM channels the user has explicitly opened (s
 let chatAllListenerAttached = false; // guard so the global chat listener attaches only once
 
 // ── INIT ──
+// ── CHAT RIDE OFFER helpers ──
+function buildRideOfferCard(m){
+  const rd=m.rideData||{};
+  const price=rd.price?'$'+rd.price:'';
+  const when=(rd.date?fmtDateShort(rd.date):'')+(rd.time?' at '+rd.time:'');
+  const driverTxt=rd.driver?rd.driver.split(' ')[0]:'Unassigned';
+  const viewBtn=m.rideId
+    ? '<button onclick="openRideFromChat('+m.rideId+')" style="margin-top:.5rem;width:100%;padding:.4rem;background:#9c27b0;color:#fff;border:none;border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">View Ride</button>'
+    : '';
+  return '<div style="background:var(--surface);border:1.5px solid #9c27b0;border-radius:10px;padding:.7rem .85rem;min-width:190px;max-width:240px;">'
+    +'<div style="font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#9c27b0;margin-bottom:.35rem;">\uD83D\uDE97 Ride Available</div>'
+    +'<div style="font-size:.9rem;font-weight:600;color:var(--black);margin-bottom:.2rem;">'+escHtml(rd.client||'\u2014')+'</div>'
+    +(when?'<div style="font-size:.8rem;color:var(--mid);">\uD83D\uDCC5 '+escHtml(when)+'</div>':'')
+    +'<div style="font-size:.8rem;color:var(--mid);">'+escHtml(rd.type||'')+' \u00b7 '+escHtml(rd.vehicle||'')+(price?' \u00b7 '+price:'')+'</div>'
+    +(rd.driver?'<div style="font-size:.76rem;color:var(--mid);">Driver: '+escHtml(driverTxt)+'</div>':'<div style="font-size:.76rem;color:#b45309;">Unassigned</div>')
+    +(rd.pickup?'<div style="font-size:.76rem;color:var(--mid);">\uD83D\uDCCD '+escHtml(rd.pickup.slice(0,38))+'</div>':'')
+    +viewBtn
+    +'</div>';
+}
+function openRideFromChat(id){
+  const m=document.getElementById('ride-modal'); if(m) m.classList.remove('show');
+  nav('calendar');
+  setTimeout(function(){ openRideModal(id); }, 150);
+}
+async function shareRideToOfferings(id){
+  const r=rides.find(x=>x.id===id); if(!r) return;
+  if(r.status==='cancelled'){ showToast('Cannot share a cancelled ride','error'); return; }
+  const msg={
+    sender: currentUser?.name||'',
+    text: '\uD83D\uDE97 Ride Available\n'+r.client+' \u00b7 '+r.type+(r.price?' \u00b7 $'+r.price:'')+'\n\uD83D\uDCC5 '+fmtDate(r.date)+(r.time?' at '+r.time:'')+(r.vehicle?'\n\uD83D\uDE8C '+r.vehicle:'')+(r.pickup?'\n\uD83D\uDCCD '+r.pickup:'')+(r.driver?'\nDriver: '+r.driver.split(' ')[0]:' (unassigned)')+'\n\nCan anyone cover this?',
+    ts: Date.now(), read: false, type: 'ride_offer', rideId: id,
+    rideData:{ client:r.client||'', date:r.date||'', time:r.time||'', type:r.type||'', vehicle:r.vehicle||'', price:r.price||0, driver:r.driver||'', pickup:r.pickup||'' }
+  };
+  if(fbDB){
+    try{ await ensureFbAuth(); await fbRef('nda/kat/chat/offerings').push(msg); }
+    catch(e){ showToast('Could not post to Offerings','error'); return; }
+  }
+  if(!chatMessages.offerings) chatMessages.offerings=[];
+  if(!chatMessages.offerings.some(m2=>m2.ts===msg.ts&&m2.sender===msg.sender)) chatMessages.offerings.push(msg);
+  notifyChatMembers('offerings', msg);
+  document.getElementById('ride-modal')?.classList.remove('show');
+  nav('chat');
+  setTimeout(function(){ chatChannel='offerings'; renderChatTabs(); renderChatMessages(); updateChatBadge(); }, 180);
+  showToast('\uD83D\uDCE4 Posted to Offerings \u2713');
+}
+
+// \u2500\u2500 TEAM CHAT init
 async function initChat(){
   const stored = await storageGet('kat:chatLastRead');
   if(stored) chatLastRead = stored;
@@ -4413,7 +4501,7 @@ function listenAllChat(){
     const all = snap.exists() ? (snap.val()||{}) : {};
     Object.keys(all).forEach(key=>{
       // Keep the group channel and any DM channel that includes my name
-      if(key !== 'group' && !key.split('__').includes(myKey)) return;
+      if(key !== 'group' && key !== 'offerings' && key !== 'updates' && !key.split('__').includes(myKey)) return;
       const val = all[key];
       let arr = Array.isArray(val) ? val.slice() : Object.values(val||{});
       arr = arr.filter(m => m && typeof m === 'object');
@@ -4438,6 +4526,12 @@ function renderChatTabs(){
   let html = `<button class="chat-tab ${chatChannel==='group'?'active':''}" onclick="switchChatChannel('group')">
     # General<span class="unread-dot ${hasUnread('group')?'show':''}"></span>
   </button>`;
+  html += `<button class="chat-tab ${chatChannel==='offerings'?'active':''}" onclick="switchChatChannel('offerings')" style="${chatChannel==='offerings'?'':''}">
+    \uD83D\uDE97 Offerings<span class="unread-dot ${hasUnread('offerings')?'show':''}"></span>
+  </button>`;
+  html += `<button class="chat-tab ${chatChannel==='updates'?'active':''}" onclick="switchChatChannel('updates')">
+    \uD83D\uDEA6 Updates<span class="unread-dot ${hasUnread('updates')?'show':''}"></span>
+  </button>`;
 
   dmChannels.forEach(ch => {
     const otherName = ch.key.split('__').map(n=>n.replace(/_/g,' ')).find(n=>n !== (myDriver||currentUser?.name));
@@ -4451,7 +4545,8 @@ function renderChatTabs(){
 
   // Update subtitle
   const sub = document.getElementById('chat-subtitle');
-  if(sub) sub.textContent = chatChannel==='group' ? 'Team channel — everyone' : 'Direct message';
+  const _chSubs={group:'Team channel \u2014 everyone',offerings:'\uD83D\uDE97 Ride offerings \u2014 post rides needing coverage',updates:'\uD83D\uDEA6 Traffic, road updates \u2014 no OS notifications'};
+  if(sub) sub.textContent=_chSubs[chatChannel]||'Direct message';
 }
 
 function getDMChannels(){
@@ -4485,7 +4580,7 @@ function hasUnread(channelKey){
 // ── SWITCH CHANNEL ──
 function switchChatChannel(channelKey){
   chatChannel = channelKey;
-  if(channelKey !== 'group') openedDMs.add(channelKey);
+  if(channelKey !== 'group' && channelKey !== 'offerings' && channelKey !== 'updates') openedDMs.add(channelKey);
 
   // Mark as read
   chatLastRead[channelKey] = Date.now();
@@ -4535,17 +4630,18 @@ function renderChatMessages(){
     }
 
     html += `<div class="chat-msg-wrap ${side}">`;
+    const _bubble = m.type==='ride_offer' ? buildRideOfferCard(m) : escHtml(m.text);
     if(!isMe){
       html += `<div style="display:flex;align-items:flex-end;gap:6px;">
         <div class="chat-avatar" style="background:${color};">${initials}</div>
         <div>
           <div style="font-size:.68rem;color:var(--mid);margin-bottom:2px;">${escHtml(m.sender||'')}</div>
-          <div class="chat-bubble theirs">${escHtml(m.text)}</div>
+          <div class="chat-bubble theirs">${_bubble}</div>
           <div class="chat-meta">${timeStr}</div>
         </div>
       </div>`;
     } else {
-      html += `<div class="chat-bubble mine">${escHtml(m.text)}</div>
+      html += `<div class="chat-bubble mine">${_bubble}</div>
         <div class="chat-meta" style="justify-content:flex-end;">${timeStr} ${m.read?'✓✓':'✓'}</div>`;
     }
     html += `</div>`;
@@ -4674,13 +4770,16 @@ function startDM(otherDriverName){
 
 // ── PUSH NOTIFY CHAT ──
 function notifyChatMembers(channelKey, msg){
-  if(channelKey === 'group'){
-    // Bell notification for all drivers except sender — no Chrome push for group chat
+  // 'group','offerings','updates' are the fixed group channels
+  const _grpCfg={group:{label:'General',emoji:'\uD83D\uDCAC',osNotif:true},offerings:{label:'Offerings',emoji:'\uD83D\uDE97',osNotif:true},updates:{label:'Updates',emoji:'\uD83D\uDEA6',osNotif:false}};
+  if(_grpCfg[channelKey]){
+    const _cfg=_grpCfg[channelKey];
+    // Bell (+ optional OS notification) for all drivers except sender — no Chrome push for group chat
     const sFirst=(msg.sender||'Someone').split(' ')[0];
     const preview=msg.text?msg.text.slice(0,60)+(msg.text.length>60?'\u2026':''):'';
     DRIVERS.forEach(d=>{
       if(d !== msg.sender){
-        addChatBellNotif(d, '\uD83D\uDCAC '+sFirst+' in General: '+preview);
+        addChatBellNotif(d, _cfg.emoji+' '+sFirst+' in '+_cfg.label+': '+(msg.type==='ride_offer'?'\uD83D\uDE97 ride posted':preview), channelKey, _cfg.osNotif);
       }
     });
     saveNotifs();
@@ -4691,16 +4790,16 @@ function notifyChatMembers(channelKey, msg){
     if(other){
       const body = msg.text.length > 60 ? msg.text.slice(0,60)+'…' : msg.text;
       sendPushToDriver(other, `💬 DM from ${msg.sender?.split(' ')[0]||'Someone'}`, body);
-      addChatBellNotif(other, `💬 ${msg.sender?.split(' ')[0]||'Someone'}: ${body}`);
+      addChatBellNotif(other, `💬 ${msg.sender?.split(' ')[0]||'Someone'}: ${body}`, channelKey, true);
       saveNotifs();
     }
   }
 }
 // Add a chat message to a driver's bell feed (syncs to their device + pops on Android)
-function addChatBellNotif(driverName, msg){
+function addChatBellNotif(driverName, msg, channel, osNotif){
   if(!driverName || !notifications) return;
   if(!notifications[driverName]) notifications[driverName] = [];
-  notifications[driverName].unshift({ read:false, msg, ts: Date.now(), type:'chat' });
+  notifications[driverName].unshift({ read:false, msg, ts: Date.now(), type:'chat', channel: channel||'group', osNotif: osNotif!==false });
   if(notifications[driverName].length > 50) notifications[driverName] = notifications[driverName].slice(0,50);
 }
 
@@ -5137,7 +5236,7 @@ function buildUpgradePromptCard(){
     +'</div>'
     +'<div style="font-size:.64rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#7c55a0;margin-bottom:.35rem;">Per-Ride Earnings</div>'
     +'<div style="display:flex;gap:.3rem;flex-wrap:wrap;margin-bottom:.75rem;">'
-    +chip('Gross · Cost · Net')+chip('Gas from MPG')+chip('Custom maint. $/mi')+chip('Private tips')+chip('15% fee tracking')
+    +chip('Gross · Cost · Net')+chip('Gas from MPG')+chip('Custom maint. $/mi')+chip('Tip tracking')+chip('15% fee tracking')
     +'</div>'
     +'<div style="font-size:.64rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#7c55a0;margin-bottom:.35rem;">Income & Tax</div>'
     +'<div style="display:flex;gap:.3rem;flex-wrap:wrap;margin-bottom:1rem;">'
@@ -5319,9 +5418,53 @@ async function saveQuickAddRide(){
   _reenableBtn();
   showToast(qaType==='AP ROUND TRIP'?`AP Round Trip added: ${client} (2 rides)`:`Ride added: ${client}`);
   refreshDash(); renderCal(); renderRides(); updateNotifBadge();
+  showPolicyTextPrompt(client, ride.phone);
 }
 
 // ── DUPLICATE RIDE ──
+// CLIENT BOOKING-POLICY TEXT (offered after a ride is saved)
+function policyTextMessage(firstName){
+  const hi = firstName ? 'Hi '+firstName+',\n\n' : '';
+  return hi
+    +'Quick Note on Our Policy:\n\n'
+    +'\u2022 Confirmation: We\u2019ll text you a confirmation the day before your trip.\n'
+    +'\u2022 Changes: Any changes after that text will incur a $40 fee (except for emergencies/acts of God).\n'
+    +'\u2022 Cancellations: Canceling after that text will result in a fee of 50% of the ride fare.\n\n'
+    +'We appreciate your business and look forward to driving you!';
+}
+function sendPolicyText(phone, firstName){
+  const num=String(phone||'').replace(/[^0-9+]/g,'');
+  if(!num){ showToast('No phone number on file for this client','error'); return; }
+  const body=policyTextMessage(firstName);
+  const isiOS=/iPad|iPhone|iPod/.test(navigator.userAgent||'');
+  window.location.href='sms:'+num+(isiOS?'&':'?')+'body='+encodeURIComponent(body);
+}
+function showPolicyTextPrompt(clientName, phone){
+  const first=(String(clientName||'').trim().split(' ')[0])||'';
+  const hasPhone=!!String(phone||'').replace(/[^0-9+]/g,'');
+  const preview=policyTextMessage(first);
+  const back=document.createElement('div');
+  back.setAttribute('data-policy-modal','1');
+  back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13000;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  back.addEventListener('click',function(e){ if(e.target===back) back.remove(); });
+  const sendBtn = hasPhone
+    ? '<button id="policy-send-btn" style="flex:1;padding:.7rem;background:var(--accent);color:#fff;border:none;border-radius:9px;font-family:\'DM Sans\',sans-serif;font-size:.9rem;font-weight:700;cursor:pointer;">\uD83D\uDCAC Text client the policy</button>'
+    : '<div style="flex:1;padding:.7rem;text-align:center;background:var(--surface);border:1.5px dashed var(--light);border-radius:9px;color:var(--mid);font-size:.8rem;display:flex;align-items:center;justify-content:center;">No phone number on file</div>';
+  back.innerHTML=
+    '<div style="background:var(--white);border-radius:16px;max-width:400px;width:100%;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
+    +'<div style="font-size:1.05rem;font-weight:700;color:var(--black);margin-bottom:.3rem;">\u2705 Ride saved'+(first?' \u2014 '+escHtml(first):'')+'</div>'
+    +'<div style="font-size:.82rem;color:var(--mid);margin-bottom:.75rem;">Text the client your booking policy?</div>'
+    +'<div style="white-space:pre-wrap;font-size:.82rem;color:var(--black);background:var(--surface);border:1px solid var(--light);border-radius:10px;padding:.75rem .85rem;margin-bottom:.9rem;line-height:1.5;">'+escHtml(preview)+'</div>'
+    +'<div style="display:flex;gap:.5rem;">'
+    +'<button onclick="this.closest(\'[data-policy-modal]\').remove()" style="padding:.7rem 1rem;background:none;border:1.5px solid var(--light);color:var(--mid);border-radius:9px;font-family:\'DM Sans\',sans-serif;font-size:.9rem;font-weight:600;cursor:pointer;">Skip</button>'
+    +sendBtn
+    +'</div>'
+    +'</div>';
+  document.body.appendChild(back);
+  const b=document.getElementById('policy-send-btn');
+  if(b) b.addEventListener('click',function(){ sendPolicyText(phone, first); back.remove(); });
+}
+
 let dupSourceId = null;
 
 function openDuplicateModal(id){
@@ -5530,6 +5673,7 @@ function renderDashConfirmations(){
   const box = document.getElementById('dash-confirmations');
   if(!box) return;
   if(!hasIncomeAccess()){ box.innerHTML=''; return; }
+  if(!confTextEnabled(getMyDriverName())){ box.innerHTML=''; return; }
   const tomorrow = toDateStr(addDays(new Date(),1));
   let due = rides.filter(r=>{
     if(r.date!==tomorrow || r.confirmSent || r.status==='cancelled') return false;
@@ -5571,7 +5715,7 @@ function buildDashUpgradeBanner(){
     +'<div style="font-family:\'Playfair Display\',serif;font-size:1.15rem;font-weight:600;color:#fff;margin-bottom:.2rem;">Your all-in-one driver toolkit</div>'
     +'<div style="font-size:.82rem;color:#bba7e0;margin-bottom:1rem;">Confirmation texts, flight tracking, per-ride earnings, and tax-ready reports.</div>'
     +cat('\ud83d\udcf1','Confirmations',['Confirmation texts — auto-written','Flight tracking link included','Terminal pickup instructions','📷 Driver selfie on AP pickups','One-tap send','Calendar confirmation log'])
-    +cat('\ud83d\udcb0','Per-Ride Earnings',['Gross \u00b7 Cost \u00b7 Net','Gas from MPG & price','Custom maintenance $/mi','Private tip entry','15% fee & payment log'])
+    +cat('\ud83d\udcb0','Per-Ride Earnings',['Gross \u00b7 Cost \u00b7 Net','Gas from MPG & price','Custom maintenance $/mi','Tip entry per ride','15% fee & payment log'])
     +cat('\ud83d\udcca','Income & Tax',['Weekly & monthly dashboard','Net take-home after costs','Receipt scanner','PDF & CSV export','Expense tracking','Log outside & cash rides'])
     +'<div style="display:flex;align-items:center;gap:.85rem;flex-wrap:wrap;margin-top:.75rem;">'
     +'<button onclick="showIncomeOrUpgrade(null)" style="padding:.7rem 1.4rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.9rem;font-weight:700;cursor:pointer;">Upgrade \u2014 $15/mo</button>'
@@ -5592,6 +5736,29 @@ async function markDashFeePaid(dName, dir, cp){
   showToast('\u2713 Fee marked as paid');
 }
 
+function venmoPayUrl(handle, amount, note){
+  const u=String(handle||'').trim().replace(/^@/,'');
+  if(!u) return '';
+  const amt=(Math.round((parseFloat(amount)||0)*100)/100).toFixed(2);
+  const n=encodeURIComponent(note||'NDA 15% finder fee');
+  return 'https://venmo.com/'+encodeURIComponent(u)+'?txn=pay&amount='+amt+'&note='+n;
+}
+function venmoPayBtn(ownerName, amount){
+  const url=venmoPayUrl((typeof driverVenmo!=='undefined'?driverVenmo[ownerName]:''), amount);
+  if(!url) return '';
+  return '<a href="'+url+'" target="_blank" rel="noopener" '
+    +'style="padding:.3rem .7rem;background:#3d95ce;color:#fff;border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;">Pay Venmo</a>';
+}
+async function waiveDashFee(owner, driver){
+  const key=owner+':recv:'+driver;
+  if(!feePayments[key]) feePayments[key]={};
+  feePayments[key].waived=true;
+  feePayments[key].waivedAt=new Date().toISOString();
+  await saveFeePayments();
+  renderDashFees();
+  showToast('\u2713 Fee waived');
+}
+
 function renderDashFees(){
   const box=document.getElementById('dash-fees'); if(!box) return;
   const dName=getMyDriverName(); if(!dName&&!isAdmin()){ box.innerHTML=''; return; }
@@ -5605,11 +5772,11 @@ function renderDashFees(){
     const driver=r.driver||null;
     if(!owner||!driver||owner===driver) return;
     const fee=parseFloat(r.price)*0.15;
-    const paidOwe=!!(feePayments[owner+':recv:'+driver]||{}).paid;
-    const paidRecv=!!(feePayments[owner+':recv:'+driver]||{}).paid;
+    const _fp=feePayments[owner+':recv:'+driver]||{};
+    const settled=!!(_fp.paid||_fp.waived);
     if(dName){
-      if(owner===dName&&!paidRecv){ const k=driver; (owedToMe[k]=owedToMe[k]||{fee:0,n:0}); owedToMe[k].fee+=fee; owedToMe[k].n++; }
-      if(driver===dName&&!paidOwe){ const k=owner; (iOwe[k]=iOwe[k]||{fee:0,n:0}); iOwe[k].fee+=fee; iOwe[k].n++; }
+      if(owner===dName&&!settled){ const k=driver; (owedToMe[k]=owedToMe[k]||{fee:0,n:0}); owedToMe[k].fee+=fee; owedToMe[k].n++; }
+      if(driver===dName&&!settled){ const k=owner; (iOwe[k]=iOwe[k]||{fee:0,n:0}); iOwe[k].fee+=fee; iOwe[k].n++; }
     }
   });
   const hasOwed=Object.keys(owedToMe).length, hasOwe=Object.keys(iOwe).length;
@@ -5624,8 +5791,12 @@ function renderDashFees(){
       html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.6rem .85rem;border-bottom:1px solid var(--light);gap:.6rem;">'
         +'<div><div style="font-size:.86rem;font-weight:600;">'+escHtml(name.split(' ')[0])+'</div>'
         +'<div style="font-size:.72rem;color:var(--mid);">'+v.n+' ride'+(v.n!==1?'s':'')+' · $'+v.fee.toFixed(2)+'</div></div>'
+        +'<div style="display:flex;gap:.35rem;white-space:nowrap;">'
         +'<button onclick="markDashFeePaid(\''+escAttr(dName)+'\',\'recv\',\''+escAttr(name)+'\')" '
-        +'style="padding:.3rem .75rem;background:var(--green);color:#fff;border:none;border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;white-space:nowrap;">Mark Paid</button>'
+        +'style="padding:.3rem .7rem;background:var(--green);color:#fff;border:none;border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Mark Paid</button>'
+        +'<button onclick="waiveDashFee(\''+escAttr(dName)+'\',\''+escAttr(name)+'\')" '
+        +'style="padding:.3rem .7rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Waive</button>'
+        +'</div>'
         +'</div>';
     });
   }
@@ -5635,8 +5806,11 @@ function renderDashFees(){
       html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.6rem .85rem;border-bottom:1px solid var(--light);gap:.6rem;">'
         +'<div><div style="font-size:.86rem;font-weight:600;">'+escHtml(name.split(' ')[0])+'</div>'
         +'<div style="font-size:.72rem;color:var(--mid);">'+v.n+' ride'+(v.n!==1?'s':'')+' · $'+v.fee.toFixed(2)+'</div></div>'
+        +'<div style="display:flex;gap:.35rem;white-space:nowrap;">'
+        +venmoPayBtn(name, v.fee)
         +'<button onclick="markDashFeePaid(\''+escAttr(name)+'\',\'recv\',\''+escAttr(dName)+'\')" '
-        +'style="padding:.3rem .75rem;background:#dc2626;color:#fff;border:none;border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;white-space:nowrap;">Mark Paid</button>'
+        +'style="padding:.3rem .7rem;background:#dc2626;color:#fff;border:none;border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Mark Paid</button>'
+        +'</div>'
         +'</div>';
     });
   }
@@ -6319,6 +6493,7 @@ function renderDriverMembers(){
           
           +(myDriverName===d?'<button type="button" onclick="manageBiometric(\''+d+'\')" style="width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;font-size:.82rem;font-weight:600;color:var(--black);cursor:pointer;margin-bottom:.45rem;">&#x1F510; Biometric &mdash; <span style="font-weight:400;color:var(--mid);font-size:.72rem;">'+((biometricCreds[d]||[]).length?'set up':'not set up')+'</span></button>':'')
           +'<div style="margin-bottom:.5rem;">'+'<div style="font-size:.68rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Payment methods accepted</div>'+(function(){  const accepted=(driverSettings[d]&&driverSettings[d].paymentMethods)||[];  return ['Credit Card','Cash','Check','Venmo','Zelle','CashApp','Apple Pay'].map(function(m){    const on=accepted.includes(m);    const mid=d.replace(/ /g,'_')+'-'+m.replace(/ /g,'_');    return '<button id="pay-'+mid+'" onclick="togglePaymentMethod(\''+d+'\',\''+m+'\')" '      +'style="margin:2px;padding:.25rem .55rem;font-size:.72rem;font-weight:600;border-radius:20px;border:1.5px solid '+(on?'#9c27b0':'var(--light)')+';'      +'background:'+(on?'#9c27b0':'var(--white)')+';color:'+(on?'#fff':'var(--black)')+';cursor:pointer;font-family:\'DM Sans\',sans-serif;">'+m+'</button>';  }).join('');}())+'</div>'
+          +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;margin-bottom:.45rem;"><span style="font-size:.82rem;font-weight:600;color:var(--black);">\uD83D\uDCC5 Schedule Confirmation</span><button type="button" onclick="toggleConfText(\''+d+'\')" style="padding:.25rem .75rem;border-radius:20px;border:none;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;'+((driverSettings[d]&&driverSettings[d].confEnabled===false)?'background:var(--light);color:var(--mid);':'background:#16a34a;color:#fff;')+'">'+((driverSettings[d]&&driverSettings[d].confEnabled===false)?'OFF':'ON')+'</button></div>'
           +'<button type="button" onclick="toggleConfTemplates(\''+dk+'\')" style="width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;font-family:\'DM Sans\',sans-serif;font-size:.82rem;font-weight:600;color:var(--black);cursor:pointer;">✉️ My confirmation templates ▾ <span style="font-weight:400;color:var(--mid);font-size:.72rem;">'+((prof.confirmTemplate||prof.pickupInstructions)?'custom set':'using defaults')+'</span></button>'
           +'<div id="conf-templates-'+dk+'" style="display:none;margin-top:.6rem;">'
           +'<div style="background:#f3eeff;border:1px solid #d9c9f5;border-radius:8px;padding:.6rem .7rem;margin-bottom:.6rem;">'
@@ -6379,7 +6554,7 @@ function renderDriverMembers(){
           +'<div style="display:flex;gap:.3rem;margin-bottom:.4rem;">'
           +'<input type="date" id="avail-hdate-'+dk+'" style="flex:1;padding:.3rem;border:1px solid var(--light);border-radius:5px;font-size:.75rem;"/>'
           +'</div>'
-          +(prof.unavailHours||[]).length?
+          +((prof.unavailHours||[]).length?
             '<div style="font-size:.65rem;color:var(--mid);margin-bottom:3px;">Current time blocks:</div>'
             +(prof.unavailHours||[]).map(blk=>{
               const dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -6390,7 +6565,7 @@ function renderDriverMembers(){
                 +'<button onclick="removeUnavailHour(\''+d+'\',\''+blk.id+'\')" style="padding:1px 5px;background:#dc2626;color:#fff;border:none;border-radius:4px;font-size:.65rem;cursor:pointer;">\u00d7</button>'
               +'</div>';
             }).join('')
-          :''
+          :'')
           +'</div>'
           +'<button onclick="saveDriverProfile(\''+d+'\')" style="width:100%;margin-top:.6rem;padding:.5rem;background:var(--gold);color:#fff;border:none;border-radius:7px;font-family:\'DM Sans\',sans-serif;font-weight:600;font-size:.82rem;cursor:pointer;">Save My Info</button>')
         :''}
@@ -7077,20 +7252,9 @@ function renderIncome(){
   let dName;
   const filterRow = document.getElementById('income-driver-filter-row');
   const filterSel = document.getElementById('income-driver-filter');
-  if(admin && filterRow && filterSel){
-    filterRow.style.display = 'flex';
-    if(!filterSel.dataset.built){
-      const mine = myName ? `<option value="__me__">My income${myName?' ('+myName.split(' ')[0]+')':''}</option>` : '';
-      filterSel.innerHTML = mine + `<option value="">All Drivers</option>` +
-        DRIVERS.map(d=>`<option value="${d}">${d.split(' ')[0]}</option>`).join('');
-      filterSel.value = myName ? '__me__' : '';
-      filterSel.dataset.built = '1';
-    }
-    const v = filterSel.value;
-    dName = (v==='__me__') ? myName : (v||null);
-  } else {
-    dName = admin ? null : myName; // non-admin: always own
-  }
+  // Everyone — including admins — only ever sees their OWN income. No driver picker.
+  if(filterRow) filterRow.style.display = 'none';
+  dName = myName;
   // personalView = showing one specific person's full P&L (own outside rides, expenses, vehicle cost).
   // True for any non-admin, and for an admin viewing their OWN income.
   const personalView = (!admin && !!myName) || (admin && !!dName && dName===myName);
@@ -8118,6 +8282,20 @@ function sendClientPhone(id){
 // Payment methods toggle for driver profiles
 const PAYMENT_METHODS=['Credit Card','Cash','Check','Venmo','Zelle','CashApp','Apple Pay'];
 
+function confTextEnabled(driverName){
+  const s = driverSettings[driverName];
+  return !s || s.confEnabled !== false;   // default ON
+}
+async function toggleConfText(driverName){
+  if(!driverSettings[driverName]) driverSettings[driverName]={};
+  const cur = driverSettings[driverName].confEnabled !== false;
+  driverSettings[driverName].confEnabled = !cur;
+  await saveDriverSettings();
+  renderDriverMembers();
+  if(typeof renderDashConfirmations==='function') renderDashConfirmations();
+  if(typeof renderConfirmations==='function' && document.getElementById('my-confirm-panel')){ try{ renderConfirmations(); }catch(e){} }
+  showToast('Schedule Confirmation '+(driverSettings[driverName].confEnabled?'turned on':'turned off'));
+}
 function togglePaymentMethod(driverName, method){
   if(!driverSettings[driverName]) driverSettings[driverName]={};
   if(!Array.isArray(driverSettings[driverName].paymentMethods))
@@ -8931,6 +9109,7 @@ function showAuthScreen(){
 // Admin can grant/revoke subscriptions from the access control panel
 
 function enterApp(){
+  _notifFirstLoad = true; // re-seed on login so existing notifications don't all re-pop
   document.getElementById('paywall-screen').style.display='none';
   document.getElementById('auth-screen').style.display='none';
   document.getElementById('app').style.display='flex';
@@ -9388,6 +9567,7 @@ function showPage(id, el){
   if(id==='account') renderAccountPage();
   if(id==='income'){ renderIncome(); renderExpensesView(); }
   if(id==='costcalc') renderCostCalc();
+  if(id==='traffic') initTrafficMap();
   document.querySelectorAll('#quicknav .qn').forEach(b=>b.classList.toggle('active', b.dataset.qn===id));
 }
 
@@ -9653,6 +9833,7 @@ function openReceiptUpload(){
       </div>
       <input type="file" id="receipt-camera-input" accept="image/*" capture="environment" style="display:none;" onchange="previewReceipt(this)" />
       <input type="file" id="receipt-file-input" accept="image/*" style="display:none;" onchange="previewReceipt(this)" />
+      <div id="receipt-scan-status" style="display:none;font-size:.8rem;color:#9c27b0;margin-bottom:.75rem;text-align:center;line-height:1.4;"></div>
       <div class="form-group">
         <label>Category</label>
         <select id="receipt-category" style="width:100%;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;">
@@ -9694,8 +9875,97 @@ function previewReceipt(input){
     receiptImageData = e.target.result;
     const area = document.getElementById('receipt-img-area');
     if(area) area.innerHTML = `<img src="${receiptImageData}" style="max-width:100%;max-height:200px;border-radius:8px;object-fit:contain;" />`;
+    scanReceipt(receiptImageData);
   };
   reader.readAsDataURL(file);
+}
+
+// ── RECEIPT OCR (client-side, lazy-loads Tesseract.js from CDN) ──
+let _tesseractLoading = null;
+function ensureTesseract(){
+  if(window.Tesseract) return Promise.resolve();
+  if(_tesseractLoading) return _tesseractLoading;
+  _tesseractLoading = new Promise(function(resolve, reject){
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload=function(){ resolve(); };
+    s.onerror=function(){ _tesseractLoading=null; reject(new Error('Tesseract load failed')); };
+    document.head.appendChild(s);
+  });
+  return _tesseractLoading;
+}
+async function scanReceipt(dataUrl){
+  const status=document.getElementById('receipt-scan-status');
+  const setStatus=function(t,show){ if(status){ status.style.display=show?'block':'none'; status.textContent=t||''; } };
+  if(!dataUrl){ return; }
+  setStatus('\uD83D\uDD0D Scanning receipt\u2026', true);
+  try{
+    await ensureTesseract();
+    setStatus('\uD83D\uDD0D Reading the text\u2026 this can take a few seconds', true);
+    const res=await Tesseract.recognize(dataUrl, 'eng');
+    const text=(res && res.data && res.data.text) || '';
+    const parsed=parseReceiptText(text);
+    const filled=[];
+    if(parsed.amount){ const a=document.getElementById('receipt-amount'); if(a && !a.value){ a.value=parsed.amount.toFixed(2); filled.push('amount'); } }
+    if(parsed.date){ const d=document.getElementById('receipt-date'); if(d){ d.value=parsed.date; filled.push('date'); } }
+    if(parsed.category){ const c=document.getElementById('receipt-category'); if(c){ c.value=parsed.category; filled.push('category'); } }
+    if(parsed.merchant){ const n=document.getElementById('receipt-notes'); if(n && !n.value){ n.value=parsed.merchant; } }
+    setStatus(filled.length? ('\u2713 Auto-filled '+filled.join(', ')+' \u2014 please double-check before saving') : 'Couldn\u2019t read it clearly \u2014 please enter the details manually', true);
+    setTimeout(function(){ setStatus('', false); }, 7000);
+  }catch(e){
+    setStatus('Auto-scan unavailable \u2014 please enter the details manually', true);
+    setTimeout(function(){ setStatus('', false); }, 5000);
+  }
+}
+function parseReceiptText(text){
+  const out={amount:null,date:null,category:null,merchant:null};
+  if(!text) return out;
+  const rawLines=text.split(/\r?\n/).map(function(l){return l.trim();}).filter(Boolean);
+  const lower=text.toLowerCase();
+  const moneyRe=/(\d{1,5}(?:[.,]\d{2}))/;
+  const moneyAllRe=/(\d{1,5}(?:[.,]\d{2}))/g;
+  let amt=null;
+  for(let i=0;i<rawLines.length;i++){
+    const ll=rawLines[i].toLowerCase();
+    if(/total|amount due|balance due|grand total/.test(ll) && !/subtotal|sub total/.test(ll)){
+      const m=rawLines[i].match(moneyRe);
+      if(m){ const v=parseFloat(m[1].replace(',','.')); if(!isNaN(v)) amt=v; }
+    }
+  }
+  if(amt==null){
+    const all=(text.match(moneyAllRe)||[]).map(function(s){return parseFloat(s.replace(',','.'));}).filter(function(v){return !isNaN(v)&&v<100000;});
+    if(all.length) amt=Math.max.apply(null, all);
+  }
+  out.amount=amt;
+  out.date=parseReceiptDate(text);
+  if(/\b(fuel|gas|gasoline|unleaded|shell|exxon|chevron|\bbp\b|quiktrip|quik trip|\bqt\b|racetrac|race trac|marathon|mobil|citgo|sunoco|texaco|valero|kwik)\b/.test(lower)) out.category='Fuel';
+  else if(/\b(toll|peach ?pass|sunpass|ez ?pass|express lane)\b/.test(lower)) out.category='Tolls';
+  else if(/\b(parking|garage|valet|park deck)\b/.test(lower)) out.category='Parking';
+  else if(/\b(oil|tire|tires|auto|repair|maintenance|jiffy|lube|brake|mechanic|service center|car wash|wash)\b/.test(lower)) out.category='Maintenance';
+  for(let i=0;i<Math.min(4,rawLines.length);i++){
+    const line=rawLines[i];
+    if(line.length>=3 && /[A-Za-z]/.test(line) && !/^(receipt|invoice|order|tel|phone)\b/i.test(line) && !/^\d+$/.test(line)){
+      out.merchant=line.replace(/\s{2,}/g,' ').slice(0,40);
+      break;
+    }
+  }
+  return out;
+}
+function parseReceiptDate(text){
+  let m=text.match(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/);
+  if(m){
+    let mo=parseInt(m[1]),da=parseInt(m[2]),yr=parseInt(m[3]);
+    if(yr<100) yr+=2000;
+    if(mo>=1&&mo<=12&&da>=1&&da<=31&&yr>=2000&&yr<=2100){
+      return yr+'-'+String(mo).padStart(2,'0')+'-'+String(da).padStart(2,'0');
+    }
+  }
+  m=text.match(/\b(20\d{2})[\/\-.](\d{1,2})[\/\-.](\d{1,2})\b/);
+  if(m){ const yr=+m[1],mo=+m[2],da=+m[3]; if(mo>=1&&mo<=12&&da>=1&&da<=31) return yr+'-'+String(mo).padStart(2,'0')+'-'+String(da).padStart(2,'0'); }
+  const months={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  m=text.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2}),?\s+(20\d{2})\b/i);
+  if(m){ const mo=months[m[1].toLowerCase().slice(0,3)],da=+m[2],yr=+m[3]; if(mo) return yr+'-'+String(mo).padStart(2,'0')+'-'+String(da).padStart(2,'0'); }
+  return null;
 }
 
 async function saveReceipt(){
@@ -10109,6 +10379,26 @@ async function exportReceiptsPDF(){
 const VAPID_KEY = 'BD1Lw0sVqFArxzBpZevctK7iIGjCLVg7ykuObVE3qE1QAmOfZAY4D5j2nA9AVzXL7ssedRBVnSZTuwZ92DwY-KU';
 
 // Register service worker
+function initTrafficMap(){
+  const el=document.getElementById('traffic-map'); if(!el) return;
+  const fb=document.getElementById('traffic-fallback');
+  function build(){
+    if(!(window.google && google.maps && google.maps.Map)) return false;
+    try{
+      const atlanta={lat:33.7490,lng:-84.3880};
+      const map=new google.maps.Map(el,{center:atlanta,zoom:11,mapTypeControl:false,streetViewControl:false,fullscreenControl:true,gestureHandling:'greedy'});
+      new google.maps.TrafficLayer().setMap(map);
+      window._trafficMap=map;
+      if(fb) fb.style.display='none';
+      return true;
+    }catch(e){ return false; }
+  }
+  if(build()) return;
+  if(typeof loadGoogleMapsAPI==='function') loadGoogleMapsAPI();
+  let tries=0;
+  const iv=setInterval(function(){ tries++; if(build()||tries>50){ clearInterval(iv); if(tries>50 && fb){ fb.style.display='block'; fb.textContent='Live map could not load \u2014 use the links below for live traffic.'; } } }, 200);
+}
+
 function showInstallHelp(){
   const m=document.getElementById('install-help-modal');
   if(m) m.style.display='flex';
@@ -10122,6 +10412,18 @@ async function registerSW(){
   if(!('serviceWorker' in navigator)) return;
   try {
     const reg = await navigator.serviceWorker.register('sw.js');
+    // When a notification is tapped, the service worker tells us — open the bell panel
+    // so the (correctly-routing) in-app notification list takes over.
+    navigator.serviceWorker.addEventListener('message', function(ev){
+      if(ev && ev.data && ev.data.type==='notification-click'){
+        try{
+          if(typeof currentUser!=='undefined' && currentUser){
+            const panel=document.getElementById('notif-panel');
+            if(panel){ renderNotifPanel(); panel.style.display='block'; }
+          }
+        }catch(e){}
+      }
+    });
     return reg;
   } catch(e) {
     console.warn('SW registration failed:', e);
@@ -10158,7 +10460,8 @@ function maybePopNotifications(data){
     const key = dName+'|'+n.ts;
     if(_notifShown.has(key)) return;
     _notifShown.add(key);
-    if(!n.read) fireLocalNotification('Northwest Drivers', n.msg || 'New update');
+    const _myName = currentUser?.name||'';
+    if(!n.read && n.osNotif !== false && (!n.createdBy || n.createdBy !== _myName)) fireLocalNotification('Northwest Drivers', n.msg || 'New update');
   });
 }
 function fireLocalNotification(title, body){
