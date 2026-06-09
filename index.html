@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090018">
+<meta name="version" content="202606090023">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -364,6 +364,7 @@ input,select,textarea{font-size:16px;}
   <div onclick="nav('chat')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">💬 Chat <span id="chat-badge" style="display:none;margin-left:4px;background:#dc2626;color:#fff;font-size:.6rem;font-weight:700;border-radius:50%;width:16px;height:16px;line-height:16px;text-align:center;display:inline-block;">●</span></div>
   <div onclick="nav('documents')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">📁 Documents</div>
   <div id="menu-myrides" onclick="nav('myrides')" style="display:none;padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;font-weight:500;">🗓 My Rides</div>
+  <div onclick="closeMenu(); openHeartedRides();" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;font-weight:500;">❤️ Hearted Rides</div>
   <div id="menu-account" onclick="nav('account')" style="display:none;padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;font-weight:500;">👤 My Account</div>
   <div onclick="closeMenu(); promptInstall();" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">📲 Install app</div>
   <div onclick="nav('traffic')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🚦 Traffic</div>
@@ -1718,7 +1719,7 @@ async function initApp() {
     await loadPasswords();
     await loadSubscriptions();
     await loadImportedClients();
-    await loadClientRequests();
+    await loadClientRequests(); await loadClientReqDriver();
   await loadCautiousList();
   await loadGlobalSettings();
     await loadExpenses();
@@ -3270,7 +3271,7 @@ function renderMyCal(){
       return `<div style="display:flex;align-items:center;gap:1rem;padding:.75rem 1rem;border-radius:10px;margin-bottom:.5rem;background:${c}66;border:2px solid ${c};cursor:pointer;flex-wrap:wrap;" onclick="openRideModal(${r.id})">
         <div style="width:8px;min-height:36px;border-radius:3px;background:${c};flex-shrink:0;align-self:stretch;"></div>
         <div class="ride-date" style="color:${tc};">${fmtDateShort(r.date)}<br>${r.time||'—'}</div>
-        <div class="ride-info"><div class="ride-client" style="color:${tc};">${r.client}${r.confirmSent?' <span style="color:var(--green);font-weight:900;">✓</span>':''}</div><div class="ride-detail" style="color:${tc};opacity:.78;">${r.type} · ${r.vehicle} · ${driverTag}</div></div>
+        <div class="ride-info"><div class="ride-client" style="color:${tc};">${r.client}${r.confirmSent?' <span style="color:var(--green);font-weight:900;">✓</span>':''}</div><div class="ride-detail" style="color:${tc};opacity:.78;">${r.type} · ${r.vehicle} · ${driverTag}</div>${rideReqDriverTag(r)}</div>
         <div class="ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}</div>
       </div>`;
     };
@@ -3948,7 +3949,7 @@ function renderRideView(r){
   const address = r.type==='AP RUN' ? r.home :
                   r.type==='AP PICK UP' ? r.pickup : r.home;
 
-  document.getElementById('rm-detail-grid').innerHTML=`
+  document.getElementById('rm-detail-grid').innerHTML=`${rideReqDriverTag(r)}
     ${r.status==='cancelled'?`<div style="grid-column:1/-1;background:#fdecea;border:1.5px solid #e6a8a0;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#b03a2e;font-weight:700;font-size:.9rem;">🚫 CANCELLED${r.cancelledBy?' · by '+escHtml(String(r.cancelledBy)):''} — tap “Reactivate Ride” below to restore.</div>`:''}
     ${r.status==='paid'?`<div style="grid-column:1/-1;background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#16a34a;font-weight:700;font-size:.9rem;">✅ CLIENT PAID${r.paidBy?' · marked by '+escHtml(String(r.paidBy)):''}</div>`:''}
     <div style="grid-column:1/-1;background:${color}66;border-left:5px solid ${color};border-radius:8px;padding:.85rem 1rem;margin-bottom:.5rem;">
@@ -4384,6 +4385,12 @@ function closeRideModal(){document.getElementById('ride-modal').classList.remove
 function myInterestKey(){ return getMyDriverName() || currentUser?.name || null; }
 function nameInitials(full){ return (full||'').trim().split(/\s+/).map(w=>w[0]||'').join('').slice(0,2).toUpperCase(); }
 function interestCount(r){ return r && r.interest ? Object.keys(r.interest).length : 0; }
+function _heartOwner(){ return (currentUser&&PROXY_MAP[currentUser.name])||getMyDriverName()||(currentUser&&currentUser.name)||''; }
+function myHeartedRides(){ var o=_heartOwner(); return (rides||[]).filter(function(r){ return r&&r.interest&&Object.keys(r.interest).some(function(k){ return (USER_DRIVER_MAP[k]||PROXY_MAP[k]||k)===o; }); }); }
+function _myHeartTs(r){ var o=_heartOwner(),ts=0; Object.keys(r.interest||{}).forEach(function(k){ if((USER_DRIVER_MAP[k]||PROXY_MAP[k]||k)===o){ var t=r.interest[k]; if(typeof t==='number'&&(!ts||t<ts)) ts=t; } }); return ts; }
+function closeHeartedRides(){ var o=document.getElementById('hearted-overlay'); if(o) o.remove(); }
+function renderHeartedList(q){ var box=document.getElementById('hearted-list'); if(!box) return; q=(q||'').toLowerCase().trim(); var all=myHeartedRides(); var list=all.slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); }); if(q){ list=list.filter(function(r){ var hay=((r.date||'')+' '+fmtDateShort(r.date)+' '+(r.client||'')+' '+(r.type||'')+' '+(r.time||'')).toLowerCase(); return hay.indexOf(q)>=0; }); } var cnt=document.getElementById('hearted-count'); if(cnt) cnt.textContent=list.length+' ride'+(list.length!==1?'s':''); if(!list.length){ box.innerHTML='<div style="text-align:center;padding:2rem;color:var(--mid);font-size:.9rem;">'+(all.length?'No hearted rides match that search.':'You have not hearted any rides yet. Tap the \uD83E\uDD0D on a ride to add it here.')+'</div>'; return; } box.innerHTML=list.map(function(r){ var c=rideColor(r); var dt=r.driver?r.driver.split(' ')[0]:'Unassigned'; var ts=_myHeartTs(r); var when=ts?('<span style="font-size:.66rem;color:var(--mid);">\u2764 '+fmtTs(ts)+'</span>'):''; return '<div onclick="closeHeartedRides();openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.8rem;padding:.7rem .85rem;border-radius:10px;margin-bottom:.45rem;background:'+c+'22;border:1.5px solid '+c+';cursor:pointer;">'+'<div style="width:7px;align-self:stretch;border-radius:3px;background:'+c+';flex-shrink:0;"></div>'+'<div style="text-align:center;min-width:54px;font-size:.72rem;font-weight:700;color:var(--black);line-height:1.2;">'+fmtDateShort(r.date)+'<br><span style="font-weight:400;color:var(--mid);">'+(r.time||'\u2014')+'</span></div>'+'<div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:.9rem;color:var(--black);">'+escHtml(r.client||'\u2014')+'</div><div style="font-size:.74rem;color:var(--mid);">'+escHtml(r.type||'')+' \u00b7 '+escHtml(dt)+'</div>'+when+'</div>'+'<div style="font-weight:700;color:var(--green);font-size:.9rem;">$'+(r.price||0)+'</div></div>'; }).join(''); }
+function openHeartedRides(){ closeHeartedRides(); var back=document.createElement('div'); back.id='hearted-overlay'; back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13000;display:flex;align-items:flex-start;justify-content:center;padding:2.5rem 1rem 1rem;overflow:auto;'; back.onclick=function(e){ if(e.target===back) closeHeartedRides(); }; back.innerHTML='<div style="background:var(--white);border-radius:16px;max-width:560px;width:100%;padding:1.1rem 1.1rem 1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.4);max-height:90vh;display:flex;flex-direction:column;box-sizing:border-box;">'+'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.4rem;">'+'<div style="font-size:1.05rem;font-weight:700;color:var(--black);">\u2764\uFE0F Rides you&#39;re interested in</div>'+'<button onclick="closeHeartedRides()" style="background:none;border:none;font-size:1.5rem;line-height:1;color:var(--mid);cursor:pointer;padding:0 .25rem;">&times;</button>'+'</div>'+'<div id="hearted-count" style="font-size:.74rem;color:var(--mid);margin-bottom:.6rem;"></div>'+'<input id="hearted-search" oninput="renderHeartedList(this.value)" placeholder="Search by date or client\u2026" style="width:100%;padding:.6rem .8rem;border:1.5px solid var(--light);border-radius:9px;font-family:inherit;font-size:.9rem;margin-bottom:.75rem;box-sizing:border-box;" />'+'<div id="hearted-list" style="overflow:auto;flex:1;"></div>'+'</div>'; document.body.appendChild(back); renderHeartedList(''); }
 
 function renderInterest(r){
   const el = document.getElementById('rm-interest');
@@ -4631,8 +4638,16 @@ function buildFeeBreakdown(r){
 // ═══════════════════════════════════════════
 // { requestId: { clientName, fromDriver, toDriver, reason, status:'pending'|'approved'|'denied', ts, decidedBy } }
 let clientRequests = {};
+let clientReqDriver = {};
 async function loadClientRequests(){ const d=await storageGet('kat:clientRequests'); if(d) clientRequests=d; }
 async function saveClientRequests(){ await storageSet('kat:clientRequests', clientRequests); }
+async function loadClientReqDriver(){ const d=await storageGet('kat:clientReqDriver'); if(d) clientReqDriver=d; }
+async function saveClientReqDriver(){ await storageSet('kat:clientReqDriver', clientReqDriver); }
+function _reqOwner(){ return (currentUser&&PROXY_MAP[currentUser.name])||getMyDriverName()||''; }
+function _reqKey(name){ return (_reqOwner()+'||'+(name||'').trim().toLowerCase()).replace(/[.#$\[\]\/]/g,'_'); }
+function getClientReqDriver(name){ return clientReqDriver[_reqKey(name)]||''; }
+async function setClientReqDriver(name,drv){ const k=_reqKey(name); if(drv) clientReqDriver[k]=drv; else delete clientReqDriver[k]; await saveClientReqDriver(); renderClients(); }
+function rideReqDriverTag(r){ if(!r||!r.client) return ''; var rOwner=USER_DRIVER_MAP[r.createdBy]||PROXY_MAP[r.createdBy]||r.createdBy; if(rOwner!==_reqOwner()) return ''; var d=getClientReqDriver(r.client); if(!d) return ''; return '<div style="margin-top:3px;"><span style="display:inline-block;font-size:.68rem;background:#fff;color:#7c3aed;border:1px solid #c4b5fd;border-radius:8px;padding:1px 7px;font-weight:700;">\u2605 Requested: '+escHtml(d)+'</span></div>'; }
 
 // Show/hide transfer button in client modal based on context
 function updateTransferBtn(client){
@@ -8668,6 +8683,7 @@ async function deleteSelectedClients(){
 
 // ── Restored missing functions ──────────────────────────────────────
 
+function openClientModal(){ /* client detail view not built; card click is a no-op */ }
 function closeClientModal(){
   const m=document.getElementById('client-modal');
   if(m) m.style.display='none';
@@ -10393,7 +10409,7 @@ function renderClients(){
   const admin    = isAdmin();
   const myDriver = getMyDriverName();
   document.getElementById('client-page-title').textContent = admin?'Client Directory':'My Clients';
-  document.getElementById('client-page-sub').textContent   = admin?'All drivers — search before booking to check for conflicts':'<strong style="font-size:1rem;">Your personal client list — private to you</strong>';
+  document.getElementById('client-page-sub').textContent   = admin?'Your clients — search before booking to check for conflicts':'<strong style="font-size:1rem;">Your personal client list — private to you</strong>';
   // Client lists are private — everyone (including admins) sees only their own.
   // Morgan is a proxy for Kat: her viewAs resolves to Kathleen Herringdine.
   const dfEl = document.getElementById('client-driver-filter');
@@ -10409,10 +10425,11 @@ function renderClients(){
   const selMonth = clientMonthFilter;
   const inMonth  = c => c.lastRide && c.lastRide.startsWith(selMonth);
   const monthCount = baseClients.filter(inMonth).length;
+  const ridesThisMonth = baseClients.reduce((s,c)=>s+c.rides.filter(r=>r.date&&r.date.startsWith(selMonth)).length,0);
   const statCards = admin
-    ?[{label:'Total Clients',val:Object.keys(allDB).length,color:'var(--gold)',filter:'all'},
-      {label:'Multiple Drivers',val:multiCount,color:'#dc2626',filter:'multi'},
-      {label:'This Month',val:monthCount,color:'var(--green)',filter:'month'}]
+    ?[{label:'Total Clients',val:Object.keys(db).length,color:'var(--gold)',filter:'all'},
+      
+      {label:'Rides This Month',val:ridesThisMonth,color:'var(--green)',filter:'month'}]
     :[{label:'My Clients',val:baseClients.length,color:'var(--gold)',filter:'all'},
       {label:'Active This Month',val:monthCount,color:'var(--green)',filter:'month'},
       {label:'Total Rides',val:baseClients.reduce((s,c)=>s+c.rides.length,0),color:'#1e88e5'}];
@@ -10446,7 +10463,7 @@ function renderClients(){
       <div style="white-space:nowrap;">Total billed</div>
     </div>`;
   const _clt=document.getElementById('client-list'); if(_clt) _clt.innerHTML=filterBar+headerRow+clients.map(function(c){
-    var multi=admin&&c.drivers.length>1;
+    var multi=false;
     var bg=c.drivers[0]?driverColor(c.drivers[0]):'#888888';
     var ini=c.name.split(' ').map(function(n){return n[0]||'';}).join('').slice(0,2).toUpperCase();
     var badges='';
@@ -10466,6 +10483,7 @@ function renderClients(){
     var cbg=chk?'var(--gold-pale)':multi?'#fff5f5':'var(--white)';
     var cbr=chk?'var(--gold)':multi?'#fca5a5':'var(--light)';
     var safeName=escAttr(c.name);
+    var reqD=viewAs?getClientReqDriver(c.name):'';
     var clickFn=sel?'toggleClientSelect(&quot;'+c.name.replace(/"/g,'&quot;')+'&quot;)':'openClientModal(&quot;'+c.name.replace(/"/g,'&quot;')+'&quot;,event)';
     var checkbox=sel
       ?('<input type="checkbox"'+(chk?' checked':'')
@@ -10479,7 +10497,7 @@ function renderClients(){
       +'<div style="width:36px;height:36px;border-radius:50%;background:'+bg+';display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:.82rem;flex-shrink:0;">'+ini+'</div>'
       +'<div style="flex:1;min-width:0;">'
       +'<div style="font-weight:600;font-size:.92rem;color:var(--black);">'+escHtml(c.name)+(multi?' <span style="font-size:.68rem;color:#dc2626;font-weight:700;">⚠ MULTIPLE DRIVERS</span>':'')+' '+imp+'</div>'
-      +'<div style="font-size:.78rem;color:var(--mid);">'+(c.phone||'No phone')+' · '+c.rides.length+' ride'+(c.rides.length!==1?'s':'')+'</div>'
+      +'<div style="font-size:.78rem;color:var(--mid);">'+(c.phone||'No phone')+' · '+c.rides.length+' ride'+(c.rides.length!==1?'s':'')+'</div>'+(viewAs?('<div onclick="event.stopPropagation()" style="margin-top:5px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;"><span style="font-size:.7rem;color:var(--mid);">Requested driver:</span><select data-cn="'+safeName+'" onchange="setClientReqDriver(this.dataset.cn,this.value)" style="font-size:.72rem;padding:1px 5px;border:1px solid '+(reqD?'var(--gold)':'var(--light)')+';border-radius:5px;font-family:inherit;color:'+(reqD?'var(--gold)':'var(--mid)')+';font-weight:'+(reqD?'600':'400')+';background:#fff;cursor:pointer;"><option value="">— none —</option>'+DRIVERS.map(function(d){return '<option value="'+escAttr(d)+'"'+(reqD===d?' selected':'')+'>'+escHtml(d)+'</option>';}).join('')+'</select></div>'):'')
       +(viewAs==='Kathleen Herringdine'?(function(){
           var mCnt=c.rides.filter(function(r){return r.createdBy==='Morgan';}).length;
           var kCnt=c.rides.length-mCnt;
