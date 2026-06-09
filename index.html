@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090003">
+<meta name="version" content="202606090004">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -11552,7 +11552,15 @@ function setupPushUI(){
 // notification when their realtime feed gets something new (works while the app is
 // open or running in the background). No server or Firebase Cloud Messaging needed.
 let _notifFirstLoad = true;
-const _notifShown = new Set();
+const _notifShown = (function(){
+  // Persist shown keys in sessionStorage so page reloads don't re-fire
+  let _s;
+  try{ _s=new Set(JSON.parse(sessionStorage.getItem('nda_notif_shown')||'[]')); }catch(e){ _s=new Set(); }
+  return {
+    has:function(k){ return _s.has(k); },
+    add:function(k){ _s.add(k); try{sessionStorage.setItem('nda_notif_shown',JSON.stringify([..._s].slice(-200)));}catch(e){} },
+  };
+})();
 function maybePopNotifications(data){
   const dName = getMyDriverName();
   const mine = dName ? (data[dName]||[]) : [];
@@ -11574,8 +11582,9 @@ function maybePopNotifications(data){
 }
 function fireLocalNotification(title, body){
   if(!('Notification' in window) || Notification.permission!=='granted') return;
-  if(typeof document!=='undefined' && document.visibilityState==='hidden') return;
-  const opts = { body: body||'', icon:'https://chasesweat.github.io/nda-app/icon-192.png', badge:'https://chasesweat.github.io/nda-app/icon-192.png', tag:'nda-'+Date.now() };
+  // Only fire OS notification when app is backgrounded — in-app users see the bell
+  if(typeof document!=='undefined' && document.visibilityState==='visible') return;
+  const opts = { body: body||'', icon:'https://chasesweat.github.io/nda-app/icon-192.png', badge:'https://chasesweat.github.io/nda-app/icon-192.png', tag:'nda-app', renotify:true };
   try{
     if(navigator.serviceWorker && navigator.serviceWorker.ready){
       navigator.serviceWorker.ready.then(reg=> reg.showNotification(title, opts))
