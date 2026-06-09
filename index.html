@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090004">
+<meta name="version" content="202606090006">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -11577,14 +11577,26 @@ function maybePopNotifications(data){
     const _myName = currentUser?.name||'';
     const _isRecent = n.ts && (Date.now() - n.ts) < 120000;
     const _notSelf = n.createdBy && n.createdBy !== _myName;
-    if(!n.read && n.osNotif !== false && _isRecent && _notSelf) fireLocalNotification('Northwest Drivers', n.msg || 'New update');
+    if(!n.read && n.osNotif !== false && _isRecent && _notSelf) fireLocalNotification('Northwest Drivers', n.msg || 'New update', n);
   });
 }
-function fireLocalNotification(title, body){
+function fireLocalNotification(title, body, notifData){
   if(!('Notification' in window) || Notification.permission!=='granted') return;
   // Only fire OS notification when app is backgrounded — in-app users see the bell
   if(typeof document!=='undefined' && document.visibilityState==='visible') return;
-  const opts = { body: body||'', icon:'https://chasesweat.github.io/nda-app/icon-192.png', badge:'https://chasesweat.github.io/nda-app/icon-192.png', tag:'nda-app', renotify:true };
+  // Store nav destination so tapping the notification deep-links to the right place
+  if(notifData){
+    try{ sessionStorage.setItem('nda_notif_nav', JSON.stringify({
+      type: notifData.type||'',
+      rideId: notifData.rideId||null,
+      channel: notifData.channel||null,
+      msg: notifData.msg||'',
+      ts: Date.now()
+    })); }catch(e){}
+  }
+  // Unique tag per message so each unread notification stays on the lock screen
+  const _tag='nda-'+((title+body).split('').reduce(function(a,c){return(a<<5)-a+c.charCodeAt(0)|0;},0)>>>0);
+  const opts = { body: body||'', icon:'https://chasesweat.github.io/nda-app/icon-192.png', badge:'https://chasesweat.github.io/nda-app/icon-192.png', tag:_tag, data:{type:notifData&&notifData.type,rideId:notifData&&notifData.rideId,channel:notifData&&notifData.channel} };
   try{
     if(navigator.serviceWorker && navigator.serviceWorker.ready){
       navigator.serviceWorker.ready.then(reg=> reg.showNotification(title, opts))
@@ -11592,6 +11604,34 @@ function fireLocalNotification(title, body){
     } else { new Notification(title, opts); }
   }catch(e){ /* ignore */ }
 }
+// Deep-link from notification tap
+function checkPendingNotifNav(){
+  try{
+    var _nav=JSON.parse(sessionStorage.getItem('nda_notif_nav')||'null');
+    if(!_nav) return;
+    if((Date.now()-_nav.ts)>60000) { sessionStorage.removeItem('nda_notif_nav'); return; } // stale after 60s
+    sessionStorage.removeItem('nda_notif_nav');
+    if(_nav.rideId){
+      nav('calendar');
+      setTimeout(function(){ try{ openRideModal(_nav.rideId); }catch(e){} }, 300);
+    } else if(_nav.channel){
+      nav('chat');
+      setTimeout(function(){ try{ switchChatChannel(_nav.channel); }catch(e){} }, 300);
+    } else if(_nav.type&&/transfer|client|merge/.test(_nav.type)){
+      nav('clients');
+    } else if(_nav.type&&/sos/.test(_nav.type)){
+      try{ showSOSPanel&&showSOSPanel(); }catch(e){ nav('dashboard'); }
+    } else if(_nav.type&&/combine/.test(_nav.type)){
+      nav('income');
+    } else {
+      nav('calendar');
+    }
+  }catch(e){}
+}
+// Run on app focus (user tapped a notification)
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState==='visible' && currentUser) checkPendingNotifNav();
+});
 function getDeviceKey(){
   let k = localStorage.getItem('nda-device-key');
   if(!k){ k = 'd' + Math.random().toString(36).slice(2,12); localStorage.setItem('nda-device-key', k); }
