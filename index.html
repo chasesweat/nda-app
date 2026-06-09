@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606089980">
+<meta name="version" content="202606089989">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -19,7 +19,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="application-name" content="NDA">
 <!-- End PWA -->
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet"></noscript>
 <style>
 :root {
   --black:#1a0d2e; --white:#fdfcff; --gold:#7c3aed; --gold-pale:#f3eeff;
@@ -963,7 +964,7 @@ input,select,textarea{font-size:16px;}
     <div style="background:linear-gradient(135deg,#1a0d2e 0%,#3d1a5c 100%);border-radius:12px;padding:1.25rem;margin-bottom:1rem;text-align:left;">
       <div style="font-size:.62rem;letter-spacing:2px;text-transform:uppercase;color:#9c7bbf;font-weight:600;margin-bottom:.4rem;">NWDA Driver Pro</div>
       <h2 id="upgrade-modal-title" style="color:#fff;margin:0 0 .35rem;font-size:1.25rem;font-weight:700;">Your all-in-one driver toolkit</h2>
-      <div style="font-size:.82rem;color:#c4b0e0;">Auto-written confirmation texts, live flight tracking, full income tracking, and year-end tax reports — built for NWDA drivers.</div>
+      <div style="font-size:.82rem;color:#c4b0e0;">Auto-written confirmation texts, live flight tracking, full income tracking, and year-end tax reports — built for NWDA drivers. SOS emergency alerts are free for everyone.</div>
     </div>
     <!-- Feature categories -->
     <div style="text-align:left;margin-bottom:1.1rem;display:grid;gap:.85rem;">
@@ -996,6 +997,13 @@ input,select,textarea{font-size:16px;}
         <div style="font-size:.64rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#9c27b0;margin-bottom:.4rem;">🗂 Client Tools</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:.2rem .6rem;font-size:.79rem;color:var(--black);line-height:1.6;">
           <div>✓ Payment method &amp; notes</div><div>✓ Client of other driver alerts</div>
+          <div>✓ Multiple saved addresses per client</div><div>✓ Address picker on booking</div>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:.64rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#dc2626;margin-bottom:.4rem;">🚨 Live Traffic</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.2rem .6rem;font-size:.79rem;color:var(--black);line-height:1.6;">
+          <div>✓ Live traffic overlay</div><div>✓ GDOT 511 &amp; Waze links</div>
         </div>
       </div>
     </div>
@@ -1236,7 +1244,7 @@ input,select,textarea{font-size:16px;}
       <button onclick="closeQuickAddModal()" style="background:none;border:none;font-size:1.25rem;cursor:pointer;color:var(--mid);">✕</button>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-      <div class="form-group"><label>Client Name</label><input type="text" id="qa-client" placeholder="Full name" list="qa-client-list" autocomplete="off" oninput="checkQaClientOwnership();maybeAutofillClient('qa')" /><datalist id="qa-client-list"></datalist></div>
+      <div class="form-group"><label>Client Name</label><input type="text" id="qa-client" placeholder="Full name" list="qa-client-list" autocomplete="off" oninput="checkQaClientOwnership();maybeAutofillClient('qa');if(!this.value){[...document.querySelectorAll('[id^=_addr-dropdown-]')].forEach(e=>e.remove());}" /><datalist id="qa-client-list"></datalist></div>
       <div class="form-group"><label>Phone</label><input type="text" id="qa-phone" placeholder="404-555-0100" onblur="checkCautiousForForm('qa')" /></div>
       <div class="form-group" style="grid-column:1/-1;"><label>Email</label><input type="email" id="qa-email" placeholder="client@email.com" /></div>
       <div style="grid-column:1/-1;text-align:right;margin-top:-.5rem;"><span onclick="openAddCautiousModal(document.getElementById('qa-client').value,document.getElementById('qa-phone').value)" style="font-size:.72rem;color:#d97706;cursor:pointer;">⚠️ Flag client as cautious</span></div>
@@ -1613,8 +1621,8 @@ function setupRealtimeListeners(){
     if(snap.exists()){
       const val = snap.val();
       // Firebase stores arrays as objects — convert back
-      if(Array.isArray(val)) rides = val;
-      else rides = Object.values(val||{});
+      if(Array.isArray(val)) rides = val.filter(function(r){return r&&r.id!=null;});
+      else rides = Object.values(val||{}).filter(function(r){return r&&r.id!=null;});
       // Re-render if app is visible
       if(document.getElementById('app').style.display!=='none'){
         refreshDash(); renderCal(); renderRides();
@@ -1745,6 +1753,34 @@ async function initApp() {
 // ════════════════════════════════════════════
 // SOS SYSTEM
 // ════════════════════════════════════════════
+// SOS SOUND
+try{window._sosSoundEnabled=localStorage.getItem('nda_sos_sound')==='1';}catch(e){window._sosSoundEnabled=false;}
+function playSOSAlertSound(){
+  if(!window._sosSoundEnabled) return;
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    [0,0.65,1.3].forEach(function(offset){
+      const osc=ctx.createOscillator(),g=ctx.createGain();
+      osc.connect(g);g.connect(ctx.destination);osc.type='sawtooth';
+      const t=ctx.currentTime+offset;
+      osc.frequency.setValueAtTime(600,t);
+      osc.frequency.exponentialRampToValueAtTime(1100,t+0.32);
+      osc.frequency.exponentialRampToValueAtTime(600,t+0.55);
+      g.gain.setValueAtTime(0.35,t);
+      g.gain.setValueAtTime(0.35,t+0.48);
+      g.gain.linearRampToValueAtTime(0,t+0.6);
+      osc.start(t);osc.stop(t+0.6);
+    });
+  }catch(e){}
+}
+function toggleSOSSound(){
+  window._sosSoundEnabled=!window._sosSoundEnabled;
+  try{localStorage.setItem('nda_sos_sound',window._sosSoundEnabled?'1':'0');}catch(e){}
+  const b=document.getElementById('sos-sound-btn');
+  if(b){b.textContent=window._sosSoundEnabled?'\uD83D\uDD14 Sound ON':'\uD83D\uDD15 Sound OFF';
+        b.style.background=window._sosSoundEnabled?'#16a34a':'#2d1460';}
+  if(window._sosSoundEnabled) playSOSAlertSound();
+}
 let activeSOS = null; // {id, sender, senderDriver, message, time, active}
 
 async function loadSOS(){
@@ -1823,7 +1859,10 @@ function showSOSActivePopup(){
   const existing=document.getElementById('sos-active-overlay'); if(existing) existing.remove();
   if(!activeSOS||!activeSOS.active) return;
   const isSender=(getMyDriverName()===activeSOS.senderDriver)||(currentUser?.name===activeSOS.sender);
-  const timeStr=new Date(activeSOS.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  const _sosD=new Date(activeSOS.time);
+  const dateTimeStr=_sosD.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'})+' at '+_sosD.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  const typeIcon=(activeSOS.type==='ride')?'🚗':'🚨';
+  const typeLabel=(activeSOS.type==='ride')?'Ride Emergency':'Personal Emergency';
   const ov=document.createElement('div');
   ov.id='sos-active-overlay'; ov.className='sos-overlay';
   ov.innerHTML='<div class="sos-box">'
@@ -1831,13 +1870,16 @@ function showSOSActivePopup(){
     +'<div style="font-size:1.25rem;font-weight:800;color:#ff4444;text-align:center;margin:.5rem 0;">SOS ALERT</div>'
     +'<div style="font-size:1rem;font-weight:700;color:#fff;text-align:center;margin-bottom:.35rem;">'+(isSender?'Your alert is active':'<strong>'+escHtml(activeSOS.senderDriver.split(' ')[0])+'</strong> needs help!')+'</div>'
     +(activeSOS.message?'<div style="font-size:.9rem;color:#ffaaaa;text-align:center;margin-bottom:.35rem;">'+escHtml(activeSOS.message)+'</div>':'')
-    +'<div style="font-size:.78rem;color:#ff8888;text-align:center;margin-bottom:1rem;">Sent at '+timeStr+'</div>'
+    +'<div style="font-size:.8rem;font-weight:700;text-align:center;background:#2a0000;padding:.3rem .75rem;border-radius:7px;margin-bottom:.35rem;">'+typeIcon+' '+typeLabel+'</div>'
+    +'<div style="font-size:.82rem;font-weight:700;color:#ff8888;text-align:center;margin-bottom:.9rem;">⏰ '+dateTimeStr+'</div>'
     +'<div style="display:flex;flex-direction:column;gap:.5rem;">'
     +(!isSender?'<button onclick="respondSOSHelp(\''+activeSOS.id+'\')" style="padding:.75rem;background:#16a34a;color:#fff;border:none;border-radius:10px;font-family:\'DM Sans\',sans-serif;font-size:.95rem;font-weight:700;cursor:pointer;">I can help \u2192 Notify '+escHtml(activeSOS.senderDriver.split(' ')[0])+'</button>':'')
     +(isSender?'<button onclick="clearSOS(\''+activeSOS.id+'\')" style="padding:.75rem;background:#16a34a;color:#fff;border:none;border-radius:10px;font-family:\'DM Sans\',sans-serif;font-size:.95rem;font-weight:700;cursor:pointer;">\u2713 I\'m OK \u2014 Clear SOS</button>':'')
     +'<button onclick="document.getElementById(\'sos-active-overlay\').remove()" style="padding:.65rem;background:none;border:1.5px solid #555;color:#aaa;border-radius:10px;font-family:\'DM Sans\',sans-serif;font-size:.9rem;cursor:pointer;">Dismiss for now</button>'
+    +'<button id="sos-sound-btn" onclick="toggleSOSSound()" style="padding:.45rem;background:'+(window._sosSoundEnabled?'#16a34a':'#2d1460')+';color:#fff;border:1px solid #555;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">'+(window._sosSoundEnabled?'🔔 Sound ON':'🔕 Sound OFF')+'</button>'
     +'</div></div>';
   document.body.appendChild(ov);
+  playSOSAlertSound();
 }
 
 async function respondSOSHelp(sosId){
@@ -2708,6 +2750,7 @@ async function saveQuote(){
 // NOTIFICATIONS
 // ═══════════════════════════════════════════
 function addNotification(driverName, ride, action, customMsg){
+  if(action==='assigned'&&currentUser&&driverName===(USER_DRIVER_MAP[currentUser.name]||'')) return;
   if(!notifications[driverName]) notifications[driverName]=[];
   const msg = customMsg || (action==='assigned'
     ? `New ride assigned: ${ride.client} on ${fmtDateShort(ride.date)} at ${ride.time||'—'} ($${ride.price})`
@@ -2729,7 +2772,11 @@ function updateNotifBadge(){
   const myName = currentUser.name;
 
   // Count unread ride notifications
-  const unreadRide = dName ? (notifications[dName]||[]).filter(n=>!n.read).length : 0;
+  const unreadRide = dName ? (notifications[dName]||[]).filter(function(n){
+    if(!n||n.read) return false;
+    if(n.createdBy && n.createdBy===(currentUser?.name||'')) return false;
+    return true;
+  }).length : 0;
 
   // Count pending transfer requests relevant to this user
   const pendingTransfers = Object.values(clientRequests||{}).filter(r=>{
@@ -3040,7 +3087,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
                 </div>
                 <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
                   <div class="week-ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}</div>
-                  <span class="badge ${badge}" style="font-size:.6rem;">${r.type.split(' ')[0]}</span>${xxlBadge}${pairBadge}
+                  <span class="badge ${badge}" style="font-size:.6rem;">${r.type==='AP RUN'?'RUN':r.type==='AP PICK UP'?'PU':r.type==='AP ROUND TRIP'?'RT':r.type==='ROUND TRIP'?'RT':r.type==='ONE WAY'?'OW':r.type==='LOCAL'?'LCL':r.type.split(' ')[0]}</span>${xxlBadge}${pairBadge}
                   ${r.createdBy==='Morgan'?'<span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#5c6bc0;color:#fff;font-size:.5rem;font-weight:700;flex-shrink:0;" title="Created by Morgan">MN</span>':''}
                   ${r.newClient?'<div style="font-size:.58rem;font-weight:700;letter-spacing:.5px;background:#f59e0b;color:#fff;border-radius:4px;padding:1px 5px;white-space:nowrap;">New Client</div>':''}
                 </div>
@@ -3418,7 +3465,7 @@ function renderConfirmations(){
 }
 
 async function toggleConfirmSent(id){
-  const r=rides.find(x=>x.id===id);
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id)));
   if(!r) return;
   const wasConfirmed=r.confirmSent;
   r.confirmSent=!r.confirmSent;
@@ -3585,12 +3632,12 @@ function fallbackCopy(str,label){
   }catch(e){ showToast('Copy failed — long-press the text to copy','error'); }
 }
 function copyConfirmation(id){
-  const r=rides.find(x=>x.id===id); if(!r) return;
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   const c=buildConfirmationText(r);
   const full=c.message+(c.instructions?'\n\n'+c.instructions:'');
   copyToClipboard(full,'Confirmation text copied');
 }
-function copyInstructions(id){ const r=rides.find(x=>x.id===id); if(r) copyToClipboard(buildConfirmationText(r).instructions,'Pickup instructions copied'); }
+function copyInstructions(id){ const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(r) copyToClipboard(buildConfirmationText(r).instructions,'Pickup instructions copied'); }
 // Builds the confirmation group-text recipients for a ride, each labeled with a name
 // where the app knows it. Always: client + any client-requested extra numbers + the
 // main (owner) driver + the assigned driver. If the sender is Kat or Morgan, adds both.
@@ -3649,7 +3696,7 @@ function buildClientVCard(r){
   return new File([lines], (first||"client")+"-contact.vcf", {type:"text/vcard"});
 }
 async function shareClientVCard(id){
-  const r=rides.find(x=>x.id===id); if(!r) return;
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   const vcf=buildClientVCard(r);
   if(navigator.canShare && navigator.canShare({files:[vcf]})){
     try{ await navigator.share({files:[vcf],title:r.client+" · contact"}); }
@@ -3755,7 +3802,7 @@ function prebuildAllDriverCardImages(){
 
 
 async function textClient(id){
-  const r=rides.find(x=>x.id===id); if(!r) return;
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   const nums=confirmationRecipients(r).map(x=>x.phone);
   if(!nums.length){ showToast('No phone numbers to text \u2014 add the client\u2019s number first','error'); return; }
   const _conf=buildConfirmationText(r);
@@ -3840,7 +3887,7 @@ function closeDayModal(){document.getElementById('day-modal').classList.remove('
 // ═══════════════════════════════════════════
 function openRideModal(id){
   activeRideId=id;
-  const r=rides.find(x=>x.id===id); if(!r) return;
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   if(r.driver) warmDriverCardImage((r.driver||"").trim());
   document.getElementById('rm-title').textContent=r.client;
   // driver assign row
@@ -3898,7 +3945,7 @@ function renderRideView(r){
     ${r.status==='cancelled'?`<div style="grid-column:1/-1;background:#fdecea;border:1.5px solid #e6a8a0;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#b03a2e;font-weight:700;font-size:.9rem;">🚫 CANCELLED${r.cancelledBy?' · by '+escHtml(String(r.cancelledBy)):''} — tap “Reactivate Ride” below to restore.</div>`:''}
     ${r.status==='paid'?`<div style="grid-column:1/-1;background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#16a34a;font-weight:700;font-size:.9rem;">✅ CLIENT PAID${r.paidBy?' · marked by '+escHtml(String(r.paidBy)):''}</div>`:''}
     <div style="grid-column:1/-1;background:${color}66;border-left:5px solid ${color};border-radius:8px;padding:.85rem 1rem;margin-bottom:.5rem;">
-      <div style="font-size:1.05rem;font-weight:600;color:var(--black);margin-bottom:.2rem;">${r.type} — ${r.client} <span style="font-weight:400;font-size:.88rem;color:${color};">(${driverFirst})</span></div>
+      <div style="font-size:1.05rem;font-weight:600;color:var(--black);margin-bottom:.2rem;">${r.type} — ${r.client}${(()=>{const _cr=(rides||[]).find(function(x){return x.client&&x.client.toLowerCase()===r.client.toLowerCase()&&x.createdBy;});const _ol=_cr?(_cr.createdBy==='Morgan'?'Kat':_cr.createdBy):null;const _dLogin=Object.keys(USER_DRIVER_MAP).find(function(k){return USER_DRIVER_MAP[k]===r.driver;})||driverFirst;return (_ol&&_ol!==_dLogin)?'<span style="font-weight:400;font-size:.88rem;color:'+color+';opacity:.75;">('+ _ol +')</span>':'';})()}</div>
       <div style="font-size:.78rem;color:var(--mid);">Created by ${r.createdBy||'—'}</div>
       ${(r.trail&&r.trail.length)?`<div style="font-size:.72rem;color:var(--mid);margin-top:.25rem;">🕒 Last: <strong>${escHtml(r.trail[r.trail.length-1].by.split(' ')[0])}</strong> ${escHtml(r.trail[r.trail.length-1].action)} · ${fmtTs(r.trail[r.trail.length-1].ts)}</div>${r.trail.length>1?`<details style="margin-top:.2rem;"><summary style="font-size:.7rem;color:var(--gold);cursor:pointer;">View full history (${r.trail.length})</summary><div style="font-size:.72rem;color:var(--mid);margin-top:.3rem;line-height:1.6;">${r.trail.slice().reverse().map(t=>`• <strong>${escHtml(t.by.split(' ')[0])}</strong> ${escHtml(t.action)} · ${fmtTs(t.ts)}`).join('<br>')}</div></details>`:''}`:''}
     </div>
@@ -4023,14 +4070,14 @@ function buildRideLifecycle(r){
 }
 
 async function toggleRidePaid(id){
-  const r=rides.find(x=>x.id===id); if(!r||r.status==='cancelled') return;
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r||r.status==='cancelled') return;
   await setRideStatus(id, r.status==='paid'?'scheduled':'paid');
   const btn=document.getElementById('rm-paid-btn');
   if(btn) btn.style.fontWeight=r.status==='paid'?'700':'400';
 }
 
 async function setRideStatus(id, status){
-  const r = rides.find(x=>x.id===id); if(!r) return;
+  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   r.status = status;
   if(status==='paid'){ r.paidAt = Date.now(); r.paidBy = currentUser?.name||''; }
   else { delete r.paidAt; delete r.paidBy; }
@@ -4063,7 +4110,7 @@ function setCancelBtn(cancelled){
   cb.style.borderColor = cancelled ? 'var(--green)' : '#b03a2e';
 }
 async function cancelRide(id){
-  const r = rides.find(x=>x.id===id); if(!r) return;
+  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   if(r.status==='cancelled'){ return reactivateRide(id); }
   // Only the client's owner (or an admin) may cancel
   const myDrv = getMyDriverName();
@@ -4091,7 +4138,7 @@ async function cancelRide(id){
   showToast('Ride cancelled');
 }
 async function reactivateRide(id){
-  const r = rides.find(x=>x.id===id); if(!r) return;
+  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   r.status='scheduled'; delete r.cancelledAt; delete r.cancelledBy;
   await saveRides();
   refreshAllRideViews(r); setCancelBtn(false);
@@ -4258,7 +4305,7 @@ function showUnheartConfirm(id){
   back.querySelector('#uhc-no').addEventListener('click',function(){ back.remove(); });
   back.querySelector('#uhc-yes').addEventListener('click',async function(){
     back.remove();
-    const r=rides.find(x=>x.id===id); if(!r) return;
+    const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
     const me=myInterestKey(); if(!me) return;
     if(r.interest && r.interest[me]){ delete r.interest[me]; }
     if(r.interest && Object.keys(r.interest).length===0) delete r.interest;
@@ -4270,7 +4317,7 @@ function showUnheartConfirm(id){
   });
 }
 async function toggleInterest(id){
-  const r = rides.find(x=>x.id===id);
+  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id)));
   if(!r) return;
   const me = myInterestKey();
   if(!me){ showToast('Could not identify your driver profile','error'); return; }
@@ -4336,7 +4383,7 @@ function buildFeeMathHTML(r){
 
 let _feeEdit=null;
 function openFeeEditor(id){
-  const r = rides.find(x=>x.id===id); if(!r) return;
+  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   if(typeof canDeleteRide==='function' && !canDeleteRide(r)){ showToast("You can't edit this fee",'error'); return; }
   const sec = document.getElementById('rm-fee-section'); if(!sec) return;
   const price = parseFloat(r.price)||0;
@@ -4404,7 +4451,7 @@ function recalcFeeEdit(setAmount){
 }
 
 async function saveFeeEdit(id){
-  const r = rides.find(x=>x.id===id); if(!r) return;
+  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   if(typeof canDeleteRide==='function' && !canDeleteRide(r)){ showToast("You can't edit this fee",'error'); return; }
   const amtEl=document.getElementById('fee-edit-amount');
   const noteEl=document.getElementById('fee-edit-note');
@@ -4430,7 +4477,7 @@ async function saveFeeEdit(id){
 }
 
 function cancelFeeEdit(id){
-  const r = rides.find(x=>x.id===id); if(!r) return;
+  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   renderRideView(r);
 }
 
@@ -4877,7 +4924,7 @@ function toggleNotifPanel(){
 //   nda/kat/chatLastRead        — { userName: { channelKey: timestamp } }
 //   nda/kat/chatTyping          — { userName: { channelKey: timestamp } } (expires in 4s)
 
-let chatChannel    = 'group';   // current active channel key
+let chatChannel    = 'offerings'; // default channel
 let chatMessages   = {};        // { channelKey: [msgs] }
 let chatLastRead   = {};        // { channelKey: timestamp }
 let chatTypingTimer = null;
@@ -4911,7 +4958,7 @@ function openRideFromChat(id){
   setTimeout(function(){ openRideModal(id); }, 150);
 }
 async function claimRideFromOfferings(id){
-  const r=rides.find(x=>x.id===id); if(!r) return;
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   const myDriver=getMyDriverName();
   if(!myDriver){ showToast('You need a driver profile to claim rides','error'); return; }
   if(r.status==='cancelled'){ showToast('This ride is cancelled','error'); return; }
@@ -4930,7 +4977,7 @@ async function claimRideFromOfferings(id){
   showToast('\u2705 You\u2019re on it! Ride assigned to you.');
 }
 async function shareRideToOfferings(id){
-  const r=rides.find(x=>x.id===id); if(!r) return;
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   if(r.status==='cancelled'){ showToast('Cannot share a cancelled ride','error'); return; }
   const msg={
     sender: currentUser?.name||'',
@@ -4958,7 +5005,7 @@ async function initChat(){
   if(stored) chatLastRead = stored;
   listenAllChat();          // discover ALL channels (group + every DM I'm part of), even ones others started
   listenChatTyping();
-  chatChannel = 'group';    // always open on the group chat; clicking a DM replaces the view
+  chatChannel = 'offerings';
   renderChatTabs();
   renderChatMessages();
   updateChatBadge();
@@ -4981,7 +5028,8 @@ function listenAllChat(){
       // Keep the group channel and any DM channel that includes my name
       if(key !== 'group' && key !== 'offerings' && key !== 'updates' && !key.split('__').includes(myKey)) return;
       const val = all[key];
-      let arr = Array.isArray(val) ? val.slice() : Object.values(val||{});
+      let arr = Array.isArray(val) ? val.slice()
+        : Object.entries(val||{}).map(([fk,m])=>m&&typeof m==='object'?Object.assign({},m,{_fbKey:fk}):null).filter(Boolean);
       arr = arr.filter(m => m && typeof m === 'object');
       arr.sort((a,b)=>(a.ts||0)-(b.ts||0));
       chatMessages[key] = arr;
@@ -5001,10 +5049,7 @@ function renderChatTabs(){
   // Build list of DM channels this user is part of
   const dmChannels = getDMChannels();
 
-  let html = `<button class="chat-tab ${chatChannel==='group'?'active':''}" onclick="switchChatChannel('group')">
-    # General<span class="unread-dot ${hasUnread('group')?'show':''}"></span>
-  </button>`;
-  html += `<button class="chat-tab ${chatChannel==='offerings'?'active':''}" onclick="switchChatChannel('offerings')" style="${chatChannel==='offerings'?'':''}">
+  let html = `<button class="chat-tab ${chatChannel==='offerings'?'active':''}" onclick="switchChatChannel('offerings')">
     \uD83D\uDE97 Offerings<span class="unread-dot ${hasUnread('offerings')?'show':''}"></span>
   </button>`;
   html += `<button class="chat-tab ${chatChannel==='updates'?'active':''}" onclick="switchChatChannel('updates')">
@@ -5109,18 +5154,21 @@ function renderChatMessages(){
 
     html += `<div class="chat-msg-wrap ${side}">`;
     const _bubble = m.type==='ride_offer' ? buildRideOfferCard(m) : escHtml(m.text);
+    const _del=(isMe||isAdmin())&&m._fbKey
+      ?`<button onclick="deleteChatMsg('${chatChannel}','${m._fbKey}')" title="Delete" style="background:none;border:none;color:#aaa;cursor:pointer;font-size:.9rem;padding:0 3px;opacity:.45;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.45'">×</button>`
+      :'';
     if(!isMe){
       html += `<div style="display:flex;align-items:flex-end;gap:6px;">
         <div class="chat-avatar" style="background:${color};">${initials}</div>
         <div>
-          <div style="font-size:.68rem;color:var(--mid);margin-bottom:2px;">${escHtml(m.sender||'')}</div>
+          <div style="font-size:.68rem;color:var(--mid);margin-bottom:2px;">${escHtml(m.sender||'')} ${_del}</div>
           <div class="chat-bubble theirs">${_bubble}</div>
           <div class="chat-meta">${timeStr}</div>
         </div>
       </div>`;
     } else {
       html += `<div class="chat-bubble mine">${_bubble}</div>
-        <div class="chat-meta" style="justify-content:flex-end;">${timeStr} ${m.read?'✓✓':'✓'}</div>`;
+        <div class="chat-meta" style="justify-content:flex-end;">${_del} ${timeStr} ${m.read?'\u2713\u2713':'\u2713'}</div>`;
     }
     html += `</div>`;
   });
@@ -5173,6 +5221,16 @@ async function sendChatMessage(){
   notifyChatMembers(chatChannel, msg);
 }
 
+async function deleteChatMsg(channel,fbKey){
+  if(!fbKey||!confirm('Delete this message?')) return;
+  try{
+    if(fbDB) await fbRef('nda/kat/chat/'+channel+'/'+fbKey).remove();
+    if(chatMessages[channel]){
+      chatMessages[channel]=chatMessages[channel].filter(m=>m._fbKey!==fbKey);
+      renderChatMessages();
+    }
+  }catch(e){ showToast('Could not delete','error'); }
+}
 function chatKeyDown(e){
   // Send on Enter (not Shift+Enter)
   if(e.key==='Enter' && !e.shiftKey){
@@ -5736,19 +5794,14 @@ function buildUpgradePromptCard(){
     +'</div>';
 }
 
-function getClientFeeOwner(clientName,drivingDriver){
+function getClientOwner(clientName){
   if(!clientName) return null;
   const key=(clientName||'').toLowerCase().trim();
-  const counts={};
-  (rides||[]).forEach(function(r){
-    if(!r.client||r.client.toLowerCase().trim()!==key) return;
-    const c=r.clientOwner||(r.createdBy?(USER_DRIVER_MAP[r.createdBy]||PROXY_MAP[r.createdBy]||null):null);
-    if(c&&c!==drivingDriver) counts[c]=(counts[c]||0)+1;
-  });
-  let best=null,bestN=0;
-  Object.entries(counts).forEach(function([d,n]){ if(n>bestN){best=d;bestN=n;} });
-  return best;
+  const r=(rides||[]).find(function(r){ return r.client&&r.client.toLowerCase().trim()===key&&r.createdBy; });
+  if(!r) return null;
+  return r.createdBy==='Morgan'?(USER_DRIVER_MAP['Kat']||'Kathleen Herringdine'):(USER_DRIVER_MAP[r.createdBy]||null);
 }
+function getClientFeeOwner(clientName,drivingDriver){ return getClientOwner(clientName); }
 function renewIncomeUpgrade(){
   showIncomeOrUpgrade(null);
 }
@@ -5798,6 +5851,32 @@ function openQuickAddModal(){
   document.getElementById('quick-add-modal').classList.add('show');
 }
 
+let clientAddressOverrides={};
+
+function getClientDefaultAddress(clientKey){
+  const s=clientAddressOverrides[clientKey];
+  if(!s) return '';
+  if(typeof s==='string') return s;
+  const d=s.find(function(a){return a.isDefault;})||s[0];
+  return d?d.address:'';
+}
+function getClientAddresses(clientKey){
+  const s=clientAddressOverrides[clientKey];
+  if(!s) return [];
+  if(typeof s==='string') return [{label:'Default',address:s,isDefault:true}];
+  return Array.isArray(s)?s:[];
+}
+function setClientAddress(clientKey,label,address,makeDefault){
+  if(!clientAddressOverrides[clientKey]) clientAddressOverrides[clientKey]=[];
+  if(typeof clientAddressOverrides[clientKey]==='string')
+    clientAddressOverrides[clientKey]=[{label:'Default',address:clientAddressOverrides[clientKey],isDefault:true}];
+  const existing=clientAddressOverrides[clientKey].findIndex(function(a){return a.address===address||a.label.toLowerCase()===label.toLowerCase();});
+  if(existing>=0) clientAddressOverrides[clientKey][existing]={label,address,isDefault:makeDefault||clientAddressOverrides[clientKey][existing].isDefault};
+  else clientAddressOverrides[clientKey].push({label,address,isDefault:makeDefault||false});
+  if(makeDefault) clientAddressOverrides[clientKey].forEach(function(a,i){if(i!==clientAddressOverrides[clientKey].findIndex(function(x){return x.address===address;})) a.isDefault=false;});
+  storageSet('kat:clientAddresses',JSON.stringify(clientAddressOverrides)).catch(function(){});
+}
+
 function checkQaClientOwnership(){
   const el=document.getElementById('qa-client'); if(!el) return;
   const cName=(el.value||'').trim(); const wEl=document.getElementById('qa-client-warn');
@@ -5806,8 +5885,86 @@ function checkQaClientOwnership(){
   const owner=getClientFeeOwner(cName,myDriver);
   if(owner&&owner!==myDriver){
     wEl.style.display=''; wEl.style.gridColumn='1/-1';
-    wEl.innerHTML='\u26a0\ufe0f <strong>'+escHtml(cName)+'</strong> is in <strong>'+escHtml(owner.split(' ')[0])+'\u2019s</strong> client list. Driving their client will generate a <strong>15% fee payable to '+escHtml(owner.split(' ')[0])+'</strong>.';
+    wEl.innerHTML='\u26a0\ufe0f <strong>'+escHtml(cName)+'</strong> is in <strong>'+escHtml(owner.split(' ')[0])+'\u2019s</strong> client list. Driving their client generates a <strong>15% fee to '+escHtml(owner.split(' ')[0])+'</strong>. '
+      +'<button onclick="requestClientFromWarning(\''+escHtml(cName)+'\')" style="margin-left:.35rem;padding:2px 10px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;font-weight:700;cursor:pointer;">\uD83D\uDD17 Request this client \u2192</button>';
   } else { wEl.style.display='none'; }
+}
+async function requestClientFromWarning(clientName){
+  const myDriver = getMyDriverName(); if(!myDriver || !clientName) return;
+  const owner = getClientOwner(clientName); if(!owner||owner===myDriver) return;
+  const reqId = 'req_'+Date.now();
+  const req = { id:reqId, type:'transfer_request', status:'pending',
+    fromDriver:myDriver, toDriver:owner, clientName:clientName, ts:Date.now(),
+    msg: myDriver.split(' ')[0]+' is requesting '+clientName+' from '+owner.split(' ')[0] };
+  if(!clientRequests) clientRequests={};
+  clientRequests[reqId]=req;
+  await saveClientRequests();
+  addNotification(owner,{id:reqId,client:clientName},'transfer_request',
+    '\uD83D\uDD17 '+myDriver.split(' ')[0]+' wants to take over '+clientName+'. Tap bell to approve or deny.');
+  ADMINS.forEach(function(a){
+    const d=USER_DRIVER_MAP[a]||a;
+    if(d!==owner&&d!==myDriver) addNotification(d,{id:reqId,client:clientName},'transfer_request',req.msg);
+  });
+  await saveNotifs();
+  updateNotifBadge();
+  showToast('\uD83D\uDD17 Request sent to '+owner.split(' ')[0]);
+  const wEl=document.getElementById('qa-client-warn');
+  if(wEl) wEl.innerHTML='\u2705 Request sent to '+escHtml(owner.split(' ')[0])+' \u2014 you\'ll be notified when they respond.';
+}
+function offerSaveDefaultAddress(clientName,newAddr){
+  var ov=document.createElement("div");
+  ov.style.cssText="position:fixed;inset:0;background:rgba(20,8,40,.8);z-index:14000;display:flex;align-items:center;justify-content:center;padding:1rem;";
+  var first=(clientName.trim().split(" ")[0])||clientName;
+  var _key=clientName.trim().toLowerCase();
+  var _existing=getClientAddresses(_key);
+  var isPremium=hasIncomeAccess();
+  // Free: simple single-address save. Premium: full multi-address with labels.
+  var inner;
+  if(isPremium){
+    var hasExisting=_existing.length>0;
+    var PRESET=["Home","Office","Airport Hotel","Vacation Home","Other"];
+    var labelOpts=PRESET.map(function(l){return "<option>"+l+"</option>";}).join("");
+    inner="<div style='background:var(--white);border-radius:16px;max-width:390px;width:100%;padding:1.35rem;box-shadow:0 20px 50px rgba(0,0,0,.4);'>"      +"<div style='font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.35rem;'>Save address for "+escHtml(first)+"? \u2728</div>"
+      +"<div style='font-size:.84rem;color:#555;margin-bottom:.75rem;'>"+escHtml(newAddr)+"</div>"
+      +"<label style='font-size:.75rem;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:#666;display:block;margin-bottom:.3rem;'>Label</label>"
+      +"<select id='_addr-label' style='width:100%;padding:.55rem .7rem;border:1.5px solid #d1d5db;border-radius:8px;font-size:.93rem;font-weight:700;color:#1a0830;background:#fff;margin-bottom:.65rem;'>"+labelOpts+"</select>"
+      +(hasExisting?"<label style='display:flex;align-items:center;gap:.45rem;font-size:.88rem;font-weight:700;color:#333;margin-bottom:.75rem;cursor:pointer;'><input type='checkbox' id='_addr-default' checked style='width:15px;height:15px;accent-color:#7c3aed;'> Set as default</label>":"")
+      +"<div style='display:flex;gap:.6rem;'>"
+      +"<button id='_addr-yes' style='flex:1;padding:.7rem;background:#7c3aed;color:#fff;border:none;border-radius:10px;font-weight:800;font-size:.93rem;cursor:pointer;'>Save</button>"
+      +"<button id='_addr-no' style='flex:1;padding:.7rem;background:#f3f4f6;color:#333;border:none;border-radius:10px;font-weight:700;font-size:.93rem;cursor:pointer;'>Skip</button>"
+      +"</div></div>";
+  } else {
+    // Free tier: one address per client, no labels
+    inner="<div style='background:var(--white);border-radius:16px;max-width:390px;width:100%;padding:1.35rem;box-shadow:0 20px 50px rgba(0,0,0,.4);'>"      +"<div style='font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.35rem;'>Save address for "+escHtml(first)+"?</div>"
+      +"<div style='font-size:.84rem;color:#555;margin-bottom:.75rem;'>"+escHtml(newAddr)+"</div>"
+      +"<div style='font-size:.8rem;color:#888;margin-bottom:.75rem;'>This will be remembered for next time.</div>"
+      +"<div style='display:flex;gap:.6rem;'>"
+      +"<button id='_addr-yes' style='flex:1;padding:.7rem;background:#7c3aed;color:#fff;border:none;border-radius:10px;font-weight:800;font-size:.93rem;cursor:pointer;'>Save</button>"
+      +"<button id='_addr-no' style='flex:1;padding:.7rem;background:#f3f4f6;color:#333;border:none;border-radius:10px;font-weight:700;font-size:.93rem;cursor:pointer;'>Skip</button>"
+      +"</div></div>";
+  }
+  ov.innerHTML=inner;
+  document.body.appendChild(ov);
+  var _close=function(save){
+    if(save){
+      if(isPremium){
+        var label=document.getElementById("_addr-label")&&document.getElementById("_addr-label").value||"Home";
+        var hasEx=_existing.length>0;
+        var makeDefault=hasEx?(document.getElementById("_addr-default")&&document.getElementById("_addr-default").checked!==false):true;
+        setClientAddress(_key,label,newAddr,makeDefault);
+        showToast("\u2713 "+label+" saved for "+first);
+      } else {
+        // Free: just save as the single default address (overwrite)
+        clientAddressOverrides[_key]=[{label:"Default",address:newAddr,isDefault:true}];
+        storageSet("kat:clientAddresses",JSON.stringify(clientAddressOverrides)).catch(function(){});
+        showToast("\u2713 Address saved for "+first);
+      }
+    }
+    document.body.removeChild(ov);
+    showPolicyTextPrompt(clientName,"");
+  };
+  document.getElementById("_addr-yes").onclick=function(){_close(true);};
+  document.getElementById("_addr-no").onclick=function(){_close(false);};
 }
 function closeQuickAddModal(){
   document.getElementById('quick-add-modal').classList.remove('show');
@@ -5898,7 +6055,7 @@ async function saveQuickAddRide(){
     newClient: !!(document.getElementById('qa-new-client')?.checked),
   };
   touchRide(ride, 'created');
-  ride.clientOwner = getClientFeeOwner(ride.client, ride.driver) || (USER_DRIVER_MAP[currentUser?.name]||getMyDriverName()||'');
+  ride.clientOwner = currentUser?.name==='Morgan'?(USER_DRIVER_MAP['Kat']||'Kathleen Herringdine'):(USER_DRIVER_MAP[currentUser?.name]||getMyDriverName()||'');
   let _driverNeedsOverride = false;
   if(ride.driver && !isDriverAvailable(ride.driver, ride.date, ride.time)){
     _reenableBtn();
@@ -5932,18 +6089,24 @@ async function saveQuickAddRide(){
   showToast(qaType==='AP ROUND TRIP'?`AP Round Trip added: ${client} (2 rides)`:`Ride added: ${client}`);
   refreshDash(); renderCal(); renderRides(); updateNotifBadge();
   if(_driverNeedsOverride) await sendAvailOverrideRequest(ride, currentUser?.name||'');
-  showPolicyTextPrompt(client, ride.phone);
+  const _usedAddr = ride.type==='AP PICK UP' ? (ride.home||'') : (ride.pickup||'');
+  if(_usedAddr && typeof _qaAutofilledData!=='undefined' && _qaAutofilledData.client && _qaAutofilledData.client.toLowerCase()===client.toLowerCase() && _usedAddr!==_qaAutofilledData.addr){
+    offerSaveDefaultAddress(client, _usedAddr);
+  } else { showPolicyTextPrompt(client, ride.phone, ride.date, ride.time, ride.price); }
+  if(typeof _qaAutofilledData!=='undefined') _qaAutofilledData={addr:'',phone:'',client:'',prefix:''};
 }
 
 // ── DUPLICATE RIDE ──
 // CLIENT BOOKING-POLICY TEXT (offered after a ride is saved)
-function policyTextMessage(firstName){
+function policyTextMessage(firstName, rideDate, rideTime, ridePrice){
   const hi = firstName ? 'Hi '+firstName+',\n\n' : '';
+  const dtPart = (rideDate&&rideTime) ? 'I have scheduled your ride for '+(typeof fmtDateShort==='function'?fmtDateShort(rideDate):rideDate)+' at '+(typeof fmtTime12==='function'?fmtTime12(rideTime):rideTime)+'.' : 'I have scheduled your ride.';
+  const cancelFee = ridePrice ? '50% of the $'+ridePrice+' fare' : '50% of the fare';
   return hi
-    +'Quick Note on Our Policy:\n\n'
+    +dtPart+'\n\n'
     +'\u2022 Confirmation: We\u2019ll text you a confirmation the day before your trip.\n'
     +'\u2022 Changes: Any changes after that text will incur a $40 fee (except for emergencies/acts of God).\n'
-    +'\u2022 Cancellations: Canceling after that text will result in a fee of 50% of the ride fare.\n\n'
+    +'\u2022 Cancellations: Canceling after that text will result in a fee of '+cancelFee+'.\n\n'
     +'We appreciate your business and look forward to driving you!';
 }
 function clearQuoteForm(){
@@ -5963,7 +6126,7 @@ function showQuoteBookingFlow(ride){
   back.setAttribute('data-qbf','1');
   back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.7);z-index:13000;display:flex;align-items:center;justify-content:center;padding:1rem;';
   function step1(){
-    const policyMsg=policyTextMessage(first);
+    const policyMsg=policyTextMessage(first, ride.date, ride.time, ride.price);
     const hasPh=!!String(ride.phone||'').replace(/[^0-9+]/g,'');
     back.innerHTML='<div style="background:var(--white);border-radius:16px;max-width:400px;width:100%;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
       +'<div style="font-size:1.05rem;font-weight:700;color:var(--black);margin-bottom:.3rem;">\u2705 Ride Saved \u2014 '+escHtml(client)+'</div>'
@@ -5975,7 +6138,7 @@ function showQuoteBookingFlow(ride){
       +'</div></div>';
     document.body.appendChild(back);
     const pSend=document.getElementById('qbf-pol-send');
-    if(pSend) pSend.addEventListener('click',function(){ sendPolicyText(ride.phone, first); step2(); });
+    if(pSend) pSend.addEventListener('click',function(){ sendPolicyText(ride.phone, first, ride.date, ride.time, ride.price); step2(); });
     document.getElementById('qbf-pol-skip').addEventListener('click', step2);
   }
   function step2(){
@@ -6002,17 +6165,17 @@ function showQuoteBookingFlow(ride){
   }
   step1();
 }
-function sendPolicyText(phone, firstName){
+function sendPolicyText(phone, firstName, rideDate, rideTime, ridePrice){
   const num=String(phone||'').replace(/[^0-9+]/g,'');
   if(!num){ showToast('No phone number on file for this client','error'); return; }
-  const body=policyTextMessage(firstName);
+  const body=policyTextMessage(firstName, rideDate, rideTime, ridePrice);
   const isiOS=/iPad|iPhone|iPod/.test(navigator.userAgent||'');
   window.location.href='sms:'+num+(isiOS?'&':'?')+'body='+encodeURIComponent(body);
 }
-function showPolicyTextPrompt(clientName, phone){
+function showPolicyTextPrompt(clientName, phone, rideDate, rideTime, ridePrice){
   const first=(String(clientName||'').trim().split(' ')[0])||'';
   const hasPhone=!!String(phone||'').replace(/[^0-9+]/g,'');
-  const preview=policyTextMessage(first);
+  const preview=policyTextMessage(first, rideDate, rideTime, ridePrice);
   const back=document.createElement('div');
   back.setAttribute('data-policy-modal','1');
   back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13000;display:flex;align-items:center;justify-content:center;padding:1rem;';
@@ -6023,7 +6186,7 @@ function showPolicyTextPrompt(clientName, phone){
   back.innerHTML=
     '<div style="background:var(--white);border-radius:16px;max-width:400px;width:100%;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
     +'<div style="font-size:1.05rem;font-weight:700;color:var(--black);margin-bottom:.3rem;">\u2705 Ride saved'+(first?' \u2014 '+escHtml(first):'')+'</div>'
-    +'<div style="font-size:.82rem;color:var(--mid);margin-bottom:.75rem;">Text the client your booking policy?</div>'
+    +'<div style="font-size:.82rem;color:var(--mid);margin-bottom:.75rem;">Send client scheduling confirmation text?</div>'
     +'<div style="white-space:pre-wrap;font-size:.82rem;color:var(--black);background:var(--surface);border:1px solid var(--light);border-radius:10px;padding:.75rem .85rem;margin-bottom:.9rem;line-height:1.5;">'+escHtml(preview)+'</div>'
     +'<div style="display:flex;gap:.5rem;">'
     +'<button onclick="this.closest(\'[data-policy-modal]\').remove()" style="padding:.7rem 1rem;background:none;border:1.5px solid var(--light);color:var(--mid);border-radius:9px;font-family:\'DM Sans\',sans-serif;font-size:.9rem;font-weight:600;cursor:pointer;">Skip</button>'
@@ -6032,13 +6195,13 @@ function showPolicyTextPrompt(clientName, phone){
     +'</div>';
   document.body.appendChild(back);
   const b=document.getElementById('policy-send-btn');
-  if(b) b.addEventListener('click',function(){ sendPolicyText(phone, first); back.remove(); });
+  if(b) b.addEventListener('click',function(){ sendPolicyText(phone, first, rideDate, rideTime, ridePrice); back.remove(); });
 }
 
 let dupSourceId = null;
 
 function openDuplicateModal(id){
-  const r = rides.find(x=>x.id===id); if(!r) return;
+  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   dupSourceId = id;
   document.getElementById('dup-modal-sub').textContent = `Copying: ${r.client} · ${r.type} · $${r.price}`;
   document.getElementById('dup-date').value = r.date || '';
@@ -6107,7 +6270,7 @@ async function assignDriver(){
 }
 
 async function deleteRide(id){
-  const r=rides.find(x=>x.id===id);
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id)));
   if(!canDeleteRide(r)){ showToast('You can only delete rides you created.','error'); return; }
   if(!confirm('Delete this ride?')) return;
   rides=rides.filter(r=>r.id!==id);
@@ -6363,7 +6526,7 @@ function renderDashFees(){
   const owedToMe={}, iOwe={};
   rides.forEach(r=>{
     if(!r.date||r.date>today||r.status==='cancelled'||parseFloat(r.price||0)<=0) return;
-    const owner=r.clientOwner||(r.createdBy?(USER_DRIVER_MAP[r.createdBy]||PROXY_MAP[r.createdBy]||null):null);
+    const owner=r.createdBy==='Morgan'?(USER_DRIVER_MAP['Kat']||'Kathleen Herringdine'):(USER_DRIVER_MAP[r.createdBy]||null);
     const driver=r.driver||null;
     if(!owner||!driver||owner===driver) return;
     const fee=parseFloat(r.price)*0.15;
@@ -7879,9 +8042,26 @@ function renderIncome(){
   document.getElementById('income-subtitle').textContent =
     (dName||'All Drivers') + (label?' · '+label:'');
 
+  const _myl=currentUser?.name||'';
+  const _lp=(driverSettings[_myl]||{}).linkedWith||null;
+  if(_lp){
+    const _on=window._showCombinedIncome===true;
+    const _st=document.getElementById('income-subtitle');
+    if(_st){
+      let _cb=document.getElementById('income-combine-btn');
+      if(!_cb){_cb=document.createElement('button');_cb.id='income-combine-btn';
+        _cb.style.cssText='margin-left:.5rem;padding:.3rem .7rem;border-radius:8px;border:1.5px solid var(--pur3);font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;';
+        _st.parentNode.insertBefore(_cb,_st.nextSibling);}
+      _cb.textContent=_on?'🔗 Combined: ON':'🔗 Combined: OFF';
+      _cb.style.background=_on?'#7c3aed':'#f3f4f6';_cb.style.color=_on?'#fff':'#333';
+      _cb.onclick=function(){window._showCombinedIncome=!window._showCombinedIncome;
+        try{localStorage.setItem('nda_combine_income',window._showCombinedIncome?'1':'0');}catch(e){}renderIncome();};
+    }
+  }else{const _old=document.getElementById('income-combine-btn');if(_old)_old.remove();}
+  const _incLinked=(window._showCombinedIncome===true&&_myl&&_lp)?_lp:null;
   // Filter rides
   let filtered = rides.filter(r=>{
-    if(dName && r.driver!==dName) return false;
+    if(dName && r.driver!==dName && (!_incLinked||r.driver!==_incLinked)) return false;
     if(!r.date||r.price===0) return false;
     if(r.status==='cancelled') return false;
     if(start && end){
@@ -8101,7 +8281,7 @@ function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm,
         <div style="font-weight:600;font-size:.85rem;color:var(--black);display:flex;align-items:center;gap:.3rem;">
           <span style="width:7px;height:7px;border-radius:50%;background:${rc};flex-shrink:0;display:inline-block;"></span>${escHtml(r.client||'—')}
         </div>
-        <span class="badge ${badge}" style="font-size:.58rem;">${r.type.split(' ')[0]}</span>
+        <span class="badge ${badge}" style="font-size:.58rem;">${r.type==='AP RUN'?'RUN':r.type==='AP PICK UP'?'PU':r.type==='AP ROUND TRIP'?'RT':r.type==='ROUND TRIP'?'RT':r.type==='ONE WAY'?'OW':r.type==='LOCAL'?'LCL':r.type.split(' ')[0]}</span>
       </td>
       <td style="padding:.5rem .6rem;text-align:right;vertical-align:top;">
         <div class="row-gross" style="font-weight:700;font-size:.9rem;color:var(--green);">$${gross.toFixed(2)}</div>
@@ -9743,6 +9923,7 @@ function enterApp(){
   const sosBtnEl=document.getElementById('sos-btn'); if(sosBtnEl) sosBtnEl.style.display='';
   if(typeof startSOSPolling==='function') startSOSPolling();
   setTimeout(maybShowTutorialBanner, 1200);
+  try{window._showCombinedIncome=localStorage.getItem('nda_combine_income')==='1';}catch(e){window._showCombinedIncome=false;}
   document.getElementById('paywall-screen').style.display='none';
   document.getElementById('auth-screen').style.display='none';
   document.getElementById('app').style.display='flex';
@@ -9935,12 +10116,46 @@ function maybeAutofillClient(prefix){
   fill(prefix+'-email', c.email);
   const extras=(c.phones||[]).slice(1).map(p=>p.number).filter(Boolean);
   if(extras.length){ const ex=document.getElementById(prefix+'-extra-phones'); if(ex && !ex.value) ex.value=extras.join(', '); }
-  // Home address → whichever field maps to ride.home for this trip type
-  if(c.address){
-    const type=(document.getElementById(prefix+'-type')||{}).value||'';
-    const homeId = (prefix==='qa') ? 'qa-home' : 'q-dropoff';
-    if(type==='AP PICK UP') fill(homeId, c.address);
-    else fill(prefix+'-pickup', c.address);
+  // Home address — check saved overrides first, then client record
+  const _clientKey2=(nameEl.value||'').trim().toLowerCase();
+  const _savedAddrs=getClientAddresses(_clientKey2);
+  const _defaultAddr=getClientDefaultAddress(_clientKey2)||c.address||'';
+  if(_defaultAddr){
+    const type2=(document.getElementById(prefix+'-type')||{}).value||'';
+    const homeId2=(prefix==='qa')?'qa-home':'q-dropoff';
+    const addrFieldId=(type2==='AP PICK UP')?homeId2:(prefix+'-pickup');
+    const addrEl=document.getElementById(addrFieldId);
+    if(addrEl && !addrEl.value){
+      // Premium + multiple saved addresses → show dropdown select
+      if(hasIncomeAccess() && _savedAddrs.length > 1 && prefix==='qa'){
+        addrEl.value=_defaultAddr;
+        // Inject a select dropdown below the field
+        const pickerId='_addr-dropdown-'+addrFieldId;
+        let picker=document.getElementById(pickerId);
+        if(picker) picker.remove();
+        picker=document.createElement('select');
+        picker.id=pickerId;
+        picker.style.cssText='width:100%;margin-top:.3rem;padding:.5rem .7rem;border:1.5px solid #7c3aed;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.88rem;font-weight:700;color:#1a0830;background:#fff;cursor:pointer;';
+        _savedAddrs.forEach(function(a){
+          const opt=document.createElement('option');
+          opt.value=a.address;
+          opt.textContent=a.label+(a.isDefault?' (default)':'');
+          if(a.address===_defaultAddr) opt.selected=true;
+          picker.appendChild(opt);
+        });
+        picker.onchange=function(){
+          addrEl.value=this.value;
+          addrEl.dispatchEvent(new Event('input',{bubbles:true}));
+          if(typeof qaDebounceDistance==='function') qaDebounceDistance();
+        };
+        if(addrEl.parentNode) addrEl.parentNode.insertBefore(picker, addrEl.nextSibling);
+      } else {
+        // Free or single address — just fill the field
+        addrEl.value=_defaultAddr;
+        addrEl.dispatchEvent(new Event('input',{bubbles:true}));
+        if(typeof qaDebounceDistance==='function') qaDebounceDistance();
+      }
+    }
   }
   // Pax + bags from most recent ride — fill if still at the default value
   const fillNum=(id,v,def)=>{ const el=document.getElementById(id); if(el&&(el.value===''||el.value==def)&&v!==undefined) el.value=v; };
@@ -11096,13 +11311,15 @@ function maybePopNotifications(data){
     if(_notifShown.has(key)) return;
     _notifShown.add(key);
     const _myName = currentUser?.name||'';
-    if(!n.read && n.osNotif !== false && (!n.createdBy || n.createdBy !== _myName)) fireLocalNotification('Northwest Drivers', n.msg || 'New update');
+    const _isRecent = n.ts && (Date.now() - n.ts) < 120000;
+    const _notSelf = n.createdBy && n.createdBy !== _myName;
+    if(!n.read && n.osNotif !== false && _isRecent && _notSelf) fireLocalNotification('Northwest Drivers', n.msg || 'New update');
   });
 }
 function fireLocalNotification(title, body){
   if(!('Notification' in window) || Notification.permission!=='granted') return;
   if(typeof document!=='undefined' && document.visibilityState==='hidden') return;
-  const opts = { body: body||'', icon:'icon-192.png', badge:'icon-192.png', tag:'nda-'+Date.now() };
+  const opts = { body: body||'', icon:'https://chasesweat.github.io/nda-app/icon-192.png', badge:'https://chasesweat.github.io/nda-app/icon-192.png', tag:'nda-'+Date.now() };
   try{
     if(navigator.serviceWorker && navigator.serviceWorker.ready){
       navigator.serviceWorker.ready.then(reg=> reg.showNotification(title, opts))
@@ -11499,5 +11716,4 @@ initApp();
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js"></script>
 
 </body>
-</html
->
+</html>
