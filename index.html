@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606089989">
+<meta name="version" content="202606089991">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -734,12 +734,7 @@ input,select,textarea{font-size:16px;}
       </div>
       <button onclick="openDocUpload()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">＋ Add Document</button>
     </div>
-    <div id="doc-filter-tabs" style="display:flex;gap:.5rem;margin-bottom:1rem;border-bottom:2px solid var(--light);padding-bottom:.75rem;overflow-x:auto;">
-      <button class="cal-tab active" onclick="setDocFilter('All', this)">All</button>
-      <button class="cal-tab" onclick="setDocFilter('Pickup', this)">Pickup</button>
-      <button class="cal-tab" onclick="setDocFilter('Drop-off', this)">Drop-off</button>
-      <button class="cal-tab" onclick="setDocFilter('General', this)">General</button>
-    </div>
+    <div id="doc-filter-tabs" style="display:flex;gap:.5rem;margin-bottom:1rem;border-bottom:2px solid var(--light);padding-bottom:.75rem;overflow-x:auto;flex-wrap:wrap;align-items:center;"></div>
     <div id="doc-list"></div>
   </div>
 
@@ -6100,13 +6095,25 @@ async function saveQuickAddRide(){
 // CLIENT BOOKING-POLICY TEXT (offered after a ride is saved)
 function policyTextMessage(firstName, rideDate, rideTime, ridePrice){
   const hi = firstName ? 'Hi '+firstName+',\n\n' : '';
-  const dtPart = (rideDate&&rideTime) ? 'I have scheduled your ride for '+(typeof fmtDateShort==='function'?fmtDateShort(rideDate):rideDate)+' at '+(typeof fmtTime12==='function'?fmtTime12(rideTime):rideTime)+'.' : 'I have scheduled your ride.';
   const cancelFee = ridePrice ? '50% of the $'+ridePrice+' fare' : '50% of the fare';
+  // Check for custom template saved by driver
+  const _customPolicy=(typeof driverSettings!=='undefined'&&currentUser)
+    ?(driverSettings[currentUser.name]||{}).policyTemplate||'':'';
+  if(_customPolicy){
+    return _customPolicy
+      .replace('{name}', firstName||'')
+      .replace('{date}', (rideDate&&typeof fmtDateShort==='function'?fmtDateShort(rideDate):(rideDate||'')))
+      .replace('{time}', (rideTime&&typeof fmtTime12==='function'?fmtTime12(rideTime):(rideTime||'')))
+      .replace('{amount}', ridePrice?'$'+ridePrice:'')
+      .replace('{cancelFee}', cancelFee)
+      .replace('{driver}', getMyDriverName()||'')
+      .replace('{phone}', (DRIVER_PROFILES[getMyDriverName()||'']||{}).phone||'');
+  }
   return hi
-    +dtPart+'\n\n'
+    +'I have your ride scheduled for '+(rideDate&&rideTime?(typeof fmtDateShort==='function'?fmtDateShort(rideDate):rideDate)+' at '+(typeof fmtTime12==='function'?fmtTime12(rideTime):rideTime):'your scheduled date and time')+'.\n\n'
     +'\u2022 Confirmation: We\u2019ll text you a confirmation the day before your trip.\n'
-    +'\u2022 Changes: Any changes after that text will incur a $40 fee (except for emergencies/acts of God).\n'
-    +'\u2022 Cancellations: Canceling after that text will result in a fee of '+cancelFee+'.\n\n'
+    +'\u2022 Changes: Any changes to travel date or time after the confirmation text will incur a $40 fee (except for emergencies/acts of God).\n'
+    +'\u2022 Cancellations: Canceling after the confirmation text will result in a fee of '+cancelFee+'.\n\n'
     +'We appreciate your business and look forward to driving you!';
 }
 function clearQuoteForm(){
@@ -8753,6 +8760,12 @@ function openDriverTemplateEdit(driverName){
   back.innerHTML=
     '<div style="background:var(--white);border-radius:16px;max-width:500px;width:100%;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.4);max-height:80vh;overflow-y:auto;">'
     +'<div style="font-size:1rem;font-weight:700;color:var(--black);margin-bottom:.75rem;">\u270F\uFE0F Confirmation Templates \u2014 '+driverName.split(' ')[0]+'</div>'
+    +(hasIncomeAccess()
+      ?'<div style="font-size:.62rem;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#7c3aed;margin-bottom:4px;">\uD83D\uDCCB Scheduling confirmation text <span style="font-weight:400;text-transform:none;color:#888;letter-spacing:0;">(sent right after booking)</span></div>'
+      +'<textarea id="dt-policy" rows="7" style="width:100%;padding:.4rem .5rem;border:1.5px solid #7c3aed;border-radius:6px;font-size:.78rem;resize:vertical;box-sizing:border-box;margin-bottom:4px;">'+(ds.policyTemplate||'')+'</textarea>'
+      +'<div style="font-size:.7rem;color:#888;margin-bottom:.5rem;">Tokens: {name} {date} {time} {amount} {cancelFee} {driver} {phone}</div>'
+      :'<div style="background:#f3eeff;border:1px dashed #c4b0e0;border-radius:8px;padding:.6rem .75rem;margin-bottom:.75rem;font-size:.8rem;color:#6d28d9;">\uD83D\uDD12 Scheduling confirmation text editing is a <strong>Premium</strong> feature. <span style="text-decoration:underline;cursor:pointer;" onclick="openUpgradeModal()">Upgrade</span> to customize it.</div>'
+    )
     +'<label style="font-size:.7rem;color:#888;display:block;margin-bottom:2px;">Custom confirmation message (leave blank for global default)</label>'
     +'<textarea id="dt-msg" rows="6" style="width:100%;padding:.4rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.78rem;resize:vertical;box-sizing:border-box;margin-bottom:.75rem;">'+(ds.confTemplate||'')+'</textarea>'
     +'<label style="font-size:.7rem;color:#888;display:block;margin-bottom:2px;">Custom pickup instructions (leave blank for global default)</label>'
@@ -8772,6 +8785,9 @@ async function saveDriverTemplate(driverName){
   else delete driverSettings[driverName].confTemplate;
   if(inst) driverSettings[driverName].pickupInstructions=inst;
   else delete driverSettings[driverName].pickupInstructions;
+  const policyTmpl=document.getElementById('dt-policy')?.value.trim();
+  if(policyTmpl) driverSettings[driverName].policyTemplate=policyTmpl;
+  else delete driverSettings[driverName].policyTemplate;
   await saveDriverSettings();
   document.querySelector('[style*="z-index: 12000"],[style*="z-index:12000"]')?.remove();
   showToast('\u2713 Templates saved for '+driverName.split(' ')[0]);
@@ -10876,10 +10892,36 @@ function viewReceiptImage(id, driverName){
 // ═══════════════════════════════════════════
 // Group-shared: everyone can view & add; creator or admin can delete.
 let sharedDocs = []; // [{id,title,category,location,instructions,images:[base64],uploaderName,ts}]
-const DOC_CATEGORIES = ['Pickup','Drop-off','General'];
-const DOC_COLORS = { 'Pickup':'#43a047', 'Drop-off':'#1e88e5', 'General':'#9c27b0' };
+const DOC_CATEGORIES_DEFAULT = ['Pickup','Drop-off','General'];
+const DOC_COLORS_DEFAULT = { 'Pickup':'#43a047', 'Drop-off':'#1e88e5', 'General':'#9c27b0' };
+const FOLDER_PALETTE = ['#e53935','#f4511e','#f6bf26','#33b679','#0b8043','#039be5','#3f51b5','#7986cb','#8e24aa','#d81b60','#616161','#ad1457'];
+let docFolders = []; // custom admin folders: [{id,name,color}]
+let DOC_CATEGORIES = [...DOC_CATEGORIES_DEFAULT];
+let DOC_COLORS = {...DOC_COLORS_DEFAULT};
 let docFilter = 'All';
-let docStagedImages = []; // base64 images staged in the upload modal
+let docStagedImages = [];
+
+function rebuildDocCategories(){
+  DOC_CATEGORIES = [...DOC_CATEGORIES_DEFAULT];
+  DOC_COLORS = {...DOC_COLORS_DEFAULT};
+  docFolders.forEach(function(f){
+    if(!DOC_CATEGORIES.includes(f.name)) DOC_CATEGORIES.push(f.name);
+    DOC_COLORS[f.name] = f.color;
+  });
+}
+
+async function loadDocFolders(){
+  try{
+    const d = await storageGet('kat:docFolders');
+    if(d) docFolders = Array.isArray(d)?d:Object.values(d);
+    rebuildDocCategories();
+  }catch(e){}
+}
+
+async function saveDocFolders(){
+  await storageSet('kat:docFolders', docFolders);
+  rebuildDocCategories();
+}
 
 
 // ════════════════════════════════════════════
@@ -10928,17 +10970,33 @@ function renderSelfieAdminSection(){
 async function loadDocs(){
   const d = await storageGet('kat:documents');
   if(d) sharedDocs = Array.isArray(d) ? d : Object.values(d);
+  await loadDocFolders();
 }
 async function saveDocs(){ await storageSet('kat:documents', sharedDocs); }
 
-function setDocFilter(cat, el){
+function setDocFilter(cat){
   docFilter = cat;
-  document.querySelectorAll('#doc-filter-tabs .cal-tab').forEach(t=>t.classList.remove('active'));
-  if(el) el.classList.add('active');
+  renderDocFilterTabs();
   renderDocuments();
 }
 
+function renderDocFilterTabs(){
+  const wrap = document.getElementById('doc-filter-tabs');
+  if(!wrap) return;
+  const allCats = ['All', ...DOC_CATEGORIES];
+  wrap.innerHTML = allCats.map(function(cat){
+    const active = cat===docFilter?' active':'';
+    const color = DOC_COLORS[cat];
+    const style = color&&cat!=='All'?'border-bottom:2px solid '+color+';':'';
+    return '<button class="cal-tab'+active+'" style="'+style+'" onclick="setDocFilter(\''+cat+'\')">'+escHtml(cat)+'</button>';
+  }).join('');
+  if(isAdmin()){
+    wrap.innerHTML += '<button onclick="openManageFolders()" style="margin-left:auto;padding:.3rem .7rem;background:none;border:1.5px solid var(--light);border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;color:var(--mid);white-space:nowrap;">&#9881; Folders</button>';
+  }
+}
+
 function renderDocuments(){
+  renderDocFilterTabs();
   const list = document.getElementById('doc-list');
   if(!list) return;
   let docs = [...sharedDocs];
@@ -10999,6 +11057,74 @@ function compressDocImage(file, maxDim=1280, quality=0.7){
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+function openManageFolders(){
+  if(!isAdmin()){ showToast('Admins only','error'); return; }
+  const modal = document.createElement('div');
+  modal.id = 'folder-mgr-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:600;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  function renderFolderMgrContent(){
+    const defaultRows = DOC_CATEGORIES_DEFAULT.map(function(name){
+      const c = DOC_COLORS_DEFAULT[name];
+      return '<div style="display:flex;align-items:center;gap:.5rem;padding:.45rem .5rem;background:var(--surface);border-radius:7px;margin-bottom:.35rem;">'
+        +'<div style="width:12px;height:12px;border-radius:50%;background:'+c+';flex-shrink:0;"></div>'
+        +'<span style="flex:1;font-size:.88rem;font-weight:600;color:var(--black);">'+escHtml(name)+'</span>'
+        +'<span style="font-size:.72rem;color:var(--mid);">Default</span></div>';
+    }).join('');
+    const customRows = docFolders.map(function(f,i){
+      return '<div style="display:flex;align-items:center;gap:.5rem;padding:.45rem .5rem;background:var(--surface);border-radius:7px;margin-bottom:.35rem;">'
+        +'<div style="width:12px;height:12px;border-radius:50%;background:'+f.color+';flex-shrink:0;"></div>'
+        +'<span style="flex:1;font-size:.88rem;font-weight:600;color:var(--black);">'+escHtml(f.name)+'</span>'
+        +'<button onclick="deleteFolderByIndex('+i+')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:.9rem;padding:0 .2rem;" title="Delete folder">&#128465;</button></div>';
+    }).join('');
+    modal.innerHTML = '<div style="background:var(--white);border-radius:16px;padding:1.5rem;max-width:400px;width:100%;max-height:90vh;overflow-y:auto;">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">'
+      +'<h3 style="margin:0;font-size:1.1rem;">&#128193; Manage Folders</h3>'
+      +'<button onclick="document.getElementById(\'folder-mgr-modal\').remove()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--mid);">&#215;</button></div>'
+      +'<div style="font-size:.75rem;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Default folders</div>'
+      +defaultRows
+      +(docFolders.length?'<div style="font-size:.75rem;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin:.75rem 0 .5rem;">Custom folders</div>'+customRows:'')
+      +'<div style="margin-top:1rem;border-top:1.5px solid var(--light);padding-top:1rem;">'
+      +'<div style="font-size:.8rem;font-weight:700;color:var(--black);margin-bottom:.4rem;">Add new folder</div>'
+      +'<div style="display:flex;gap:.5rem;">'
+      +'<input id="new-folder-name" type="text" placeholder="Folder name" maxlength="32" style="flex:1;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.9rem;"/>'
+      +'<button onclick="addFolderFromModal()" style="padding:.5rem .9rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.88rem;cursor:pointer;">Add</button>'
+      +'</div>'
+      +'<div id="folder-mgr-err" style="color:#dc2626;font-size:.8rem;margin-top:.3rem;min-height:.9rem;"></div>'
+      +'</div></div>';
+  }
+  renderFolderMgrContent();
+  window._reRenderFolderMgr = renderFolderMgrContent;
+  document.body.appendChild(modal);
+}
+
+function addFolderFromModal(){
+  const inp = document.getElementById('new-folder-name');
+  const err = document.getElementById('folder-mgr-err');
+  const name = (inp&&inp.value||'').trim();
+  if(!name){ if(err) err.textContent='Enter a folder name.'; return; }
+  if(DOC_CATEGORIES.includes(name)){ if(err) err.textContent='That folder already exists.'; return; }
+  const color = FOLDER_PALETTE[docFolders.length % FOLDER_PALETTE.length];
+  docFolders.push({id:'folder_'+Date.now(), name:name, color:color});
+  saveDocFolders().then(function(){ renderDocuments(); });
+  if(window._reRenderFolderMgr) window._reRenderFolderMgr();
+  showToast('\u2713 Folder \u201c'+name+'\u201d added');
+}
+
+async function deleteFolderByIndex(i){
+  const f = docFolders[i];
+  if(!f) return;
+  if(!confirm('Delete folder \u201c'+f.name+'\u201d? Documents in it won\u2019t be deleted \u2014 they\u2019ll move to General.')) return;
+  // Move docs in this folder to General
+  sharedDocs.forEach(function(d){ if(d.category===f.name) d.category='General'; });
+  await saveDocs();
+  docFolders.splice(i,1);
+  await saveDocFolders();
+  if(docFilter===f.name) docFilter='All';
+  renderDocuments();
+  if(window._reRenderFolderMgr) window._reRenderFolderMgr();
+  showToast('Folder removed \u2014 docs moved to General');
 }
 
 function openDocUpload(){
