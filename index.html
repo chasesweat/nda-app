@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090038">
+<meta name="version" content="202606090040">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -979,6 +979,7 @@ input,select,textarea{font-size:16px;}
           <div>✓ Confirmation texts — auto-written</div><div>✓ ✈️ Flight tracking link auto-included</div>
           <div>✓ Terminal pickup instructions</div><div>✓ 📷 Driver selfie on AP pickups</div>
           <div>✓ One-tap send</div><div>✓ Calendar confirmation log</div>
+          <div>✓ 📍 Share location to client</div><div>✓ Works on any phone &amp; carrier</div>
         </div>
       </div>
       <div>
@@ -1052,7 +1053,7 @@ input,select,textarea{font-size:16px;}
         <span style="font-size:.8rem;color:var(--mid);min-width:60px;">Driver</span>
         <select id="rm-driver-select"></select>
         <button onclick="assignDriver()" style="padding:.5rem 1rem;background:var(--gold);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;">Assign</button>
-       <button onclick="shareLocationToClient(${r.id})" style="padding:.45rem .75rem;background:#0f172a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;margin-left:.4rem;">&#128205; Share Location</button>
+       ${canSeeContact?`<button onclick="shareLocationToClient(${r.id})" style="padding:.45rem .75rem;background:#0f172a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;margin-left:.4rem;">&#128205; Share Location</button>`:''}
       </div>
       <div id="rm-interest"></div>
       <div id="mt-wrap"></div>
@@ -3226,7 +3227,7 @@ function calSearch(){
       return '<div onclick="openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.85rem;padding:.7rem .85rem;border-radius:10px;margin-bottom:.5rem;background:'+c+'66;border:2px solid '+c+';cursor:pointer;flex-wrap:wrap;">'
         +'<div style="width:6px;align-self:stretch;min-height:34px;border-radius:3px;background:'+c+';"></div>'
         +'<div style="min-width:58px;"><strong style="font-size:.82rem;color:'+tc+';">'+fmtDateShort(r.date)+'</strong><br><span style="font-size:.72rem;color:'+tc+';opacity:.78;">'+(r.time||'')+'</span></div>'
-        +'<div style="flex:1;min-width:120px;"><div style="font-weight:600;font-size:.9rem;color:'+tc+';">'+check+escHtml(r.client||'—')+'</div><div style="font-size:.74rem;color:'+tc+';opacity:.78;">'+(r.driver?escHtml(r.driver.split(' ')[0]):'Unassigned')+(r.phone?' · '+escHtml(r.phone):'')+'</div></div>'
+        +'<div style="flex:1;min-width:120px;"><div style="font-weight:600;font-size:.9rem;color:'+tc+';">'+check+escHtml(r.client||'—')+'</div><div style="font-size:.74rem;color:'+tc+';opacity:.78;">'+(r.driver?escHtml(r.driver.split(' ')[0]):'Unassigned')+(r.phone&&(currentUser&&currentUser.name===r.createdBy||(getMyDriverName()&&getMyDriverName()===r.driver))?' · '+escHtml(r.phone):'')+'</div></div>'
         +'<span class="badge '+typeCls+'">'+escHtml((r.type||'')+apVehSuffix(r))+'</span>'
         +'<div style="font-weight:600;color:'+(tc==='#fff'?'#fff':'var(--green)')+';">$'+r.price+'</div>'
       +'</div>';
@@ -5044,6 +5045,7 @@ function _rtTryRecover(){ /* no persistent state needed for address-based approa
 // ── LOCATION SHARE ───────────────────────────────────────────────────────
 function _closeLocShare(){var o=document.getElementById('loc-share-overlay');if(o)o.remove();}
 function shareLocationToClient(rideId){
+  if(!hasIncomeAccess()){showIncomeOrUpgrade(null);return;}
   var r=rideId?rides.find(function(x){return x.id===rideId;}):null;
   if(!navigator.geolocation){showToast('GPS not available on this device');return;}
   var overlay=document.createElement('div');
