@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090048">
+<meta name="version" content="202606090052">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1658,6 +1658,21 @@ function setupRealtimeListeners(){
   // Listen for notification changes
   fbRef('nda/kat/notifications').on('value', snap=>{
     const data = snap.exists() ? (snap.val()||{}) : {};
+    // Preserve locally-set read states so the bell stays cleared
+    // even if this fires before our saveNotifs() round-trips.
+    try{
+      Object.keys(notifications||{}).forEach(function(dn){
+        var localArr=notifications[dn]||[];
+        var incoming=data[dn];
+        if(!Array.isArray(incoming)) return;
+        localArr.forEach(function(ln){
+          if(ln && ln.read && ln.ts){
+            var match=incoming.find(function(x){return x&&x.ts===ln.ts&&x.msg===ln.msg;});
+            if(match) match.read=true;
+          }
+        });
+      });
+    }catch(e){ console.warn('notif merge', e); }
     notifications = data;
     updateNotifBadge();
     maybePopNotifications(data);
@@ -11299,6 +11314,9 @@ function showAuthScreen(){
 
 function enterApp(){
   _notifFirstLoad = true; // re-seed on login so existing notifications don't all re-pop
+  // Multi-account safety: immediately remove this device from any OTHER driver's
+  // push tokens so you never get pushes for an account you previously tested.
+  setTimeout(function(){ try{ _purgeDeviceTokens(getMyDriverName()); }catch(e){} }, 300);
   setTimeout(function(){ if(typeof loadGoogleMapsAPI==='function') loadGoogleMapsAPI(); }, 800);
   setTimeout(function(){ if(typeof check24hOverrides==='function') check24hOverrides(); }, 2500);
   setTimeout(function(){ if(typeof checkForActiveSOSOnLogin==='function') checkForActiveSOSOnLogin(); }, 2000);
@@ -11766,6 +11784,10 @@ document.getElementById('pw-input').addEventListener('keydown',e=>{if(e.key==='E
 
 function logout(){
   stopPresence();
+  // Remove THIS device's push token for the user logging out
+  try{ var _ld=getMyDriverName(), _dev=getDeviceKey();
+    if(_ld && fbDB){ ensureFbAuth().then(function(){ fbRef('nda/kat/fcmTokens/'+_ld+'/'+_dev).remove().catch(function(){}); }).catch(function(){}); }
+  }catch(e){}
   try{ localStorage.removeItem('nda-session'); }catch(e){}
   currentUser=null; selectedUser=null;
   document.getElementById('auth-screen').style.display='flex';
@@ -12863,7 +12885,9 @@ function maybePopNotifications(data){
     _notifShown.add(key);
     const _myName = currentUser?.name||'';
     const _isRecent = n.ts && (Date.now() - n.ts) < 120000;
-    const _notSelf = n.createdBy && n.createdBy !== _myName;
+    var _nbRm=PROXY_MAP[_myName]||USER_DRIVER_MAP[_myName]||_myName;
+    var _nbRc=n.createdBy?(PROXY_MAP[n.createdBy]||USER_DRIVER_MAP[n.createdBy]||n.createdBy):null;
+    const _notSelf = _nbRc && _nbRc !== _nbRm;
     if(!n.read && n.osNotif !== false && _isRecent && _notSelf) fireLocalNotification('Northwest Drivers', n.msg || 'New update', n);
   });
 }
@@ -12924,6 +12948,23 @@ function getDeviceKey(){
   if(!k){ k = 'd' + Math.random().toString(36).slice(2,12); localStorage.setItem('nda-device-key', k); }
   return k;
 }
+async function _purgeDeviceTokens(keepDriver){
+  // Remove THIS device's FCM token from every driver except keepDriver.
+  // Critical for multi-account testing on one device: prevents a device from
+  // receiving pushes meant for a driver you previously logged in as.
+  try{
+    var _dev=getDeviceKey();
+    var _all=await storageGet('kat:fcmTokens');
+    if(_all && typeof _all==='object'){
+      for(var _drv in _all){
+        if(_drv===keepDriver) continue;
+        if(_all[_drv] && _all[_drv][_dev]){
+          if(fbDB){ try{ await ensureFbAuth(); await fbRef('nda/kat/fcmTokens/'+_drv+'/'+_dev).remove(); }catch(e){} }
+        }
+      }
+    }
+  }catch(e){ console.warn('device token purge', e); }
+}
 async function registerFcmToken(){
   try{
     if(typeof firebase === 'undefined' || !firebase.messaging) return;
@@ -12933,7 +12974,11 @@ async function registerFcmToken(){
     if(!driver) return;
     const reg = await navigator.serviceWorker.register('firebase-messaging-sw.js', { scope: 'firebase-cloud-messaging-push-scope' });
     const token = await firebase.messaging().getToken({ vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
-    if(token){ await storageSet('kat:fcmTokens/'+driver+'/'+getDeviceKey(), token); }
+    if(token){
+      var _dev=getDeviceKey();
+      await _purgeDeviceTokens(driver);  // clear stale tokens from other drivers on this device
+      await storageSet('kat:fcmTokens/'+driver+'/'+_dev, token);
+    }
   }catch(e){ console.warn('FCM token registration failed:', e); }
 }
 async function askNotificationPermission(){
@@ -12972,6 +13017,14 @@ function setupFCMForeground(){
 // Write a notification request to DB → service worker picks it up
 async function sendPushToDriver(driverName, title, body){
   if(!fbDB || !driverName) return;
+  // Never push to the person who triggered the action.
+  // Match the SAME name space the FCM token is stored under (driver name via USER_DRIVER_MAP).
+  var _meDriver=getMyDriverName();
+  var _tgtDriver=USER_DRIVER_MAP[driverName]||driverName;
+  if(_meDriver && _tgtDriver && _meDriver===_tgtDriver) return;
+  // Also skip if same person via Kat↔Morgan proxy
+  var _mp=PROXY_MAP[currentUser&&currentUser.name], _tp=PROXY_MAP[driverName];
+  if(_mp && (_mp===_tgtDriver || _mp===driverName)) return;
   try {
     const id = Date.now()+'_'+Math.random().toString(36).slice(2,7);
     await fbRef('nda/kat/pushQueue/'+id).set({ to: driverName, title, body, ts: Date.now() });
