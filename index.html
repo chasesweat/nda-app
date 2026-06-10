@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090040">
+<meta name="version" content="202606090046">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -183,9 +183,9 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
 .btn-icon:hover{color:var(--gold);}
 
 /* RIDE DETAIL MODAL */
-.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:center;justify-content:center;}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:center;justify-content:center;border-radius:16px;}
 .modal-overlay.show{display:flex;}
-.modal{background:var(--white);border-radius:16px;padding:2rem;max-width:min(560px,95vw);width:94%;max-height:90vh;overflow-y:auto;}
+.modal{background:var(--white);border-radius:16px;padding:2rem;max-width:min(560px,95vw);width:94%;max-height:90vh;overflow-y:auto;overflow-x:hidden;}
 .modal h2{font-family:'Playfair Display',serif;font-size:1.3rem;margin-bottom:1.25rem;}
 .modal-footer{display:flex;gap:.75rem;justify-content:flex-end;margin-top:1.5rem;flex-wrap:wrap;}
 .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem 1.5rem;margin-bottom:1.25rem;}
@@ -666,7 +666,7 @@ input,select,textarea{font-size:16px;}
     </div>
     <div id="tsa-checkpoints" style="display:flex;flex-direction:column;gap:.4rem;"></div>
     <div style="margin-top:.6rem;padding-top:.6rem;border-top:1px solid var(--light);">
-      <a href="https://www.tsa.gov/travel/security-screening/waittime/ATL" target="_blank" rel="noopener"
+      <a href="https://www.tsa.gov/travel/security-screening" target="_blank" rel="noopener"
         style="font-size:.72rem;color:#9c27b0;text-decoration:none;">View on TSA.gov ↗</a>
       <span style="color:var(--mid);font-size:.72rem;"> · </span>
       <a href="https://www.google.com/search?q=ATL+TSA+wait+times+today" target="_blank" rel="noopener"
@@ -718,6 +718,10 @@ input,select,textarea{font-size:16px;}
       </div>
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;">
         <select id="client-driver-filter" onchange="renderClients()" style="display:none;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.82rem;"><option value="">All drivers</option></select>
+         <button id="client-unlock-btn" onclick="openClientUnlockPanel()" style="display:none;padding:.45rem .9rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">&#x1F512; Unlock List</button>
+         <div id="client-unlock-view-wrap" style="display:none;align-items:center;gap:.4rem;">
+           <select id="client-unlock-view-sel" onchange="renderClients()" style="padding:.45rem .75rem;border:1.5px solid #c4b5fd;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.82rem;"></select>
+         </div>
         <input type="file" id="client-csv-input" accept=".csv,.xlsx,.xls" style="display:none;" onchange="importClientsFromFile(this)" />
         <button id="cautious-list-btn" onclick="toggleCautiousList()" style="background:none;border:1.5px solid #fbbf24;border-radius:8px;padding:.5rem .9rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;color:#92400e;">⚠️ Cautious List</button>
         <button onclick="openAddClientModal()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:.5rem .9rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">+ Add Client</button>
@@ -1040,7 +1044,8 @@ input,select,textarea{font-size:16px;}
 <div class="modal-overlay" id="ride-modal">
   <div class="modal" style="max-width:min(580px,95vw);">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:.5rem;">
-      <h2 id="rm-title" style="margin:0;">Ride Details</h2>
+      <h2 id="rm-title" style="margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Ride Details</h2>
+      <button onclick="closeRideModal()" style="background:none;border:none;font-size:1.6rem;line-height:1;color:var(--mid);cursor:pointer;padding:0 .25rem;flex-shrink:0;" aria-label="Close">&times;</button>
       <div style="display:flex;gap:.5rem;">
         <button id="rm-edit-btn" class="btn-secondary" onclick="toggleEditMode(true)" style="font-size:.8rem;padding:.4rem .9rem;">✏️ Edit</button>
         <button id="rm-save-btn" class="btn-primary" onclick="saveRideEdits()" style="display:none;width:auto;padding:.4rem .9rem;font-size:.8rem;">Save Changes</button>
@@ -1053,7 +1058,8 @@ input,select,textarea{font-size:16px;}
         <span style="font-size:.8rem;color:var(--mid);min-width:60px;">Driver</span>
         <select id="rm-driver-select"></select>
         <button onclick="assignDriver()" style="padding:.5rem 1rem;background:var(--gold);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;">Assign</button>
-       ${canSeeContact?`<button onclick="shareLocationToClient(${r.id})" style="padding:.45rem .75rem;background:#0f172a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;margin-left:.4rem;">&#128205; Share Location</button>`:''}
+       <div id="rm-share-loc-btn"></div>
+:''}
       </div>
       <div id="rm-interest"></div>
       <div id="mt-wrap"></div>
@@ -1728,7 +1734,7 @@ async function initApp() {
     await loadPasswords();
     await loadSubscriptions();
     await loadImportedClients();
-    await loadClientRequests(); await loadClientReqDriver(); try{_mtTryRecover();}catch(e){} try{_rtTryRecover();}catch(e){}
+    await loadClientRequests(); await loadClientReqDriver(); try{_mtTryRecover();}catch(e){} try{_rtTryRecover();}catch(e){} await loadClientUnlock();
   await loadCautiousList();
   await loadGlobalSettings();
     await loadExpenses();
@@ -2239,6 +2245,9 @@ function calcQuote() {
   let lines = [];
   let tripTotal = 0;
 
+  const owType  = type==='ONE WAY';
+  const lcType  = type==='LOCAL';
+
   if(rtType){
     const rtMiles   = miles * 2;
     const rtCharge  = rtMiles * RATE_PER_MILE;
@@ -2246,6 +2255,12 @@ function calcQuote() {
     tripTotal = rtCharge + rtService;
     lines.push(miles>0?{label:'Round trip mileage', val:rtCharge, note:`${miles} mi × 2 = ${rtMiles} mi × $${RATE_PER_MILE.toFixed(2)}/mi`}:{label:'Round trip mileage', val:0, note:'Enter miles above'});
     lines.push({label:'Service fee', val:rtService});
+  } else if(owType || lcType){
+    const owCharge  = miles * RATE_PER_MILE;
+    const owService = 10;
+    tripTotal = owCharge + owService;
+    lines.push(miles>0?{label:'Mileage', val:owCharge, note:`${miles} mi × $${RATE_PER_MILE.toFixed(2)}/mi`}:{label:'Mileage', val:0, note:'Enter miles above'});
+    lines.push({label:'Service fee', val:owService});
   } else {
     const overMiles = apType && miles > 52 ? miles - 50 : 0;
     const overage   = overMiles * RATE_PER_MILE;
@@ -2253,7 +2268,7 @@ function calcQuote() {
     lines.push({label:`Base rate (${vehicle}) — includes up to 50 mi`, val:base});
     if(apType && miles > 0 && miles <= 52) lines.push({label:`Mileage (${miles} mi — within free radius)`, val:0, note:'No overage — within 52 mi grace buffer'});
     if(overage > 0) lines.push({label:'Mileage overage', val:overage, note:`(${miles} mi − 50) = ${overMiles} mi × $${RATE_PER_MILE.toFixed(2)}/mi`});
-    if(!apType && !rtType && miles > 0) lines.push({label:`Mileage (${miles} mi)`, val:0, note:'Included in base rate'});
+
   }
 
   const surcharges = getSurchargeLines();
@@ -3112,7 +3127,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
                   <div class="week-ride-client" style="color:${tc};">${r.confirmSent?'<span style="color:var(--green);font-weight:900;">✓ </span>':''}${r.client}</div>
                   <div class="week-ride-detail" style="color:${tc};opacity:.78;">${r.vehicle} · ${r.driver?r.driver.split(' ')[0]:'Unassigned'}${ic?` · <span style="color:#e0245e;font-weight:700;">❤️${ic}</span>`:''}</div>
                   ${r.type==='AP PICK UP'&&r.flight?`<a href="https://www.google.com/search?q=${encodeURIComponent((r.flight||"").trim().replace(/\s+/g,"").toUpperCase())}+flight+tracking" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:${tc};text-decoration:underline;opacity:.9;white-space:nowrap;">✈️ Flight Tracking</a>`:''}
-                  ${r.type==='AP RUN'?'<a href="https://redesign.atl.com/security-wait-times/" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:'+tc+';text-decoration:underline;opacity:.9;white-space:nowrap;">🔒 TSA Wait Times</a>':''}  
+                  ${r.type==='AP RUN'?'<a href="https://www.atl.com/times/" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:'+tc+';text-decoration:underline;opacity:.9;white-space:nowrap;">🔒 TSA Wait Times</a>':''}  
                 </div>
                 <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
                   <div class="week-ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}</div>
@@ -3921,14 +3936,21 @@ function openRideModal(id){
   // driver assign row
   const drRow=document.getElementById('rm-driver-row');
   drRow.style.display=canAssignOnRide(r)?'flex':'none';
+  var _slBtn=document.getElementById('rm-share-loc-btn');
+  if(_slBtn)_slBtn.innerHTML=canSeeContact&&hasIncomeAccess()?'<button onclick="shareLocationToClient('+r.id+')" style="padding:.45rem .75rem;background:#0f172a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;">&#128205; Share Location</button>':'';
   const dSel=document.getElementById('rm-driver-select');
   dSel.innerHTML=driverOptionsHTML(r.driver, r.date);
   // delete button
   const delBtn=document.getElementById('rm-delete-btn');
   if(delBtn) delBtn.style.display=canDeleteRide(r)?'inline-block':'none';
-  // edit button — admins or creator
+  // edit button — creator only (Kat↔Morgan proxy)
   const editBtn=document.getElementById('rm-edit-btn');
-  if(editBtn) editBtn.style.display=canDeleteRide(r)?'inline-flex':'none';
+  if(editBtn){
+    const _eMe=currentUser&&currentUser.name;
+    const _eRm=PROXY_MAP[_eMe]||USER_DRIVER_MAP[_eMe]||_eMe;
+    const _eRc=PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy;
+    editBtn.style.display=(_eRm&&_eRc&&_eRm===_eRc)?'inline-flex':'none';
+  }
   setCancelBtn(r.status==='cancelled');
   // build view mode detail grid
   renderRideView(r);
@@ -3959,12 +3981,17 @@ function renderRideView(r){
         : escHtml(r.flight)) + '</div>'
     : '';
   const tsaRowHtml = (r.type==='AP RUN')
-    ? '<div style="font-size:.88rem;margin-bottom:3px;"><a href="https://redesign.atl.com/security-wait-times/" target="_blank" rel="noopener" style="color:#4285f4;font-weight:600;text-decoration:underline;">\uD83D\uDD12 TSA Wait Times \u2014 ATL</a></div>'
+    ? '<div style="font-size:.88rem;margin-bottom:3px;"><a href="https://www.atl.com/times/" target="_blank" rel="noopener" style="color:#4285f4;font-weight:600;text-decoration:underline;">\uD83D\uDD12 TSA Wait Times \u2014 ATL</a></div>'
     : '';
   if(!window._offeredRides) window._offeredRides=new Set();
   const _alreadyOffered=window._offeredRides.has(r.id);
   const _pairedRideForBtn=(r.pairId&&rides)?rides.find(function(x){return x.id!==r.id&&x.pairId===r.pairId;}):null;
-  const shareOfferingsBtn = (r.status!=='cancelled')
+  // Post to Offerings — creator only (Kat↔Morgan treated as same person)
+  const _myLogin = currentUser&&currentUser.name;
+  const _resolvedMe = PROXY_MAP[_myLogin]||USER_DRIVER_MAP[_myLogin]||_myLogin;
+  const _resolvedCreator = PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy;
+  const canPostOfferings = !!(_resolvedMe && _resolvedCreator && _resolvedMe===_resolvedCreator);
+  const shareOfferingsBtn = (r.status!=='cancelled' && canPostOfferings)
     ? '<div class="detail-row" style="grid-column:1/-1;margin-top:.25rem;">'+(_alreadyOffered?'<div style="padding:.5rem;text-align:center;font-size:.84rem;color:var(--green);font-weight:600;">\u2705 Posted to Offerings</div>':'<button onclick="shareRideToOfferings('+r.id+')" style="width:100%;padding:.55rem;background:none;border:1.5px solid #9c27b0;color:#9c27b0;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.84rem;font-weight:600;cursor:pointer;">\uD83D\uDCE4 Post to Offerings</button>')+'</div>'
     : '';
   const address = r.type==='AP RUN' ? r.home :
@@ -4764,6 +4791,266 @@ async function _saveLogMiles(rideId){
   var w=document.getElementById('mt-wrap'); if(w)w.innerHTML=mtBarHtml(rideId);
   showToast('\uD83D\uDCCD '+mi+' mi saved'+(tip?' + $'+tip+' tip':''));
 }
+
+// ── CLIENT LIST UNLOCK (double admin approval) ────────────────────────────
+var clientUnlockRequests = {};  // { reqId: {requester, target, ts, approvals:[]} }
+var clientUnlockGrants   = {};  // { grantKey: {requester, target, expiry} }
+var CLIENT_UNLOCK_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+async function loadClientUnlock(){
+  try{
+    var d = await storageGet('kat:clientUnlockRequests');
+    if(d) clientUnlockRequests = d;
+  }catch(e){ clientUnlockRequests = {}; }
+  try{
+    var g = await storageGet('kat:clientUnlockGrants');
+    if(g) clientUnlockGrants = g;
+  }catch(e){ clientUnlockGrants = {}; }
+  // Prune expired grants
+  var now = Date.now();
+  var changed = false;
+  Object.keys(clientUnlockGrants).forEach(function(k){
+    if(clientUnlockGrants[k].expiry < now){ delete clientUnlockGrants[k]; changed=true; }
+  });
+  if(changed) await storageSet('kat:clientUnlockGrants', clientUnlockGrants);
+}
+async function saveClientUnlock(){
+  await storageSet('kat:clientUnlockRequests', clientUnlockRequests);
+  await storageSet('kat:clientUnlockGrants',   clientUnlockGrants);
+}
+
+function _unlockGrantKey(requester, target){
+  return (requester+'::'+target).replace(/[^a-zA-Z0-9:_-]/g,'_');
+}
+function hasClientUnlock(targetDriverName){
+  // Returns true if current user has an active grant to view targetDriverName's list
+  var requester = currentUser && currentUser.name;
+  if(!requester) return false;
+  var k = _unlockGrantKey(requester, targetDriverName);
+  var g = clientUnlockGrants[k];
+  return !!(g && g.expiry > Date.now());
+}
+function myPendingUnlockRequest(targetDriverName){
+  var me = currentUser && currentUser.name;
+  return Object.values(clientUnlockRequests).find(function(r){
+    return r.requester===me && r.target===targetDriverName && !r.granted;
+  });
+}
+function pendingRequestsNeedingMyApproval(){
+  var me = currentUser && currentUser.name;
+  if(!me || !isAdmin()) return [];
+  return Object.values(clientUnlockRequests).filter(function(r){
+    return !r.granted
+      && r.requester !== me                    // can't approve own request
+      && (r.approvals||[]).indexOf(me) < 0;   // haven't already approved
+  });
+}
+
+async function requestClientUnlock(targetLoginName){
+  var me = currentUser && currentUser.name;
+  if(!me || !isAdmin()){ showToast('Admins only'); return; }
+  // Check if already have a grant
+  var targetDriver = USER_DRIVER_MAP[targetLoginName] || targetLoginName;
+  if(hasClientUnlock(targetDriver)){ showToast('You already have access'); renderClients(); return; }
+  // Check if already have a pending request
+  if(myPendingUnlockRequest(targetDriver)){ showToast('Request already pending — waiting for a second admin to approve'); return; }
+  var reqId = 'ulk_' + me + '_' + targetLoginName + '_' + Date.now();
+  clientUnlockRequests[reqId] = {
+    id: reqId,
+    requester: me,
+    requesterDriver: USER_DRIVER_MAP[me] || me,
+    target: targetDriver,
+    targetLogin: targetLoginName,
+    ts: Date.now(),
+    approvals: [me],   // requester is first approver
+    granted: false,
+  };
+  await saveClientUnlock();
+  // Notify other admins
+  USERS.filter(function(u){ return u.role==='admin' && u.name!==me && !u.disabled; })
+       .forEach(function(u){
+         addNotification(USER_DRIVER_MAP[u.name]||u.name, null, 'clientUnlock',
+           me + ' is requesting access to ' + targetLoginName + '\'s client list. Open the Client Directory to approve or deny.');
+       });
+  updateNotifBadge();
+  showToast('\uD83D\uDD13 Request sent — a second admin must approve');
+  _closeUnlockPanel();
+  renderClients();
+}
+
+async function approveClientUnlock(reqId){
+  var me = currentUser && currentUser.name;
+  var req = clientUnlockRequests[reqId];
+  if(!req || req.granted) return;
+  if(req.requester === me){ showToast('You cannot approve your own request'); return; }
+  if((req.approvals||[]).indexOf(me)>=0){ showToast('Already approved by you'); return; }
+  req.approvals = (req.approvals||[]).concat([me]);
+  // Grant if we now have 2 different admins
+  if(req.approvals.length >= 2){
+    req.granted = true;
+    var k = _unlockGrantKey(req.requester, req.target);
+    clientUnlockGrants[k] = {
+      requester: req.requester,
+      target: req.target,
+      approvedBy: me,
+      expiry: Date.now() + CLIENT_UNLOCK_EXPIRY_MS,
+    };
+    // Notify the requester
+    addNotification(USER_DRIVER_MAP[req.requester]||req.requester, null, 'clientUnlockGranted',
+      'Your request to view ' + req.targetLogin + '\'s client list was approved. Access expires in 24 hours.');
+    updateNotifBadge();
+    showToast('\uD83D\uDD13 Access granted to ' + req.requester + ' for 24 hours');
+  } else {
+    showToast('Approved — one more admin needed');
+  }
+  await saveClientUnlock();
+  _closeUnlockPanel();
+  renderClients();
+}
+
+async function denyClientUnlock(reqId){
+  var me = currentUser && currentUser.name;
+  var req = clientUnlockRequests[reqId];
+  if(!req) return;
+  delete clientUnlockRequests[reqId];
+  await saveClientUnlock();
+  showToast('Request denied');
+  _closeUnlockPanel();
+  renderClients();
+}
+
+async function revokeClientUnlock(grantKey){
+  delete clientUnlockGrants[grantKey];
+  await saveClientUnlock();
+  showToast('Access revoked');
+  _closeUnlockPanel();
+  renderClients();
+}
+
+function _closeUnlockPanel(){ var p=document.getElementById('unlock-panel-overlay'); if(p)p.remove(); }
+
+function openClientUnlockPanel(){
+  if(!isAdmin()){ showToast('Admins only'); return; }
+  _closeUnlockPanel();
+  var me = currentUser && currentUser.name;
+  var otherAdmins = USERS.filter(function(u){ return u.role==='driver' && !u.disabled; });
+  var adminDrivers = USERS.filter(function(u){ return u.role==='driver' && !u.disabled; });
+  // All non-admin drivers + admins who aren't me
+  var allDrivers = USERS.filter(function(u){ return !u.disabled && u.name!==me; });
+
+  var pendingApproval = pendingRequestsNeedingMyApproval();
+  var myGrants = Object.entries(clientUnlockGrants).filter(function(e){ return e[1].requester===me; });
+  var activeRequests = Object.values(clientUnlockRequests).filter(function(r){
+    return r.requester===me && !r.granted;
+  });
+
+  var ov = document.createElement('div');
+  ov.id = 'unlock-panel-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14000;display:flex;align-items:flex-start;justify-content:center;padding:2rem 1rem;overflow:auto;';
+  ov.onclick = function(e){ if(e.target===ov) _closeUnlockPanel(); };
+
+  var pendingHtml = pendingApproval.length ? (
+    '<div style="margin-bottom:1rem;">'
+    +'<div style="font-size:.7rem;font-weight:700;color:#dc2626;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.5rem;">'
+    +'\u26A0\uFE0F Pending your approval ('+pendingApproval.length+')</div>'
+    + pendingApproval.map(function(r){
+        var ago = Math.round((Date.now()-r.ts)/60000);
+        var agoStr = ago<60?ago+'m ago':Math.floor(ago/60)+'h ago';
+        return '<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:.7rem .9rem;margin-bottom:.5rem;">'
+          +'<div style="font-size:.88rem;font-weight:700;color:#0f172a;margin-bottom:2px;">'
+          +escHtml(r.requester)+' \u2192 '+escHtml(r.targetLogin)+'\'s list</div>'
+          +'<div style="font-size:.72rem;color:#64748b;margin-bottom:.6rem;">Requested '+agoStr+'</div>'
+          +'<div style="display:flex;gap:.5rem;">'
+          +'<button onclick="denyClientUnlock(\''+r.id+'\')" style="flex:1;padding:.45rem;background:#f1f5f9;color:#475569;border:none;border-radius:8px;font-family:inherit;font-size:.82rem;font-weight:600;cursor:pointer;">Deny</button>'
+          +'<button onclick="approveClientUnlock(\''+r.id+'\')" style="flex:2;padding:.45rem;background:#16a34a;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;">\u2713 Approve Access</button>'
+          +'</div></div>';
+      }).join('')
+    +'</div>'
+  ) : '';
+
+  var myGrantsHtml = myGrants.length ? (
+    '<div style="margin-bottom:1rem;">'
+    +'<div style="font-size:.7rem;font-weight:700;color:#16a34a;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.5rem;">\uD83D\uDD13 Your active access</div>'
+    + myGrants.map(function(e){
+        var k=e[0], g=e[1];
+        var expiresIn = Math.round((g.expiry-Date.now())/3600000);
+        return '<div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:.65rem .9rem;margin-bottom:.45rem;display:flex;align-items:center;justify-content:space-between;">'
+          +'<div><div style="font-size:.88rem;font-weight:700;color:#0f172a;">'+escHtml(g.target)+'\'s list</div>'
+          +'<div style="font-size:.72rem;color:#64748b;">Expires in '+expiresIn+'h &bull; approved by '+escHtml(g.approvedBy)+'</div></div>'
+          +'<button onclick="revokeClientUnlock(\''+k+'\')" style="padding:.3rem .7rem;background:none;border:1px solid #dc2626;border-radius:7px;color:#dc2626;font-size:.75rem;font-weight:600;cursor:pointer;font-family:inherit;">Revoke</button>'
+          +'</div>';
+      }).join('')
+    +'</div>'
+  ) : '';
+
+  var activeReqHtml = activeRequests.length ? (
+    '<div style="margin-bottom:1rem;">'
+    +'<div style="font-size:.7rem;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.5rem;">\u23F3 Pending requests</div>'
+    + activeRequests.map(function(r){
+        return '<div style="background:#fefce8;border:1.5px solid #fde68a;border-radius:10px;padding:.65rem .9rem;margin-bottom:.45rem;font-size:.85rem;color:#92400e;">'
+          +'\u23F3 Waiting for second admin to approve access to '+escHtml(r.targetLogin)+'\'s list</div>';
+      }).join('')
+    +'</div>'
+  ) : '';
+
+  var requestHtml = '<div>'
+    +'<div style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.5rem;">Request access to a driver\'s list</div>'
+    +'<select id="unlock-driver-sel" style="width:100%;padding:.55rem .75rem;border:1.5px solid #e2e8f0;border-radius:9px;font-family:inherit;font-size:.9rem;margin-bottom:.5rem;">'
+    +'<option value="">— Choose a driver —</option>'
+    + allDrivers.map(function(u){
+        var dn = USER_DRIVER_MAP[u.name]||u.name;
+        var granted = hasClientUnlock(dn);
+        var pending = !!myPendingUnlockRequest(dn);
+        var label = escHtml(u.name)+(granted?' \u2713 (access active)':pending?' \u23F3 (pending)':'');
+        return '<option value="'+escHtml(u.name)+'"'+(granted||pending?' disabled':'')+'>'+label+'</option>';
+      }).join('')
+    +'</select>'
+    +'<div style="background:#f5f3ff;border:1px solid #c4b5fd;border-radius:8px;padding:.55rem .75rem;font-size:.76rem;color:#4c1d95;margin-bottom:.75rem;">'
+    +'\uD83D\uDD12 Requires approval from a second admin. Access expires after 24 hours and can be revoked at any time.</div>'
+    +'<button onclick="_submitUnlockRequest()" style="width:100%;padding:.6rem;background:#7c3aed;color:#fff;border:none;border-radius:9px;font-family:inherit;font-size:.9rem;font-weight:700;cursor:pointer;">\uD83D\uDD13 Request Access</button>'
+    +'</div>';
+
+  ov.innerHTML = '<div style="background:#fff;border-radius:16px;max-width:440px;width:100%;padding:1.25rem;'
+    +'box-shadow:0 24px 60px rgba(0,0,0,.35);max-height:90vh;overflow-y:auto;box-sizing:border-box;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">'
+    +'<div><div style="font-size:1.05rem;font-weight:800;color:#0f172a;">\uD83D\uDD12 Client List Access</div>'
+    +'<div style="font-size:.75rem;color:#64748b;margin-top:2px;">Double admin approval required</div></div>'
+    +'<button onclick="_closeUnlockPanel()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button>'
+    +'</div>'
+    + pendingHtml
+    + myGrantsHtml
+    + activeReqHtml
+    + requestHtml
+    +'</div>';
+  document.body.appendChild(ov);
+}
+
+function _buildUnlockViewPicker(){
+  var me=currentUser&&currentUser.name;
+  var myGrants=Object.values(clientUnlockGrants).filter(function(g){
+    return g.requester===me&&g.expiry>Date.now();
+  });
+  var wrap=document.getElementById('client-unlock-view-wrap');
+  if(!wrap)return;
+  if(!isAdmin()||!myGrants.length){wrap.style.display='none';return;}
+  wrap.style.display='flex';
+  var sel=document.getElementById('client-unlock-view-sel');
+  if(!sel)return;
+  var cur=sel.value;
+  sel.innerHTML='<option value="">My clients</option>'
+    +myGrants.map(function(g){
+      return '<option value="'+escHtml(g.target)+'"'+(cur===g.target?' selected':'')+'>'
+        +escHtml(g.target)+'\'s list</option>';
+    }).join('');
+}
+function _submitUnlockRequest(){
+  var sel = document.getElementById('unlock-driver-sel');
+  var val = sel && sel.value;
+  if(!val){ showToast('Choose a driver first'); return; }
+  requestClientUnlock(val);
+}
+
+
 
 
 // ── ROUTE-BASED MILEAGE (multi-stop address entry → Google Maps road distance) ──
@@ -6033,6 +6320,12 @@ async function claimRideFromOfferings(id){
 async function shareRideToOfferings(id){
   const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   if(r.status==='cancelled'){ showToast('Cannot share a cancelled ride','error'); return; }
+  // Creator-only gate (Kat↔Morgan treated as same)
+  const _ml=currentUser&&currentUser.name;
+  const _rm=PROXY_MAP[_ml]||USER_DRIVER_MAP[_ml]||_ml;
+  const _rc=PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy;
+  if(!_rm||!_rc||_rm!==_rc){
+    showToast('Only the ride creator can post to Offerings','error'); return; }
   const msg={
     sender: currentUser?.name||'',
     text: '\uD83D\uDE97 Ride Available\n'+r.client+' \u00b7 '+r.type+(r.price?' \u00b7 $'+r.price:'')+'\n\uD83D\uDCC5 '+fmtDate(r.date)+(r.time?' at '+r.time:'')+(r.vehicle?'\n\uD83D\uDE8C '+r.vehicle:'')+(r.pickup?'\n\uD83D\uDCCD '+r.pickup:'')+(r.driver?'\nDriver: '+r.driver.split(' ')[0]:' (unassigned)')+'\n\nCan anyone cover this?',
@@ -11328,7 +11621,13 @@ function renderClients(){
   // Morgan is a proxy for Kat: her viewAs resolves to Kathleen Herringdine.
   const dfEl = document.getElementById('client-driver-filter');
   if(dfEl) dfEl.style.display='none';
-  const viewAs = (currentUser && PROXY_MAP[currentUser.name]) || myDriver;
+  var unlockBtn=document.getElementById('client-unlock-btn');
+  if(unlockBtn) unlockBtn.style.display=admin?'inline-block':'none';
+  var _unlockSel=document.getElementById('client-unlock-view-sel');
+  var _unlockView=_unlockSel&&_unlockSel.value||'';
+  var _hasGrant=_unlockView&&hasClientUnlock(_unlockView);
+  const viewAs=_hasGrant?_unlockView:((currentUser&&PROXY_MAP[currentUser.name])||myDriver);
+  _buildUnlockViewPicker();
   const db = buildClientDB(viewAs);
   const q  = (document.getElementById('client-search')?.value||'').toLowerCase().trim();
   let baseClients = Object.values(db);
