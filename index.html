@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090052">
+<meta name="version" content="202606090056">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -509,7 +509,7 @@ input,select,textarea{font-size:16px;}
           <input type="hidden" id="q-type" value="AP ROUND TRIP" />
         </div>
         <div class="form-group"><label>Pickup address</label><input type="text" id="q-pickup" placeholder="Start typing…" /></div>
-        <div class="form-group" id="q-dropoff-group"><label>Drop-off address</label><input type="text" id="q-dropoff" placeholder="Start typing…" /></div>
+        <div id="q-stops-wrap"></div><div class="form-group" style="margin-top:-.3rem;margin-bottom:.75rem;"><button type="button" id="q-addstop-btn" onclick="qAddStop()" style="background:none;border:1px dashed var(--gold);color:var(--gold);border-radius:8px;padding:.45rem .9rem;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:600;cursor:pointer;">+ Add Stop</button><span style="font-size:.72rem;color:var(--mid);margin-left:.5rem;">Extra pickups between start &amp; drop-off</span></div><div class="form-group" id="q-dropoff-group"><label>Drop-off address</label><input type="text" id="q-dropoff" placeholder="Start typing…" /></div>
         <div id="q-mileage-box" style="background:var(--black);border-radius:10px;padding:1rem;margin-bottom:1rem;">
           <div style="font-size:.72rem;color:var(--mid);margin-bottom:.25rem;">Distance · Google Maps</div>
           <div id="q-miles-display" style="font-size:1.5rem;font-weight:700;color:var(--gold);">—</div>
@@ -827,7 +827,8 @@ input,select,textarea{font-size:16px;}
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
         <button onclick="openOutsideRideModal()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">+ Outside Ride</button>
         <button onclick="generateYearEndPL()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">📊 Year-End P&amp;L</button>
-        <button onclick="exportIncomeCSV()" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">⬇ Export CSV</button>
+        <button id="pricing-audit-btn" onclick="generatePricingAudit()" style="display:none;background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;margin-right:.4rem;">&#128203; Pricing Audit</button>
+         <button onclick="exportIncomeCSV()" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">⬇ Export CSV</button>
       </div>
     </div>
     <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1rem;border-bottom:2px solid var(--light);padding-bottom:.75rem;">
@@ -1749,7 +1750,7 @@ async function initApp() {
     await loadPasswords();
     await loadSubscriptions();
     await loadImportedClients();
-    await loadClientRequests(); await loadClientReqDriver(); try{_mtTryRecover();}catch(e){} try{_rtTryRecover();}catch(e){} await loadClientUnlock();
+    await loadClientRequests(); await loadClientReqDriver(); try{_mtTryRecover();}catch(e){} try{_rtTryRecover();}catch(e){} await loadClientUnlock(); try{_dmLoadPersistent();}catch(e){}
   await loadCautiousList();
   await loadGlobalSettings();
     await loadExpenses();
@@ -2387,11 +2388,152 @@ function debounceMileage(){
   document.getElementById('q-mileage-status').textContent = 'Calculating…';
   mileageTimer = setTimeout(()=>{ calcMileage(); }, 1200);
 }
+// ── Distance Matrix cache (cuts repeat Google Maps billing) ───────────────
+var _dmCache = {};         // in-memory: key -> response
+var _DM_CACHE_MAX = 400;   // cap localStorage entries
+function _dmKey(req){
+  // Stable key from origins+destinations+mode. Addresses normalized.
+  function norm(x){
+    if(typeof x==='string') return x.trim().toLowerCase().replace(/\s+/g,' ');
+    if(x && x.lat && x.lng) return x.lat()+','+x.lng();
+    return String(x);
+  }
+  var o=(req.origins||[]).map(norm).join('|');
+  var d=(req.destinations||[]).map(norm).join('|');
+  return (req.travelMode||'DRIVING')+'::'+o+'::'+d;
+}
+function _dmLoadPersistent(){
+  try{ var raw=localStorage.getItem('nda_dm_cache'); if(raw) _dmCache=JSON.parse(raw)||{}; }catch(e){ _dmCache={}; }
+}
+function _dmSavePersistent(){
+  try{
+    var keys=Object.keys(_dmCache);
+    // Trim oldest if over cap (entries store _ts)
+    if(keys.length>_DM_CACHE_MAX){
+      keys.sort(function(a,b){ return (_dmCache[a]._ts||0)-(_dmCache[b]._ts||0); });
+      keys.slice(0, keys.length-_DM_CACHE_MAX).forEach(function(k){ delete _dmCache[k]; });
+    }
+    localStorage.setItem('nda_dm_cache', JSON.stringify(_dmCache));
+  }catch(e){}
+}
+function cachedDistanceMatrix(req, callback){
+  var key;
+  try{ key=_dmKey(req); }catch(e){ key=null; }
+  if(key && _dmCache[key] && _dmCache[key].resp){
+    // Serve from cache — no API call, no billing
+    try{ callback(_dmCache[key].resp, 'OK'); return; }catch(e){}
+  }
+  gmapsService.getDistanceMatrix(req, function(resp, status){
+    if(status==='OK' && key){
+      try{ _dmCache[key]={ resp:resp, _ts:Date.now() }; _dmSavePersistent(); }catch(e){}
+    }
+    callback(resp, status);
+  });
+}
+
+// ── MULTI-STOP ROUTING (quote calculator) ────────────────────────────────
+var _qStopCount = 0;          // number of intermediate stops added
+var _qStopSeq   = 0;          // ever-incrementing id for unique field ids
+
+var _Q_MAX_STOPS = 2;  // intermediate stops (pickup + 2 + dropoff = 4 total addresses)
+function qAddStop(){
+  var _existing = document.querySelectorAll('#q-stops-wrap .q-stop-input').length;
+  if(_existing >= _Q_MAX_STOPS){ if(typeof showToast==='function') showToast('Up to 4 stops total (pickup + 2 stops + drop-off)'); return; }
+  _qStopCount++;
+  _qStopSeq++;
+  var sid = 'q-stop-' + _qStopSeq;
+  var wrap = document.getElementById('q-stops-wrap');
+  if(!wrap) return;
+  var row = document.createElement('div');
+  row.className = 'form-group';
+  row.id = sid + '-row';
+  row.style.cssText = 'display:flex;gap:.4rem;align-items:flex-end;';
+  row.innerHTML =
+    '<div style="flex:1;">'
+    + '<label>Stop ' + _qStopCount + ' &mdash; pickup/stop address</label>'
+    + '<input type="text" id="' + sid + '" class="q-stop-input" placeholder="Start typing\u2026" />'
+    + '</div>'
+    + '<button type="button" onclick="qRemoveStop(\'' + sid + '\')" '
+    + 'style="padding:.55rem .7rem;background:#3a2030;color:#ff8a9b;border:1px solid #5a3040;'
+    + 'border-radius:8px;cursor:pointer;font-size:1rem;line-height:1;margin-bottom:.05rem;" '
+    + 'aria-label="Remove stop">&times;</button>';
+  wrap.appendChild(row);
+  // Attach autocomplete to the new field
+  _qAttachStopAutocomplete(sid);
+  resetMileage();
+  _qUpdateAddBtn();
+}
+
+function qRemoveStop(sid){
+  var row = document.getElementById(sid + '-row');
+  if(row) row.remove();
+  _qStopCount = document.querySelectorAll('#q-stops-wrap .q-stop-input').length;
+  _qRelabelStops();
+  resetMileage();
+  debounceMileage();
+  _qUpdateAddBtn();
+}
+
+function _qUpdateAddBtn(){
+  var btn=document.getElementById('q-addstop-btn');
+  if(!btn) return;
+  var n=document.querySelectorAll('#q-stops-wrap .q-stop-input').length;
+  btn.style.display = n >= _Q_MAX_STOPS ? 'none' : 'inline-block';
+}
+function _qRelabelStops(){
+  // Re-number the visible stop labels after a removal
+  var rows = document.querySelectorAll('#q-stops-wrap .form-group');
+  var n = 0;
+  rows.forEach(function(r){
+    n++;
+    var lbl = r.querySelector('label');
+    if(lbl) lbl.innerHTML = 'Stop ' + n + ' &mdash; pickup/stop address';
+  });
+}
+
+function _qAttachStopAutocomplete(sid){
+  if(typeof google==='undefined' || !google.maps || !google.maps.places) return;
+  var el = document.getElementById(sid);
+  if(!el || el.dataset.acInit) return;
+  try{
+    var ac = new google.maps.places.Autocomplete(el, {
+      componentRestrictions: { country: 'us' },
+      fields: ['formatted_address','geometry','name'],
+      types: ['geocode','establishment'],
+    });
+    ac.addListener('place_changed', function(){
+      var place = ac.getPlace();
+      if(place.formatted_address) el.value = place.formatted_address;
+      resetMileage();
+      debounceMileage();
+    });
+    el.addEventListener('keydown', function(e){ if(e.key==='Enter') e.preventDefault(); });
+    el.addEventListener('input', function(){ resetMileage(); debounceMileage(); });
+    el.dataset.acInit = '1';
+  }catch(e){ console.warn('stop autocomplete failed', e); }
+}
+
+function _qGetAllStops(){
+  // Returns the full ordered route: [pickup, ...intermediate stops, dropoff]
+  var pickup  = (document.getElementById('q-pickup')||{}).value;
+  var dropoff = (document.getElementById('q-dropoff')||{}).value;
+  pickup  = (pickup||'').trim();
+  dropoff = (dropoff||'').trim();
+  var mids = [];
+  document.querySelectorAll('#q-stops-wrap .q-stop-input').forEach(function(el){
+    var v = (el.value||'').trim();
+    if(v) mids.push(v);
+  });
+  var all = [];
+  if(pickup) all.push(pickup);
+  mids.forEach(function(m){ all.push(m); });
+  if(dropoff) all.push(dropoff);
+  return all;
+}
 
 async function calcMileage(){
-  const pickup  = document.getElementById('q-pickup').value.trim();
-  const dropoff = document.getElementById('q-dropoff').value.trim();
-  if(!pickup || !dropoff) return;
+  const stops = _qGetAllStops();   // [pickup, ...intermediate, dropoff]
+  if(stops.length < 2) return;
   const statusEl = document.getElementById('q-mileage-status');
 
   // Ensure Google Maps is loaded
@@ -2407,33 +2549,41 @@ async function calcMileage(){
     if(!gmapsLoaded){ statusEl.innerHTML=`Maps unavailable. <span style="color:#4ade80;cursor:pointer;text-decoration:underline;" onclick="openGoogleMaps()">Check in Google Maps ↗</span>`; return; }
   }
 
-  statusEl.textContent = 'Getting distance…';
+  const legCount = stops.length - 1;
+  statusEl.textContent = legCount > 1 ? `Getting distance (${legCount} legs)…` : 'Getting distance…';
   try {
-    const result = await new Promise((resolve, reject)=>{
-      gmapsService.getDistanceMatrix({
-        origins: [pickup],
-        destinations: [dropoff],
-        travelMode: google.maps.TravelMode.DRIVING,
-        unitSystem: google.maps.UnitSystem.IMPERIAL,
-      }, (response, status)=>{
-        if(status === 'OK') resolve(response);
-        else reject(new Error(status));
+    let totalMeters = 0;
+    let totalSeconds = 0;
+    // Sum each consecutive leg: stop[i] → stop[i+1]
+    for(let i = 0; i < stops.length - 1; i++){
+      const origin = stops[i];
+      const dest   = stops[i+1];
+      const result = await new Promise((resolve, reject)=>{
+        cachedDistanceMatrix({
+          origins: [origin],
+          destinations: [dest],
+          travelMode: google.maps.TravelMode.DRIVING,
+          unitSystem: google.maps.UnitSystem.IMPERIAL,
+        }, (response, status)=>{
+          if(status === 'OK') resolve(response);
+          else reject(new Error(status));
+        });
       });
-    });
+      const element = result.rows[0].elements[0];
+      if(element.status !== 'OK') throw new Error('Leg ' + (i+1) + ': ' + element.status);
+      totalMeters  += element.distance.value;
+      totalSeconds += element.duration.value;
+    }
 
-    const element = result.rows[0].elements[0];
-    if(element.status !== 'OK') throw new Error(element.status);
-
-    const meters   = element.distance.value;
-    const miles    = meters / 1609.344;
-    const seconds  = element.duration.value;
-    const mins     = Math.round(seconds / 60);
+    const miles    = totalMeters / 1609.344;
+    const mins     = Math.round(totalSeconds / 60);
     const hrs      = Math.floor(mins / 60);
     const durStr   = hrs > 0 ? `${hrs}h ${mins % 60}m drive` : `${mins} min drive`;
     const milesVal = Math.ceil(miles);
 
     document.getElementById('q-miles').value = milesVal;
-    statusEl.textContent = `✓ ${milesVal} miles · ${durStr} (Google Maps)`;
+    const legNote = legCount > 1 ? ` · ${legCount} legs` : '';
+    statusEl.textContent = `✓ ${milesVal} miles · ${durStr}${legNote} (Google Maps)`;
     updateMilesDisplay();
     calcQuote();
   } catch(err){
@@ -5212,7 +5362,7 @@ async function _rtCalcRoute(){
     var origins=stops.slice(0,-1);
     var dests  =stops.slice(1);
     var result=await new Promise(function(resolve,reject){
-      gmapsService.getDistanceMatrix({
+      cachedDistanceMatrix({
         origins:origins, destinations:dests,
         travelMode:google.maps.TravelMode.DRIVING,
         unitSystem:google.maps.UnitSystem.IMPERIAL,
@@ -6824,7 +6974,7 @@ async function calcCostLoopMileage(){
   try {
     // One matrix call; take the three legs off the diagonal
     const result = await new Promise((resolve,reject)=>{
-      gmapsService.getDistanceMatrix({
+      cachedDistanceMatrix({
         origins:[home, pickup, dropoff],
         destinations:[pickup, dropoff, home],
         travelMode: google.maps.TravelMode.DRIVING,
@@ -7482,6 +7632,7 @@ function policyTextMessage(firstName, rideDate, rideTime, ridePrice){
 function clearQuoteForm(){
   ['q-client','q-phone','q-pickup','q-dropoff','q-miles','q-flight','q-rt-flight','q-notes','q-wait']
     .forEach(function(id){ const el=document.getElementById(id); if(el) el.value=''; });
+  var _sw=document.getElementById('q-stops-wrap'); if(_sw) _sw.innerHTML=''; _qStopCount=0; var _asb=document.getElementById('q-addstop-btn'); if(_asb) _asb.style.display='inline-block';
   const qDate=document.getElementById('q-date'); if(qDate) qDate.value='';
   const qTime=document.getElementById('q-time'); if(qTime) qTime.value='';
   const qPrice=document.getElementById('q-price'); if(qPrice) qPrice.textContent='$0';
@@ -9405,6 +9556,8 @@ function getIncomeDateRange(){
 function renderIncome(){
   if(!document.getElementById('income-summary-cards')) return;
   if(!hasIncomeAccess()) return;
+  var _paBtn=document.getElementById('pricing-audit-btn');
+  if(_paBtn) _paBtn.style.display=isAdmin()?'inline-block':'none';
   const admin = isAdmin();
   const myName = getMyDriverName();
   // Admin driver filter: populate once, default to the admin's OWN income.
@@ -10937,6 +11090,163 @@ function exportIncomeCSV(){
   a.click();
   showToast('CSV exported ✓');
 }
+
+// ── PRICING AUDIT REPORT (admin only) ─────────────────────────────────────
+function _csvCell(v){
+  v = (v===null||v===undefined) ? '' : String(v);
+  if(/[",\n]/.test(v)) return '"'+v.replace(/"/g,'""')+'"';
+  return v;
+}
+
+function _auditSurchargeLines(r){
+  // Returns array of {label, amount} for active surcharges on this ride
+  var lines=[];
+  var add = (typeof ADDONS_FLAT!=='undefined') ? ADDONS_FLAT : {premium:30,holiday:30,christmas:35,late:20,traffic:15};
+  if(r.christmas==='Y'){ lines.push({label:'Christmas', amount:add.christmas||35}); }
+  else if(r.holiday==='Y'){ lines.push({label:'Holiday', amount:add.holiday||30}); }
+  if(r.premium==='Y'){ lines.push({label:'Premium vehicle', amount:add.premium||30}); }
+  if(r.late==='Y'){ lines.push({label:'Late night', amount:add.late||20}); }
+  if(r.traffic==='Y'){ lines.push({label:'Traffic', amount:add.traffic||15}); }
+  if(r.fuel==='Y'){ lines.push({label:'Fuel surcharge', amount:15}); }
+  if(r.xstop==='Y'){ lines.push({label:'Extra stop', amount:15}); }
+  var waitVal = parseFloat(r.wait)||0;
+  if(waitVal>0){
+    var wr = (typeof WAIT_RATE!=='undefined')?WAIT_RATE:60;
+    lines.push({label:'Wait ('+waitVal+'h)', amount:Math.round(waitVal*wr)});
+  }
+  return lines;
+}
+
+function _auditBaseBreakdown(r){
+  // Reconstruct the base + mileage portion (before surcharges & manual adj)
+  var RPM = (typeof RATE_PER_MILE!=='undefined')?RATE_PER_MILE:2.50;
+  var baseRates = (typeof BASE!=='undefined')?BASE:{'Sedan':105,'SUV/Van':145,'Premium':185};
+  var miles = parseFloat(r.miles)||0;
+  var type = (r.type||'').toUpperCase();
+  var out = { baseLabel:'', baseAmount:0, mileageLabel:'', mileageAmount:0, serviceFee:0 };
+
+  if(type==='ROUND TRIP'){
+    out.mileageLabel = miles+' mi × 2 × $'+RPM.toFixed(2);
+    out.mileageAmount = miles*2*RPM;
+    out.serviceFee = 20;
+  } else if(type==='ONE WAY' || type==='LOCAL'){
+    out.mileageLabel = miles+' mi × $'+RPM.toFixed(2);
+    out.mileageAmount = miles*RPM;
+    out.serviceFee = 10;
+  } else {
+    // AP types: base rate includes 50 mi, overage beyond 50 (52 grace)
+    var base = baseRates[r.vehicle]||0;
+    out.baseLabel = (r.vehicle||'?')+' base (incl 50 mi)';
+    out.baseAmount = base;
+    if(miles>52){
+      out.mileageLabel = 'Overage '+(miles-50)+' mi × $'+RPM.toFixed(2);
+      out.mileageAmount = (miles-50)*RPM;
+    }
+  }
+  return out;
+}
+
+function generatePricingAudit(){
+  if(!isAdmin()){ showToast('Admins only','error'); return; }
+
+  // Date range: reuse the income page range if available, else all-time
+  var range = (typeof getIncomeDateRange==='function') ? getIncomeDateRange() : {start:null,end:null,label:'All time'};
+  var start = range.start, end = range.end, label = range.label||'All time';
+
+  var list = (rides||[]).filter(function(r){
+    if(!r || !r.date) return false;
+    if(start && end){
+      var d = new Date(r.date+'T12:00:00');
+      if(d<start || d>end) return false;
+    }
+    return true;
+  }).sort(function(a,b){
+    return (a.date||'').localeCompare(b.date||'') || (a.time||'').localeCompare(b.time||'');
+  });
+
+  if(!list.length){ showToast('No rides in this date range','error'); return; }
+
+  var headers = ['Date','Time','Client','Driver','Type','Vehicle','Miles',
+    'Base','Mileage','Service Fee','Surcharges','Surcharge Detail',
+    'Manual Adj','Adj Note','Computed Subtotal','Quoted Price','Variance','Created By','Confirmed'];
+  var rows = [headers.map(_csvCell).join(',')];
+
+  var sumBase=0, sumMileage=0, sumService=0, sumSurcharge=0, sumManual=0, sumComputed=0, sumQuoted=0, sumVariance=0;
+
+  list.forEach(function(r){
+    var bb = _auditBaseBreakdown(r);
+    var surLines = _auditSurchargeLines(r);
+    var surTotal = surLines.reduce(function(s,x){ return s+x.amount; }, 0);
+    var surDetail = surLines.map(function(x){ return x.label+' $'+x.amount; }).join('; ');
+
+    var manualAdj = 0, adjNote = '';
+    if(r.feeType && (parseFloat(r.feeAmount)||0)!==0){
+      manualAdj = parseFloat(r.feeAmount)||0;
+      adjNote = r.feeNote || r.feeType || '';
+    }
+
+    var computed = bb.baseAmount + bb.mileageAmount + bb.serviceFee + surTotal + manualAdj;
+    var quoted = parseFloat(r.price)||0;
+    // Round trip second leg
+    if((r.type||'').toUpperCase()==='AP ROUND TRIP' && r.price2){
+      quoted += parseFloat(r.price2)||0;
+    }
+    var variance = +(quoted - computed).toFixed(2);
+
+    sumBase+=bb.baseAmount; sumMileage+=bb.mileageAmount; sumService+=bb.serviceFee;
+    sumSurcharge+=surTotal; sumManual+=manualAdj; sumComputed+=computed; sumQuoted+=quoted; sumVariance+=variance;
+
+    rows.push([
+      r.date||'', r.time||'', r.client||'', (r.driver||'Unassigned'),
+      r.type||'', r.vehicle||'', parseFloat(r.miles)||0,
+      bb.baseAmount?('$'+bb.baseAmount.toFixed(2)):'',
+      bb.mileageAmount?('$'+bb.mileageAmount.toFixed(2)):'',
+      bb.serviceFee?('$'+bb.serviceFee.toFixed(2)):'',
+      surTotal?('$'+surTotal.toFixed(2)):'',
+      surDetail,
+      manualAdj?('$'+manualAdj.toFixed(2)):'',
+      adjNote,
+      '$'+computed.toFixed(2),
+      '$'+quoted.toFixed(2),
+      (variance!==0?('$'+variance.toFixed(2)):'$0.00'),
+      r.createdBy||'', (r.confirmed?'Yes':'No')
+    ].map(_csvCell).join(','));
+  });
+
+  // Totals row
+  rows.push('');
+  rows.push(['TOTALS','','','','','','',
+    '$'+sumBase.toFixed(2),'$'+sumMileage.toFixed(2),'$'+sumService.toFixed(2),
+    '$'+sumSurcharge.toFixed(2),'',
+    '$'+sumManual.toFixed(2),'',
+    '$'+sumComputed.toFixed(2),'$'+sumQuoted.toFixed(2),
+    '$'+sumVariance.toFixed(2),'',''
+  ].map(_csvCell).join(','));
+
+  // Header context rows
+  var preamble = [
+    'NWDA Pricing Audit Report',
+    'Generated: '+new Date().toLocaleString(),
+    'Range: '+label,
+    'Rides: '+list.length,
+    'Total Quoted: $'+sumQuoted.toFixed(2),
+    'Total Computed: $'+sumComputed.toFixed(2),
+    'Net Variance: $'+sumVariance.toFixed(2)+' (quoted minus computed)',
+    'Note: Variance flags rides where the saved price differs from the standard pricing formula (manual overrides, legacy rides, or admin-set Sprinter rates).',
+    ''
+  ].map(function(l){ return _csvCell(l); }).join('\n');
+
+  var csv = preamble + '\n' + rows.join('\n');
+  var fname = 'NWDA-pricing-audit-'+(new Date().toISOString().slice(0,10))+'.csv';
+  if(typeof downloadTextFile==='function'){
+    downloadTextFile(csv, fname, 'text/csv');
+    showToast('\uD83D\uDCCB Pricing audit exported \u2713');
+  } else {
+    showToast('Download helper missing','error');
+  }
+}
+
+
 
 // ── YEAR-END P&L / TAX SUMMARY (real .xlsx) ──
 let _xlsxPromise=null;
