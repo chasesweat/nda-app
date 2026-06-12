@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090056">
+<meta name="version" content="202606090062">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -376,7 +376,7 @@ input,select,textarea{font-size:16px;}
   <div id="menu-income" onclick="nav('income')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">💰 Income</div>
   <div id="menu-costcalc" onclick="nav('costcalc')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">💵 Trip Profit</div>
   <div id="menu-access" onclick="nav('access')" style="display:none;padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🔐 Access Control</div>
-  <div onclick="closeMenu(); window.open('nwda-tutorial.html','_blank');" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">📚 Driver Tutorial</div>
+  <div onclick="closeMenu(); window.open('nwda-tutorial.html','_blank');" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">📚 Driver Tutorial</div><div id="menu-admin-guide" onclick="closeMenu(); window.open('nwda-admin-tutorial.html','_blank');" style="display:none;padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;align-items:center;gap:.75rem;">🔐 Admin Guide</div>
   <div onclick="closeMenu(); openMergeRequestModal();" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🔗 Request Profile Merge</div>
   <div onclick="closeMenu();openPwModal(null);" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🔑 Change password</div>
   <div onclick="closeMenu();logout();" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;display:flex;align-items:center;gap:.75rem;">↩ Sign out</div>
@@ -1353,6 +1353,13 @@ input,select,textarea{font-size:16px;}
       </div>
       <div class="form-group" style="grid-column:1/-1;"><label>Drop-off / Home Address</label>
         <input type="text" id="qa-home" placeholder="Start typing…" />
+      </div>
+      <div class="form-group" style="grid-column:1/-1;">
+        <div id="qa-mileage-box" style="background:var(--black);border-radius:10px;padding:.85rem 1rem;">
+          <div style="font-size:.72rem;color:var(--mid);margin-bottom:.2rem;">Distance &middot; Google Maps</div>
+          <div id="qa-miles-display" style="font-size:1.4rem;font-weight:700;color:var(--gold);">&mdash;</div>
+          <div id="qa-mileage-status" style="font-size:.76rem;color:var(--mid);"></div>
+        </div>
       </div>
       <div class="form-group"><label>Flight #</label><input type="text" id="qa-flight" placeholder="e.g. DL1234" /></div>
       <div class="form-group"><label>Terminal</label>
@@ -2373,6 +2380,7 @@ function initAddressAutocomplete(){
           resetMileage();
           debounceMileage();
         }
+        if(id==='qa-pickup'||id==='qa-home'){ _qaDebounceMileage(); }
       });
       el.addEventListener('keydown', e=>{ if(e.key==='Enter') e.preventDefault(); });
       el.dataset.acInit = '1';
@@ -2380,6 +2388,50 @@ function initAddressAutocomplete(){
   });
 }
 
+var _qaMileageTimer=null;
+function _qaResetMileage(){
+  var d=document.getElementById('qa-miles-display'); if(d) d.textContent='\u2014';
+  var s=document.getElementById('qa-mileage-status'); if(s) s.textContent='';
+  var mh=document.getElementById('qa-miles-hidden'); if(mh) mh.value='';
+}
+function _qaDebounceMileage(){
+  clearTimeout(_qaMileageTimer);
+  var pu=((document.getElementById('qa-pickup')||{}).value||'').trim();
+  var dp=((document.getElementById('qa-home')||{}).value||'').trim();
+  if(pu.length<5||dp.length<5){ return; }
+  var st=document.getElementById('qa-mileage-status'); if(st) st.textContent='Calculating\u2026';
+  _qaMileageTimer=setTimeout(function(){ _qaCalcMileage(); }, 600);
+}
+async function _qaCalcMileage(){
+  var pu=((document.getElementById('qa-pickup')||{}).value||'').trim();
+  var dp=((document.getElementById('qa-home')||{}).value||'').trim();
+  if(!pu||!dp) return;
+  var disp=document.getElementById('qa-miles-display');
+  var st=document.getElementById('qa-mileage-status');
+  try{
+    var result=await new Promise(function(resolve,reject){
+      cachedDistanceMatrix({
+        origins:[pu], destinations:[dp],
+        travelMode:google.maps.TravelMode.DRIVING,
+        unitSystem:google.maps.UnitSystem.IMPERIAL,
+      }, function(resp,status){ if(status==='OK') resolve(resp); else reject(new Error(status)); });
+    });
+    var el=result.rows[0].elements[0];
+    if(el.status!=='OK') throw new Error(el.status);
+    var miles=Math.ceil(el.distance.value/1609.344);
+    var mins=Math.round(el.duration.value/60);
+    var hrs=Math.floor(mins/60);
+    var durStr=hrs>0?(hrs+'h '+(mins%60)+'m drive'):(mins+' min drive');
+    if(disp) disp.textContent=miles+' mi';
+    if(st) st.textContent='\u2713 '+durStr+' (Google Maps)';
+    var mh=document.getElementById('qa-miles-hidden');
+    if(!mh){ mh=document.createElement('input'); mh.type='hidden'; mh.id='qa-miles-hidden'; document.body.appendChild(mh); }
+    mh.value=miles;
+  }catch(e){
+    if(st) st.textContent='Could not calculate distance';
+    console.warn('qa mileage', e);
+  }
+}
 function debounceMileage(){
   clearTimeout(mileageTimer);
   const pickup  = document.getElementById('q-pickup').value.trim();
@@ -3407,7 +3459,7 @@ function calSearch(){
       return '<div onclick="openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.85rem;padding:.7rem .85rem;border-radius:10px;margin-bottom:.5rem;background:'+c+'66;border:2px solid '+c+';cursor:pointer;flex-wrap:wrap;">'
         +'<div style="width:6px;align-self:stretch;min-height:34px;border-radius:3px;background:'+c+';"></div>'
         +'<div style="min-width:58px;"><strong style="font-size:.82rem;color:'+tc+';">'+fmtDateShort(r.date)+'</strong><br><span style="font-size:.72rem;color:'+tc+';opacity:.78;">'+(r.time||'')+'</span></div>'
-        +'<div style="flex:1;min-width:120px;"><div style="font-weight:600;font-size:.9rem;color:'+tc+';">'+check+escHtml(r.client||'—')+'</div><div style="font-size:.74rem;color:'+tc+';opacity:.78;">'+(r.driver?escHtml(r.driver.split(' ')[0]):'Unassigned')+(r.phone&&(currentUser&&currentUser.name===r.createdBy||(getMyDriverName()&&getMyDriverName()===r.driver))?' · '+escHtml(r.phone):'')+'</div></div>'
+        +'<div style="flex:1;min-width:120px;"><div style="font-weight:600;font-size:.9rem;color:'+tc+';">'+check+escHtml(r.client||'—')+'</div><div style="font-size:.74rem;color:'+tc+';opacity:.78;">'+(r.driver?escHtml(r.driver.split(' ')[0]):'Unassigned')+(r.phone&&(currentUser&&(PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name)===(r.createdBy?(PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy):null)||(getMyDriverName()&&getMyDriverName()===r.driver))?' · '+escHtml(r.phone):'')+'</div></div>'
         +'<span class="badge '+typeCls+'">'+escHtml((r.type||'')+apVehSuffix(r))+'</span>'
         +'<div style="font-weight:600;color:'+(tc==='#fff'?'#fff':'var(--green)')+';">$'+r.price+'</div>'
       +'</div>';
@@ -4130,7 +4182,9 @@ function renderRideView(r){
   const color = rideColor(r);
   const feeBreak = buildFeeBreakdown(r);
   const _myDName = getMyDriverName();
-  const canSeeContact = (currentUser && currentUser.name === r.createdBy)
+  const _ccRm = currentUser ? (PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name) : null;
+  const _ccRc = r.createdBy ? (PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy) : null;
+  const canSeeContact = (_ccRm && _ccRc && _ccRm === _ccRc)
     || (_myDName && _myDName === r.driver)
     || (r.xxl && _myDName && _myDName === r.driver2);
   // Share Location button — driver+creator only, Premium (canSeeContact now in scope)
@@ -4239,7 +4293,7 @@ function renderRideView(r){
     </div>
 
     ${(()=>{
-      const _isCreator2=r.createdBy===currentUser?.name||(r.createdBy==='Morgan'&&currentUser?.name==='Kat');
+      const _c2m=currentUser?(PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name):null;const _c2c=r.createdBy?(PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy):null;const _isCreator2=!!(_c2m&&_c2c&&_c2m===_c2c);
       if(!_isCreator2) return '';
       const _feeApplied=r.feeType;
       return `<div class="detail-row" style="grid-column:1/-1;">`
@@ -5257,7 +5311,7 @@ function _rtShowBuilder(stops){
       +'<div style="width:22px;height:22px;border-radius:50%;background:'+(i===0||i===stops.length-1?'#7c3aed':'#e2e8f0')+';'
       +'display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:10px;font-weight:700;color:'+(i===0||i===stops.length-1?'#fff':'#64748b')+';">'
       +(i===0?'H':i===stops.length-1?'H':i)+'</div>'
-      +'<input id="rt-stop-'+i+'" data-rt-stop="1" value="'+escHtml(s.val||'')+'" placeholder="'+escHtml(s.label)+'"'
+      +'<input id="rt-stop-'+i+'" data-rt-stop="1" value="'+escAttr(s.val||'')+'" placeholder="'+escAttr(s.label)+'"'
       +' style="flex:1;padding:.5rem .65rem;border:1.5px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:.85rem;">'
       +(stops.length>2&&i>0&&i<stops.length-1
         ? '<button onclick="_rtRemoveStop('+i+')" style="background:none;border:none;color:#94a3b8;font-size:1.1rem;cursor:pointer;padding:0 4px;flex-shrink:0;">&times;</button>'
@@ -6401,6 +6455,8 @@ function setupHamburgerMenu(){
   // Access Control shortcut — admins only
   const ax = document.getElementById('menu-access');
   if(ax) ax.style.display = admin ? 'block' : 'none';
+  const agd = document.getElementById('menu-admin-guide');
+  if(agd) agd.style.display = admin ? 'flex' : 'none';
 }
 
 function toggleNotifPanel(){
@@ -7528,16 +7584,16 @@ function recalcQa(){
     :((total>base || xs>0) ? `${veh} base $${base} + surcharges → $${total.toFixed(2)} (editable)` : `${veh} base $${base}`);
 }
 async function saveQuickAddRide(){
+  const saveBtn=document.getElementById('qa-save-btn');
+  const _reenableBtn=()=>{ if(saveBtn){ saveBtn.disabled=false; saveBtn.style.opacity='1'; } };
+  if(saveBtn&&saveBtn.disabled) return;   // already submitting
   const client=document.getElementById('qa-client').value.trim();
   const date  =document.getElementById('qa-date').value;
   const errEl =document.getElementById('qa-error');
   if(!client){errEl.textContent='Client name is required.'; _reenableBtn(); return;}
   if(!date)  {errEl.textContent='Date is required.'; _reenableBtn(); return;}
   errEl.textContent='';
-  const saveBtn=document.getElementById('qa-save-btn');
-  if(saveBtn&&saveBtn.disabled) return;   // already submitting
   if(saveBtn){ saveBtn.disabled=true; saveBtn.style.opacity='0.55'; }
-  const _reenableBtn=()=>{ if(saveBtn){ saveBtn.disabled=false; saveBtn.style.opacity='1'; } };
   const qaType = document.getElementById('qa-type').value;
   if(qaType==='AP ROUND TRIP'){
     if(!document.getElementById('qa-leg-run')?.checked||!document.getElementById('qa-leg-pickup')?.checked){
@@ -7561,7 +7617,7 @@ async function saveQuickAddRide(){
     flight:  document.getElementById('qa-flight').value.trim(),
     terminal:document.getElementById('qa-terminal').value,
     notes:   document.getElementById('qa-notes').value.trim(),
-    miles:0,pax:parseInt(document.getElementById('qa-pax')?.value)||1,checkedBags:parseInt(document.getElementById('qa-checked-bags')?.value)||0,carryOnBags:parseInt(document.getElementById('qa-carryon-bags')?.value)||0,rt:'',email:document.getElementById('qa-email')?document.getElementById('qa-email').value.trim():'',
+    miles:parseFloat((document.getElementById('qa-miles-hidden')||{}).value)||0,pax:parseInt(document.getElementById('qa-pax')?.value)||1,checkedBags:parseInt(document.getElementById('qa-checked-bags')?.value)||0,carryOnBags:parseInt(document.getElementById('qa-carryon-bags')?.value)||0,rt:'',email:document.getElementById('qa-email')?document.getElementById('qa-email').value.trim():'',
     holiday:qaAddonState.holiday?'Y':'N',christmas:qaAddonState.christmas?'Y':'N',late:qaAddonState.late?'Y':'N',premium:qaAddonState.premium?'Y':'N',fuel:qaAddonState.fuel?'Y':'N',xstop:parseInt(document.getElementById('qa-xstop')?.value)||0,traffic:qaAddonState.traffic?'Y':'N',wait:parseFloat(document.getElementById('qa-wait')?.value)||0,
     confirmed:false, createdBy:currentUser?.name||'',
     newClient: !!(document.getElementById('qa-new-client')?.checked),
@@ -10342,14 +10398,16 @@ let biometricCreds = {}; // { 'Chase': ['base64id1','base64id2'], ... }
 
 async function loadBiometricCreds(){
   try{
-    const d = await storageGet('kat:biometricCreds');
-    if(d && typeof d==='object') biometricCreds = d;
+    const raw = localStorage.getItem('nda_biometric_creds');
+    const d = raw ? JSON.parse(raw) : null;
+    if(d && typeof d==='object') biometricCreds = d; else biometricCreds = {};
   }catch(e){ biometricCreds = {}; }
   refreshBiometricButton();
 }
 
 async function saveBiometricCreds(){
-  try{ await storageSet('kat:biometricCreds', biometricCreds); }catch(e){}
+  // Device-specific — store ONLY in localStorage, never Firebase.
+  try{ localStorage.setItem('nda_biometric_creds', JSON.stringify(biometricCreds)); }catch(e){}
 }
 
 // Returns true if device supports platform biometrics
@@ -11094,6 +11152,8 @@ function exportIncomeCSV(){
 // ── PRICING AUDIT REPORT (admin only) ─────────────────────────────────────
 function _csvCell(v){
   v = (v===null||v===undefined) ? '' : String(v);
+  // Formula-injection guard: prefix cells starting with =,+,-,@ so Excel treats them as text
+  if(/^[=+\-@]/.test(v)) v = "'" + v;
   if(/[",\n]/.test(v)) return '"'+v.replace(/"/g,'""')+'"';
   return v;
 }
@@ -12243,7 +12303,7 @@ function importClientsFromFile(input){
   reader.readAsText(file);
 }
 
-function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function showToast(msg,type){const t=document.getElementById('toast');t.textContent=msg;t.style.background=type==='error'?'#b03a2e':'#2e6b46';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000);}
 
 // ═══════════════════════════════════════════
