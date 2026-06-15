@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090081">
+<meta name="version" content="202606090083">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1120,6 +1120,10 @@ input,select,textarea{font-size:16px;}
       <div class="form-group" style="margin-top:.5rem;">
         <label>Notes</label>
         <textarea id="edit-notes" rows="2" style="width:100%;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;resize:vertical;"></textarea>
+      </div>
+      <div class="form-group" style="margin-top:.5rem;">
+        <label>Requested driver <span style="font-weight:400;color:var(--mid);font-size:.72rem;">(private — only you can see this)</span></label>
+        <input type="text" id="edit-reqdriver" placeholder="e.g. a driver this client prefers" style="width:100%;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;box-sizing:border-box;" />
       </div>
     </div>
     <div class="comments-section">
@@ -4352,6 +4356,7 @@ function renderRideView(r){
               return r.notes?`<div style="font-size:.86rem;color:var(--black);padding:.45rem .1rem;">${escHtml(r.notes)}</div>`:'<div style="font-size:.82rem;color:var(--mid);font-style:italic;">No notes</div>';
             }
           })()}
+          ${(currentUser&&currentUser.name===r.createdBy&&r.reqDriverNote)?`<div style="margin-top:.4rem;"><span style="display:inline-block;font-size:.72rem;background:#fff;color:#7c3aed;border:1px solid #c4b5fd;border-radius:8px;padding:2px 9px;font-weight:700;">\u2605 Requested driver: ${escHtml(r.reqDriverNote)}</span><div style="font-size:.62rem;color:var(--mid);margin-top:2px;">Private \u2014 only you can see this</div></div>`:''}
         </div>
       </div>
     </div>
@@ -4534,7 +4539,7 @@ async function cancelRide(id){
     ]
   });
   if(_choice==='keep'||_choice===null) return;
-  r.status='cancelled'; r.cancelledAt=Date.now(); r.cancelledBy=currentUser?.name||'';
+  r.status='cancelled'; touchRide(r, 'cancelled ride'); r.cancelledAt=Date.now(); r.cancelledBy=currentUser?.name||'';
   if(_choice==='fee'){
     r.feeType='cancel'; r.feeAmount=_feeAmt;
     const _fn='Cancellation fee: $'+_feeAmt;
@@ -4623,6 +4628,7 @@ function toggleEditMode(on){
   document.getElementById('edit-price').value    = r.price||0;
   document.getElementById('edit-confirmed').value= r.confirmed?'true':'false';
   document.getElementById('edit-notes').value    = r.notes||'';
+  (function(){ var _rd=document.getElementById('edit-reqdriver'); if(_rd){ var _isCreator=(currentUser&&currentUser.name===r.createdBy); _rd.value=(_isCreator&&r.reqDriverNote)?r.reqDriverNote:''; _rd.closest('.form-group').style.display=_isCreator?'block':'none'; } })();
   // populate driver select
   const dSel=document.getElementById('edit-driver');
   dSel.innerHTML=driverOptionsHTML(r.driver, r.date);
@@ -4662,6 +4668,7 @@ async function saveRideEdits(){
   r.price     = parseFloat(document.getElementById('edit-price').value)||0;
   r.confirmed = document.getElementById('edit-confirmed').value==='true';
   r.notes     = document.getElementById('edit-notes').value.trim();
+  if(currentUser&&currentUser.name===r.createdBy){ var _rdv=document.getElementById('edit-reqdriver'); if(_rdv){ var _v=_rdv.value.trim(); if(_v) r.reqDriverNote=_v; else delete r.reqDriverNote; } }
   r.driver    = document.getElementById('edit-driver').value;
   touchRide(r, 'edited');
   // Notify new driver if changed
@@ -6138,7 +6145,7 @@ function _reqOwner(){ return (currentUser&&PROXY_MAP[currentUser.name])||getMyDr
 function _reqKey(name){ return (_reqOwner()+'||'+(name||'').trim().toLowerCase()).replace(/[.#$\[\]\/]/g,'_'); }
 function getClientReqDriver(name){ return clientReqDriver[_reqKey(name)]||''; }
 async function setClientReqDriver(name,drv){ const k=_reqKey(name); if(drv) clientReqDriver[k]=drv; else delete clientReqDriver[k]; await saveClientReqDriver(); renderClients(); }
-function rideReqDriverTag(r){ if(!r||!r.client) return ''; var rOwner=USER_DRIVER_MAP[r.createdBy]||PROXY_MAP[r.createdBy]||r.createdBy; if(rOwner!==_reqOwner()) return ''; var d=getClientReqDriver(r.client); if(!d) return ''; return '<div style="margin-top:3px;"><span style="display:inline-block;font-size:.68rem;background:#fff;color:#7c3aed;border:1px solid #c4b5fd;border-radius:8px;padding:1px 7px;font-weight:700;">\u2605 Requested: '+escHtml(d)+'</span></div>'; }
+function rideReqDriverTag(r){ if(!r) return ''; if(!currentUser||currentUser.name!==r.createdBy) return ''; var d=r.reqDriverNote||''; if(!d) return ''; return '<div style="margin-top:3px;"><span style="display:inline-block;font-size:.68rem;background:#fff;color:#7c3aed;border:1px solid #c4b5fd;border-radius:8px;padding:1px 7px;font-weight:700;">\u2605 Requested: '+escHtml(d)+'</span></div>'; }
 
 // Show/hide transfer button in client modal based on context
 function updateTransferBtn(client){
@@ -9143,7 +9150,7 @@ function renderDriverMembers(){
         ${editField('Email',prof.email,'prof-email','email@example.com')}
         ${editField('Vehicle Year',prof.vehicleYear,'prof-vehicleyear','e.g. 2022')}
         ${editField('Vehicle Make/Model',prof.vehicle,'prof-vehicle','e.g. Toyota Camry')}
-        ${canEdit?('<div style="margin-bottom:.45rem;">'
+        ${(myDriverName===d)?('<div style="margin-bottom:.45rem;">'
           +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Home address (for mileage routing)</div>'+'<input type="text" id="prof-homeaddress-'+dk+'" value="'+(prof.homeAddress||'')+'" placeholder="Your home address" style="width:100%;padding:.3rem .5rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;box-sizing:border-box;">'+'</div>'+'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Gas price ($/gal) &amp; your MPG</div>'
           +'<div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;">'
           +'<input type="number" id="prof-gasprice-'+dk+'" value="'+(prof.gasPrice||'')+'" placeholder="$/gal e.g. 3.49" min="0" step="0.01" style="width:130px;padding:.35rem .65rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;" />'
