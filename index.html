@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090100">
+<meta name="version" content="202606090102">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -3376,7 +3376,7 @@ function getWeekStart(d){
   // returns the Sunday of the week containing d
   const s=new Date(d);
   s.setHours(0,0,0,0);
-  s.setDate(s.getDate()-s.getDay());
+  // Rolling 7-day window: start from the given day (e.g. today) rather than the prior Sunday
   return s;
 }
 function addDays(d,n){ const r=new Date(d); r.setDate(r.getDate()+n); return r; }
@@ -3763,7 +3763,9 @@ function renderConfirmations(){
         ?('<div style="font-size:.72rem;color:var(--mid);margin-bottom:.4rem;">\uD83D\uDC65 Group text to '+recips.length+' numbers: '+recips.map(function(x){return x.name;}).join(', ')+'</div>')
         :'';
       const phone=(r.phone||'').trim();
-      const phoneLink=phone?('<a href="tel:'+phone.replace(/[^0-9+]/g,'')+'" onclick="event.stopPropagation()" style="color:var(--black);font-weight:600;text-decoration:none;">\uD83D\uDCDE '+phone+'</a>'):'';
+      const phoneLink=phone?(_looksLikePhone(phone)
+        ?('<a href="tel:'+phone.replace(/[^0-9+]/g,'')+'" onclick="event.stopPropagation()" style="color:var(--black);font-weight:600;text-decoration:none;">\uD83D\uDCDE '+escHtml(phone)+'</a>')
+        :('<span style="color:var(--black);font-weight:600;">\uD83D\uDCCD '+escHtml(phone)+'</span>')):'';
       const drvPreviewId='dc-prev-'+r.id;
       const pid=r.id;
       const bBase='display:flex;align-items:center;gap:.45rem;padding:.55rem .75rem;border:1.5px solid var(--light);border-radius:9px;background:var(--white);font-family:\'DM Sans\',sans-serif;font-size:.8rem;font-weight:600;color:var(--black);cursor:pointer;flex:1 1 auto;min-width:140px;transition:border-color .15s,color .15s,background .15s;';
@@ -4032,10 +4034,22 @@ function copyInstructions(id){ const r=rides.find(x=>x&&(x.id===id||x.id===+id||
 // where the app knows it. Always: client + any client-requested extra numbers + the
 // main (owner) driver + the assigned driver. If the sender is Kat or Morgan, adds both.
 // Returns [{name, phone}] (deduped by phone); use .phone for the SMS link, .name for display.
+// Returns true only if a value looks like a real phone number (not an address
+// or other text mistakenly typed into a phone field). A phone has 7–15 digits
+// and no runs of 3+ letters (which would indicate words / a street address).
+function _looksLikePhone(v){
+  v=(v||'').trim();
+  if(!v) return false;
+  if(/[A-Za-z]{3,}/.test(v)) return false;
+  const d=v.replace(/\D/g,'');
+  return d.length>=7 && d.length<=15;
+}
+
 function confirmationRecipients(r){
   const seen=new Set();
   const out=[];
   const add=(name,raw)=>{
+    if(!_looksLikePhone(raw)) return; // skip addresses / junk so we never text a wrong number
     const d=(raw||'').replace(/[^0-9+]/g,'');
     if(!d || seen.has(d)) return;
     seen.add(d);
@@ -4216,7 +4230,6 @@ async function textClient(id){
   const sep=isIOS?'&':'?';
   const smsURL='sms:'+nums.join(',')+sep+'body='+encodeURIComponent(_fullMsg);
   const cardFile=files.find(function(f){ return f.type==='image/png'; });
-  const vcardFile=files.find(function(f){ return f.name&&f.name.endsWith('.vcf'); });
 
   // ── iOS: single navigator.share call — image + vCard + text all land in iMessage ──
   if(isIOS && navigator.canShare && files.length){
@@ -4255,16 +4268,9 @@ async function textClient(id){
       toasts.push('\uD83D\uDDBC\uFE0F Card copied \u2014 long-press to paste in Messages');
     }catch(e){ console.warn('clipboard write failed',e); }
   }
-  if(vcardFile){
-    try{
-      const vcURL=URL.createObjectURL(vcardFile);
-      const a=document.createElement('a');
-      a.href=vcURL; a.download=vcardFile.name; a.style.display='none';
-      document.body.appendChild(a); a.click();
-      setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(vcURL); },1000);
-      toasts.push('\uD83D\uDC64 Contact card downloaded \u2014 open to save driver contact');
-    }catch(e){ console.warn('vcard download failed',e); }
-  }
+  // Driver contact is attached to the share sheet above (so the CLIENT can choose
+  // to save it). We intentionally do NOT auto-download the .vcf onto the sender's
+  // own phone here — the sender already has the driver's contact.
   window.location.href=smsURL;
   if(toasts.length) setTimeout(function(){ showToast(toasts.join(' \u00b7 ')); },800);
 }
@@ -8461,9 +8467,8 @@ function renderDashConfirmations(){
   if(!due.length){ box.innerHTML=''; return; }
 
   const rows = due.map(r=>{
-    const c = rideColor(r);
     return `<div style="display:flex;align-items:center;gap:.6rem;padding:.4rem .2rem;border-bottom:1px solid #f3d9a0;">
-      <span style="min-width:58px;font-size:.8rem;font-weight:700;color:${c};">${fmtTime12(r.time)||'—'}</span>
+      <span style="min-width:58px;font-size:.8rem;font-weight:700;color:var(--black);">${fmtTime12(r.time)||'—'}</span>
       <span style="flex:1;font-size:.85rem;color:var(--black);">${escHtml(r.client||'—')}</span>
       <span style="font-size:.72rem;color:var(--mid);">${r.driver?escHtml(r.driver.split(' ')[0]):'Unassigned'}</span>
     </div>`;
@@ -11469,13 +11474,28 @@ async function sendSelfiePic(id){
 async function sendDriverVCard(id){
   const r=rides.find(function(x){ return x.id===id; }); if(!r || !r.driver) return;
   const vcf=buildDriverVCard(r.driver.trim());
-  const url=URL.createObjectURL(vcf);
-  const a=document.createElement('a'); a.href=url; a.download=vcf.name; a.style.display='none';
-  document.body.appendChild(a); a.click();
-  setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1000);
-  openGroupThread(id, '');
-  markPartSent(id,'vcard');
-  setTimeout(function(){ showToast('\uD83D\uDC64 Driver contact downloaded \u2014 attach from your files in Messages'); },700);
+  // Prefer the share sheet so the CLIENT receives the contact and chooses whether to
+  // save it — rather than auto-downloading the .vcf onto the sender's own phone.
+  if(navigator.canShare){
+    try{
+      const shareData={ files:[vcf], title:(r.driver.split(' ')[0]+' \u2014 driver contact') };
+      if(navigator.canShare(shareData)){
+        await navigator.share(shareData);
+        markPartSent(id,'vcard');
+        return;
+      }
+    }catch(e){ if(e && e.name==='AbortError') return; console.warn('vcard share failed',e); }
+  }
+  // Fallback only for browsers without file-sharing: save so it can be attached manually.
+  try{
+    const url=URL.createObjectURL(vcf);
+    const a=document.createElement('a'); a.href=url; a.download=vcf.name; a.style.display='none';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1000);
+    openGroupThread(id, '');
+    markPartSent(id,'vcard');
+    setTimeout(function(){ showToast('\uD83D\uDC64 Driver contact saved to Files \u2014 attach it in Messages'); },700);
+  }catch(e){ console.warn('vcard download failed',e); showToast('Could not prepare driver contact','error'); }
 }
 
 async function sendDriverCard(id){
