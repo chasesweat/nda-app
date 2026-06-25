@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090098">
+<meta name="version" content="202606090100">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -3778,6 +3778,8 @@ function renderConfirmations(){
       };
 
       const buttons='<div style="display:flex;flex-direction:column;gap:.35rem;margin-bottom:.75rem;">'
+        +'<button onclick="sendAllConf('+pid+')" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.45rem;padding:.65rem;background:#16a34a;border:none;border-radius:9px;color:#fff;font-weight:800;font-size:.9rem;cursor:pointer;font-family:\'DM Sans\',sans-serif;">&#x1F4E4; Send everything in one text</button>'
+        +'<div style="font-size:.66rem;color:var(--mid);text-align:center;margin:-.15rem 0 .2rem;">Confirmation, instructions, driver card &amp; contact \u2014 one share</div>'
         +btnRow('text','&#x1F4AC; Confirmation text','sendConfText')
         +(conf.instructions?btnRow('inst','&#x1F4CD; Pickup instructions','sendConfInstructions'):'')
         +((r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')?btnRow('selfie','&#x1F933; Selfie request','sendSelfiePic'):'')
@@ -3822,6 +3824,14 @@ function renderConfirmations(){
         const prof=DRIVER_PROFILES[r.driver.trim()]||{};
         const allFiles=[file];
         if(prof.phone) allFiles.push(buildDriverVCard(r.driver.trim()));
+        // Airport rides: include the driver selfie so the client can spot their driver
+        if(r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP'){
+          try{
+            const _su=getDriverSelfie(r.driver.trim());
+            const _sb=_su?dataURLtoBlob(_su):null;
+            if(_sb) allFiles.push(new File([_sb],(r.driver.trim().split(' ')[0]||'driver')+'-selfie.png',{type:_sb.type||'image/png'}));
+          }catch(e){ console.warn('selfie share file',e); }
+        }
         _confirmShareFiles[r.id]=allFiles;
         const url=URL.createObjectURL(file);
         imgEl.onload=function(){ URL.revokeObjectURL(url); };
@@ -11164,6 +11174,15 @@ function markPartSent(rideId, partKey){
     const chk=btn.querySelector('.cpart-chk');
     if(chk) chk.style.display='inline';
   }
+}
+
+function sendAllConf(id){
+  const r=rides.find(function(x){ return x&&x.id===id; }); if(!r) return;
+  textClient(id); // one-tap: confirmation text + instructions + driver card + vCard
+  // optimistically flip the per-part checks for what the all-in-one share includes
+  ['text','inst','card','vcard','selfie'].forEach(function(k){
+    if(document.getElementById('cpart-'+id+'-'+k)) markPartSent(id,k);
+  });
 }
 
 // ── Individual confirmation part actions ─────────────────────────────
