@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090088">
+<meta name="version" content="202606090091">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2883,7 +2883,11 @@ function toggleAddon(k){
 
 // ── EXPORTS ──
 function exportClientsToCSV(){
-  const db=(typeof buildClientDB==='function') ? buildClientDB(isAdmin()?null:getMyDriverName()) : {};
+  // Export only the clients shown in YOUR directory — your own list (or an
+  // unlocked driver's list if you're authorized to view it) — never everyone's.
+  var _us=document.getElementById('client-unlock-view-sel'); var _uv=_us&&_us.value||'';
+  var _viewAs=(_uv && hasClientUnlock(_uv)) ? _uv : ((currentUser&&PROXY_MAP[currentUser.name])||getMyDriverName());
+  const db=(typeof buildClientDB==='function') ? buildClientDB(_viewAs) : {};
   const rows=[['Client','Phone','Email','Drivers','Rides','Total $']];
   Object.values(db).forEach(c=>{
     const total=(c.rides||[]).reduce((s,r)=>s+(parseFloat(r.price)||0),0);
@@ -10550,8 +10554,9 @@ function openClientModal(name){
   back.innerHTML=
     '<div style="background:var(--white);border-radius:16px;max-width:380px;width:100%;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.4);max-height:90vh;overflow:auto;">'
     +'<div style="font-size:1rem;font-weight:700;color:var(--black);margin-bottom:.2rem;">\u270F\uFE0F Edit Client</div>'
-    +'<div style="font-size:1.05rem;font-weight:700;color:var(--black);">'+escHtml(c.name)+'</div>'
-    +'<div style="font-size:.68rem;color:#888;margin:.25rem 0 .7rem;">Updates your contact details only \u2014 the name on existing rides is unchanged. Private to you.</div>'
+    +'<label style="font-size:.7rem;color:#888;display:block;margin-bottom:2px;">Full name</label>'
+    +'<input id="ec-name" type="text" value="'+escAttr(c.name||'')+'" style="width:100%;padding:.35rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.86rem;font-weight:700;box-sizing:border-box;margin-bottom:.4rem;" />'
+    +'<div style="font-size:.68rem;color:#888;margin:0 0 .7rem;">Renaming also corrects the name on your own rides, and merges duplicates that share a name. Private to you.</div>'
     +'<label style="font-size:.7rem;color:#888;display:block;margin-bottom:2px;">Phone</label>'
     +'<input id="ec-phone" type="text" value="'+escAttr(c.phone||'')+'" style="width:100%;padding:.35rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;margin-bottom:.5rem;" />'
     +'<label style="font-size:.7rem;color:#888;display:block;margin-bottom:2px;">Email</label>'
@@ -10570,13 +10575,47 @@ function openClientModal(name){
   document.body.appendChild(back);
   setTimeout(function(){ var el=document.getElementById('ec-phone'); if(el) el.focus(); },100);
 }
-async function submitEditClient(name){
-  if(!name) return;
+async function submitEditClient(oldName){
+  if(!oldName) return;
   var driver=clientStoreDriver(); if(!driver){ showToast('Not logged in','error'); return; }
   if(!importedClients[driver]) importedClients[driver]=[];
-  var key=name.trim().toLowerCase();
-  var rec=importedClients[driver].find(function(c){ return c.name&&c.name.toLowerCase()===key; });
-  if(!rec){ rec={ name:name.trim(), source:'client', addedAt:new Date().toISOString() }; importedClients[driver].push(rec); }
+  var newName=(document.getElementById('ec-name')?.value||'').trim();
+  if(!newName){ var ee=document.getElementById('ec-err'); if(ee) ee.textContent='Name is required.'; return; }
+  var oldKey=oldName.trim().toLowerCase();
+  var newKey=newName.toLowerCase();
+  var renaming = newKey!==oldKey;
+
+  if(renaming){
+    var viewAs=(currentUser&&PROXY_MAP[currentUser.name])||getMyDriverName();
+    var _own=function(r){ var o=USER_DRIVER_MAP[r.createdBy]||PROXY_MAP[r.createdBy]||r.createdBy; return o===viewAs; };
+    var myRides=(Array.isArray(rides)?rides:[]).filter(function(r){ return r.client && r.client.trim().toLowerCase()===oldKey && _own(r); });
+    var mergeTarget = importedClients[driver].some(function(c){ return c.name && c.name.trim().toLowerCase()===newKey; })
+      || (Array.isArray(rides) && rides.some(function(r){ return r.client && r.client.trim().toLowerCase()===newKey && _own(r); }));
+    var msg='Rename \u201C'+oldName+'\u201D to \u201C'+newName+'\u201D?';
+    if(myRides.length) msg+='\n\nThis updates the name on '+myRides.length+' of your ride'+(myRides.length===1?'':'s')+'.';
+    if(mergeTarget) msg+='\n\n\u201C'+newName+'\u201D already exists \u2014 they will be combined into one client.';
+    if(!confirm(msg)) return;
+    // 1) rename the name on MY rides only
+    myRides.forEach(function(r){ r.client=newName; });
+    if(myRides.length){ await saveRides(); }
+    // 2) keep status flags attached to the same person across the rename
+    var me=_deceasedOwner();
+    if(Array.isArray(deceasedClients)) deceasedClients.forEach(function(e){ if(e&&e.owner===me&&e.name&&e.name.trim().toLowerCase()===oldKey) e.name=newName; });
+    if(Array.isArray(hiddenClients))  hiddenClients.forEach(function(e){ if(e&&e.owner===me&&e.name&&e.name.trim().toLowerCase()===oldKey) e.name=newName; });
+    if(Array.isArray(cautiousList))   cautiousList.forEach(function(e){ if(e&&e.name&&e.name.trim().toLowerCase()===oldKey) e.name=newName; });
+    try{ await saveDeceasedClients(); }catch(_e){}
+    try{ await storageSet('kat:hiddenClients',hiddenClients); }catch(_e){}
+    try{ await saveCautiousList(); }catch(_e){}
+  }
+
+  // 3) upsert the contact record under the (possibly new) name, merging if one exists
+  var arr=importedClients[driver];
+  var oldRec=arr.find(function(c){ return c.name&&c.name.trim().toLowerCase()===oldKey; });
+  var rec=arr.find(function(c){ return c.name&&c.name.trim().toLowerCase()===newKey; });
+  if(renaming && oldRec && rec && oldRec!==rec){ arr.splice(arr.indexOf(oldRec),1); }      // merge: drop old, keep target
+  else if(renaming && oldRec && !rec){ oldRec.name=newName; rec=oldRec; }                   // simple rename
+  if(!rec){ rec={ name:newName, source:'client', addedAt:new Date().toISOString() }; arr.push(rec); }
+
   var phone=(document.getElementById('ec-phone')?.value||'').trim();
   var email=(document.getElementById('ec-email')?.value||'').trim();
   rec.phone=phone; rec.phones=phone?[{label:'',number:phone}]:[];
@@ -10586,7 +10625,7 @@ async function submitEditClient(name){
   rec.notes=(document.getElementById('ec-notes')?.value||'').trim();
   await saveImportedClients();
   var b=document.getElementById('client-edit-back'); if(b) b.remove();
-  renderClients(); showToast('\u2713 Client updated');
+  renderClients(); showToast(renaming?'\u2713 Client updated \u0026 renamed':'\u2713 Client updated');
 }
 function closeClientModal(){
   const m=document.getElementById('client-modal');
@@ -12319,7 +12358,7 @@ function buildClientDB(forDriver){
 
 // When a ride is created/edited, make sure the client exists in the creator's saved list,
 // and fold in any new phone/email/address the driver entered.
-async function clientStoreDriver(){
+function clientStoreDriver(){
   // Returns the login name used as the key in importedClients for the current user.
   return currentUser ? currentUser.name : null;
 }
@@ -12768,37 +12807,56 @@ function importClientsFromFile(input){
   const file=input.files[0]; if(!file) return;
   input.value='';
   const driver=clientStoreDriver(); if(!driver){ showToast('Not logged in','error'); return; }
-  if(file.name.match(/\.xlsx?$/i)){ showToast('Please export your spreadsheet as CSV first, then import','error'); return; }
+  if(/\.xlsx?$/i.test(file.name)){
+    // Native Excel import via SheetJS — no need to export to CSV first.
+    showToast('Reading spreadsheet\u2026');
+    loadXLSX().then(function(){
+      const reader=new FileReader();
+      reader.onload=function(e){
+        try{
+          const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+          const ws=wb.Sheets[wb.SheetNames[0]];
+          const rows=XLSX.utils.sheet_to_json(ws,{header:1,blankrows:false,defval:''})
+            .map(function(r){ return (r||[]).map(function(c){ return (c==null?'':String(c)).trim(); }); });
+          _importClientRows(rows, driver);
+        }catch(err){ showToast('Could not read that spreadsheet','error'); }
+      };
+      reader.readAsArrayBuffer(file);
+    }).catch(function(){ showToast('Spreadsheet reader failed to load \u2014 try CSV instead','error'); });
+    return;
+  }
+  // CSV / plain text
   const reader=new FileReader();
-  reader.onload=async function(e){
-    const text=e.target.result;
-    const lines=text.split(/\r?\n/).filter(function(l){ return l.trim(); });
-    if(!lines.length){ showToast('File appears empty','error'); return; }
-    // Detect header row
-    const firstLow=lines[0].toLowerCase();
-    const hasHeader=/name|phone|email/.test(firstLow);
-    const dataLines=hasHeader?lines.slice(1):lines;
-    if(!importedClients[driver]) importedClients[driver]=[];
-    let added=0, skipped=0;
-    dataLines.forEach(function(line){
-      const cols=line.split(',').map(function(c){ return c.replace(/^["']|["']$/g,'').trim(); });
-      const name=cols[0]; if(!name) return;
-      const key=name.toLowerCase();
-      if(importedClients[driver].find(function(c){ return c.name&&c.name.toLowerCase()===key; })){ skipped++; return; }
-      importedClients[driver].push({
-        name:name,
-        phone:cols[1]||'',
-        email:cols[2]||'',
-        notes:cols[3]||'',
-        source:'imported', addedAt:new Date().toISOString()
-      });
-      added++;
-    });
-    await saveImportedClients();
-    renderClients();
-    showToast(added+' client'+(added===1?' imported':' imported')+(skipped?' ('+skipped+' skipped — already exist)':''));
+  reader.onload=function(e){
+    const rows=(e.target.result||'').split(/\r?\n/).filter(function(l){ return l.trim(); })
+      .map(function(line){ return line.split(',').map(function(c){ return c.replace(/^["']|["']$/g,'').trim(); }); });
+    _importClientRows(rows, driver);
   };
   reader.readAsText(file);
+}
+async function _importClientRows(rows, driver){
+  if(!rows || !rows.length){ showToast('File appears empty','error'); return; }
+  // Skip a header row if the first row looks like column titles
+  const first=(rows[0]||[]).join(' ').toLowerCase();
+  const dataRows=/name|phone|email/.test(first)?rows.slice(1):rows;
+  if(!importedClients[driver]) importedClients[driver]=[];
+  let added=0, skipped=0;
+  dataRows.forEach(function(cols){
+    const name=(cols[0]||'').trim(); if(!name) return;
+    const key=name.toLowerCase();
+    if(importedClients[driver].find(function(c){ return c.name&&c.name.toLowerCase()===key; })){ skipped++; return; }
+    importedClients[driver].push({
+      name:name,
+      phone:(cols[1]||'').trim(),
+      email:(cols[2]||'').trim(),
+      notes:(cols[3]||'').trim(),
+      source:'imported', addedAt:new Date().toISOString()
+    });
+    added++;
+  });
+  await saveImportedClients();
+  renderClients();
+  showToast(added+' client'+(added===1?'':'s')+' imported'+(skipped?' ('+skipped+' skipped \u2014 already exist)':''));
 }
 
 function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
