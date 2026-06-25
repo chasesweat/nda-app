@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090087">
+<meta name="version" content="202606090088">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -6181,6 +6181,7 @@ function openClientActions(name, ev){
   var item=function(label,color,fn){ return '<div onclick="'+fn+'" style="padding:.7rem .9rem;font-size:.84rem;color:'+color+';cursor:pointer;border-bottom:1px solid #f0ecf7;" onmouseover="this.style.background=\'#f7f4fc\'" onmouseout="this.style.background=\'#fff\'">'+label+'</div>'; };
   var safe=name.replace(/'/g,"\\'").replace(/"/g,'&quot;');
   var html='';
+  html+=item('\u270F\uFE0F Edit details','var(--black)',"_caFromMenu();openClientModal(&quot;"+safe+"&quot;);");
   html+=item('Release / Transfer','var(--black)',"_caFromMenu();openReleaseModal();");
   html+=item('Mark as cautious','#b45309',"_caFromMenu();openCautiousForClient(&quot;"+safe+"&quot;);");
   if(deceased){
@@ -6217,7 +6218,10 @@ function _confirmDeceased(name){
 }
 function _confirmRemoveClient(name){
   _closeClientActions();
-  if(confirm('Remove '+name+' entirely from your client list? This hides the client from your directory. Their ride history is not deleted.')){
+  var onCaution = Array.isArray(cautiousList) && cautiousList.some(function(e){ return e && e.name && e.name.trim().toLowerCase()===name.trim().toLowerCase(); });
+  var msg='Remove '+name+' entirely from your client list? This hides the client from your directory. Their ride history is not deleted.';
+  if(onCaution) msg+='\n\nThis client is on the team cautious list \u2014 they will stay flagged there for everyone.';
+  if(confirm(msg)){
     removeClientEntirely(name);
   }
 }
@@ -10529,7 +10533,61 @@ async function deleteSelectedClients(){
 
 // ── Restored missing functions ──────────────────────────────────────
 
-function openClientModal(){ /* client detail view not built; card click is a no-op */ }
+function openClientModal(name){
+  if(!name) return;
+  // Editing is for your OWN list only. If an admin is viewing another driver's
+  // unlocked list, keep it read-only.
+  var _us=document.getElementById('client-unlock-view-sel'); var _uv=_us&&_us.value||'';
+  if(_uv && hasClientUnlock(_uv)){ showToast('Viewing another driver\u2019s list \u2014 read only','error'); return; }
+  var viewAs=(currentUser&&PROXY_MAP[currentUser.name])||getMyDriverName();
+  var db=buildClientDB(viewAs);
+  var c=db[name.trim().toLowerCase()]||{name:name,phone:'',email:'',address:'',paymentMethod:'',notes:''};
+  var safeName=(c.name||'').replace(/"/g,'&quot;');
+  var back=document.createElement('div');
+  back.id='client-edit-back';
+  back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:12000;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  back.addEventListener('click',function(e){ if(e.target===back) back.remove(); });
+  back.innerHTML=
+    '<div style="background:var(--white);border-radius:16px;max-width:380px;width:100%;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.4);max-height:90vh;overflow:auto;">'
+    +'<div style="font-size:1rem;font-weight:700;color:var(--black);margin-bottom:.2rem;">\u270F\uFE0F Edit Client</div>'
+    +'<div style="font-size:1.05rem;font-weight:700;color:var(--black);">'+escHtml(c.name)+'</div>'
+    +'<div style="font-size:.68rem;color:#888;margin:.25rem 0 .7rem;">Updates your contact details only \u2014 the name on existing rides is unchanged. Private to you.</div>'
+    +'<label style="font-size:.7rem;color:#888;display:block;margin-bottom:2px;">Phone</label>'
+    +'<input id="ec-phone" type="text" value="'+escAttr(c.phone||'')+'" style="width:100%;padding:.35rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;margin-bottom:.5rem;" />'
+    +'<label style="font-size:.7rem;color:#888;display:block;margin-bottom:2px;">Email</label>'
+    +'<input id="ec-email" type="email" value="'+escAttr(c.email||'')+'" style="width:100%;padding:.35rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;margin-bottom:.5rem;" />'
+    +'<label style="font-size:.7rem;color:#888;display:block;margin-bottom:2px;">Address</label>'
+    +'<input id="ec-address" type="text" value="'+escAttr(c.address||'')+'" style="width:100%;padding:.35rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;margin-bottom:.5rem;" />'
+    +'<label style="font-size:.7rem;color:#888;display:block;margin-bottom:2px;">Payment method</label>'
+    +'<input id="ec-pay" type="text" value="'+escAttr(c.paymentMethod||'')+'" placeholder="e.g. Venmo, Cash, Card" style="width:100%;padding:.35rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;margin-bottom:.5rem;" />'
+    +'<label style="font-size:.7rem;color:#888;display:block;margin-bottom:2px;">Notes</label>'
+    +'<textarea id="ec-notes" rows="2" style="width:100%;padding:.4rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;resize:vertical;box-sizing:border-box;margin-bottom:.5rem;">'+escHtml(c.notes||'')+'</textarea>'
+    +'<div id="ec-err" style="font-size:.75rem;color:#dc2626;min-height:1rem;margin-bottom:.4rem;"></div>'
+    +'<div style="display:flex;gap:.5rem;">'
+    +'<button onclick="submitEditClient(&quot;'+safeName+'&quot;)" style="flex:1;padding:.6rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.88rem;cursor:pointer;">Save Changes</button>'
+    +'<button onclick="document.getElementById(\'client-edit-back\').remove()" style="flex:1;padding:.6rem;background:none;border:1.5px solid #ddd;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:600;font-size:.88rem;cursor:pointer;color:#666;">Cancel</button>'
+    +'</div></div>';
+  document.body.appendChild(back);
+  setTimeout(function(){ var el=document.getElementById('ec-phone'); if(el) el.focus(); },100);
+}
+async function submitEditClient(name){
+  if(!name) return;
+  var driver=clientStoreDriver(); if(!driver){ showToast('Not logged in','error'); return; }
+  if(!importedClients[driver]) importedClients[driver]=[];
+  var key=name.trim().toLowerCase();
+  var rec=importedClients[driver].find(function(c){ return c.name&&c.name.toLowerCase()===key; });
+  if(!rec){ rec={ name:name.trim(), source:'client', addedAt:new Date().toISOString() }; importedClients[driver].push(rec); }
+  var phone=(document.getElementById('ec-phone')?.value||'').trim();
+  var email=(document.getElementById('ec-email')?.value||'').trim();
+  rec.phone=phone; rec.phones=phone?[{label:'',number:phone}]:[];
+  rec.email=email; rec.emails=email?[email]:[];
+  rec.address=(document.getElementById('ec-address')?.value||'').trim();
+  rec.paymentMethod=(document.getElementById('ec-pay')?.value||'').trim();
+  rec.notes=(document.getElementById('ec-notes')?.value||'').trim();
+  await saveImportedClients();
+  var b=document.getElementById('client-edit-back'); if(b) b.remove();
+  renderClients(); showToast('\u2713 Client updated');
+}
 function closeClientModal(){
   const m=document.getElementById('client-modal');
   if(m) m.style.display='none';
