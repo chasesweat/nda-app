@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090085">
+<meta name="version" content="202606090087">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2089,7 +2089,7 @@ async function approveMerge(reqId){
   if(!driverSettings[req.toDriver]) driverSettings[req.toDriver]={};
   driverSettings[req.fromDriver].linkedWith=req.toDriver;
   driverSettings[req.toDriver].linkedWith=req.fromDriver;
-  await saveClientRequests(); await saveDSettings();
+  await saveClientRequests(); await saveDriverSettings();
   // Notify both drivers
   [req.fromDriver, req.toDriver].forEach(function(d){
     addNotification(d,{id:reqId},'merge_approved','\uD83D\uDD17 Profiles linked! You can now view '+(d===req.fromDriver?req.toDriver:req.fromDriver).split(' ')[0]+'\'s clients, rides, and income. Both profiles stay completely separate.');
@@ -2111,7 +2111,7 @@ async function unlinkProfiles(driverName){
   const partner=(driverSettings[driverName]||{}).linkedWith;
   if(driverSettings[driverName]) delete driverSettings[driverName].linkedWith;
   if(partner&&driverSettings[partner]) delete driverSettings[partner].linkedWith;
-  await saveDSettings();
+  await saveDriverSettings();
   if(partner){ addNotification(partner,{},'transfer_denied','Your profile link with '+driverName.split(' ')[0]+' has been removed.'); await saveNotifs(); updateNotifBadge(); }
   showToast('Profiles unlinked');
   closeMenu();
@@ -7684,6 +7684,7 @@ async function requestClientFromWarning(clientName){
   await saveClientRequests();
   addNotification(owner,{id:reqId,client:clientName},'transfer_request',
     '🔗 '+myDriver.split(' ')[0]+' wants to take over '+clientName+'. Tap bell to approve or deny.');
+  const ADMINS=['Kat','Chase','Morgan'];
   ADMINS.forEach(function(a){const d=USER_DRIVER_MAP[a]||a;if(d!==owner&&d!==myDriver)addNotification(d,{id:reqId,client:clientName},'transfer_request',req.msg);});
   await saveNotifs();
   updateNotifBadge();
@@ -10518,7 +10519,7 @@ async function deleteSelectedClients(){
       if(key) delete importedClients[driver][key];
     }
   });
-  await persistImportedClients();
+  await saveImportedClients();
   selectedClients.clear(); clientSelectMode=false;
   const btn=document.getElementById("client-select-btn");
   if(btn){ btn.textContent="\u2611 Select"; btn.style.background=""; btn.style.borderColor="var(--light)"; btn.style.color=""; }
@@ -10609,7 +10610,7 @@ async function _executeRelease(req){
       const rec=arr.splice(idx,1)[0];
       if(!importedClients[toLogin]) importedClients[toLogin]=[];
       importedClients[toLogin].push(rec);
-      await persistImportedClients();
+      await saveImportedClients();
     }
   }
   // Reassign future rides to the new driver
@@ -11481,6 +11482,7 @@ function buildIncomeRow(r, i, admin){
   const isOutside = !!r._outside;
   const rowClick = isOutside ? '' : ('onclick="openRideModal('+r.id+')"');
   const rowCursor = isOutside ? 'default' : 'pointer';
+  let driverCell = '';
   if(admin){
     driverCell = '<td style="padding:.55rem .75rem;">'
       + '<span style="display:flex;align-items:center;gap:4px;">'
@@ -12434,6 +12436,12 @@ function setClientMonth(m){
   if(m){ clientMonthFilter = m; clientStatFilter = 'month'; renderClients(); }
 }
 
+// Multi-select state for the client list — declared here so renderClients() can
+// read them safely. Previously undeclared, which threw a ReferenceError at the
+// first client row and blanked the entire list (stats above it still rendered).
+let clientSelectMode = false;
+let selectedClients  = new Set();
+
 function renderClients(){
   if(!document.getElementById('client-list')) return;
   const admin    = isAdmin();
@@ -12693,7 +12701,7 @@ async function submitAddClient(){
     notes:document.getElementById('ac-notes')?.value.trim()||'',
     source:'client', addedAt:new Date().toISOString()
   });
-  await persistImportedClients();
+  await saveImportedClients();
   document.querySelector('[style*="z-index: 12000"],[style*="z-index:12000"]')?.remove();
   renderClients(); showToast('\u2713 Client added');
 }
@@ -12728,7 +12736,7 @@ function importClientsFromFile(input){
       });
       added++;
     });
-    await persistImportedClients();
+    await saveImportedClients();
     renderClients();
     showToast(added+' client'+(added===1?' imported':' imported')+(skipped?' ('+skipped+' skipped — already exist)':''));
   };
