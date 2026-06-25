@@ -1,12 +1,10 @@
-// NWDA Driver Portal service worker — network-first with offline cache fallback.
-const CACHE = 'nwda-v2';
+// NWDA Driver Portal service worker — network-first, always-fresh app shell.
+const CACHE = 'nwda-v3';
 const CORE = ['./'];
-
 self.addEventListener('install', (e) => {
   self.skipWaiting();
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE).catch(() => {})));
 });
-
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
@@ -14,10 +12,30 @@ self.addEventListener('activate', (e) => {
       .then(() => self.clients.claim())
   );
 });
-
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;                 // never touch Firebase writes etc.
+
+  // The app shell / page navigations: bypass the browser HTTP cache so a fresh
+  // deploy is picked up on the very next launch. Fall back to cache only offline.
+  const isPage = req.mode === 'navigate' ||
+                 (req.headers.get('accept') || '').includes('text/html');
+  if (isPage) {
+    e.respondWith(
+      fetch(req, { cache: 'no-store' })
+        .then((res) => {
+          if (res && res.status === 200 && req.url.startsWith(self.location.origin)) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(req, copy).catch(() => {}));
+          }
+          return res;
+        })
+        .catch(() => caches.match(req).then((r) => r || caches.match('./')))
+    );
+    return;
+  }
+
+  // Everything else (icons, etc.): network-first with cache fallback (unchanged).
   e.respondWith(
     fetch(req)
       .then((res) => {
@@ -30,7 +48,6 @@ self.addEventListener('fetch', (e) => {
       .catch(() => caches.match(req).then((r) => r || caches.match('./')))
   );
 });
-
 // ── Tapping a notification: focus the app (or open it) instead of doing nothing ──
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
@@ -53,7 +70,6 @@ self.addEventListener('notificationclick', (e) => {
     })
   );
 });
-
 // ── Background push (only used if FCM/Web Push is wired up later) ──
 // Harmless today: with no push subscription this never fires. When real push is
 // enabled, the sender should target ONE driver's device token so only that driver
