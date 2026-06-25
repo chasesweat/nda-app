@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090091">
+<meta name="version" content="202606090093">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2242,8 +2242,8 @@ function calcQuote() {
   // Sprinter Van: $405 flat for airport, $150/hr for round trips
   const _sprintAP=BASE['Sprinter Van']||(globalSettings.baseRates&&globalSettings.baseRates['Sprinter Van'])||405;
   const _sprintHr=globalSettings.sprintHourly||150;
-  const base=vehicle==='Sprinter Van'?(apType?_sprintAP:_sprintHr):BASE[vehicle]||0;
   const apType  = type==='AP RUN'||type==='AP PICK UP'||type==='AP ROUND TRIP';
+  const base=vehicle==='Sprinter Van'?(apType?_sprintAP:_sprintHr):BASE[vehicle]||0;
   const rtType  = type==='ROUND TRIP';
   const apRtType= type==='AP ROUND TRIP';
 
@@ -3732,7 +3732,7 @@ function renderConfirmations(){
       const buttons='<div style="display:flex;flex-direction:column;gap:.35rem;margin-bottom:.75rem;">'
         +btnRow('text','&#x1F4AC; Confirmation text','sendConfText')
         +(conf.instructions?btnRow('inst','&#x1F4CD; Pickup instructions','sendConfInstructions'):'')
-        +btnRow('selfie','&#x1F933; Selfie request','sendSelfiePic')
+        +((r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')?btnRow('selfie','&#x1F933; Selfie request','sendSelfiePic'):'')
         +btnRow('vcard','&#x1F464; Driver vCard','sendDriverVCard')
         +btnRow('card','&#x1F5BC; Driver card','sendDriverCard')
         +btnRow('phone','&#x1F4F1; Client phone to driver','sendClientPhone')
@@ -12568,12 +12568,12 @@ function renderClients(){
   const monthCount = baseClients.filter(inMonth).length;
   const ridesThisMonth = baseClients.reduce((s,c)=>s+c.rides.filter(r=>r.date&&r.date.startsWith(selMonth)).length,0);
   const statCards = admin
-    ?[{label:'Total Clients',val:Object.keys(db).length,color:'var(--gold)',filter:'all'},
+    ?[{label:'Total Clients',val:Object.values(db).filter(function(c){return !isClientHidden(c.name);}).length,color:'var(--gold)',filter:'all'},
       
       {label:'Rides This Month',val:ridesThisMonth,color:'var(--green)',filter:'month'}]
-    :[{label:'My Clients',val:baseClients.length,color:'var(--gold)',filter:'all'},
+    :[{label:'My Clients',val:baseClients.filter(function(c){return !isClientHidden(c.name);}).length,color:'var(--gold)',filter:'all'},
       {label:'Active This Month',val:monthCount,color:'var(--green)',filter:'month'},
-      {label:'Total Rides',val:baseClients.reduce((s,c)=>s+c.rides.length,0),color:'#1e88e5'}];
+      {label:'Total Rides',val:baseClients.filter(function(c){return !isClientHidden(c.name);}).reduce((s,c)=>s+c.rides.length,0),color:'#1e88e5'}];
   const _cst=document.getElementById('client-stats'); if(_cst) _cst.innerHTML=statCards.map(s=>{
     const active = s.filter && clientStatFilter===s.filter;
     const clickable = !!s.filter;
