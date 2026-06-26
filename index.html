@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090109">
+<meta name="version" content="202606090115">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -27,6 +27,7 @@
   --charcoal:#2d1f45; --mid:#a898cc; --light:#e2d9f3; --surface:#f7f3ff;
   --red:#b03a2e; --green:#2e6b46; --blue:#1e4f87;
   --accent:#0d9488;
+  --pur3:#7c3aed;
 }
 html{font-size:17px;color:#fff;}
 body{color:#fff;}
@@ -225,6 +226,7 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
 .driver-card-name{font-weight:600;font-size:1rem;margin-bottom:.75rem;display:flex;align-items:center;gap:.5rem;}
 /* styled member card */
 .member-card{border-radius:14px;overflow:hidden;border:1px solid var(--light);background:var(--white);max-width:300px;}
+.member-card-edit{grid-column:1 / -1;max-width:560px;margin-left:auto;margin-right:auto;}
 .member-card-photo{height:160px;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;}
 .member-card-initials{font-size:2rem;font-weight:700;color:#fff;letter-spacing:1px;}
 .member-card-badge{background:rgba(0,0,0,.55);padding:.35rem .75rem;display:flex;align-items:center;justify-content:space-between;gap:.5rem;}
@@ -1137,7 +1139,7 @@ input,select,textarea{font-size:16px;}
     <div class="modal-footer">
       <button id="rm-delete-btn" class="btn-danger" onclick="deleteRide(activeRideId)">Delete Ride</button>
       <button id="rm-cancelride-btn" class="btn-secondary" onclick="cancelRide(activeRideId)" style="color:#b03a2e;border-color:#b03a2e;">🚫 Cancel Ride</button>
-      <button id="rm-paid-btn" class="btn-secondary" onclick="toggleRidePaid(activeRideId)" style="color:var(--green);border-color:var(--green);">💰 Mark Paid</button>
+      <button id="rm-paid-btn" class="btn-secondary" onclick="toggleRidePaid(activeRideId)" style="color:var(--green);border-color:var(--green);" title="Mark that the client has paid the driver">💰 Mark Client Paid</button>
       <button class="btn-secondary" onclick="openDuplicateModal(activeRideId)" style="color:var(--gold);border-color:var(--gold);">⧉ Duplicate</button>
       <button class="btn-secondary" onclick="closeRideModal()">Close</button>
     </div>
@@ -3425,7 +3427,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
     const isHoliday=ALL_HOLIDAY_MMDD.includes(mmdd);
     const holName=HOLIDAY_NAMES[mmdd]||'';
     const holFee=CHRISTMAS_DATES.includes(mmdd)?35:30;
-    let dayRides=rides.filter(r=>r.date===ds && r.status!=='cancelled');
+    let dayRides=rides.filter(r=>r.date===ds);
     if(typeof driverFilter==='function') dayRides=dayRides.filter(driverFilter);
     else if(driverFilter&&driverFilter!=='group') dayRides=dayRides.filter(r=>r.driver===driverFilter);
     dayRides.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
@@ -3443,19 +3445,26 @@ function renderWeekView(containerId, weekStart, driverFilter){
         ${dayRides.length
           ? dayRides.map(r=>{
               const c=rideColor(r);
+              const isCancelled=r.status==='cancelled';
+              const isPaid=r.status==='paid';
+              const ownerName=r.createdBy?(PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy):null;
+              const ownerFirst=ownerName?String(ownerName).split(' ')[0]:'';
               const ic=interestCount(r);
-              const tc=contrastText(c,0.4);
+              const tc=isCancelled?'#6b6b6b':contrastText(c,0.4);
               const badge=r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP'?'badge-ap':r.type==='ROUND TRIP'?'badge-rt':'badge-pt';
   const xxlBadge=r.xxl?'<span style="font-size:.55rem;font-weight:700;background:#6b21a8;color:#fff;border-radius:3px;padding:1px 4px;margin-left:2px;">XXL</span>':'';
   const pairBadge=r.pairId?'<span style="font-size:.55rem;font-weight:700;background:#1d4ed8;color:#fff;border-radius:3px;padding:1px 5px;margin-left:2px;" title="Linked ride pair">🔗 Pair</span>':'';
-              return `<div class="week-ride-card" style="border-color:${c};background:${c}66;" onclick="openRideModal(${r.id})">
+              return `<div class="week-ride-card" style="${isCancelled?'border-color:#b03a2e;background:#ececec;opacity:.72;':'border-color:'+c+';background:'+c+'66;'}" onclick="openRideModal(${r.id})">
                 <div style="display:flex;flex-direction:column;min-width:46px;">
                   <div class="week-ride-time" style="color:${tc};">${fmtTime12(r.time)||'—'}</div>
                   <div style="width:8px;height:8px;border-radius:50%;background:${c};margin-top:3px;"></div>
                 </div>
                 <div style="flex:1;min-width:0;">
-                  <div class="week-ride-client" style="color:${tc};">${r.confirmSent?'<span style="color:var(--green);font-weight:900;">✓ </span>':''}${r.client}</div>
+                  <div class="week-ride-client" style="color:${tc};${isCancelled?'text-decoration:line-through;':''}">${isCancelled?'<span style="color:#b03a2e;font-weight:800;text-decoration:none;">CANCELED · </span>':''}${r.confirmSent&&!isCancelled?'<span style="color:var(--green);font-weight:900;">✓ </span>':''}${r.client}</div>
                   <div class="week-ride-detail" style="color:${tc};opacity:.78;">${r.vehicle} · ${r.driver?r.driver.split(' ')[0]:'Unassigned'}${ic?` · <span style="color:#e0245e;font-weight:700;">❤️${ic}</span>`:''}</div>
+                  ${ownerFirst?`<div class="week-ride-detail" style="color:${tc};opacity:.7;font-size:.66rem;">👤 ${ownerFirst}'s client</div>`:''}
+                  ${isPaid&&!isCancelled?`<div style="display:inline-block;margin-top:3px;font-size:.58rem;font-weight:700;background:#ecfdf5;color:#047857;border:1px solid #6ee7b7;border-radius:4px;padding:1px 6px;white-space:nowrap;">💵 Paid</div>`:''}
+                  ${r.confirmSent&&!isCancelled?`<div style="display:inline-block;margin-top:3px;font-size:.58rem;font-weight:700;background:#f0fdf4;color:#16a34a;border:1px solid #86efac;border-radius:4px;padding:1px 6px;white-space:nowrap;">\u2713 Confirmation sent</div>`:''}
                   ${(function(){var cp=clientPhoneFor(r);return cp?'<a href="tel:'+cp.replace(/[^0-9+]/g,'')+'" onclick="event.stopPropagation()" style="display:block;font-size:.66rem;font-weight:700;color:'+tc+';opacity:.85;text-decoration:none;white-space:nowrap;">\uD83D\uDCDE '+escHtml(cp)+'</a>':'';})()}
                   ${r.type==='AP PICK UP'&&r.flight?`<a href="https://www.google.com/search?q=${encodeURIComponent((r.flight||"").trim().replace(/\s+/g,"").toUpperCase())}+flight+tracking" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:${tc};text-decoration:underline;opacity:.9;white-space:nowrap;">✈️ Flight Tracking</a>`:''}
                   ${r.type==='AP RUN'?'<a href="https://www.atl.com/times/" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:'+tc+';text-decoration:underline;opacity:.9;white-space:nowrap;">🔒 TSA Wait Times</a>':''}  
@@ -3492,7 +3501,7 @@ function renderMonthView(containerId, monthDate, driverFilter, jumpFn){
     const isToday=ds===today;
     const mmdd=ds.slice(5);
     const isHoliday=ALL_HOLIDAY_MMDD.includes(mmdd);
-    let dayRides=rides.filter(r=>r.date===ds && r.status!=='cancelled');
+    let dayRides=rides.filter(r=>r.date===ds);
     if(typeof driverFilter==='function') dayRides=dayRides.filter(driverFilter);
     else if(driverFilter&&driverFilter!=='group') dayRides=dayRides.filter(r=>r.driver===driverFilter);
     dayRides.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
@@ -3500,10 +3509,14 @@ function renderMonthView(containerId, monthDate, driverFilter, jumpFn){
     const extra=dayRides.length-shown.length;
     const pills=shown.map(r=>{
       const c=rideColor(r);
-      const check=r.confirmSent?'<span style="font-weight:900;">✓</span> ':'';
-      const tc=contrastText(c);
-      const lbl=`${r.time?fmtTime12(r.time)+' ':''}${(r.client||'').split(' ')[0]}`;
-      return `<div class="month-pill" style="background:${c};color:${tc};${r.newClient?'white-space:normal;':''}" title="${r.confirmSent?'✓ Confirmed · ':''}${r.newClient?'★ New Client · ':''}${(r.client||'')} · ${r.type} · $${r.price}" onclick="event.stopPropagation();openRideModal(${r.id})">${check}${lbl}${r.newClient?`<br><span style="font-size:.52rem;font-weight:700;letter-spacing:.4px;opacity:.95;">New Client</span>`:''}</div>`;
+      const isCancelled=r.status==='cancelled';
+      const isPaid=r.status==='paid';
+      const ownerName=r.createdBy?(PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy):null;
+      const ownerFirst=ownerName?String(ownerName).split(' ')[0]:'';
+      const mark=isCancelled?'':(isPaid?'<span title="Paid">💵</span> ':(r.confirmSent?'<span style="font-weight:900;">✓</span> ':''));
+      const tc=isCancelled?'#6b6b6b':contrastText(c);
+      const lbl=`${isCancelled?'CANCELED ':''}${r.time?fmtTime12(r.time)+' ':''}${(r.client||'').split(' ')[0]}`;
+      return `<div class="month-pill" style="background:${isCancelled?'#ececec':c};color:${tc};${isPaid&&!isCancelled?'box-shadow:inset 3px 0 0 #047857;':''}${isCancelled?'text-decoration:line-through;border:1px solid #d8b4ae;':''}${r.newClient?'white-space:normal;':''}" title="${isCancelled?'CANCELED · ':''}${isPaid?'💵 Paid · ':''}${r.confirmSent&&!isCancelled?'✓ Confirmed · ':''}${ownerFirst?escAttr(ownerFirst)+'\u2019s client · ':''}${escAttr(r.client||'')} · ${r.type} · $${r.price}" onclick="event.stopPropagation();openRideModal(${r.id})">${mark}${lbl}${r.newClient?`<br><span style="font-size:.52rem;font-weight:700;letter-spacing:.4px;opacity:.95;">New Client</span>`:''}</div>`;
     }).join('');
     const more=extra>0?`<div class="month-more">+${extra} more</div>`:'';
     const hol=isHoliday?`<span class="month-holiday" title="${HOLIDAY_NAMES[mmdd]||'Holiday'} — $${CHRISTMAS_DATES.includes(mmdd)?35:30} surcharge">✨ +$${CHRISTMAS_DATES.includes(mmdd)?35:30}</span>`:'';
@@ -3633,11 +3646,13 @@ function renderMyCal(){
     const rideCard=(r)=>{
       const c=rideColor(r);
       const driverTag = r.driver ? r.driver.split(' ')[0] : 'Unassigned';
+      const _ownerName=r.createdBy?(PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy):null;
+      const _ownerFirst=_ownerName?String(_ownerName).split(' ')[0]:'';
       const tc=contrastText(c,0.4);
       return `<div style="display:flex;align-items:center;gap:1rem;padding:.75rem 1rem;border-radius:10px;margin-bottom:.5rem;background:${c}66;border:2px solid ${c};cursor:pointer;flex-wrap:wrap;" onclick="openRideModal(${r.id})">
         <div style="width:8px;min-height:36px;border-radius:3px;background:${c};flex-shrink:0;align-self:stretch;"></div>
         <div class="ride-date" style="color:${tc};">${fmtDateShort(r.date)}<br>${fmtTime12(r.time)||'—'}</div>
-        <div class="ride-info"><div class="ride-client" style="color:${tc};">${r.client}${r.confirmSent?' <span style="color:var(--green);font-weight:900;">✓</span>':''}</div><div class="ride-detail" style="color:${tc};opacity:.78;">${rideDisplayType(r)} · ${driverTag}</div>${rideReqDriverTag(r)}${(_mtWatchId&&_mtRideIds.indexOf(r.id)>=0)?'<div style="margin-top:3px;"><span style="display:inline-block;font-size:.68rem;background:#f0fdf4;color:#16a34a;border:1px solid #86efac;border-radius:8px;padding:1px 7px;font-weight:700;animation:mt-pulse .9s ease-in-out infinite;">&#128205; Live tracking</span></div>':''}}</div>
+        <div class="ride-info"><div class="ride-client" style="color:${tc};">${r.client}${r.confirmSent?' <span style="color:var(--green);font-weight:900;">✓</span>':''}</div><div class="ride-detail" style="color:${tc};opacity:.78;">${rideDisplayType(r)} · ${driverTag}${_ownerFirst?' · 👤 '+escHtml(_ownerFirst)+'\u2019s client':''}</div>${rideReqDriverTag(r)}${r.status==='paid'?'<div style="margin-top:3px;"><span style="display:inline-block;font-size:.66rem;background:#ecfdf5;color:#047857;border:1px solid #6ee7b7;border-radius:8px;padding:1px 7px;font-weight:700;">💵 Paid</span></div>':''}${r.confirmSent?'<div style="margin-top:3px;"><span style="display:inline-block;font-size:.66rem;background:#f0fdf4;color:#16a34a;border:1px solid #86efac;border-radius:8px;padding:1px 7px;font-weight:700;">\u2713 Confirmation sent</span></div>':''}${(_mtWatchId&&_mtRideIds.indexOf(r.id)>=0)?'<div style="margin-top:3px;"><span style="display:inline-block;font-size:.68rem;background:#f0fdf4;color:#16a34a;border:1px solid #86efac;border-radius:8px;padding:1px 7px;font-weight:700;animation:mt-pulse .9s ease-in-out infinite;">&#128205; Live tracking</span></div>':''}}</div>
         <div class="ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}</div>
       </div>`;
     };
@@ -4538,16 +4553,16 @@ function buildRideLifecycle(r){
   } else if(!owner || owner===driver){
     // Client always pays the driver the full fare
     payHtml = `<div style="display:flex;justify-content:space-between;padding:.3rem 0;">
-        <span style="color:var(--mid);font-size:.84rem;">Client pays full fare</span>
+        <span style="color:var(--mid);font-size:.84rem;">Client pays driver (full fare)</span>
         <span style="font-weight:700;color:var(--green);">$${fare.toFixed(2)}</span></div>`;
   } else {
-    // Client pays the driver the full fare; the driver handles the 15% 15% Client Fee
+    // Client pays the driver the full fare; the assigned driver owes the owner 15%
     const fee = fare*0.15;
     payHtml = `<div style="display:flex;justify-content:space-between;padding:.3rem 0;">
-        <span style="color:var(--mid);font-size:.84rem;">Client pays full fare</span>
+        <span style="color:var(--mid);font-size:.84rem;">Client pays driver (full fare)</span>
         <span style="font-weight:600;color:var(--black);">$${fare.toFixed(2)}</span></div>
       <div style="display:flex;justify-content:space-between;padding:.3rem 0;border-top:1px solid var(--light);">
-        <span style="color:var(--mid);font-size:.84rem;">15% finder\u2019s fee</span>
+        <span style="color:var(--mid);font-size:.84rem;">Driver owes owner (15% finder\u2019s fee)</span>
         <span style="font-weight:700;color:var(--gold);">$${fee.toFixed(2)}</span></div>`;
   }
 
@@ -4555,6 +4570,7 @@ function buildRideLifecycle(r){
     <div style="width:100%;background:var(--surface);border-radius:10px;padding:.85rem;">
       <div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Ride status</div>
       <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.75rem;">${chips}</div>
+      <div style="font-size:.68rem;color:var(--mid);margin:-.5rem 0 .75rem;line-height:1.4;">&ldquo;Paid&rdquo; means the client has paid the driver.</div>
       <div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Payment owed</div>
       ${payHtml}
     </div>
@@ -4578,7 +4594,7 @@ async function setRideStatus(id, status){
   renderRideView(r);
   if(typeof refreshDash==='function') refreshDash();
   const paidBtn=document.getElementById('rm-paid-btn');
-  if(paidBtn){ paidBtn.textContent=r.status==='paid'?'💰 Paid ✓':'💰 Mark Paid';
+  if(paidBtn){ paidBtn.textContent=r.status==='paid'?'💰 Client Paid ✓':'💰 Mark Client Paid';
     paidBtn.style.fontWeight=r.status==='paid'?'700':'400';
     paidBtn.style.background=r.status==='paid'?'#f0fdf4':''; }
   if(document.getElementById('page-income')?.classList.contains('active') && typeof renderIncome==='function') renderIncome();
@@ -8647,8 +8663,8 @@ function renderDashFees(){
   let html='<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">15% Client Fees — To Be Paid</div>'
     +'<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:12px;overflow:hidden;">';
 
+  html+='<div style="font-size:.72rem;font-weight:600;color:var(--green);padding:.45rem .85rem;border-bottom:1px solid var(--light);background:#f0fdf4;">Owed to you</div>';
   if(hasOwed){
-    html+='<div style="font-size:.72rem;font-weight:600;color:var(--green);padding:.45rem .85rem;border-bottom:1px solid var(--light);background:#f0fdf4;">Owed to you</div>';
     Object.entries(owedToMe).forEach(([name,v])=>{
       html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.6rem .85rem;border-bottom:1px solid var(--light);gap:.6rem;">'
         +'<div><div style="font-size:.86rem;font-weight:600;">'+escHtml(name.split(' ')[0])+'</div>'
@@ -8661,9 +8677,11 @@ function renderDashFees(){
         +'</div>'
         +'</div>';
     });
+  } else {
+    html+='<div style="padding:.6rem .85rem;font-size:.78rem;color:var(--mid);border-bottom:1px solid var(--light);">Nothing owed to you right now.</div>';
   }
+  html+='<div style="font-size:.72rem;font-weight:600;color:#dc2626;padding:.45rem .85rem;border-bottom:1px solid var(--light);background:#fff5f5;">You owe</div>';
   if(hasOwe){
-    html+='<div style="font-size:.72rem;font-weight:600;color:#dc2626;padding:.45rem .85rem;border-bottom:1px solid var(--light);background:#fff5f5;">You owe</div>';
     Object.entries(iOwe).forEach(([name,v])=>{
       html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.6rem .85rem;border-bottom:1px solid var(--light);gap:.6rem;">'
         +'<div><div style="font-size:.86rem;font-weight:600;">'+escHtml(name.split(' ')[0])+'</div>'
@@ -8675,6 +8693,8 @@ function renderDashFees(){
         +'</div>'
         +'</div>';
     });
+  } else {
+    html+='<div style="padding:.6rem .85rem;font-size:.78rem;color:var(--mid);border-bottom:1px solid var(--light);">You\u2019re settled up \u2014 no 15% fees to pay right now.</div>';
   }
 
   // Waived-by-me section
@@ -8715,9 +8735,11 @@ function renderDashIncome(){
   const inMonth=r=>{ if(!r.date) return false; const d=new Date(r.date+'T12:00:00'); return d>=start&&d<=end; };
   // Only count COMPLETED rides — those on previous days, or explicitly marked completed/paid. Exclude cancelled.
   const isCompleted=r=> r.status!=='cancelled' && ((r.status==='completed'||r.status==='paid') || (r.date && r.date < todayStr));
+  // In-app rides count toward income only once the client has paid the driver.
+  const isPaid=r=> r.status==='paid';
   // The dashboard income reflects money earned DRIVING.
-  let monthRides=rides.filter(r=>inMonth(r)&&parseFloat(r.price||0)>0&&isMyDrivingRide(r)&&isCompleted(r));
-  // include this user's own completed outside rides
+  let monthRides=rides.filter(r=>inMonth(r)&&parseFloat(r.price||0)>0&&isMyDrivingRide(r)&&isPaid(r));
+  // include this user's own completed outside rides (manually logged earnings)
   {
     const outside=getMyOutsideRidesAsRides().filter(r=>inMonth(r)&&parseFloat(r.price||0)>0&&isCompleted(r));
     monthRides=monthRides.concat(outside);
@@ -8733,7 +8755,7 @@ function renderDashIncome(){
     </div>`;
   box.innerHTML=`
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem;flex-wrap:wrap;gap:.5rem;">
-      <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);">💰 Income · ${monthName} <span style="font-weight:400;text-transform:none;letter-spacing:0;">(completed rides)</span></div>
+      <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);">💰 Income · ${monthName} <span style="font-weight:400;text-transform:none;letter-spacing:0;">(paid rides)</span></div>
       <span onclick="nav('income')" style="font-size:.78rem;color:var(--gold);font-weight:600;cursor:pointer;">View details →</span>
     </div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;">
@@ -9304,6 +9326,39 @@ function renderDriverSettings(){
     </div>`).join('');
 }
 
+// Tap a driver's phone → choose Call or Text.
+function driverContact(phone, name){
+  if(!phone){ if(typeof showToast==='function') showToast('No phone number on file for '+(name||'this driver'),'error'); return; }
+  var clean=String(phone).replace(/[^0-9+]/g,'');
+  var ex=document.getElementById('contact-sheet'); if(ex) ex.remove();
+  var ov=document.createElement('div');
+  ov.id='contact-sheet';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100000;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  ov.addEventListener('click',function(e){ if(e.target===ov) ov.remove(); });
+  ov.innerHTML='<div style="background:var(--white);border-radius:16px;padding:1.25rem;max-width:320px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,.3);font-family:\'DM Sans\',sans-serif;text-align:center;">'
+    +'<div style="font-size:1rem;font-weight:700;color:var(--black);margin-bottom:.15rem;">'+escHtml(name||'Driver')+'</div>'
+    +'<div style="font-size:.85rem;color:var(--mid);margin-bottom:1rem;">'+escHtml(phone)+'</div>'
+    +'<a href="tel:'+clean+'" onclick="var s=document.getElementById(\'contact-sheet\');if(s)setTimeout(function(){s.remove();},120);" style="display:block;padding:.7rem;background:#16a34a;color:#fff;border-radius:10px;font-weight:700;font-size:.9rem;text-decoration:none;margin-bottom:.5rem;">\uD83D\uDCDE Call</a>'
+    +'<a href="sms:'+clean+'" onclick="var s=document.getElementById(\'contact-sheet\');if(s)setTimeout(function(){s.remove();},120);" style="display:block;padding:.7rem;background:var(--accent);color:#fff;border-radius:10px;font-weight:700;font-size:.9rem;text-decoration:none;margin-bottom:.5rem;">\uD83D\uDCAC Text</a>'
+    +'<button type="button" onclick="var s=document.getElementById(\'contact-sheet\');if(s)s.remove();" style="display:block;width:100%;padding:.6rem;background:none;border:1.5px solid var(--light);border-radius:10px;font-weight:600;font-size:.85rem;color:var(--mid);cursor:pointer;font-family:\'DM Sans\',sans-serif;">Cancel</button>'
+    +'</div>';
+  document.body.appendChild(ov);
+}
+
+// Tracks which driver cards are expanded so re-renders don't snap them shut.
+let _openMemberCards = new Set();
+function toggleMemberDetails(dk){
+  var el=document.getElementById('member-details-'+dk);
+  if(!el) return;
+  var open=!_openMemberCards.has(dk);
+  if(open) _openMemberCards.add(dk); else _openMemberCards.delete(dk);
+  el.style.display=open?'block':'none';
+  var card=el.closest('.member-card');
+  if(card) card.classList.toggle('member-card-edit', open);
+  var btn=document.getElementById('member-toggle-'+dk);
+  if(btn) btn.innerHTML=(open?'Hide details ':'Show details ')+'<span id="member-chevron-'+dk+'">'+(open?'\u25B4':'\u25BE')+'</span>';
+}
+
 function renderDriverMembers(){
   const grid=document.getElementById('driver-members-grid');
   if(!grid) return;
@@ -9338,11 +9393,28 @@ function renderDriverMembers(){
           <input type="text" id="${fieldId}-${dk}" value="${val||''}" placeholder="${placeholder}"
             style="width:100%;padding:.35rem .65rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.82rem;" />
         </div>`
-      : val ? `<div class="member-card-field"><span class="member-card-lbl">${label}</span><span class="member-card-val">${val}</span></div>` : '';
+      : '';
 
-    return`<div class="member-card">
+    const isOpen=_openMemberCards.has(dk);
+    const expandAttr=canEdit?`onclick="toggleMemberDetails('${dk}')" `:'';
+    const expandCur=canEdit?'cursor:pointer;':'';
+    const phoneSummary = prof.phone
+      ? '<button type="button" onclick="driverContact(\''+prof.phone+'\',\''+d+'\')" style="display:inline-flex;align-items:center;gap:.4rem;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.4rem .7rem;font-family:\'DM Sans\',sans-serif;font-size:.85rem;font-weight:600;color:var(--accent);cursor:pointer;margin-bottom:.5rem;">\uD83D\uDCDE '+escHtml(prof.phone)+'</button>'
+      : (canEdit?'<div style="font-size:.78rem;color:var(--mid);margin-bottom:.5rem;">No phone on file \u2014 add it below</div>':'');
+    const paymentBlock = canEdit
+      ? '<div style="margin-bottom:.5rem;">'+'<div style="font-size:.68rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Payment methods accepted</div>'+(function(){  const accepted=(driverSettings[d]&&driverSettings[d].paymentMethods)||[];  return ['Credit Card','Cash','Check','Venmo','Zelle','CashApp','Apple Pay'].map(function(m){    const on=accepted.includes(m);    const mid=d.replace(/ /g,'_')+'-'+m.replace(/ /g,'_');    return '<button id="pay-'+mid+'" onclick="togglePaymentMethod(\''+d+'\',\''+m+'\')" '      +'style="margin:2px;padding:.25rem .55rem;font-size:.72rem;font-weight:600;border-radius:20px;border:1.5px solid '+(on?'#9c27b0':'var(--light)')+';'      +'background:'+(on?'#9c27b0':'var(--white)')+';color:'+(on?'#fff':'var(--black)')+';cursor:pointer;font-family:\'DM Sans\',sans-serif;">'+m+'</button>';  }).join('');}())+'</div>'
+      : '';
+    const shareButtons =
+      (venmoLink?('<div style="margin-top:.5rem;">'+venmoLink+'</div>'):'')
+      +'<div style="display:flex;gap:.4rem;margin-top:.6rem;">'
+      +'<button onclick="shareDriverCard(\''+d+'\')" style="flex:1;padding:.45rem;background:var(--accent);color:#fff;border:none;border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">\u2197 Share Card</button>'
+      +'<button onclick="downloadDriverCard(\''+d+'\')" style="flex:1;padding:.45rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">\u2B07 Download</button>'
+      +'</div>'
+      +(venmo?('<button onclick="shareDriverVenmo(\''+d+'\')" style="width:100%;margin-top:.4rem;padding:.45rem;background:#3d95ce;color:#fff;border:none;border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">\u2197 Share Venmo link</button>'):'');
+
+    return`<div class="member-card${isOpen?' member-card-edit':''}">
       <!-- photo area -->
-      <div class="member-card-photo" style="background:${color};position:relative;">
+      <div class="member-card-photo" ${expandAttr}style="background:${color};position:relative;${expandCur}">
         ${DRIVER_PHOTOS[d]
           ? '<img src="'+DRIVER_PHOTOS[d]+'" style="width:100%;height:100%;object-fit:cover;object-position:top center;" alt="'+d+'" />'
           : '<div class="member-card-initials" style="color:'+photoText+';">'+initials+'</div>'
@@ -9350,20 +9422,24 @@ function renderDriverMembers(){
 
       </div>
       <!-- name badge -->
-      <div class="member-card-badge" style="background:${color}cc;">
+      <div class="member-card-badge" ${expandAttr}style="background:${color}cc;${expandCur}">
         <div>
           <div class="member-card-badge-name" style="color:${badgeText};">${d}${myDriverName===d?' <span style="font-size:.65rem;opacity:.7;">(you)</span>':''}</div>
         </div>
         <div style="width:8px;height:8px;border-radius:50%;background:${badgeText};opacity:.55;"></div>
       </div>
       <!-- vehicle bar -->
-      <div class="member-card-vehicle">
+      <div class="member-card-vehicle" ${expandAttr}style="${expandCur}">
         <svg width="14" height="14" fill="none" stroke="#888" stroke-width="1.5" viewBox="0 0 24 24"><path d="M5 17H3a2 2 0 01-2-2v-5a2 2 0 012-2l1-3h14l1 3a2 2 0 012 2v5a2 2 0 01-2 2h-2m-9 0h6m-6 0a1 1 0 100 2 1 1 0 000-2zm6 0a1 1 0 100 2 1 1 0 000-2z"/></svg>
         <div class="member-card-vehicle-name">${prof.vehicle||'Vehicle not set'}</div>
       </div>
       <!-- body -->
       <div class="member-card-body">
-        <div class="member-card-field"><span class="member-card-lbl">Phone</span><span class="member-card-val">${prof.phone||'—'}</span></div>
+        ${phoneSummary}
+        ${paymentBlock}
+        ${shareButtons}
+        ${canEdit?`<button type="button" id="member-toggle-${dk}" onclick="toggleMemberDetails('${dk}')" style="width:100%;margin-top:.6rem;padding:.45rem;background:none;border:1.5px solid var(--light);border-radius:7px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;color:var(--mid);cursor:pointer;">${isOpen?'Hide':'Show'} details <span id="member-chevron-${dk}">${isOpen?'\u25B4':'\u25BE'}</span></button>`:''}
+        ${canEdit?`<div id="member-details-${dk}" style="display:${isOpen?'block':'none'};margin-top:.5rem;">`:''}
         ${editField('Email',prof.email,'prof-email','email@example.com')}
         ${editField('Vehicle Year',prof.vehicleYear,'prof-vehicleyear','e.g. 2022')}
         ${editField('Vehicle Make/Model',prof.vehicle,'prof-vehicle','e.g. Toyota Camry')}
@@ -9383,8 +9459,20 @@ function renderDriverMembers(){
         ${editField('Notes',prof.notes,'prof-notes','Any notes…')}
         ${canEdit?('<div style="margin:.6rem 0;padding-top:.55rem;border-top:1px solid var(--light);">'
           
-          +(myDriverName===d?'<button type="button" onclick="manageBiometric(\''+d+'\')" style="width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;font-size:.82rem;font-weight:600;color:var(--black);cursor:pointer;margin-bottom:.45rem;">&#x1F510; Biometric &mdash; <span style="font-weight:400;color:var(--mid);font-size:.72rem;">'+((biometricCreds[d]||[]).length?'set up':'not set up')+'</span></button>':'')
-          +'<div style="margin-bottom:.5rem;">'+'<div style="font-size:.68rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Payment methods accepted</div>'+(function(){  const accepted=(driverSettings[d]&&driverSettings[d].paymentMethods)||[];  return ['Credit Card','Cash','Check','Venmo','Zelle','CashApp','Apple Pay'].map(function(m){    const on=accepted.includes(m);    const mid=d.replace(/ /g,'_')+'-'+m.replace(/ /g,'_');    return '<button id="pay-'+mid+'" onclick="togglePaymentMethod(\''+d+'\',\''+m+'\')" '      +'style="margin:2px;padding:.25rem .55rem;font-size:.72rem;font-weight:600;border-radius:20px;border:1.5px solid '+(on?'#9c27b0':'var(--light)')+';'      +'background:'+(on?'#9c27b0':'var(--white)')+';color:'+(on?'#fff':'var(--black)')+';cursor:pointer;font-family:\'DM Sans\',sans-serif;">'+m+'</button>';  }).join('');}())+'</div>'
+          +'<div style="margin-bottom:.6rem;">'
+          +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Day-of-travel selfie</div>'
+          +'<div style="font-size:.66rem;color:var(--mid);margin-bottom:.45rem;line-height:1.4;">Clients see this photo so they can recognize you on pickup day.</div>'
+          +'<div style="display:flex;align-items:center;gap:.7rem;">'
+          +((driverSettings[d]&&driverSettings[d].selfie)
+            ?'<img src="'+driverSettings[d].selfie+'" alt="day-of selfie" style="width:54px;height:54px;border-radius:10px;object-fit:cover;border:1.5px solid var(--light);flex-shrink:0;" />'
+            :'<div style="width:54px;height:54px;border-radius:10px;border:1.5px dashed var(--light);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:.6rem;color:var(--mid);flex-shrink:0;text-align:center;line-height:1.1;">Using<br>default</div>')
+          +'<div style="display:flex;flex-direction:column;gap:.35rem;align-items:flex-start;">'
+          +'<button type="button" onclick="openDriverSelfieUpload(\''+d+'\')" style="padding:.4rem .7rem;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;color:var(--black);cursor:pointer;">\uD83D\uDCF7 '+((driverSettings[d]&&driverSettings[d].selfie)?'Replace photo':'Upload photo')+'</button>'
+          +((driverSettings[d]&&driverSettings[d].selfie)?'<button type="button" onclick="resetDriverSelfie(\''+d+'\')" style="padding:.3rem .6rem;background:none;border:none;color:var(--mid);font-family:\'DM Sans\',sans-serif;font-size:.72rem;cursor:pointer;text-decoration:underline;">Use default</button>':'')
+          +'</div>'
+          +'</div>'
+          +'</div>'
+          +(myDriverName===d?'<button type="button" onclick="manageBiometric(\''+d+'\')" style="width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;font-size:.82rem;font-weight:600;color:var(--black);cursor:pointer;margin-bottom:.45rem;">&#x1F510; Biometric &mdash; <span style="font-weight:400;color:var(--mid);font-size:.72rem;">'+((biometricSetUpFor(d))?'set up on this device':'not set up on this device')+'</span></button>':'')
           +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;margin-bottom:.45rem;"><span style="font-size:.82rem;font-weight:600;color:var(--black);">\uD83D\uDCC5 Schedule Confirmation</span><button type="button" onclick="toggleConfText(\''+d+'\')" style="padding:.25rem .75rem;border-radius:20px;border:none;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;'+((driverSettings[d]&&driverSettings[d].confEnabled===false)?'background:var(--light);color:var(--mid);':'background:#16a34a;color:#fff;')+'">'+((driverSettings[d]&&driverSettings[d].confEnabled===false)?'OFF':'ON')+'</button></div>'+'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;margin-bottom:.45rem;"><span style="font-size:.82rem;font-weight:600;color:var(--black);">\u2708\uFE0F Flight Tracking Link</span><button type="button" onclick="toggleTrackingLink(\''+d+'\')" style="padding:.25rem .75rem;border-radius:20px;border:none;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;'+((driverSettings[d]&&driverSettings[d].trackingLink===false)?'background:var(--light);color:var(--mid);':'background:#16a34a;color:#fff;')+'">'+((driverSettings[d]&&driverSettings[d].trackingLink===false)?'OFF':'ON')+'</button></div>'
           +'<button type="button" onclick="toggleConfTemplates(\''+dk+'\')" style="width:100%;text-align:left;background:var(--surface);border:2px solid var(--gold);border-radius:10px;padding:.75rem .85rem;font-family:\'DM Sans\',sans-serif;font-size:.9rem;font-weight:800;color:var(--black);cursor:pointer;background:#fef8ec;">✉️ My Confirmation Text & Pickup Instructions <span id="conf-arrow-'+dk+'">▾</span> <span style="font-weight:400;color:var(--mid);font-size:.72rem;">'+((prof.confirmTemplate||prof.pickupInstructions)?'custom set':'using defaults')+'</span></button>'
           +'<div id="conf-templates-'+dk+'" style="display:none;margin-top:.6rem;">'
@@ -9419,12 +9507,6 @@ function renderDriverMembers(){
           +'</div>'
           +'</div>')
           :''}
-        ${venmoLink?('<div style="margin-top:.5rem;">'+venmoLink+'</div>'):''}
-        <div style="display:flex;gap:.4rem;margin-top:.6rem;">
-          <button onclick="shareDriverCard('${d}')" style="flex:1;padding:.45rem;background:var(--accent);color:#fff;border:none;border-radius:7px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">↗ Share Card</button>
-          <button onclick="downloadDriverCard('${d}')" style="flex:1;padding:.45rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:7px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">⬇ Download</button>
-        </div>
-        ${venmo?('<button onclick="shareDriverVenmo(\''+d+'\')" style="width:100%;margin-top:.4rem;padding:.45rem;background:#3d95ce;color:#fff;border:none;border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">↗ Share Venmo link</button>'):''}
         ${canEdit?('<div style="display:flex;gap:.4rem;align-items:center;margin-top:.5rem;">'
           +'<input type="text" id="venmo-'+dk+'" value="'+venmo+'" placeholder="@venmohandle" style="flex:1;padding:.35rem .65rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
           +'</div>'
@@ -9461,6 +9543,7 @@ function renderDriverMembers(){
           +'</div>'
           +'<button onclick="saveDriverProfile(\''+d+'\')" style="width:100%;margin-top:.6rem;padding:.5rem;background:var(--gold);color:#fff;border:none;border-radius:7px;font-family:\'DM Sans\',sans-serif;font-weight:600;font-size:.82rem;cursor:pointer;">Save My Info</button>')
         :''}
+        ${canEdit?'</div>':''}
       </div>
     </div>`;
   }).join('');
@@ -10206,6 +10289,7 @@ function renderIncome(){
     if(dName && r.driver!==dName && (!_incLinked||r.driver!==_incLinked)) return false;
     if(!r.date||r.price===0) return false;
     if(r.status==='cancelled') return false;
+    if(r.status!=='paid') return false; // income counts a ride only once the client has paid the driver
     if(start && end){
       const d=new Date(r.date+'T12:00:00');
       if(d<start||d>end) return false;
@@ -11006,6 +11090,13 @@ function openDriverSelfieUpload(driverName){
   setTimeout(function(){ document.body.removeChild(inp); }, 5000);
 }
 
+async function resetDriverSelfie(driverName){
+  if(driverSettings[driverName]) delete driverSettings[driverName].selfie;
+  await saveDriverSettings();
+  renderDriverMembers();
+  showToast('\u2713 Using the default day-of-travel selfie for '+driverName.split(' ')[0]);
+}
+
 function openDriverTemplateEdit(driverName){
   const ds=driverSettings[driverName]||{};
   const back=document.createElement('div');
@@ -11152,6 +11243,7 @@ async function registerBiometric(userName){
     await saveBiometricCreds();
     refreshBiometricButton();
     showToast('\u2713 Face ID / Touch ID enabled for '+userName.split(' ')[0]);
+    if(document.getElementById('driver-members-grid')) renderDriverMembers();
   }catch(e){
     if(e.name==='NotAllowedError') showToast('Biometric setup cancelled', 'error');
     else if(e.name==='InvalidStateError') showToast('A passkey is already registered on this device');
@@ -11211,25 +11303,45 @@ async function authenticateWithBiometric(){
   }
 }
 
+// Biometric creds may be stored under either the login name ("Chase") — the
+// post-login setup path — or the full driver name ("Chase Sweat") — the profile
+// path. These helpers reconcile both so the label / manage / remove all agree.
+function biometricKeysFor(name){
+  var keys=[];
+  if(name) keys.push(name);
+  if(USER_DRIVER_MAP[name] && keys.indexOf(USER_DRIVER_MAP[name])<0) keys.push(USER_DRIVER_MAP[name]);
+  for(var u in USER_DRIVER_MAP){ if(USER_DRIVER_MAP[u]===name && keys.indexOf(u)<0) keys.push(u); }
+  return keys;
+}
+function biometricSetUpFor(name){
+  return biometricKeysFor(name).some(function(k){ return (biometricCreds[k]||[]).length>0; });
+}
+function canonicalBiometricKey(name){
+  // Prefer the login name so it matches the post-login setup path & USERS lookup
+  if(USERS && USERS.some(function(u){ return u.name===name; })) return name;
+  for(var u in USER_DRIVER_MAP){ if(USER_DRIVER_MAP[u]===name) return u; }
+  return name;
+}
+
 // Removes all passkeys for a user (e.g. from their profile settings)
 function manageBiometric(userName){
-  const hasCreds=biometricCreds[userName]&&biometricCreds[userName].length>0;
-  if(hasCreds){
-    if(confirm("Remove biometric login for "+userName.split(' ')[0]+"? You'll need to set it up again from your device.")){
+  if(biometricSetUpFor(userName)){
+    if(confirm("Remove biometric login for "+String(userName).split(' ')[0]+"? You'll need to set it up again from your device.")){
       removeBiometric(userName);
     }
   } else {
-    // No creds yet — offer to set up
-    registerBiometric(userName);
+    // No creds on this device yet — offer to set up (under a single canonical key)
+    registerBiometric(canonicalBiometricKey(userName));
   }
 }
 
 async function removeBiometric(userName){
   if(!userName) return;
-  delete biometricCreds[userName];
+  biometricKeysFor(userName).forEach(function(k){ delete biometricCreds[k]; });
   await saveBiometricCreds();
   refreshBiometricButton();
-  showToast('\u2713 Biometric removed for '+userName.split(' ')[0]);
+  showToast('\u2713 Biometric removed for '+String(userName).split(' ')[0]);
+  if(document.getElementById('driver-members-grid')) renderDriverMembers();
 }
 
 // Mark a confirmation part as sent and update button appearance
@@ -11244,6 +11356,34 @@ function markPartSent(rideId, partKey){
     const chk=btn.querySelector('.cpart-chk');
     if(chk) chk.style.display='inline';
   }
+  // Sending the confirmation TEXT auto-confirms the ride.
+  if(partKey==='text') autoConfirmFromText(rideId);
+}
+
+// When the confirmation text is sent, mark the ride confirmed (calendar ✓,
+// removed from "To Confirm") and advance its lifecycle to Confirmed.
+async function autoConfirmFromText(rideId){
+  const r=rides.find(x=>x&&(x.id===rideId||x.id===+rideId||String(x.id)===String(rideId)));
+  if(!r || r.status==='cancelled') return;
+  let changed=false;
+  if(!r.confirmSent){
+    r.confirmSent=true;
+    r.confirmSentBy=currentUser?.name||'';
+    r.confirmSentAt=Date.now();
+    changed=true;
+  }
+  if(!r.confirmed){ r.confirmed=true; changed=true; }
+  // Advance the lifecycle to Confirmed only if it hasn't moved past Scheduled,
+  // so we never downgrade a Completed or Paid ride.
+  if(!r.status || r.status==='scheduled'){ r.status='confirmed'; changed=true; }
+  if(!changed) return;
+  touchRide(r,'confirmation text sent \u2192 auto-confirmed');
+  await saveRides();
+  if(typeof renderConfirmations==='function') renderConfirmations();
+  if(typeof renderCal==='function') renderCal();
+  if(typeof renderMyCal==='function') renderMyCal();
+  if(typeof renderRides==='function') renderRides();
+  if(typeof refreshDash==='function') refreshDash();
 }
 
 function sendAllConf(id){
