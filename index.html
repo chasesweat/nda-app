@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090115">
+<meta name="version" content="202606090116">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -6044,17 +6044,26 @@ function renderInterest(r){
   const me = myInterestKey();
   const iAmIn = !!(me && interest[me]);
   const count = names.length;
+  const canAssign = canAssignOnRide(r);
   const chips = names.map(n=>{
     const c = driverColor(n);
     const first = n.split(' ')[0];
     const ts = interest[n];
     const when = (typeof ts==='number') ? fmtTs(ts) : '';
-    return `<span style="display:inline-flex;align-items:center;gap:.5rem;background:${c}1a;border:1px solid ${c};color:var(--black);border-radius:999px;padding:.25rem .7rem .25rem .25rem;font-size:.8rem;font-weight:500;">
+    const driverFullName = USER_DRIVER_MAP[n] || n;
+    const isThisDriver = r.driver === driverFullName;
+    const assignBtn = isThisDriver
+      ? `<span style="font-size:.66rem;font-weight:700;color:var(--green);margin-left:.2rem;white-space:nowrap;">✓ Driving</span>`
+      : (canAssign
+          ? `<button onclick="event.stopPropagation();assignToHearted(${r.id},'${escAttr(driverFullName)}')" style="margin-left:.2rem;background:var(--gold);color:#fff;border:none;border-radius:999px;padding:.25rem .7rem;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;">Assign</button>`
+          : '');
+    return `<span style="display:inline-flex;align-items:center;gap:.5rem;background:${c}1a;border:1px solid ${c};color:var(--black);border-radius:999px;padding:.25rem .35rem .25rem .25rem;font-size:.8rem;font-weight:500;">
         <span style="width:22px;height:22px;border-radius:50%;background:${c};color:#fff;font-size:.58rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">${nameInitials(n)}</span>
         <span style="display:inline-flex;flex-direction:column;line-height:1.15;">
           <span>${first}${n===me?' (you)':''}</span>
           ${when?`<span style="font-size:.66rem;font-weight:400;color:var(--mid);">${when}</span>`:''}
         </span>
+        ${assignBtn}
       </span>`;
   }).join('');
   el.innerHTML = `
@@ -8392,6 +8401,24 @@ async function assignDriver(){
   openRideModal(activeRideId); renderRides(); refreshDash(); renderCal(); updateNotifBadge();
 }
 
+// Assign the ride straight to a driver who hearted it (from the interested list).
+async function assignToHearted(id, name){
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
+  if(!canAssignOnRide(r)){ showToast('You can only assign drivers to rides you created.','error'); return; }
+  if(!name){ return; }
+  const oldDriver=r.driver;
+  if(oldDriver===name){ showToast(name.split(' ')[0]+' is already driving this ride'); return; }
+  r.driver=name;
+  addNotification(name, r, 'assigned');
+  touchRide(r, 'assigned to '+name.split(' ')[0]+' (from interested list)');
+  await saveRides();
+  await saveNotifs();
+  showToast('✓ Assigned to '+name.split(' ')[0]);
+  openRideModal(id); renderRides(); refreshDash(); renderCal();
+  if(typeof renderMyCal==='function') renderMyCal();
+  updateNotifBadge();
+}
+
 async function deleteRide(id){
   const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id)));
   if(!canDeleteRide(r)){ showToast('You can only delete rides you created.','error'); return; }
@@ -8515,6 +8542,7 @@ function refreshDash(){
       <div class="ride-info">
         <div class="ride-client" style="color:${tc};">${r.client}</div>
         <div class="ride-detail" style="color:${tc};opacity:.78;">${r.type} · ${r.vehicle} · ${r.driver?r.driver.split(' ')[0]:'<em>Unassigned</em>'}</div>
+        ${r.status==='paid'?`<div style="margin-top:3px;"><span style="display:inline-block;font-size:.62rem;background:#ecfdf5;color:#047857;border:1px solid #6ee7b7;border-radius:8px;padding:1px 7px;font-weight:700;">💵 Paid</span></div>`:''}
       </div>
       <span class="badge ${typeCls}">${r.type}${apVehSuffix(r)}</span>
       <div class="ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}</div>
