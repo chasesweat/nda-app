@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090102">
+<meta name="version" content="202606090109">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -719,7 +719,6 @@ input,select,textarea{font-size:16px;}
       </div>
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;">
         <select id="client-driver-filter" onchange="renderClients()" style="display:none;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.82rem;"><option value="">All drivers</option></select>
-         <button id="client-unlock-btn" onclick="openClientUnlockPanel()" style="display:none;padding:.45rem .9rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">&#x1F512; Unlock List</button>
          <div id="client-unlock-view-wrap" style="display:none;align-items:center;gap:.4rem;">
            <select id="client-unlock-view-sel" onchange="renderClients()" style="padding:.45rem .75rem;border:1.5px solid #c4b5fd;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.82rem;"></select>
          </div>
@@ -765,6 +764,7 @@ input,select,textarea{font-size:16px;}
     </div>
     <div id="driver-panel-settings" style="display:none;"><div id="driver-settings-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:1rem;"></div></div>
     <div id="driver-panel-members">
+      <div id="driver-unlock-bar" style="display:none;margin-bottom:1rem;"></div>
       <div id="driver-members-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;"></div>
     </div>
     <div id="driver-panel-access" style="display:none;"><div id="selfie-admin-section"></div><div id="access-control-list"></div></div>
@@ -1070,7 +1070,7 @@ input,select,textarea{font-size:16px;}
     <div id="rm-edit-mode" style="display:none;">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
         <div class="form-group"><label>Client Name</label><input type="text" id="edit-client" list="qa-client-list" autocomplete="off" oninput="populateClientDatalist();maybeAutofillClient('edit')" /></div>
-        <div class="form-group"><label>Phone</label><input type="text" id="edit-phone" /></div>
+        <div class="form-group"><label>Phone</label><input type="text" id="edit-phone" oninput="checkPhoneFieldHint('edit')" /><div id="edit-phone-hint" style="display:none;font-size:.72rem;color:#b45309;margin-top:.25rem;">&#9888; That looks like an address. Phone numbers go here &mdash; put the address in the <b>Pickup</b> / <b>Drop-off</b> fields below.</div></div>
         <div class="form-group" style="grid-column:1/-1;"><label>Additional numbers on confirmation <span style="text-transform:none;letter-spacing:0;font-weight:400;color:var(--mid);">(comma-separated)</span></label><input type="text" id="edit-extra-phones" placeholder="404-555-0102, 770-555-0188" /></div>
         <div class="form-group"><label>Email</label><input type="text" id="edit-email" /></div>
         <div class="form-group"><label>Date</label><input type="date" id="edit-date" /></div>
@@ -1317,7 +1317,7 @@ input,select,textarea{font-size:16px;}
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
       <div class="form-group"><label>Client Name</label><input type="text" id="qa-client" placeholder="Full name" list="qa-client-list" autocomplete="off" oninput="checkQaClientOwnership();maybeAutofillClient('qa')" /><datalist id="qa-client-list"></datalist></div>
-      <div class="form-group"><label>Phone</label><input type="text" id="qa-phone" placeholder="404-555-0100" onblur="checkCautiousForForm('qa')" /></div>
+      <div class="form-group"><label>Phone</label><input type="text" id="qa-phone" placeholder="404-555-0100" oninput="checkPhoneFieldHint('qa')" onblur="checkCautiousForForm('qa')" /><div id="qa-phone-hint" style="display:none;font-size:.72rem;color:#b45309;margin-top:.25rem;">&#9888; That looks like an address. Phone numbers go here &mdash; put the address in the <b>Pickup Address</b> / <b>Drop-off</b> fields lower in this form.</div></div>
       <div class="form-group" style="grid-column:1/-1;"><label>Email</label><input type="email" id="qa-email" placeholder="client@email.com" /></div>
       <div style="grid-column:1/-1;text-align:right;margin-top:-.5rem;"><span onclick="openAddCautiousModal(document.getElementById('qa-client').value,document.getElementById('qa-phone').value)" style="font-size:.72rem;color:#d97706;cursor:pointer;">⚠️ Flag client as cautious</span></div>
       <div style="grid-column:1/-1;display:flex;align-items:center;gap:.5rem;margin-top:-.25rem;">
@@ -3456,6 +3456,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
                 <div style="flex:1;min-width:0;">
                   <div class="week-ride-client" style="color:${tc};">${r.confirmSent?'<span style="color:var(--green);font-weight:900;">✓ </span>':''}${r.client}</div>
                   <div class="week-ride-detail" style="color:${tc};opacity:.78;">${r.vehicle} · ${r.driver?r.driver.split(' ')[0]:'Unassigned'}${ic?` · <span style="color:#e0245e;font-weight:700;">❤️${ic}</span>`:''}</div>
+                  ${(function(){var cp=clientPhoneFor(r);return cp?'<a href="tel:'+cp.replace(/[^0-9+]/g,'')+'" onclick="event.stopPropagation()" style="display:block;font-size:.66rem;font-weight:700;color:'+tc+';opacity:.85;text-decoration:none;white-space:nowrap;">\uD83D\uDCDE '+escHtml(cp)+'</a>':'';})()}
                   ${r.type==='AP PICK UP'&&r.flight?`<a href="https://www.google.com/search?q=${encodeURIComponent((r.flight||"").trim().replace(/\s+/g,"").toUpperCase())}+flight+tracking" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:${tc};text-decoration:underline;opacity:.9;white-space:nowrap;">✈️ Flight Tracking</a>`:''}
                   ${r.type==='AP RUN'?'<a href="https://www.atl.com/times/" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:'+tc+';text-decoration:underline;opacity:.9;white-space:nowrap;">🔒 TSA Wait Times</a>':''}  
                 </div>
@@ -3762,10 +3763,11 @@ function renderConfirmations(){
       const groupLine=recips.length
         ?('<div style="font-size:.72rem;color:var(--mid);margin-bottom:.4rem;">\uD83D\uDC65 Group text to '+recips.length+' numbers: '+recips.map(function(x){return x.name;}).join(', ')+'</div>')
         :'';
-      const phone=(r.phone||'').trim();
-      const phoneLink=phone?(_looksLikePhone(phone)
-        ?('<a href="tel:'+phone.replace(/[^0-9+]/g,'')+'" onclick="event.stopPropagation()" style="color:var(--black);font-weight:600;text-decoration:none;">\uD83D\uDCDE '+escHtml(phone)+'</a>')
-        :('<span style="color:var(--black);font-weight:600;">\uD83D\uDCCD '+escHtml(phone)+'</span>')):'';
+      const _cphone=clientPhoneFor(r);
+      const _rawphone=(r.phone||'').trim();
+      const phoneLink=_cphone
+        ?('<a href="tel:'+_cphone.replace(/[^0-9+]/g,'')+'" onclick="event.stopPropagation()" style="color:var(--black);font-weight:600;text-decoration:none;">\uD83D\uDCDE '+escHtml(_cphone)+'</a>')
+        :(_rawphone?('<span style="color:var(--black);font-weight:600;">\uD83D\uDCCD '+escHtml(_rawphone)+'</span>'):'');
       const drvPreviewId='dc-prev-'+r.id;
       const pid=r.id;
       const bBase='display:flex;align-items:center;gap:.45rem;padding:.55rem .75rem;border:1.5px solid var(--light);border-radius:9px;background:var(--white);font-family:\'DM Sans\',sans-serif;font-size:.8rem;font-weight:600;color:var(--black);cursor:pointer;flex:1 1 auto;min-width:140px;transition:border-color .15s,color .15s,background .15s;';
@@ -4045,18 +4047,69 @@ function _looksLikePhone(v){
   return d.length>=7 && d.length<=15;
 }
 
+// Pull the first usable phone number out of a possibly-messy value — e.g. a phone
+// field that also contains an address ("404-229-9854 3115 Corsair Curve").
+// Returns the matched phone string, or '' if none is found.
+function _extractPhone(v){
+  v=(v||'').trim(); if(!v) return '';
+  if(_looksLikePhone(v)) return v;                 // already a clean phone
+  const cands=v.match(/\+?\d[\d\s().\-]{5,}\d/g)||[];
+  let fallback='';
+  for(let i=0;i<cands.length;i++){
+    const d=cands[i].replace(/\D/g,'');
+    if(d.length>=10 && d.length<=15) return cands[i].trim();          // full number wins
+    if(d.length>=7 && d.length<=15 && !fallback) fallback=cands[i].trim();
+  }
+  return fallback;
+}
+
+// Resolve the client's phone for a ride: first the ride's own phone field, then the
+// saved client record (so a number stored on the client still reaches the group text).
+function clientPhoneFor(r){
+  if(!r) return '';
+  let p=_extractPhone(r.phone);
+  if(p) return p;
+  try{
+    const db=buildClientDB(clientLookupScope());
+    const c=db[(r.client||'').trim().toLowerCase()];
+    if(c){
+      p=_extractPhone(c.phone); if(p) return p;
+      const arr=c.phones||[];
+      for(let i=0;i<arr.length;i++){ p=_extractPhone(arr[i]&&arr[i].number); if(p) return p; }
+    }
+  }catch(e){}
+  return '';
+}
+
+// Warn (inline) when a phone field clearly contains an address instead of a number,
+// so the address gets put in the Pickup/Drop-off fields where it belongs.
+function checkPhoneFieldHint(prefix){
+  const el=document.getElementById(prefix+'-phone');
+  const hint=document.getElementById(prefix+'-phone-hint');
+  if(!el||!hint) return;
+  const v=(el.value||'').trim();
+  const looksAddressy = v.length>0 && /[A-Za-z]{3,}/.test(v) && !_extractPhone(v);
+  hint.style.display = looksAddressy ? 'block' : 'none';
+}
+
 function confirmationRecipients(r){
   const seen=new Set();
   const out=[];
+  // Never text the sender themselves: compute the current user's own number to exclude it.
+  const _digits10 = s => (s||'').replace(/\D/g,'').slice(-10);
+  const _meName = (typeof currentUser!=='undefined' && currentUser) ? currentUser.name : null;
+  const _meDriver = _meName ? (USER_DRIVER_MAP[_meName] || _meName) : null;
+  const _mePhone = _digits10(_meDriver ? (DRIVER_PROFILES[_meDriver]||{}).phone : '');
   const add=(name,raw)=>{
     if(!_looksLikePhone(raw)) return; // skip addresses / junk so we never text a wrong number
     const d=(raw||'').replace(/[^0-9+]/g,'');
     if(!d || seen.has(d)) return;
+    if(_mePhone && _digits10(d)===_mePhone) return; // never text the sender (creator) themselves
     seen.add(d);
     out.push({ name:(name||d), phone:d });
   };
   // Client + extras (extras are just digits)
-  add(r.client||'Client', r.phone);
+  add(r.client||'Client', clientPhoneFor(r));
   (r.extraPhones||'').split(/[,;]/).forEach(p=>add(null,p));
   // Assigned driver(s) — include driver2 for XXL bookings
   if(r.driver) add(r.driver.split(' ')[0], (DRIVER_PROFILES[r.driver]||{}).phone);
@@ -4231,12 +4284,21 @@ async function textClient(id){
   const smsURL='sms:'+nums.join(',')+sep+'body='+encodeURIComponent(_fullMsg);
   const cardFile=files.find(function(f){ return f.type==='image/png'; });
 
+  // Copy the driver card image to the clipboard FIRST, so it is always available to
+  // paste into Messages — even if the OS share sheet drops the image (which can happen
+  // when a contact card is shared alongside it).
+  let _cardCopied=false;
+  if(cardFile && window.ClipboardItem && navigator.clipboard && navigator.clipboard.write){
+    try{ await navigator.clipboard.write([new ClipboardItem({'image/png':cardFile})]); _cardCopied=true; }catch(e){ console.warn('clipboard write failed',e); }
+  }
+
   // ── iOS: single navigator.share call — image + vCard + text all land in iMessage ──
   if(isIOS && navigator.canShare && files.length){
     const shareData={files:files, text:_fullMsg};
     try{
       if(navigator.canShare(shareData)){
         await navigator.share(shareData);
+        if(_cardCopied) setTimeout(function(){ showToast('\uD83D\uDDBC\uFE0F Driver card also copied \u2014 long-press to paste it if it is missing'); },900);
         return;
       }
     }catch(e){
@@ -4252,6 +4314,7 @@ async function textClient(id){
     try{
       if(navigator.canShare(shareData)){
         await navigator.share(shareData);
+        if(_cardCopied) setTimeout(function(){ showToast('\uD83D\uDDBC\uFE0F Driver card also copied \u2014 long-press to paste it if it is missing'); },900);
         return;
       }
     }catch(e){
@@ -4260,17 +4323,10 @@ async function textClient(id){
     }
   }
 
-  // ── Clipboard fallback: copy card image, download vCard, open SMS thread ──
+  // ── Fallback: the card image is already on the clipboard (copied up front); just
+  // open the pre-addressed SMS thread so the sender can paste it and send. ──
   const toasts=[];
-  if(cardFile && window.ClipboardItem && navigator.clipboard && navigator.clipboard.write){
-    try{
-      await navigator.clipboard.write([new ClipboardItem({'image/png':cardFile})]);
-      toasts.push('\uD83D\uDDBC\uFE0F Card copied \u2014 long-press to paste in Messages');
-    }catch(e){ console.warn('clipboard write failed',e); }
-  }
-  // Driver contact is attached to the share sheet above (so the CLIENT can choose
-  // to save it). We intentionally do NOT auto-download the .vcf onto the sender's
-  // own phone here — the sender already has the driver's contact.
+  if(_cardCopied) toasts.push('\uD83D\uDDBC\uFE0F Card copied \u2014 long-press to paste in Messages');
   window.location.href=smsURL;
   if(toasts.length) setTimeout(function(){ showToast(toasts.join(' \u00b7 ')); },800);
 }
@@ -9252,6 +9308,15 @@ function renderDriverMembers(){
   const grid=document.getElementById('driver-members-grid');
   if(!grid) return;
   const admin=isAdmin();
+  var _ub=document.getElementById('driver-unlock-bar');
+  if(_ub){
+    if(admin){
+      _ub.style.display='block';
+      _ub.innerHTML=`<button onclick="openClientUnlockPanel()" style="padding:.5rem 1rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">\uD83D\uDD12 Unlock a driver's client list</button><div style="font-size:.72rem;color:var(--mid);margin-top:.35rem;">Admins only \u2014 request temporary access to another driver's private client list.</div>`;
+    } else {
+      _ub.innerHTML=''; _ub.style.display='none';
+    }
+  }
   grid.innerHTML=DRIVERS.map(d=>{
     const venmo=driverVenmo[d]||'';
     const prof=DRIVER_PROFILES[d]||{};
@@ -11277,10 +11342,10 @@ async function copyImageToClipboard(dataUrl){
 // Send client's phone number to the assigned driver(s)
 function sendClientPhone(id){
   const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
-  const clientPhone=(r.phone||'').replace(/[^0-9+]/g,'');
-  if(!clientPhone){ showToast('No phone number on file for this client','error'); return; }
+  const clientPhone=clientPhoneFor(r);
+  if(!clientPhone){ showToast('No valid phone on file for '+(r.client||'this client')+' \u2014 add their number to the ride first.','error'); return; }
   const clientName=r.client||'your client';
-  const msg=clientName+'\'s number: '+r.phone+'\nFor your '+r.type+' on '+(r.date||'')+(r.time?' at '+fmtTime12(r.time):'');
+  const msg=clientName+'\'s number: '+clientPhone+'\nFor your '+r.type+' on '+(r.date||'')+(r.time?' at '+fmtTime12(r.time):'');
   // Send to driver(s)
   const driverNums=[];
   if(r.driver){ const p=(DRIVER_PROFILES[r.driver]||{}).phone; if(p) driverNums.push(p.replace(/[^0-9+]/g,'')); }
@@ -12512,13 +12577,16 @@ function maybeAutofillClient(prefix){
   let db; try{ db=buildClientDB(clientLookupScope()); }catch(e){ return; }
   const c=db[val]; if(!c) return;
   const fill=(id,v)=>{ const el=document.getElementById(id); if(el && !el.value && v) el.value=v; };
-  fill(prefix+'-phone', c.phone);
+  fill(prefix+'-phone', _extractPhone(c.phone));
   fill(prefix+'-email', c.email);
   const extras=(c.phones||[]).slice(1).map(p=>p.number).filter(Boolean);
   if(extras.length){ const ex=document.getElementById(prefix+'-extra-phones'); if(ex && !ex.value) ex.value=extras.join(', '); }
   const _clientKey2=(nameEl.value||'').trim().toLowerCase();
   const _savedAddrs=getClientAddresses(_clientKey2);
-  const _defaultAddr=getClientDefaultAddress(_clientKey2)||c.address||'';
+  // If the saved record has an address sitting in its phone field, recover it here so
+  // it lands in the address field instead of being lost.
+  const _phoneAsAddr=(c.phone && !_extractPhone(c.phone)) ? c.phone : '';
+  const _defaultAddr=getClientDefaultAddress(_clientKey2)||c.address||_phoneAsAddr||'';
   if(_defaultAddr){
     const type2=(document.getElementById(prefix+'-type')||{}).value||'';
     const homeId2=(prefix==='qa')?'qa-home':(prefix==='edit'?'edit-home':'q-dropoff');
@@ -12714,8 +12782,7 @@ function renderClients(){
       var ownsIt=c.rides.some(function(r){return USER_DRIVER_MAP[r.createdBy]===viewAs||r.createdBy===viewAs;});
       var drivesIt=c.drivers.includes(viewAs);
       var roleClean=ownsIt&&drivesIt?'Your client · you drive':ownsIt?'Your client':drivesIt?'Assigned to you':'';
-      var col=driverColor(viewAs);
-      badges=roleClean?'<span style="font-size:.72rem;padding:2px 7px;border-radius:10px;background:'+col+'22;color:'+col+';border:1px solid '+col+'45;">'+roleClean+'</span>':'';
+      badges=roleClean?'<span style="font-size:.72rem;padding:2px 8px;border-radius:10px;background:var(--black);color:#fff;border:1px solid var(--black);font-weight:600;">'+roleClean+'</span>':'';
     } else if(admin){
       badges=c.drivers.map(function(d){return '<span style="font-size:.72rem;padding:2px 7px;border-radius:10px;background:'+driverColor(d)+'22;color:'+driverColor(d)+';border:1px solid '+driverColor(d)+'55;">'+d.split(' ')[0]+'</span>';}).join(' ');
     }
