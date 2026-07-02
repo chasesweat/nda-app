@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090112">
+<meta name="version" content="202606090113">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -6073,6 +6073,12 @@ function renderInterest(r){
   const me = myInterestKey();
   const iAmIn = !!(me && interest[me]);
   const count = names.length;
+  // Don't prompt the creator to be "interested" in their own ride. Hide the bubble
+  // entirely when nobody else is interested; if others are, still show who (below).
+  const _pmI = currentUser?(PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name):null;
+  const _pcI = r.createdBy?(PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy):null;
+  const iCreated = !!(_pmI && _pcI && _pmI===_pcI);
+  if(iCreated && count===0){ el.innerHTML=''; el.style.display='none'; return; }
   const chips = names.map(n=>{
     const c = driverColor(n);
     const first = n.split(' ')[0];
@@ -6086,13 +6092,14 @@ function renderInterest(r){
         </span>
       </span>`;
   }).join('');
+  el.style.display='';
   el.innerHTML = `
     <div style="background:var(--gold-pale);border:1px solid var(--light);border-radius:10px;padding:.85rem 1rem;margin-bottom:.75rem;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap;">
         <div style="font-size:.78rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);">
           ${count?`❤️ ${count} interested`:(r.driver?'Interested in covering this ride?':'Who can take this ride?')}
         </div>
-        ${me?`<button onclick="toggleInterest(${r.id})" style="display:inline-flex;align-items:center;gap:.4rem;cursor:pointer;border-radius:999px;padding:.45rem .95rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;${iAmIn?'background:#e0245e;color:#fff;border:1.5px solid #e0245e;':'background:transparent;color:#e0245e;border:1.5px solid #e0245e;'}">
+        ${(me && !iCreated)?`<button onclick="toggleInterest(${r.id})" style="display:inline-flex;align-items:center;gap:.4rem;cursor:pointer;border-radius:999px;padding:.45rem .95rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;${iAmIn?'background:#e0245e;color:#fff;border:1.5px solid #e0245e;':'background:transparent;color:#e0245e;border:1.5px solid #e0245e;'}">
             ${iAmIn?'❤️ Interested':'🤍 I\'m interested'}
           </button>`:''}
       </div>
