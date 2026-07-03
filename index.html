@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090114">
+<meta name="version" content="202606090117">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -32,7 +32,7 @@ html{font-size:17px;color:#fff;}
 body{color:#fff;}
 .form-group label{font-weight:600;color:#fff;}
 .page-sub{font-weight:500;}
-.qn-l{font-size:.72rem !important;font-weight:600 !important;white-space:nowrap;overflow:visible;line-height:1.1;letter-spacing:-.2px;}
+.qn-l{font-size:clamp(.46rem,2.5vw,.62rem) !important;font-weight:600 !important;white-space:nowrap;overflow:visible;line-height:1.1;letter-spacing:-.3px;}
 #quicknav .qn{color:#fff !important;}
 *{box-sizing:border-box;margin:0;padding:0;}
 html,body{background:#ffffff !important;}body{font-family:'DM Sans',sans-serif;background:var(--white);color:var(--black);min-height:100vh;display:flex;flex-direction:column;}
@@ -3624,7 +3624,14 @@ function isMyDrivingRide(r){
 function isMyScheduledRide(r){
   const dName=getMyDriverName();
   const login=currentUser&&currentUser.name;
-  return (!!login && r.createdBy===login) || (!!dName && r.createdBy && USER_DRIVER_MAP[r.createdBy]===dName);
+  if(!!login && r.createdBy===login) return true;
+  if(!!dName && r.createdBy && USER_DRIVER_MAP[r.createdBy]===dName) return true;
+  // Kat & Morgan share dispatch: a ride scheduled by either shows for both, no
+  // matter who created it. Resolve both identities to their owner and compare.
+  const _pm = login ? (PROXY_MAP[login]||USER_DRIVER_MAP[login]||login) : null;
+  const _pc = r.createdBy ? (PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy) : null;
+  if(_pm && _pc && _pm===_pc) return true;
+  return false;
 }
 
 function renderMyCal(){
@@ -7707,12 +7714,21 @@ function buildUpgradePromptCard(){
     +'</div>';
 }
 
+// Morgan dispatches on Kat's behalf and NEVER collects the 15% client fee — any fee
+// that would be owed to Morgan goes to Kat instead, no matter who scheduled the ride.
+function feeOwnerFor(createdBy){
+  const kat = USER_DRIVER_MAP['Kat'] || 'Kathleen Herringdine';
+  if(createdBy==='Morgan') return kat;
+  let o = USER_DRIVER_MAP[createdBy] || null;
+  if(o==='Morgan') o = kat;
+  return o;
+}
 function getClientOwner(clientName){
   if(!clientName) return null;
   const key=(clientName||''). toLowerCase().trim();
   const r=(rides||[]).find(function(r){ return r.client&&r.client.toLowerCase().trim()===key&&r.createdBy; });
   if(!r) return null;
-  return r.createdBy==='Morgan'?(USER_DRIVER_MAP['Kat']||'Kathleen Herringdine'):(USER_DRIVER_MAP[r.createdBy]||null);
+  return feeOwnerFor(r.createdBy);
 }
 function getClientFeeOwner(clientName,drivingDriver){ return getClientOwner(clientName); }
 
@@ -8682,7 +8698,7 @@ function renderDashFees(){
   const owedToMe={}, iOwe={};
   rides.forEach(r=>{
     if(!r.date||r.date>today||r.status==='cancelled'||parseFloat(r.price||0)<=0) return;
-    const owner=r.createdBy==='Morgan'?(USER_DRIVER_MAP['Kat']||'Kathleen Herringdine'):(USER_DRIVER_MAP[r.createdBy]||null);
+    const owner=feeOwnerFor(r.createdBy);
     const driver=r.driver||null;
     if(!owner||!driver||owner===driver) return;
     const fee=parseFloat(r.price)*0.15;
@@ -9377,9 +9393,11 @@ function renderDriverMembers(){
     const photoText=contrastText(color, 1);     // initials sit on the full-strength color
     const initials=d.split(' ').map(n=>n[0]).join('').slice(0,2);
     const dk=d.replace(/ /g,'_');
-    // can edit if admin OR this is the logged-in driver's own card
+    // Personal settings — availability, confirmation text, Venmo, time blocks,
+    // payment methods — are private to each driver. They only show/edit on your OWN
+    // card, even for admins. Other drivers' cards show just public info + share.
     const myDriverName=getMyDriverName();
-    const canEdit=admin||(myDriverName===d);
+    const canEdit=(myDriverName===d);
     const venmoLink=venmo
       ?`<a href="https://venmo.com/${venmo.replace('@','')}" target="_blank" style="color:var(--gold);font-size:.8rem;font-weight:600;text-decoration:none;">↗ Pay @${venmo.replace('@','')}</a>`
       :'';
