@@ -48,7 +48,7 @@ self.addEventListener('fetch', (e) => {
       .catch(() => caches.match(req).then((r) => r || caches.match('./')))
   );
 });
-// ── Tapping a notification: focus the app (or open it) instead of doing nothing ──
+// ── Tapping a notification: deep-link into the app ──
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   const data = e.notification.data || {};
@@ -59,13 +59,12 @@ self.addEventListener('notificationclick', (e) => {
       for (const client of list) {
         if ('focus' in client) {
           client.focus();
-          // Let the page open its in-app notification list (which routes to the source)
-          try { client.postMessage({ type: 'notification-click', url: url, tag: e.notification.tag }); } catch (_) {}
-          if (url && url !== './' && 'navigate' in client) { try { client.navigate(url); } catch (_) {} }
+          // Hand the routing info to the page — it deep-links in place (no reload).
+          try { client.postMessage({ type: 'notification-click', url: url, data: data, tag: e.notification.tag }); } catch (_) {}
           return;
         }
       }
-      // Otherwise open a fresh window
+      // Otherwise launch a fresh window at the deep-link URL (./?nride=<id> etc.)
       if (self.clients.openWindow) return self.clients.openWindow(url);
     })
   );
@@ -84,7 +83,12 @@ self.addEventListener('push', (e) => {
     icon: 'icon-192.png',
     badge: 'icon-192.png',
     tag: data.tag || ('nwda-' + Date.now()),
-    data: { url: data.url || './' }
+    data: {
+      url: data.url || (data.rideId ? ('./?nride=' + encodeURIComponent(data.rideId)) : './'),
+      rideId: data.rideId || null,
+      channel: data.channel || null,
+      type: data.type || ''
+    }
   };
   e.waitUntil(self.registration.showNotification(title, opts));
 });
