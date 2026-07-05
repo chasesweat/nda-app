@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090127">
+<meta name="version" content="202606090133">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -562,6 +562,9 @@ input,select,textarea{font-size:16px;}
             <span id="stops-count" style="font-size:1.1rem;font-weight:600;color:var(--mid);">0</span>
             <button onclick="changeStops(1)" style="width:32px;height:32px;border-radius:50%;border:1.5px solid var(--light);background:none;font-size:1.1rem;cursor:pointer;">+</button>
             <span style="font-size:.78rem;color:var(--mid);">× $10 each</span>
+          </div>
+          <div id="q-xstop-addr-wrap" style="display:none;margin-top:.5rem;">
+            <input type="text" id="q-xstop-addr" placeholder="Extra stop address (separate several with ;)" />
           </div>
         </div>
         <div class="form-group">
@@ -1395,7 +1398,10 @@ input,select,textarea{font-size:16px;}
         <div id="qa-price-note" style="font-size:.72rem;color:var(--mid);margin-top:.25rem;"></div>
       </div>
       <div class="form-group"><label>Extra stops ($10 ea)</label>
-        <input type="number" id="qa-xstop" min="0" step="1" value="0" oninput="recalcQa()" />
+        <input type="number" id="qa-xstop" min="0" step="1" value="0" oninput="recalcQa();toggleXstopAddr('qa-xstop','qa-xstop-addr-wrap')" />
+        <div id="qa-xstop-addr-wrap" style="display:none;margin-top:.4rem;">
+          <input type="text" id="qa-xstop-addr" placeholder="Extra stop address (separate several with ;)" />
+        </div>
       </div>
       <div class="form-group"><label>Wait time (hrs · $60/hr)</label>
         <input type="number" id="qa-wait" min="0" step="0.25" value="0" oninput="recalcQa()" />
@@ -2261,7 +2267,13 @@ function changeStops(delta){
   extraStops = Math.max(0, extraStops + delta);
   document.getElementById('stops-count').textContent = extraStops;
   document.getElementById('stops-count').style.color = extraStops > 0 ? 'var(--gold)' : 'var(--mid)';
+  var _xw=document.getElementById('q-xstop-addr-wrap'); if(_xw) _xw.style.display = extraStops>0 ? 'block' : 'none';
   calcQuote();
+}
+// Show the extra-stop address input only once an extra-stop fee is selected
+function toggleXstopAddr(cntId, wrapId){
+  var c=parseInt(document.getElementById(cntId)?.value)||0;
+  var w=document.getElementById(wrapId); if(w) w.style.display = c>0 ? 'block' : 'none';
 }
 
 const CHRISTMAS_DATES=['12-23','12-24','12-25','12-26'];
@@ -3085,6 +3097,7 @@ async function saveQuote(){
     email:(document.getElementById('q-email')||{}).value||'',
     ...Object.fromEntries(Object.keys(addonState).map(k=>[k,addonState[k]?'Y':'N'])),
     xstop: extraStops,
+    xstopAddr:(document.getElementById('q-xstop-addr')?.value||'').trim(),
     wait:parseFloat(document.getElementById('q-wait').value)||0,
     confirmed:false, createdBy:currentUser?.name||'',
     newClient: !!(document.getElementById('q-new-client')?.checked),
@@ -3511,7 +3524,6 @@ function renderWeekView(containerId, weekStart, driverFilter){
                 <div style="flex:1;min-width:0;">
                   <div class="week-ride-client" style="color:${tc};">${r.confirmSent?'<span style="color:var(--green);font-weight:900;">✓ </span>':''}${r.client}</div>
                   <div class="week-ride-detail" style="color:${tc};opacity:.78;">${r.vehicle} · ${r.driver?r.driver.split(' ')[0]:'Unassigned'}${ic?` · <span style="color:#e0245e;font-weight:700;">❤️${ic}</span>`:''}</div>
-                  ${(function(){var cp=clientPhoneFor(r);return cp?'<a href="tel:'+cp.replace(/[^0-9+]/g,'')+'" onclick="event.stopPropagation()" style="display:block;font-size:.66rem;font-weight:700;color:'+tc+';opacity:.85;text-decoration:none;white-space:nowrap;">\uD83D\uDCDE '+escHtml(cp)+'</a>':'';})()}
                   ${r.type==='AP PICK UP'&&r.flight?`<a href="https://www.google.com/search?q=${encodeURIComponent((r.flight||"").trim().replace(/\s+/g,"").toUpperCase())}+flight+tracking" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:${tc};text-decoration:underline;opacity:.9;white-space:nowrap;">✈️ Flight Tracking</a>`:''}
                   ${r.type==='AP RUN'?'<a href="https://www.atl.com/times/" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:'+tc+';text-decoration:underline;opacity:.9;white-space:nowrap;">🔒 TSA Wait Times</a>':''}  
                 </div>
@@ -4035,7 +4047,10 @@ function buildConfirmationText(r){
   var _byType = (_ds.confTemplateByType)||{};
   var _rideType = (r.type||'').trim();
   var _typeMsg = (_rideType && _byType[_rideType]) ? _byType[_rideType] : '';
-  const customMsg   = (_typeMsg||_ds.confTemplate||senderProf.confirmTemplate||'').trim();
+  // AP PICK UP has its own built-in message (Flight #, tracking link) — only a template
+  // saved SPECIFICALLY for AP Pick Up may replace it. The general-default template is
+  // worded for ground pickups and must never override an airport pickup.
+  const customMsg   = (_typeMsg || (type!=='AP PICK UP' ? (_ds.confTemplate||senderProf.confirmTemplate||'') : '')).trim();
   // Pickup instructions represent the CLIENT OWNER's relationship with the client — not
   // whoever happens to be driving this particular ride, and not whoever is sending the
   // text. A ride Kat owns but has Chase driving should still carry Kat's instructions.
@@ -4044,8 +4059,27 @@ function buildConfirmationText(r){
   const _ods=(typeof driverSettings!=='undefined'&&driverSettings[owner])||{};
   var _byTerm = (_ods.pickupInstructionsByTerminal)||{};
   var _rideTerm = (r.terminal||r.rtTerminal||'').trim();
-  var _termInstr = (_rideTerm && _byTerm[_rideTerm]) ? _byTerm[_rideTerm] : '';
-  const customInstr = (_termInstr||_ods.pickupInstructions||_oProf.pickupInstructions||'').trim();
+  // Tolerant terminal match: "North Domestic", "NORTH TERMINAL", "north" all hit the
+  // same entry — old rides stored terminals in different formats.
+  var _termInstr = '';
+  if(_rideTerm){
+    _termInstr = _byTerm[_rideTerm] || '';
+    if(!_termInstr){
+      var _tl=_rideTerm.toLowerCase();
+      for(var _tk in _byTerm){
+        var _kl=_tk.toLowerCase();
+        if((_tl.indexOf('north')>-1&&_kl.indexOf('north')>-1)
+         ||(_tl.indexOf('south')>-1&&_kl.indexOf('south')>-1)
+         ||(((_tl.indexOf('international')>-1)||(_tl.indexOf('intl')>-1))&&((_kl.indexOf('international')>-1)||(_kl.indexOf('intl')>-1)))){
+          _termInstr=_byTerm[_tk]; break;
+        }
+      }
+    }
+  }
+  // AP PICK UP meets the client AT the airport — only terminal-specific instructions may
+  // replace the built-in terminal walk-through. The general home/hotel instructions are
+  // for rides that START at the client's location (AP Run, round trips, one-ways).
+  const customInstr = (_termInstr || (type!=='AP PICK UP' ? (_ods.pickupInstructions||_oProf.pickupInstructions||'') : '')).trim();
   if(customMsg)   message      = fillConfTemplate(customMsg, r, sender, assigned);
   if(customInstr) instructions = fillConfTemplate(customInstr, r, sender, assigned);
 
@@ -4155,6 +4189,14 @@ function clientPhoneFor(r){
       p=_extractPhone(c.phone); if(p) return p;
       const arr=c.phones||[];
       for(let i=0;i<arr.length;i++){ p=_extractPhone(arr[i]&&arr[i].number); if(p) return p; }
+    }
+  }catch(e){}
+  // Last resort: the same client on ANOTHER ride may carry the number (regulars often do)
+  try{
+    const key=(r.client||'').trim().toLowerCase();
+    if(key){
+      const others=(rides||[]).filter(function(x){ return x&&x.id!==r.id&&(x.client||'').trim().toLowerCase()===key; });
+      for(let i=0;i<others.length;i++){ p=_extractPhone(others[i].phone); if(p) return p; }
     }
   }catch(e){}
   return '';
@@ -4928,7 +4970,8 @@ function myInterestKey(){ return getMyDriverName() || currentUser?.name || null;
 
 // ── MILEAGE TRACKER (multi-ride session) ─────────────────────────────────
 var _mtRideIds  = [];    // ordered list of ride IDs in current session
-function _mtCheckpoint(){try{localStorage.setItem('nda_mt_session',JSON.stringify({ids:_mtRideIds,mi:_mtAccum,ts:Date.now()}));}catch(e){}}
+var _mtManualPause = false; // driver hit ⏸ Pause — session alive, GPS off, miles held
+function _mtCheckpoint(){try{localStorage.setItem('nda_mt_session',JSON.stringify({ids:_mtRideIds,mi:_mtAccum,ts:Date.now(),paused:_mtManualPause}));}catch(e){}}
 function _mtClearCheckpoint(){try{localStorage.removeItem('nda_mt_session');}catch(e){}}
 var _mtWakeLock=null;
 async function _mtAcquireWakeLock(){
@@ -4970,7 +5013,7 @@ function _mtTryRecover(){
     if(!s||!s.ids||!s.ids.length||!(s.mi>0)){_mtClearCheckpoint();return;}
     if(Date.now()-(s.ts||0)>12*3600*1000){_mtClearCheckpoint();return;}
     if(!hasIncomeAccess())return;
-    _mtRideIds=s.ids.slice();_mtAccum=s.mi;_mtLastPos=null;
+    _mtRideIds=s.ids.slice();_mtAccum=s.mi;_mtLastPos=null;_mtManualPause=true;
     showToast('\uD83D\uDCCD Recovered unsaved mileage: '+_mtFmt(_mtAccum)+' mi across '+s.ids.length+' ride'+(s.ids.length!==1?'s':'')+'. Open a ride to resume or stop & save.');
   }catch(e){}
 }
@@ -5017,21 +5060,26 @@ async function _mtSaveGasPrice(val){
 // ── RIDE NAVIGATION + MILE LOGGING ───────────────────────────────────────
 function _navEnc(addr){ return encodeURIComponent((addr||'').trim()); }
 
-function _buildRouteUrlsFrom(r, startAddr){
+function _buildRouteUrlsFrom(r, startAddr, endAddr){
   var home    = (startAddr||_rtGetHome()).trim();
+  var endPt   = (endAddr!==undefined&&endAddr!==null ? String(endAddr) : home).trim();
   var pickup  = (r.pickup||'').trim();
   var dropoff = (r.home||'').trim();
+  // Extra stop addresses (shown once the extra-stop fee is set) slot in between
+  // pickup and dropoff; several can be separated with ';'
+  var extras  = (r.xstopAddr||'').split(';').map(function(x){return x.trim();}).filter(Boolean);
   var t       = r.type||'';
   // Build ordered stop list based on ride type:
-  // AP RUN / ROUND TRIP / ONE WAY: driver home → pickup → dropoff → home
+  // AP RUN / ROUND TRIP / ONE WAY: start → pickup → [extra stops] → dropoff → end (end defaults to start)
   // AP PICK UP: pickup IS the airport; dropoff is where client goes
   // LOCAL: no fixed direction, just pickup → dropoff
   var stops;
   if(t==='LOCAL' || t==='ONE WAY'){
-    stops = [pickup, dropoff].filter(Boolean);
-    if(home) stops = [home].concat(stops).concat(home?[home]:[]);
+    stops = [pickup].concat(extras).concat([dropoff]).filter(Boolean);
+    if(home) stops = [home].concat(stops);
+    if(endPt) stops = stops.concat([endPt]);
   } else {
-    stops = [home, pickup, dropoff, home].filter(Boolean);
+    stops = [home, pickup].concat(extras).concat([dropoff, endPt]).filter(Boolean);
   }
   // Remove consecutive duplicates and empty strings
   stops = stops.filter(function(s,i){ return s && s!==stops[i-1]; });
@@ -5125,7 +5173,7 @@ function _openStartRideFromCurrent(rideId){
       var lng=pos.coords.longitude.toFixed(6);
       var locStr=lat+','+lng;
       _closeNavModal();
-      _openStartRideWithHome(rideId, locStr);
+      _askReturnDest(rideId, locStr);
     },
     function(err){
       _closeNavModal();
@@ -5137,20 +5185,108 @@ function _openStartRideFromCurrent(rideId){
   );
 }
 
-function _openStartRideWithHome(rideId, startAddr){
+// Starting from current location: ask where the route should END —
+// home, back to this same spot, or a typed address.
+function _askReturnDest(rideId, locStr){
+  var home=_rtGetHome();
+  window._srtId=rideId; window._srtLoc=locStr; window._srtHome=home;
+  var ov=document.createElement('div');
+  ov.id='nav-modal-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14000;'
+    +'display:flex;align-items:center;justify-content:center;padding:1.5rem;';
+  ov.onclick=function(e){if(e.target===ov)_closeNavModal();};
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:340px;width:100%;padding:1.25rem;'
+    +'box-shadow:0 24px 60px rgba(0,0,0,.35);">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.9rem;">'
+    +'<div style="font-size:1rem;font-weight:800;color:#0f172a;">Where should the route end?</div>'
+    +'<button onclick="_closeNavModal()" style="background:none;border:none;font-size:1.4rem;color:#94a3b8;cursor:pointer;">&times;</button>'
+    +'</div>'
+    // Return home
+    +(home
+      ? '<button onclick="_closeNavModal();_openStartRideWithHome(window._srtId,window._srtLoc,window._srtHome)" '
+        +'style="display:flex;align-items:center;gap:.75rem;width:100%;padding:.75rem .9rem;'
+        +'background:#f5f3ff;border:1.5px solid #c4b5fd;border-radius:11px;cursor:pointer;'
+        +'font-family:inherit;text-align:left;margin-bottom:.5rem;">'
+        +'<span style="font-size:1.3rem;flex-shrink:0;">&#127968;</span>'
+        +'<div style="min-width:0;">'
+        +'<div style="font-size:.88rem;font-weight:700;color:#0f172a;">Return home</div>'
+        +'<div style="font-size:.72rem;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escHtml(home)+'</div>'
+        +'</div>'
+        +'<span style="margin-left:auto;color:#7c3aed;font-size:.85rem;flex-shrink:0;">&#8594;</span>'
+        +'</button>'
+      : '')
+    // Back to current location
+    +'<button onclick="_closeNavModal();_openStartRideWithHome(window._srtId,window._srtLoc,window._srtLoc)" '
+    +'style="display:flex;align-items:center;gap:.75rem;width:100%;padding:.75rem .9rem;'
+    +'background:#f0fdf4;border:1.5px solid #86efac;border-radius:11px;cursor:pointer;'
+    +'font-family:inherit;text-align:left;margin-bottom:.5rem;">'
+    +'<span style="font-size:1.3rem;flex-shrink:0;">&#128205;</span>'
+    +'<div>'
+    +'<div style="font-size:.88rem;font-weight:700;color:#0f172a;">Back to my current location</div>'
+    +'<div style="font-size:.72rem;color:#64748b;">Loop back to this spot</div>'
+    +'</div>'
+    +'<span style="margin-left:auto;color:#16a34a;font-size:.85rem;flex-shrink:0;">&#8594;</span>'
+    +'</button>'
+    // Other address
+    +'<button onclick="var f=document.getElementById(\'srt-other-wrap\');f.style.display=f.style.display===\'none\'?\'block\':\'none\';var i=document.getElementById(\'srt-other-input\');if(f.style.display===\'block\'&&i)i.focus();" '
+    +'style="display:flex;align-items:center;gap:.75rem;width:100%;padding:.75rem .9rem;'
+    +'background:#fff7ed;border:1.5px solid #fdba74;border-radius:11px;cursor:pointer;'
+    +'font-family:inherit;text-align:left;">'
+    +'<span style="font-size:1.3rem;flex-shrink:0;">&#9999;&#65039;</span>'
+    +'<div>'
+    +'<div style="font-size:.88rem;font-weight:700;color:#0f172a;">Somewhere else</div>'
+    +'<div style="font-size:.72rem;color:#64748b;">Type a different end address</div>'
+    +'</div>'
+    +'<span style="margin-left:auto;color:#ea580c;font-size:.85rem;flex-shrink:0;">&#8594;</span>'
+    +'</button>'
+    +'<div id="srt-other-wrap" style="display:none;margin-top:.5rem;">'
+    +'<input id="srt-other-input" type="text" placeholder="Enter end address&hellip;" '
+    +'style="width:100%;padding:.6rem .7rem;border:1.5px solid #e2e8f0;border-radius:9px;font-family:inherit;font-size:.85rem;box-sizing:border-box;margin-bottom:.4rem;" '
+    +'onkeydown="if(event.key===\'Enter\')_srtGoOther();">'
+    +'<button onclick="_srtGoOther()" '
+    +'style="width:100%;padding:.6rem;background:#7c3aed;color:#fff;border:none;border-radius:9px;'
+    +'font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">Build route &#8594;</button>'
+    +'</div>'
+    +'</div>';
+  document.body.appendChild(ov);
+}
+
+function _srtGoOther(){
+  var i=document.getElementById('srt-other-input');
+  var v=(i&&i.value||'').trim();
+  if(!v){ showToast('Enter an end address first'); return; }
+  _closeNavModal();
+  _openStartRideWithHome(window._srtId, window._srtLoc, v);
+}
+
+function _openStartRideWithHome(rideId, startAddr, endAddr){
   var r=rides.find(function(x){return x.id===rideId;});
   if(!r){ showToast('Ride not found'); return; }
-  var urls=_buildRouteUrlsFrom(r, startAddr);
+  var urls=_buildRouteUrlsFrom(r, startAddr, endAddr);
   var isIos=/iphone|ipad|ipod/i.test(navigator.userAgent);
 
   var stops=urls.stops;
+  // Per-stop "go here" links for single-destination apps (Apple Maps / Waze):
+  // tap any stop to navigate just that leg from wherever you are now.
+  var isIosLeg=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  function _legUrl(s){
+    return isIosLeg
+      ? 'https://maps.apple.com/?daddr='+_navEnc(s)
+      : 'https://waze.com/ul?q='+_navEnc(s)+'&navigate=yes';
+  }
   var stopsHtml=stops.map(function(s,i){
     return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:'+(i<stops.length-1?'2':'0')+'px;">'
       +'<div style="width:10px;height:10px;border-radius:50%;background:'+(i===0||i===stops.length-1?'#7c3aed':'#e2e8f0')+';flex-shrink:0;'+(i>0&&i<stops.length-1?'border:2px solid #94a3b8;':'')+'"></div>'
-      +'<span style="font-size:.78rem;color:#334155;">'+escHtml(s)+'</span>'
+      +'<span style="font-size:.78rem;color:#334155;flex:1;min-width:0;">'+escHtml(s)+'</span>'
+      +(i>0
+        ? '<button onclick="window.open(\''+_legUrl(s).replace(/'/g,"\\'")+'\',\'_blank\')" '
+          +'title="Navigate to this stop" '
+          +'style="flex-shrink:0;padding:2px 8px;border-radius:6px;border:1px solid #c4b5fd;background:#f5f3ff;color:#7c3aed;font-family:inherit;font-size:.68rem;font-weight:700;cursor:pointer;">&#10148;</button>'
+        : '')
       +'</div>'
       +(i<stops.length-1?'<div style="margin-left:4px;width:2px;height:10px;background:#e2e8f0;margin-bottom:2px;"></div>':'');
   }).join('');
+  stopsHtml+='<div style="font-size:.64rem;color:#94a3b8;margin-top:6px;">&#10148; = navigate to just that stop ('+(isIosLeg?'Apple Maps':'Waze')+') &mdash; handy since those apps take one stop at a time</div>';
 
   var ov=document.createElement('div');
   ov.id='nav-modal-overlay';
@@ -6004,6 +6140,7 @@ function mtStart(rideId){
   }
   if(!navigator.geolocation){showToast('GPS not available on this device');return;}
   var resuming=_mtRideIds.length>0&&_mtAccum>0;
+  _mtManualPause=false;
   if(resuming){
     if(_mtRideIds.indexOf(rideId)<0)_mtRideIds.push(rideId);
     _mtLastPos=null;
@@ -6019,6 +6156,7 @@ function mtStart(rideId){
 }
 async function mtStop(){
   if(_mtWatchId){navigator.geolocation.clearWatch(_mtWatchId);_mtWatchId=null;}
+  _mtManualPause=false;
   _mtReleaseWakeLock();
   _mtUpdateBar();
   if(_mtRideIds.length>0&&_mtAccum>0){
@@ -6028,18 +6166,57 @@ async function mtStop(){
     showToast('Tracking stopped');
   }
 }
+
+// ── PAUSE / RESUME (e.g. round trip: drop client off, pause while they're at their
+// event — or while you run personal errands — then resume for the return pickup).
+// Pause turns GPS fully OFF (saves battery) but keeps the session miles and rides.
+// Resume starts from a FRESH fix, so miles driven while paused are never counted.
+function mtPause(){
+  if(!_mtWatchId){ showToast('Nothing is tracking'); return; }
+  navigator.geolocation.clearWatch(_mtWatchId); _mtWatchId=null;
+  _mtManualPause=true;
+  _mtLastPos=null;                 // never bridge across the paused gap
+  _mtReleaseWakeLock();
+  _mtCheckpoint();
+  showToast('\u23f8 Ride paused \u2014 '+_mtFmt(_mtAccum)+' mi held. GPS off until you resume.');
+  _mtUpdateBar();
+  _mtRefreshModalBar();
+}
+function mtResume(){
+  if(_mtWatchId){ showToast('Already tracking'); return; }
+  if(!navigator.geolocation){ showToast('GPS not available on this device'); return; }
+  _mtManualPause=false;
+  _mtLastPos=null;                 // fresh fix — count only from here forward
+  _mtWatchId=navigator.geolocation.watchPosition(_mtOnFix,function(err){showToast('GPS: '+err.message);mtStop();},{enableHighAccuracy:true,maximumAge:0,timeout:15000});
+  _mtAcquireWakeLock();
+  _mtCheckpoint();
+  showToast('\u25b6 Ride resumed \u2014 continuing from '+_mtFmt(_mtAccum)+' mi');
+  _mtUpdateBar();
+  _mtRefreshModalBar();
+}
+// Refresh the tracker bar inside the open ride modal (if any session ride is open)
+function _mtRefreshModalBar(){
+  try{
+    var w=document.getElementById('mt-wrap');
+    if(w && typeof activeRideId!=='undefined' && activeRideId!=null){ w.innerHTML=mtBarHtml(activeRideId); }
+  }catch(e){}
+}
 function mtBarHtml(rid){
   if(!hasIncomeAccess()) return '';
   var r=rides.find(function(x){return x.id===rid;});
   var mi=r?parseFloat(r.miles)||0:0;
   var tip=r?parseFloat(r.tip)||0:0;
   var on=!!_mtWatchId&&_mtRideIds.indexOf(rid)>=0;
+  var paused=!_mtWatchId&&_mtManualPause&&_mtRideIds.indexOf(rid)>=0;
   var hasMiles=mi>0;
   return '<div id="mt-bar" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;'
-    +'background:#f8fafc;border:1.5px solid '+(on?'#22c55e':hasMiles?'#86efac':'#e2e8f0')+';'
+    +'background:'+(paused?'#fffbeb':'#f8fafc')+';border:1.5px solid '+(on?'#22c55e':paused?'#f59e0b':hasMiles?'#86efac':'#e2e8f0')+';'
     +'border-radius:10px;padding:.65rem .9rem;margin-bottom:.6rem;">'
     +'<div style="flex:1 1 auto;min-width:72px;">'
-    +(hasMiles
+    +(paused
+      ? '<div style="font-size:1rem;font-weight:800;color:#b45309;white-space:nowrap;">&#9208; '+_mtFmt(_mtAccum)+' mi held</div>'
+        +'<div style="font-size:.7rem;color:#b45309;font-weight:600;letter-spacing:.3px;white-space:nowrap;">PAUSED &bull; GPS OFF</div>'
+      : hasMiles
       ? '<div style="font-size:1rem;font-weight:800;color:#166534;white-space:nowrap;">'+mi+' mi'+(tip?' &bull; $'+tip+' tip':'')+'</div>'
         +'<div style="font-size:.7rem;color:#64748b;font-weight:600;letter-spacing:.3px;white-space:nowrap;">LOGGED'+(on?' &bull; GPS ACTIVE':'')+'</div>'
       : '<div style="font-size:.85rem;color:#64748b;white-space:nowrap;">No miles logged yet</div>'
@@ -6047,7 +6224,11 @@ function mtBarHtml(rid){
     +'</div>'
     +'<div style="display:flex;gap:5px;flex-wrap:wrap;">'
     +(on
-      ? '<button onclick="mtStop()" style="padding:.42rem .85rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;border:none;background:#dc2626;color:#fff;">&#9209; Stop GPS</button>'
+      ? '<button onclick="mtPause()" style="padding:.42rem .8rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;border:none;background:#f59e0b;color:#fff;">&#9208; Pause</button>'
+        +'<button onclick="mtStop()" style="padding:.42rem .85rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;border:none;background:#dc2626;color:#fff;">&#9209; Stop GPS</button>'
+      : paused
+      ? '<button onclick="mtResume()" style="padding:.42rem .9rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;border:none;background:#16a34a;color:#fff;">&#9654; Resume</button>'
+        +'<button onclick="mtStop()" style="padding:.42rem .85rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;border:none;background:#dc2626;color:#fff;">&#9209; Stop &amp; Save</button>'
       : '<button onclick="openStartRide('+rid+')" style="padding:.42rem .9rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;border:none;background:#7c3aed;color:#fff;">&#128663; Start Ride</button>'
         +'<button onclick="openLogMiles('+rid+')" style="padding:.42rem .75rem;border-radius:8px;font-family:inherit;font-size:.77rem;font-weight:700;cursor:pointer;border:1.5px solid #7c3aed;background:#fff;color:#7c3aed;">&#128205; '+(hasMiles?'Edit Miles':'Log Miles')+'</button>'
         +'<button onclick="mtStart('+rid+')" style="padding:.42rem .6rem;border-radius:8px;font-family:inherit;font-size:.72rem;font-weight:600;cursor:pointer;border:1px solid #d1d5db;background:#fff;color:#94a3b8;">GPS</button>'
@@ -6213,10 +6394,15 @@ function openFeeEditor(id){
       </div>
       <div style="display:flex;gap:.5rem;">
         <label style="flex:1;font-size:.74rem;color:var(--mid);">Extra stops ($10 ea)
-          <input id="fee-edit-xstop" type="number" min="0" step="1" value="${parseInt(r.xstop)||0}" oninput="recalcFeeEdit(true)" style="width:100%;margin-top:.2rem;padding:.4rem .5rem;border:1.5px solid var(--light);border-radius:7px;font-family:'DM Sans',sans-serif;box-sizing:border-box;" />
+          <input id="fee-edit-xstop" type="number" min="0" step="1" value="${parseInt(r.xstop)||0}" oninput="recalcFeeEdit(true);toggleXstopAddr('fee-edit-xstop','fee-edit-xstop-addr-wrap')" style="width:100%;margin-top:.2rem;padding:.4rem .5rem;border:1.5px solid var(--light);border-radius:7px;font-family:'DM Sans',sans-serif;box-sizing:border-box;" />
         </label>
         <label style="flex:1;font-size:.74rem;color:var(--mid);">Wait hrs ($60/hr)
           <input id="fee-edit-wait" type="number" min="0" step="0.25" value="${parseFloat(r.wait)||0}" oninput="recalcFeeEdit(true)" style="width:100%;margin-top:.2rem;padding:.4rem .5rem;border:1.5px solid var(--light);border-radius:7px;font-family:'DM Sans',sans-serif;box-sizing:border-box;" />
+        </label>
+      </div>
+      <div id="fee-edit-xstop-addr-wrap" style="display:${(parseInt(r.xstop)||0)>0?'block':'none'};">
+        <label style="font-size:.74rem;color:var(--mid);display:block;">Extra stop address (separate several with ;)
+          <input id="fee-edit-xstop-addr" type="text" value="${escAttr(r.xstopAddr||'')}" placeholder="e.g. 120 Publix Way, Cumming" style="width:100%;margin-top:.2rem;padding:.4rem .5rem;border:1.5px solid var(--light);border-radius:7px;font-family:'DM Sans',sans-serif;box-sizing:border-box;" />
         </label>
       </div>
       <label style="font-size:.76rem;color:var(--mid);">Total fee charged to client
@@ -6277,6 +6463,7 @@ async function saveFeeEdit(id){
     r.late=st.late?'Y':'N'; r.traffic=st.traffic?'Y':'N'; r.fuel=st.fuel?'Y':'N';
   }
   r.xstop=parseInt(document.getElementById('fee-edit-xstop')?.value)||0;
+  r.xstopAddr=r.xstop>0?(document.getElementById('fee-edit-xstop-addr')?.value||'').trim():'';
   r.wait=parseFloat(document.getElementById('fee-edit-wait')?.value)||0;
   r.price = Math.round(newPrice*100)/100;
   const note=(noteEl && noteEl.value||'').trim();
@@ -7739,6 +7926,8 @@ function openQuickAddModal(){
   }
   qaAddonState={ premium:false, holiday:false, christmas:false, late:false, traffic:false, fuel:false };
   const xsEl=document.getElementById('qa-xstop'); if(xsEl) xsEl.value=0;
+  const xsaEl=document.getElementById('qa-xstop-addr'); if(xsaEl) xsaEl.value='';
+  const xswEl=document.getElementById('qa-xstop-addr-wrap'); if(xswEl) xswEl.style.display='none';
   const wtEl=document.getElementById('qa-wait'); if(wtEl) wtEl.value=0;
   const pxEl=document.getElementById('qa-pax'); if(pxEl) pxEl.value=1;
   const cbEl=document.getElementById('qa-checked-bags'); if(cbEl) cbEl.value=0;
@@ -8186,7 +8375,7 @@ async function saveQuickAddRide(){
     terminal:document.getElementById('qa-terminal').value,
     notes:   document.getElementById('qa-notes').value.trim(),
     miles:parseFloat((document.getElementById('qa-miles-hidden')||{}).value)||0,pax:parseInt(document.getElementById('qa-pax')?.value)||1,checkedBags:parseInt(document.getElementById('qa-checked-bags')?.value)||0,carryOnBags:parseInt(document.getElementById('qa-carryon-bags')?.value)||0,rt:'',email:document.getElementById('qa-email')?document.getElementById('qa-email').value.trim():'',
-    holiday:qaAddonState.holiday?'Y':'N',christmas:qaAddonState.christmas?'Y':'N',late:qaAddonState.late?'Y':'N',premium:qaAddonState.premium?'Y':'N',fuel:qaAddonState.fuel?'Y':'N',xstop:parseInt(document.getElementById('qa-xstop')?.value)||0,traffic:qaAddonState.traffic?'Y':'N',wait:parseFloat(document.getElementById('qa-wait')?.value)||0,
+    holiday:qaAddonState.holiday?'Y':'N',christmas:qaAddonState.christmas?'Y':'N',late:qaAddonState.late?'Y':'N',premium:qaAddonState.premium?'Y':'N',fuel:qaAddonState.fuel?'Y':'N',xstop:parseInt(document.getElementById('qa-xstop')?.value)||0,xstopAddr:(document.getElementById('qa-xstop-addr')?.value||'').trim(),traffic:qaAddonState.traffic?'Y':'N',wait:parseFloat(document.getElementById('qa-wait')?.value)||0,
     confirmed:false, createdBy:currentUser?.name||'',
     newClient: !!(document.getElementById('qa-new-client')?.checked),
   };
@@ -11288,8 +11477,16 @@ async function copyConfPart(id, partKey){
 
 function openGroupThread(id, body){
   const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
-  const nums=confirmationRecipients(r).map(function(x){ return x.phone; });
-  if(!nums.length) return;
+  const recips=confirmationRecipients(r);
+  const nums=recips.map(function(x){ return x.phone; });
+  if(!nums.length){ showToast('\u26a0 No phone numbers found for this ride \u2014 add the client\'s number first'); return; }
+  // Make sure the CLIENT is actually in the thread — texting only drivers is a silent miss.
+  const cp=(clientPhoneFor(r)||'').replace(/[^0-9+]/g,'');
+  const cp10=cp.replace(/\D/g,'').slice(-10);
+  const clientIn = !!cp10 && recips.some(function(x){ return (x.phone||'').replace(/\D/g,'').slice(-10)===cp10; });
+  if(!clientIn){
+    showToast('\u26a0 '+(r.client||'The client')+' has no phone on file \u2014 this text reaches only the drivers. Add their number to the ride, then resend.');
+  }
   const sep=/iphone|ipad|ipod|mac/i.test(navigator.userAgent)?'&':'?';
   window.location.href='sms:'+nums.join(',')+sep+'body='+encodeURIComponent(body||'');
 }
