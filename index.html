@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090163">
+<meta name="version" content="202606090172">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -516,6 +516,7 @@ input,select,textarea{font-size:16px;}
             <button class="tog" onclick="setTripType('ONE WAY',this)">One Way</button>
           </div>
           <input type="hidden" id="q-type" value="AP ROUND TRIP" />
+          <div id="q-pickup-note" style="display:none;margin-top:.5rem;font-size:.75rem;line-height:1.4;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;border-radius:8px;padding:.5rem .7rem;"></div>
         </div>
         <div class="form-group"><label id="q-pickup-label">Home address</label><input type="text" id="q-pickup" placeholder="Start typing…" oninput="debounceMileage()" /></div>
         <div id="q-stops-wrap"></div><div class="form-group" style="margin-top:-.3rem;margin-bottom:.75rem;"><button type="button" id="q-addstop-btn" onclick="qAddStop()" style="background:none;border:1px dashed var(--gold);color:var(--gold);border-radius:8px;padding:.45rem .9rem;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:600;cursor:pointer;">+ Add Stop</button><span style="font-size:.72rem;color:var(--mid);margin-left:.5rem;">Extra pickups between start &amp; drop-off</span></div><div class="form-group" id="q-dropoff-group"><label id="q-dropoff-label">Destination address</label><input type="text" id="q-dropoff" placeholder="Start typing…" oninput="debounceMileage()" /></div>
@@ -566,9 +567,9 @@ input,select,textarea{font-size:16px;}
         <div class="form-group">
           <label>Additional pickups</label>
           <div style="display:flex;align-items:center;gap:.75rem;">
-            <button onclick="changeStops(-1)" style="width:32px;height:32px;border-radius:50%;border:1.5px solid var(--light);background:none;font-size:1.1rem;cursor:pointer;">−</button>
-            <span id="stops-count" style="font-size:1.1rem;font-weight:600;color:var(--mid);">0</span>
-            <button onclick="changeStops(1)" style="width:32px;height:32px;border-radius:50%;border:1.5px solid var(--light);background:none;font-size:1.1rem;cursor:pointer;">+</button>
+            <button type="button" onclick="changeStops(-1)" style="width:32px;height:32px;border-radius:50%;border:1.5px solid var(--light);background:none;font-size:1.1rem;cursor:pointer;color:var(--mid);flex-shrink:0;">−</button>
+            <input type="number" id="stops-count" min="0" step="1" value="0" inputmode="numeric" oninput="setStops(this.value)" style="width:60px;text-align:center;font-size:1.1rem;font-weight:600;padding:.35rem;border:1.5px solid var(--light);border-radius:7px;font-family:'DM Sans',sans-serif;color:var(--mid);" />
+            <button type="button" onclick="changeStops(1)" style="width:32px;height:32px;border-radius:50%;border:1.5px solid var(--light);background:none;font-size:1.1rem;cursor:pointer;color:var(--mid);flex-shrink:0;">+</button>
             <span style="font-size:.78rem;color:var(--mid);">× $10 each</span>
           </div>
           <div id="q-xstop-addr-wrap" style="display:none;margin-top:.5rem;">
@@ -834,32 +835,14 @@ input,select,textarea{font-size:16px;}
     <div id="my-rides-list" style="display:none;"></div>
     <div id="my-confirm-panel" style="display:none;"></div>
     <div id="my-export-block" style="margin-top:1.5rem;">
-      <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Sync your rides to a calendar</div>
-      <div style="font-size:.8rem;color:var(--mid);line-height:1.5;margin-bottom:.6rem;">Subscribe once and <strong>only the rides you\u2019re driving</strong> stay up to date automatically \u2014 new, changed, and cancelled rides update on their own. Other drivers\u2019 rides are never included. Works with Google, Apple, Outlook, and Skylight.</div>
-
-      <div style="background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.7rem .85rem;margin-bottom:.7rem;">
-        <div style="font-size:.62rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:4px;">Your personal calendar link</div>
-        <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;">
-          <input id="cal-feed-url" type="text" readonly value="" onclick="this.select()" style="flex:1;min-width:0;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:7px;font-family:monospace;font-size:.72rem;background:#fff;box-sizing:border-box;" />
-          <button onclick="copyCalendarFeedUrl()" class="btn-primary" style="font-size:.78rem;padding:.45rem .8rem;white-space:nowrap;">Copy link</button>
-        </div>
-        <div style="font-size:.66rem;color:var(--mid);margin-top:5px;line-height:1.4;">Keep this link private \u2014 anyone with it can see your ride schedule.</div>
+      <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Add your rides to a calendar</div>
+      <div style="font-size:.8rem;color:var(--mid);line-height:1.5;margin-bottom:.6rem;">Open any ride and tap <strong>Add to calendar</strong> to add that ride to Apple, Google, Outlook, or Skylight. Or download all your upcoming rides at once below.</div>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+        <button onclick="exportCalendar('apple')" class="btn-secondary" style="font-size:.8rem;">&#127822; Apple</button>
+        <button onclick="exportCalendar('google')" class="btn-secondary" style="font-size:.8rem;">&#128197; Google</button>
+        <button onclick="exportCalendar('outlook')" class="btn-secondary" style="font-size:.8rem;">&#128203; Outlook / Skylight</button>
       </div>
-
-      <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem;">
-        <button onclick="subscribeGoogleCalendar()" class="btn-secondary" style="font-size:.82rem;">\uD83D\uDCC5 Add to Google (1-tap)</button>
-        <button onclick="showCalendarHelp()" class="btn-secondary" style="font-size:.82rem;">\uD83D\uDCF1 Apple / Outlook / Skylight steps</button>
-      </div>
-
-      <details style="margin-top:.4rem;">
-        <summary style="font-size:.75rem;color:var(--accent);cursor:pointer;">Prefer a one-time download instead?</summary>
-        <div style="font-size:.72rem;color:var(--mid);margin:.4rem 0 .5rem;line-height:1.4;">This adds your current rides once but won\u2019t update later. Use the link above for automatic sync.</div>
-        <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
-          <button onclick="exportCalendar('apple')" class="btn-secondary" style="font-size:.8rem;">\uD83C\uDF4E Apple</button>
-          <button onclick="exportCalendar('google')" class="btn-secondary" style="font-size:.8rem;">\uD83D\uDCC5 Google</button>
-          <button onclick="exportCalendar('outlook')" class="btn-secondary" style="font-size:.8rem;">\uD83D\uDCCB Outlook / Skylight</button>
-        </div>
-      </details>
+      <div style="font-size:.68rem;color:var(--mid);margin-top:5px;line-height:1.4;">Downloads a file with your upcoming rides. Re-download anytime to pick up new or changed rides.</div>
     </div>
   </div>
 
@@ -2343,8 +2326,16 @@ let extraStops = 0; // extra pickups at $10 each
 
 function changeStops(delta){
   extraStops = Math.max(0, extraStops + delta);
-  document.getElementById('stops-count').textContent = extraStops;
-  document.getElementById('stops-count').style.color = extraStops > 0 ? 'var(--gold)' : 'var(--mid)';
+  var _el=document.getElementById('stops-count');
+  if(_el){ _el.value = extraStops; _el.style.color = extraStops > 0 ? 'var(--gold)' : 'var(--mid)'; }
+  var _xw=document.getElementById('q-xstop-addr-wrap'); if(_xw) _xw.style.display = extraStops>0 ? 'block' : 'none';
+  calcQuote();
+}
+// Direct typing into the pickups field (e.g. type "3")
+function setStops(val){
+  extraStops = Math.max(0, parseInt(val)||0);
+  var _el=document.getElementById('stops-count');
+  if(_el) _el.style.color = extraStops > 0 ? 'var(--gold)' : 'var(--mid)';
   var _xw=document.getElementById('q-xstop-addr-wrap'); if(_xw) _xw.style.display = extraStops>0 ? 'block' : 'none';
   calcQuote();
 }
@@ -2466,7 +2457,7 @@ function calcQuote() {
     const vehUp     = (BASE[vehicle]||105) - 105;
     tripTotal = rtCharge + rtService + vehUp;
     lines.push(miles>0?{label:'Round trip mileage', val:rtCharge, note:`${miles} mi × 2 = ${rtMiles} mi × $${RATE_PER_MILE.toFixed(2)}/mi`}:{label:'Round trip mileage', val:0, note:'Enter miles above'});
-    lines.push({label:'Service fee', val:rtService});
+    lines.push({label:'Pickup/Drop-off fee', val:rtService});
     if(vehUp>0) lines.push({label:`Vehicle upcharge (${vehicle})`, val:vehUp});
   } else if(owType || lcType){
     const owCharge  = miles * RATE_PER_MILE;
@@ -2474,7 +2465,7 @@ function calcQuote() {
     const vehUp     = (BASE[vehicle]||105) - 105;
     tripTotal = owCharge + owService + vehUp;
     lines.push(miles>0?{label:'Mileage', val:owCharge, note:`${miles} mi × $${RATE_PER_MILE.toFixed(2)}/mi`}:{label:'Mileage', val:0, note:'Enter miles above'});
-    lines.push({label:'Service fee', val:owService});
+    lines.push({label:'Pickup/Drop-off fee', val:owService});
     if(vehUp>0) lines.push({label:`Vehicle upcharge (${vehicle})`, val:vehUp});
   } else {
     const overMiles = apType && miles > 52 ? miles - 50 : 0;
@@ -2967,6 +2958,19 @@ function setTripType(t, btn){
   const el=document.getElementById('q-type'); if(el) el.value=t;
   setActiveTog(btn);
   updateTripFields();
+  // Remind the scheduler that base pickup(s) are already priced in.
+  const note=document.getElementById('q-pickup-note');
+  if(note){
+    if(t==='ONE WAY'){
+      note.innerHTML='&#8505;&#65039; The base <strong>1 pickup</strong> is already included in this price. Only add <em>Additional pickups</em> for extra stops beyond it.';
+      note.style.display='block';
+    } else if(t==='ROUND TRIP'){
+      note.innerHTML='&#8505;&#65039; The <strong>2 base pickups</strong> (there &amp; back) are already included in this price. Only add <em>Additional pickups</em> for extra stops beyond them.';
+      note.style.display='block';
+    } else {
+      note.style.display='none';
+    }
+  }
   if(typeof autoFillTerminalAddress==='function') autoFillTerminalAddress();
   calcQuote();
 }
@@ -3072,74 +3076,6 @@ function exportClientsToCSV(){
   downloadTextFile(csv, 'nda-clients.csv', 'text/csv');
   showToast('📥 Clients exported');
 }
-// ── LIVE CALENDAR SUBSCRIPTION ──────────────────────────────────────────
-// The Cloud Function serves a per-driver .ics feed at this base. Update this
-// if you deploy the function to a different region/project.
-const CAL_FEED_BASE = "https://us-central1-nda-transportation.cloudfunctions.net/calendar";
-// Opaque-ish token so the raw driver name isn't in the URL. Must match
-// driverFromToken() in calendar-function/functions/index.js.
-function tokenFor(name){
-  try{
-    const b64 = btoa(unescape(encodeURIComponent("nda|" + name)));
-    return b64.replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
-  }catch(e){ return ""; }
-}
-function myCalendarFeedUrl(){
-  const dn = getMyDriverName();
-  if(!dn) return "";
-  return CAL_FEED_BASE + "?driver=" + tokenFor(dn);
-}
-function copyCalendarFeedUrl(){
-  const url = myCalendarFeedUrl();
-  if(!url){ showToast('Set up your driver profile first','error'); return; }
-  copyToClipboard(url, 'Calendar link copied \u2014 paste it into your calendar app');
-}
-// Google Calendar: deep-link that opens the "add by URL" subscribe flow.
-function subscribeGoogleCalendar(){
-  const url = myCalendarFeedUrl();
-  if(!url){ showToast('Set up your driver profile first','error'); return; }
-  window.open('https://calendar.google.com/calendar/u/0/r/settings/addbyurl?cid=' + encodeURIComponent(url), '_blank');
-  showToast('Opening Google Calendar \u2014 confirm to subscribe');
-}
-function showCalendarHelp(){
-  const url = myCalendarFeedUrl() || '(set up your profile first)';
-  const ov=document.createElement('div');
-  ov.id='cal-help-overlay';
-  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:14200;display:flex;align-items:flex-start;justify-content:center;padding:1.5rem 1rem;overflow:auto;';
-  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
-  const step=function(n,t){ return '<div style="display:flex;gap:.5rem;margin-bottom:.35rem;"><span style="flex-shrink:0;width:18px;height:18px;border-radius:50%;background:var(--accent);color:#fff;font-size:.7rem;font-weight:700;display:flex;align-items:center;justify-content:center;">'+n+'</span><span style="font-size:.82rem;color:var(--black);line-height:1.4;">'+t+'</span></div>'; };
-  const section=function(title,steps){ return '<div style="margin-bottom:1.1rem;"><div style="font-size:.82rem;font-weight:800;color:var(--black);margin-bottom:.5rem;">'+title+'</div>'+steps+'</div>'; };
-  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:440px;width:100%;padding:1.25rem;box-shadow:0 24px 60px rgba(0,0,0,.35);">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;">'
-    +'<div style="font-size:1.05rem;font-weight:800;color:#0f172a;">Subscribe to your rides</div>'
-    +'<button onclick="document.getElementById(\'cal-help-overlay\').remove()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button>'
-    +'</div>'
-    +'<div style="background:var(--surface);border:1px solid var(--light);border-radius:9px;padding:.55rem .7rem;margin-bottom:1rem;">'
-    +'<div style="font-size:.62rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:3px;">Your link</div>'
-    +'<div style="font-family:monospace;font-size:.68rem;color:var(--black);word-break:break-all;line-height:1.4;">'+escHtml(url)+'</div>'
-    +'<button onclick="copyCalendarFeedUrl()" class="btn-primary" style="font-size:.74rem;padding:.35rem .7rem;margin-top:.5rem;">Copy link</button>'
-    +'</div>'
-    +section('\uD83C\uDF4E Apple Calendar (iPhone/iPad)',
-        step(1,'Copy your link above.')
-       +step(2,'Open <b>Settings \u2192 Calendar \u2192 Accounts \u2192 Add Account \u2192 Other</b>.')
-       +step(3,'Tap <b>Add Subscribed Calendar</b>, paste the link, tap <b>Next</b>, then <b>Save</b>.'))
-    +section('\uD83D\uDCC5 Google Calendar',
-        step(1,'Use the <b>Add to Google (1-tap)</b> button on the previous screen \u2014 or:')
-       +step(2,'On a computer, open Google Calendar. Next to <b>Other calendars</b> click <b>+</b> \u2192 <b>From URL</b>.')
-       +step(3,'Paste your link and click <b>Add calendar</b>.'))
-    +section('\uD83D\uDCCB Outlook',
-        step(1,'Copy your link above.')
-       +step(2,'In Outlook go to <b>Add calendar \u2192 Subscribe from web</b>.')
-       +step(3,'Paste the link, name it \u201cNDA Rides,\u201d and click <b>Import</b>.'))
-    +section('\uD83D\uDDBC\uFE0F Skylight Calendar',
-        step(1,'Copy your link above.')
-       +step(2,'In the Skylight app tap the <b>My Skylight</b> menu \u2192 <b>Synced Calendars</b> \u2192 <b>Sync new calendar</b>.')
-       +step(3,'Choose <b>Calendar URL</b>, paste your link, and tap <b>Done</b>.'))
-    +'<div style="font-size:.72rem;color:var(--mid);line-height:1.5;border-top:1px solid var(--light);padding-top:.7rem;">Updates aren\u2019t instant \u2014 each calendar refreshes on its own schedule (usually within a few hours). New and changed rides appear automatically.</div>'
-    +'<button onclick="document.getElementById(\'cal-help-overlay\').remove()" class="btn-primary" style="width:100%;margin-top:.9rem;">Got it</button>'
-    +'</div>';
-  document.body.appendChild(ov);
-}
 
 function exportCalendar(target){
   // Build an .ics of upcoming rides; Apple/Google/Outlook all import .ics.
@@ -3168,6 +3104,40 @@ function downloadTextFile(content, filename, mime){
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   }catch(e){ showToast('Export failed','error'); }
+}
+
+// Add a SINGLE ride to the user's calendar as a downloadable .ics file.
+// Apple Calendar, Google Calendar, Outlook, and Skylight all import .ics.
+function icsEscape(str){
+  return String(str||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\r?\n/g,'\\n');
+}
+function addRideToCalendar(rideId){
+  var r=rides.find(function(x){return x.id===rideId||x.id===+rideId||String(x.id)===String(rideId);});
+  if(!r){ showToast('Ride not found','error'); return; }
+  var pad=function(n){return String(n).padStart(2,'0');};
+  var toICS=function(ds,ts){ var p=(ds||'').split('-'); var t=(ts||'09:00').split(':'); return p[0]+pad(p[1])+pad(p[2])+'T'+pad(t[0])+pad(t[1])+'00'; };
+  // 1-hour default block; calendars let the user adjust after import.
+  var startDs=r.date, startTs=r.time||'09:00';
+  var start=toICS(startDs,startTs);
+  var eh=(parseInt((startTs).split(':')[0])||9)+1; if(eh>23) eh=23;
+  var end=toICS(startDs, pad(eh)+':'+((startTs).split(':')[1]||'00'));
+  var now=new Date();
+  var stamp=now.getUTCFullYear()+pad(now.getUTCMonth()+1)+pad(now.getUTCDate())+'T'+pad(now.getUTCHours())+pad(now.getUTCMinutes())+pad(now.getUTCSeconds())+'Z';
+  var summary=icsEscape((r.client||'Ride')+(r.type?' \u2014 '+r.type:''));
+  var descParts=[];
+  if(r.driver) descParts.push('Driver: '+r.driver);
+  if(r.pickup) descParts.push('Pickup: '+r.pickup);
+  if(r.home) descParts.push('Drop-off: '+r.home);
+  if(r.flight) descParts.push('Flight: '+r.flight);
+  if(r.phone) descParts.push('Phone: '+r.phone);
+  var desc=icsEscape(descParts.join('\n'));
+  var loc=icsEscape(r.pickup||r.home||'');
+  var ics='BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//NDA Transportation//EN\r\nCALSCALE:GREGORIAN\r\n'
+    +'BEGIN:VEVENT\r\nUID:nda-'+r.id+'@nda\r\nDTSTAMP:'+stamp+'\r\nDTSTART:'+start+'\r\nDTEND:'+end+'\r\n'
+    +'SUMMARY:'+summary+'\r\nDESCRIPTION:'+desc+'\r\nLOCATION:'+loc+'\r\nEND:VEVENT\r\nEND:VCALENDAR';
+  var safeName=((r.client||'ride').replace(/[^a-z0-9]+/gi,'-').toLowerCase())+'-'+(r.date||'');
+  downloadTextFile(ics, 'nda-'+safeName+'.ics', 'text/calendar');
+  showToast('\uD83D\uDCC5 Calendar file ready \u2014 open it to add this ride');
 }
 
 
@@ -3832,8 +3802,6 @@ function isMyScheduledRide(r){
 
 function renderMyCal(){
   if(!document.getElementById('my-cal-grid')) return;
-  var _feedEl=document.getElementById('cal-feed-url');
-  if(_feedEl) _feedEl.value=myCalendarFeedUrl();
   const dName=getMyDriverName();
   document.getElementById('mycal-view-week').classList.toggle('active', myCalView==='week');
   document.getElementById('mycal-view-month').classList.toggle('active', myCalView==='month');
@@ -4709,6 +4677,11 @@ function renderRideView(r){
     </div>` : (!canSeeContact && r.phone ? `<div class="detail-row" style="grid-column:1/-1;"><div style="font-size:.82rem;color:var(--mid);font-style:italic;">Contact info is only visible to the assigned driver and ride creator.</div></div>` : '')}
 
     <div class="detail-row" style="grid-column:1/-1;">
+      <button onclick="addRideToCalendar(${r.id})" class="btn-secondary" style="width:100%;font-size:.85rem;display:flex;align-items:center;justify-content:center;gap:.4rem;">&#128197; Add to calendar</button>
+      <div style="font-size:.68rem;color:var(--mid);text-align:center;margin-top:3px;">Opens a file you can add to Apple, Google, Outlook, or Skylight</div>
+    </div>
+
+    <div class="detail-row" style="grid-column:1/-1;">
       <div style="display:flex;align-items:flex-start;gap:.75rem;">
         <i class="ti ti-message" style="font-size:18px;color:var(--mid);margin-top:3px;" aria-hidden="true"></i>
         <div style="flex:1;">
@@ -4720,7 +4693,7 @@ function renderRideView(r){
               return r.notes?`<div style="font-size:.86rem;color:var(--black);padding:.45rem .1rem;">${escHtml(r.notes)}</div>`:'<div style="font-size:.82rem;color:var(--mid);font-style:italic;">No notes</div>';
             }
           })()}
-          ${(currentUser&&currentUser.name===r.createdBy&&r.reqDriverNote)?`<div style="margin-top:.4rem;"><span style="display:inline-block;font-size:.72rem;background:#fff;color:#7c3aed;border:1px solid #c4b5fd;border-radius:8px;padding:2px 9px;font-weight:700;">\u2605 Requested driver: ${escHtml(r.reqDriverNote)}</span><div style="font-size:.62rem;color:var(--mid);margin-top:2px;">Private \u2014 only you can see this</div></div>`:''}
+          ${(currentUser&&currentUser.name===r.createdBy&&r.reqDriverNote)?`<div style="margin-top:.4rem;"><span style="display:inline-block;font-size:.9rem;background:#fff;color:#7c3aed;border:1.5px solid #c4b5fd;border-radius:9px;padding:4px 12px;font-weight:700;">\u2605 Requested driver: ${escHtml(r.reqDriverNote)}</span><div style="font-size:.66rem;color:var(--mid);margin-top:3px;">Private \u2014 only you can see this</div></div>`:''}
         </div>
       </div>
     </div>
@@ -4787,7 +4760,8 @@ function buildRideLifecycle(r){
   }).join('');
 
   const fare = parseFloat(r.price)||0;
-  const owner  = r.createdBy ? (USER_DRIVER_MAP[r.createdBy]||null) : null;
+  // Driver-as-client rides owe no fee; otherwise resolve owner proxy-aware.
+  const owner  = clientIsDriver(r.client) ? null : (feeOwnerFor(r.createdBy) || getClientOwner(r.client));
   const driver = r.driver || null;
   let payHtml;
   if(!driver){
@@ -5536,7 +5510,7 @@ function openLogMiles(rideId){
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin-bottom:.75rem;">'
     +'<div><label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">MILES DRIVEN</label>'
     +'<div style="font-size:.66rem;color:#94a3b8;margin-bottom:4px;">Total from Waze / Apple / Google Maps</div>'
-    +'<input id="lm-miles" type="number" min="0" step="0.1" value="'+(r.miles||'')+'" placeholder="e.g. 41" '
+    +'<input id="lm-miles" type="number" min="0" step="0.1" value="'+(r.drivenMiles||r.miles||'')+'" placeholder="e.g. 41" '
     +'style="width:100%;padding:.55rem .65rem;border:1.5px solid #c4b5fd;border-radius:9px;font-family:inherit;font-size:1rem;box-sizing:border-box;">'
     +'</div>'
     +'<div><label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">TIP RECEIVED $</label>'
@@ -5566,7 +5540,10 @@ async function _saveLogMiles(rideId){
   var mi=parseFloat(document.getElementById('lm-miles').value)||0;
   var tip=parseFloat(document.getElementById('lm-tip').value)||0;
   var gas=parseFloat(document.getElementById('lm-gas').value)||0;
-  r.miles=mi;
+  // These are the miles the DRIVER actually drove (e.g. round trip), used only
+  // for their gas/maintenance cost and profit. It does NOT change the client's
+  // fare, which is based on the originally quoted r.miles.
+  r.drivenMiles=mi;
   if(tip>0) r.tip=tip;
   if(gas>0) await _mtSaveGasPrice(gas);
   try{await saveRides();}catch(e){console.warn(e);}
@@ -6074,7 +6051,7 @@ async function _rtSave(){
     var r=id?rides.find(function(x){return x.id===id;}):null; if(!r)continue;
     var miEl=document.getElementById('rt-mi-'+id);
     var tipEl=document.getElementById('rt-tip-'+id);
-    r.miles=parseFloat(miEl?miEl.value:0)||0;
+    r.drivenMiles=parseFloat(miEl?miEl.value:0)||0;
     var tipVal=parseFloat(tipEl?tipEl.value:0)||0;
     if(tipVal>0) r.tip=tipVal;
     saved.push((r.client||'Ride')+': '+r.miles+' mi'+(tipVal?', $'+tipVal+' tip':''));
@@ -6204,7 +6181,7 @@ async function _mtConfirmSession(){
     if(!r)continue;
     var miEl=document.getElementById('mt-mi-'+id);
     var tipEl=document.getElementById('mt-tip-'+id);
-    r.miles=parseFloat(miEl?miEl.value:0)||0;
+    r.drivenMiles=parseFloat(miEl?miEl.value:0)||0;
     var tipVal=parseFloat(tipEl?tipEl.value:0)||0;
     if(tipVal>0)r.tip=tipVal;
     saved.push((r.client||'Ride')+': '+r.miles+' mi'+(tipVal?', $'+tipVal+' tip':''));
@@ -6364,7 +6341,7 @@ function _mtRefreshModalBar(){
 function mtBarHtml(rid){
   if(!hasIncomeAccess()) return '';
   var r=rides.find(function(x){return x.id===rid;});
-  var mi=r?parseFloat(r.miles)||0:0;
+  var mi=r?(parseFloat(r.drivenMiles)||parseFloat(r.miles)||0):0;
   var tip=r?parseFloat(r.tip)||0:0;
   var on=!!_mtWatchId&&_mtRideIds.indexOf(rid)>=0;
   var paused=!_mtWatchId&&_mtManualPause&&_mtRideIds.indexOf(rid)>=0;
@@ -6544,7 +6521,7 @@ function openFeeEditor(id){
   const price = parseFloat(r.price)||0;
   const noteVal = String(r.feeNote||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
   const _on = v => v==='Y'||v===true;
-  _feeEdit = { id, vehicle:r.vehicle, state:{ premium:_on(r.premium), holiday:_on(r.holiday), christmas:_on(r.christmas), late:_on(r.late), traffic:_on(r.traffic), fuel:_on(r.fuel) } };
+  _feeEdit = { id, vehicle:r.vehicle, miles:parseFloat(r.miles)||0, type:r.type, state:{ premium:_on(r.premium), holiday:_on(r.holiday), christmas:_on(r.christmas), late:_on(r.late), traffic:_on(r.traffic), fuel:_on(r.fuel) } };
   sec.innerHTML = `
     <div style="font-size:.68rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Edit fee & surcharges</div>
     <div style="display:flex;flex-direction:column;gap:.55rem;">
@@ -6600,13 +6577,22 @@ function recalcFeeEdit(setAmount){
   if(!_feeEdit) return;
   const veh=_feeEdit.vehicle||'Sedan';
   const base=(typeof BASE!=='undefined'?(BASE[veh]||105):105);
-  let sub=base; const flat={premium:30,holiday:30,christmas:35,late:20,traffic:15};
+  let sub=base;
+  // Mileage overage: only the miles OVER 50 are charged at $2.50 (AP rides).
+  const apType = _feeEdit.type==='AP RUN'||_feeEdit.type==='AP PICK UP'||_feeEdit.type==='AP ROUND TRIP';
+  const miles = parseFloat(_feeEdit.miles)||0;
+  const rate = (typeof RATE_PER_MILE!=='undefined'?RATE_PER_MILE:2.5);
+  let overage = 0;
+  if(apType && miles>52){ overage = (miles-50)*rate; sub += overage; }
+  let sub2=sub; // base + mileage overage, before flat surcharges (for fuel base)
+  const flat={premium:30,holiday:30,christmas:35,late:20,traffic:15};
   Object.keys(flat).forEach(k=>{ if(_feeEdit.state[k]){ if(k==='holiday'&&_feeEdit.state.christmas) return; sub+=flat[k]; } });
   const xs=parseInt(document.getElementById('fee-edit-xstop')?.value)||0; sub+=xs*10;
   const wt=parseFloat(document.getElementById('fee-edit-wait')?.value)||0; sub+=wt*60;
-  let total=_feeEdit.state.fuel ? Math.floor(sub*1.08) : Math.round(sub*100)/100;
+  // Fuel surcharge (8%) applies to the full subtotal (base + mileage + surcharges).
+  let total=_feeEdit.state.fuel ? Math.round(sub*1.08*100)/100 : Math.round(sub*100)/100;
   const sug=document.getElementById('fee-edit-suggest');
-  if(sug) sug.textContent=`Suggested (${veh} base $${base} + surcharges): $${total.toFixed(2)}`;
+  if(sug) sug.textContent=`Suggested (${veh} base $${base}${overage>0?' + $'+overage.toFixed(2)+' mileage':''} + surcharges): $${total.toFixed(2)}`;
   if(setAmount){ const a=document.getElementById('fee-edit-amount'); if(a) a.value=total.toFixed(2); }
 }
 
@@ -6673,7 +6659,7 @@ function _reqOwner(){ return (currentUser&&PROXY_MAP[currentUser.name])||getMyDr
 function _reqKey(name){ return (_reqOwner()+'||'+(name||'').trim().toLowerCase()).replace(/[.#$\[\]\/]/g,'_'); }
 function getClientReqDriver(name){ return clientReqDriver[_reqKey(name)]||''; }
 async function setClientReqDriver(name,drv){ const k=_reqKey(name); if(drv) clientReqDriver[k]=drv; else delete clientReqDriver[k]; await saveClientReqDriver(); renderClients(); }
-function rideReqDriverTag(r){ if(!r) return ''; if(!currentUser||currentUser.name!==r.createdBy) return ''; var d=r.reqDriverNote||''; if(!d) return ''; return '<div style="margin-top:3px;"><span style="display:inline-block;font-size:.68rem;background:#fff;color:#7c3aed;border:1px solid #c4b5fd;border-radius:8px;padding:1px 7px;font-weight:700;">\u2605 Requested: '+escHtml(d)+'</span></div>'; }
+function rideReqDriverTag(r){ if(!r) return ''; if(!currentUser||currentUser.name!==r.createdBy) return ''; var d=r.reqDriverNote||''; if(!d) return ''; return '<div style="margin-top:4px;"><span style="display:inline-block;font-size:.9rem;background:#fff;color:#7c3aed;border:1.5px solid #c4b5fd;border-radius:9px;padding:4px 12px;font-weight:700;">\u2605 Requested: '+escHtml(d)+'</span></div>'; }
 
 // ── Owner or admin can push/release a client to another driver ──
 let _releaseClientName = null;
@@ -8043,6 +8029,13 @@ function feeOwnerFor(createdBy){
   if(o==='Morgan') o = kat;
   return o;
 }
+// A ride whose CLIENT is themselves a driver in the group is that driver's own
+// client — no 15% finder's fee is ever owed on it, no matter who drives it.
+function clientIsDriver(clientName){
+  if(!clientName) return false;
+  const key = clientName.toLowerCase().trim();
+  return DRIVERS.some(function(d){ return d.toLowerCase().trim()===key; });
+}
 function getClientOwner(clientName){
   if(!clientName) return null;
   const key=(clientName||''). toLowerCase().trim();
@@ -8679,6 +8672,7 @@ function clearQuoteForm(){
   ['q-client','q-phone','q-pickup','q-dropoff','q-miles','q-flight','q-rt-flight','q-notes','q-wait']
     .forEach(function(id){ const el=document.getElementById(id); if(el) el.value=''; });
   var _sw=document.getElementById('q-stops-wrap'); if(_sw) _sw.innerHTML=''; _qStopCount=0; var _qac=document.getElementById('q-add-client'); if(_qac) _qac.checked=true; var _asb=document.getElementById('q-addstop-btn'); if(_asb) _asb.style.display='inline-block';
+  extraStops=0; var _scnt=document.getElementById('stops-count'); if(_scnt){ _scnt.value='0'; _scnt.style.color='var(--mid)'; } var _xaw=document.getElementById('q-xstop-addr-wrap'); if(_xaw) _xaw.style.display='none';
   const qDate=document.getElementById('q-date'); if(qDate) qDate.value='';
   const qTime=document.getElementById('q-time'); if(qTime) qTime.value='';
   const qPrice=document.getElementById('q-price'); if(qPrice) qPrice.textContent='$0';
@@ -9161,6 +9155,8 @@ function renderDashFees(){
   const owedToMe={}, iOwe={};
   rides.forEach(r=>{
     if(!r.date||r.date>today||r.status==='cancelled'||parseFloat(r.price||0)<=0) return;
+    // A ride whose client is themselves a driver never generates a finder's fee.
+    if(clientIsDriver(r.client)) return;
     const owner=feeOwnerFor(r.createdBy);
     const driver=r.driver||null;
     if(!owner||!driver||owner===driver) return;
@@ -9495,7 +9491,8 @@ function computeExpectedPrice(ride){
   const inAM=mins>=390&&mins<540, inPM=mins>=870&&mins<1140;
   const isTraffic=isWd&&(inAM||inPM);
   let sub=base;
-  if(miles>50) sub+=(miles-50)*RATE;
+  const _apType = ride.type==='AP RUN'||ride.type==='AP PICK UP'||ride.type==='AP ROUND TRIP';
+  if(_apType && miles>52) sub+=(miles-50)*RATE;
   if(isPremium) sub+=AF.premium;
   if(isHoliday) sub+=AF.holiday;
   if(isChristmas) sub+=AF.christmas;
@@ -11074,7 +11071,7 @@ function renderIncome(){
 
   // Vehicle costs — computed from driver profile so they show even without the Trip Profit calculator
   const myDrivenRides  = (personalView && dName) ? filtered.filter(r=>r.driver===dName&&!r._outside) : [];
-  const totalMiles     = myDrivenRides.reduce((s,r)=>s+(parseFloat(r.miles||0)),0);
+  const totalMiles     = myDrivenRides.reduce((s,r)=>s+(parseFloat(r.drivenMiles||r.miles||0)),0);
   const driverProf     = (personalView && dName) ? (DRIVER_PROFILES[dName]||{}) : {};
   const driverMpg      = parseFloat(driverProf.mpg)||0;
   const driverGasPrice = parseFloat(driverProf.gasPrice)||3.50;
@@ -11225,12 +11222,19 @@ function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm,
   const rows=myRides.map((r,i)=>{
     const fare  = parseFloat(r.price||0);
     const tip   = parseFloat(r.tip||0);
-    const miles = parseFloat(r.miles||0);
+    // Cost is based on the miles the driver actually drove (drivenMiles) when
+    // they've logged them; otherwise fall back to the quoted trip miles.
+    const miles = parseFloat(r.drivenMiles||r.miles||0);
     const gas   = miles * gasCpm;
     const maint = miles * maintCpm;
     // 15% is owed to the client's owner when the driver drove SOMEONE ELSE's client.
     // It applies only to the fare (base + surcharges) — never to the tip.
-    const owner = r.createdBy ? (USER_DRIVER_MAP[r.createdBy]||null) : null;
+    // Resolve the owner the same way the rest of the app does: proxy-aware
+    // (Morgan→Kat) via feeOwnerFor, with a client-name fallback for rides that
+    // don't carry createdBy themselves.
+    // Exception: if the CLIENT is themselves a driver in the group, the ride is
+    // that driver's own client and never owes a fee, no matter who drives it.
+    const owner = clientIsDriver(r.client) ? null : (feeOwnerFor(r.createdBy) || getClientOwner(r.client));
     const fee   = (owner && owner!==dName) ? fare*0.15 : 0;
     const gross = fare + tip;
     const cost  = gas + maint + fee;
@@ -12427,7 +12431,9 @@ function renderFinderFees(dName, start, end){
   const iOwe     = {};  // owner  -> {fare, fee, count}
   rides.forEach(r=>{
     if(!inRange(r)) return;
-    const owner  = r.createdBy ? (USER_DRIVER_MAP[r.createdBy]||null) : null;
+    // A ride whose client is themselves a driver never generates a finder's fee.
+    if(clientIsDriver(r.client)) return;
+    const owner  = feeOwnerFor(r.createdBy) || getClientOwner(r.client);
     const driver = r.driver || null;
     if(!owner || !driver || owner===driver) return;
     const fare = parseFloat(r.price)||0;
@@ -13535,7 +13541,11 @@ function renderClients(){
     .map(function(c){
     var multi=false;
     var _deceased=isClientDeceased(c.name);
-    var bg=c.drivers[0]?driverColor(c.drivers[0]):'#888888';
+    // Avatar color = the CLIENT OWNER's color (whoever the client belongs to),
+    // resolved proxy-aware. Falls back to first driver's color, then grey.
+    var _ownerName = (typeof getClientOwner==='function') ? getClientOwner(c.name) : null;
+    var bg = _ownerName ? driverColor(_ownerName)
+           : (c.drivers[0] ? driverColor(c.drivers[0]) : '#888888');
     var ini=c.name.split(' ').map(function(n){return n[0]||'';}).join('').slice(0,2).toUpperCase();
     var badges='';
     if(admin && viewAs){
