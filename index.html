@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090158">
+<meta name="version" content="202606090162">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -834,12 +834,32 @@ input,select,textarea{font-size:16px;}
     <div id="my-rides-list" style="display:none;"></div>
     <div id="my-confirm-panel" style="display:none;"></div>
     <div id="my-export-block" style="margin-top:1.5rem;">
-      <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.75rem;">Export to calendar</div>
-      <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
-        <button onclick="exportCalendar('apple')" class="btn-secondary" style="font-size:.82rem;">🍎 Apple Calendar</button>
-        <button onclick="exportCalendar('google')" class="btn-secondary" style="font-size:.82rem;">📅 Google Calendar</button>
-        <button onclick="exportCalendar('outlook')" class="btn-secondary" style="font-size:.82rem;">📋 Skylight / Outlook</button>
+      <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Sync your rides to a calendar</div>
+      <div style="font-size:.8rem;color:var(--mid);line-height:1.5;margin-bottom:.6rem;">Subscribe once and <strong>only the rides you\u2019re driving</strong> stay up to date automatically \u2014 new, changed, and cancelled rides update on their own. Other drivers\u2019 rides are never included. Works with Google, Apple, Outlook, and Skylight.</div>
+
+      <div style="background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.7rem .85rem;margin-bottom:.7rem;">
+        <div style="font-size:.62rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:4px;">Your personal calendar link</div>
+        <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;">
+          <input id="cal-feed-url" type="text" readonly value="" onclick="this.select()" style="flex:1;min-width:0;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:7px;font-family:monospace;font-size:.72rem;background:#fff;box-sizing:border-box;" />
+          <button onclick="copyCalendarFeedUrl()" class="btn-primary" style="font-size:.78rem;padding:.45rem .8rem;white-space:nowrap;">Copy link</button>
+        </div>
+        <div style="font-size:.66rem;color:var(--mid);margin-top:5px;line-height:1.4;">Keep this link private \u2014 anyone with it can see your ride schedule.</div>
       </div>
+
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem;">
+        <button onclick="subscribeGoogleCalendar()" class="btn-secondary" style="font-size:.82rem;">\uD83D\uDCC5 Add to Google (1-tap)</button>
+        <button onclick="showCalendarHelp()" class="btn-secondary" style="font-size:.82rem;">\uD83D\uDCF1 Apple / Outlook / Skylight steps</button>
+      </div>
+
+      <details style="margin-top:.4rem;">
+        <summary style="font-size:.75rem;color:var(--accent);cursor:pointer;">Prefer a one-time download instead?</summary>
+        <div style="font-size:.72rem;color:var(--mid);margin:.4rem 0 .5rem;line-height:1.4;">This adds your current rides once but won\u2019t update later. Use the link above for automatic sync.</div>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+          <button onclick="exportCalendar('apple')" class="btn-secondary" style="font-size:.8rem;">\uD83C\uDF4E Apple</button>
+          <button onclick="exportCalendar('google')" class="btn-secondary" style="font-size:.8rem;">\uD83D\uDCC5 Google</button>
+          <button onclick="exportCalendar('outlook')" class="btn-secondary" style="font-size:.8rem;">\uD83D\uDCCB Outlook / Skylight</button>
+        </div>
+      </details>
     </div>
   </div>
 
@@ -3052,6 +3072,75 @@ function exportClientsToCSV(){
   downloadTextFile(csv, 'nda-clients.csv', 'text/csv');
   showToast('📥 Clients exported');
 }
+// ── LIVE CALENDAR SUBSCRIPTION ──────────────────────────────────────────
+// The Cloud Function serves a per-driver .ics feed at this base. Update this
+// if you deploy the function to a different region/project.
+const CAL_FEED_BASE = "https://us-central1-nda-transportation.cloudfunctions.net/calendar";
+// Opaque-ish token so the raw driver name isn't in the URL. Must match
+// driverFromToken() in calendar-function/functions/index.js.
+function tokenFor(name){
+  try{
+    const b64 = btoa(unescape(encodeURIComponent("nda|" + name)));
+    return b64.replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+  }catch(e){ return ""; }
+}
+function myCalendarFeedUrl(){
+  const dn = getMyDriverName();
+  if(!dn) return "";
+  return CAL_FEED_BASE + "?driver=" + tokenFor(dn);
+}
+function copyCalendarFeedUrl(){
+  const url = myCalendarFeedUrl();
+  if(!url){ showToast('Set up your driver profile first','error'); return; }
+  copyToClipboard(url, 'Calendar link copied \u2014 paste it into your calendar app');
+}
+// Google Calendar: deep-link that opens the "add by URL" subscribe flow.
+function subscribeGoogleCalendar(){
+  const url = myCalendarFeedUrl();
+  if(!url){ showToast('Set up your driver profile first','error'); return; }
+  window.open('https://calendar.google.com/calendar/u/0/r/settings/addbyurl?cid=' + encodeURIComponent(url), '_blank');
+  showToast('Opening Google Calendar \u2014 confirm to subscribe');
+}
+function showCalendarHelp(){
+  const url = myCalendarFeedUrl() || '(set up your profile first)';
+  const ov=document.createElement('div');
+  ov.id='cal-help-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:14200;display:flex;align-items:flex-start;justify-content:center;padding:1.5rem 1rem;overflow:auto;';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  const step=function(n,t){ return '<div style="display:flex;gap:.5rem;margin-bottom:.35rem;"><span style="flex-shrink:0;width:18px;height:18px;border-radius:50%;background:var(--accent);color:#fff;font-size:.7rem;font-weight:700;display:flex;align-items:center;justify-content:center;">'+n+'</span><span style="font-size:.82rem;color:var(--black);line-height:1.4;">'+t+'</span></div>'; };
+  const section=function(title,steps){ return '<div style="margin-bottom:1.1rem;"><div style="font-size:.82rem;font-weight:800;color:var(--black);margin-bottom:.5rem;">'+title+'</div>'+steps+'</div>'; };
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:440px;width:100%;padding:1.25rem;box-shadow:0 24px 60px rgba(0,0,0,.35);">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;">'
+    +'<div style="font-size:1.05rem;font-weight:800;color:#0f172a;">Subscribe to your rides</div>'
+    +'<button onclick="document.getElementById(\'cal-help-overlay\').remove()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button>'
+    +'</div>'
+    +'<div style="background:var(--surface);border:1px solid var(--light);border-radius:9px;padding:.55rem .7rem;margin-bottom:1rem;">'
+    +'<div style="font-size:.62rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:3px;">Your link</div>'
+    +'<div style="font-family:monospace;font-size:.68rem;color:var(--black);word-break:break-all;line-height:1.4;">'+escHtml(url)+'</div>'
+    +'<button onclick="copyCalendarFeedUrl()" class="btn-primary" style="font-size:.74rem;padding:.35rem .7rem;margin-top:.5rem;">Copy link</button>'
+    +'</div>'
+    +section('\uD83C\uDF4E Apple Calendar (iPhone/iPad)',
+        step(1,'Copy your link above.')
+       +step(2,'Open <b>Settings \u2192 Calendar \u2192 Accounts \u2192 Add Account \u2192 Other</b>.')
+       +step(3,'Tap <b>Add Subscribed Calendar</b>, paste the link, tap <b>Next</b>, then <b>Save</b>.'))
+    +section('\uD83D\uDCC5 Google Calendar',
+        step(1,'Use the <b>Add to Google (1-tap)</b> button on the previous screen \u2014 or:')
+       +step(2,'On a computer, open Google Calendar. Next to <b>Other calendars</b> click <b>+</b> \u2192 <b>From URL</b>.')
+       +step(3,'Paste your link and click <b>Add calendar</b>.'))
+    +section('\uD83D\uDCCB Outlook',
+        step(1,'Copy your link above.')
+       +step(2,'In Outlook go to <b>Add calendar \u2192 Subscribe from web</b>.')
+       +step(3,'Paste the link, name it \u201cNDA Rides,\u201d and click <b>Import</b>.'))
+    +section('\uD83D\uDDBC\uFE0F Skylight Calendar',
+        step(1,'Copy your link above.')
+       +step(2,'In the Skylight app tap the <b>My Skylight</b> menu \u2192 <b>Synced Calendars</b> \u2192 <b>Sync new calendar</b>.')
+       +step(3,'Choose <b>Calendar URL</b>, paste your link, and tap <b>Done</b>.'))
+    +'<div style="font-size:.72rem;color:var(--mid);line-height:1.5;border-top:1px solid var(--light);padding-top:.7rem;">Updates aren\u2019t instant \u2014 each calendar refreshes on its own schedule (usually within a few hours). New and changed rides appear automatically.</div>'
+    +'<button onclick="document.getElementById(\'cal-help-overlay\').remove()" class="btn-primary" style="width:100%;margin-top:.9rem;">Got it</button>'
+    +'</div>';
+  document.body.appendChild(ov);
+}
+
 function exportCalendar(target){
   // Build an .ics of upcoming rides; Apple/Google/Outlook all import .ics.
   const now=new Date(); const todayStr=toDateStr(now);
@@ -3743,6 +3832,8 @@ function isMyScheduledRide(r){
 
 function renderMyCal(){
   if(!document.getElementById('my-cal-grid')) return;
+  var _feedEl=document.getElementById('cal-feed-url');
+  if(_feedEl) _feedEl.value=myCalendarFeedUrl();
   const dName=getMyDriverName();
   document.getElementById('mycal-view-week').classList.toggle('active', myCalView==='week');
   document.getElementById('mycal-view-month').classList.toggle('active', myCalView==='month');
@@ -8867,7 +8958,7 @@ function refreshDash(){
       <div style="width:4px;height:40px;border-radius:2px;background:${c};flex-shrink:0;"></div>
       <div class="ride-date" style="color:${tc};">${fmtDateShort(r.date)}<br><span style="font-size:.72rem">${fmtTime12(r.time)||''}</span></div>
       <div class="ride-info">
-        <div class="ride-client" style="color:${tc};">${r.client}</div>
+        <div class="ride-client" style="color:${tc};">${r.confirmed?'<span title="Confirmed" style="color:#16a34a;font-weight:700;">&#x2713;</span> ':''}${r.client}</div>
         <div class="ride-detail" style="color:${tc};opacity:.78;">${r.type} · ${r.vehicle} · ${r.driver?r.driver.split(' ')[0]:'<em>Unassigned</em>'}</div>
       </div>
       <span class="badge ${typeCls}">${r.type}${apVehSuffix(r)}</span>
