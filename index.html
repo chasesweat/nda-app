@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090135">
+<meta name="version" content="202606090144">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -225,7 +225,7 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
 .driver-card-name{font-weight:600;font-size:1rem;margin-bottom:.75rem;display:flex;align-items:center;gap:.5rem;}
 /* styled member card */
 .member-card{border-radius:14px;overflow:hidden;border:1px solid var(--light);background:var(--white);max-width:300px;}
-.member-card-photo{height:160px;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;}
+.member-card-photo{height:190px;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;}
 .member-card-initials{font-size:2rem;font-weight:700;color:#fff;letter-spacing:1px;}
 .member-card-badge{background:rgba(0,0,0,.55);padding:.35rem .75rem;display:flex;align-items:center;justify-content:space-between;gap:.5rem;}
 .member-card-badge-name{color:#fff;font-size:.82rem;font-weight:600;letter-spacing:.5px;}
@@ -366,6 +366,7 @@ input,select,textarea{font-size:16px;}
   <div onclick="nav('calendar')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">📅 Calendar</div>
   <div onclick="nav('clients')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">👥 Clients</div>
   <div onclick="nav('drivers')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🚘 Drivers</div>
+  <div id="menu-myprofile" onclick="nav('myprofile')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;font-weight:500;">🪪 My Profile</div>
   <div onclick="nav('chat')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">💬 Chat <span id="chat-badge" style="display:none;margin-left:4px;background:#dc2626;color:#fff;font-size:.6rem;font-weight:700;border-radius:50%;width:16px;height:16px;line-height:16px;text-align:center;display:inline-block;">●</span></div>
   <div onclick="nav('documents')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">📁 Documents</div>
   <div id="menu-myrides" onclick="nav('myrides')" style="display:none;padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;font-weight:500;">🗓 My Rides</div>
@@ -772,6 +773,21 @@ input,select,textarea{font-size:16px;}
     </div>
     <div id="driver-panel-access" style="display:none;"><div id="access-control-list"></div></div>
     <div id="driver-panel-pricing" style="display:none;"></div>
+  </div>
+
+  <!-- MY PROFILE -->
+  <div class="page" id="page-myprofile">
+    <div class="page-title" style="margin-bottom:1rem;">My Profile</div>
+    <div style="display:flex;gap:.5rem;border-bottom:2px solid var(--light);padding-bottom:.75rem;margin-bottom:1.25rem;">
+      <button class="cal-tab active" id="mptab-me" onclick="switchProfileTab('me',this)">My Info</button>
+      <button class="cal-tab" id="mptab-avail" onclick="switchProfileTab('avail',this)">Team Availability</button>
+    </div>
+    <div id="profile-panel-me">
+      <div id="myprofile-card" style="max-width:340px;"></div>
+    </div>
+    <div id="profile-panel-avail" style="display:none;">
+      <div id="team-availability-list"></div>
+    </div>
   </div>
 
   <!-- MY RIDES -->
@@ -1816,6 +1832,13 @@ async function initApp() {
     await loadDriverExtras();
     const storedProfiles = await storageGet('kat:driverProfiles');
     if(storedProfiles) Object.assign(DRIVER_PROFILES, storedProfiles);
+    // Saved client address overrides were WRITTEN but never loaded — restore them.
+    // Legacy writes were JSON.stringify'd strings; handle both shapes.
+    try{
+      const _cao=await storageGet('kat:clientAddresses');
+      if(_cao) clientAddressOverrides = (typeof _cao==='string') ? JSON.parse(_cao) : _cao;
+    }catch(e){ console.warn('clientAddresses load', e); }
+    await loadAddedDrivers();
     await loadPasswords();
     await loadSubscriptions();
     await loadImportedClients();
@@ -2167,6 +2190,9 @@ async function unlinkProfiles(driverName){
 
 function maybShowTutorialBanner(){
   if(localStorage.getItem('nda_tutorial_dismissed')==='forever') return;
+  // On the first-login setup session we ask about the tutorial AFTER setup instead,
+  // so the setup popup isn't competing with this banner.
+  if(window._profileIntroThisSession) return;
   const b=document.createElement('div');
   b.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);max-width:min(420px,calc(100vw - 24px));width:100%;background:#1e0f3d;border:1.5px solid #f5a623;border-radius:14px;padding:.9rem 1rem;z-index:8500;box-shadow:0 8px 32px rgba(0,0,0,.55);animation:tipIn .35s ease;';
   b.innerHTML='<div style="font-size:.78rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#f5a623;margin-bottom:.3rem;">👋 New to the app?</div>'
@@ -2190,7 +2216,8 @@ const TIP_DATA={
   income:{icon:'💰',title:'Income & Receipts',text:'Track gross fares, expenses, and net take-home here. Use the receipt scanner to snap a photo and auto-fill amounts. Premium subscription required.'},
   flights:{icon:'✈️',title:'Flights & Traffic',text:'Search any flight number for live tracking. Today\'s and tomorrow\'s airport rides are listed automatically with tracking links.'},
   chat:{icon:'💬',title:'Team Chat',text:'Offerings: post rides needing coverage — teammates tap ✅ to claim instantly. Updates: share traffic without buzzing anyone\'s phone.'},
-  team:{icon:'🚘',title:'Team & Driver Profiles',text:'Find your driver card here to set your vehicle, availability, Venmo handle, and custom confirmation text templates.'},
+  team:{icon:'🚘',title:'Team & Driver Cards',text:'Team driver cards live here — tap Share Card or Download to send yours. To edit your own info, use My Profile in the menu. Admins can add a new driver from this page.'},
+  myprofile:{icon:'🪪',title:'My Profile',text:'Set up everything about you here: vehicle, home address, gas/MPG, Venmo, confirmation text, day-of selfie, and which parts your all-in-one text includes. The Team Availability tab shows when everyone is off.'},
 };
 let _shownTips=new Set();
 function showPageTip(pageId){
@@ -3900,11 +3927,18 @@ function renderConfirmations(){
         if(!file){ if(loaderEl) loaderEl.textContent='No card photo'; return; }
         const ds=driverSettings[r.driver.trim()]||{};
         const prof=DRIVER_PROFILES[r.driver.trim()]||{};
-        const allFiles=[file];
-        if(prof.phone) allFiles.push(buildDriverVCard(r.driver.trim()));
+        // Per-part toggles live on the CLIENT OWNER's settings (whose confirmation this is).
+        // Missing = on (default), so existing drivers are unaffected until they opt out.
+        const _own=feeOwnerFor(r.createdBy)||r.driver.trim();
+        const _sa=(driverSettings[_own]||{}).sendParts||{};
+        const _wantCard =_sa.card!==false;
+        const _wantVcard=_sa.vcard!==false;
+        const _wantSelfie=_sa.selfie!==false;
+        const allFiles=_wantCard?[file]:[];
+        if(_wantVcard&&prof.phone) allFiles.push(buildDriverVCard(r.driver.trim()));
         // Airport rides: include the OWNER's selfie (the client relationship's owner,
         // not necessarily whoever is physically driving) so the client can recognize them.
-        if(r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP'){
+        if(_wantSelfie&&(r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')){
           try{
             const _selfieOwner=feeOwnerFor(r.createdBy)||r.driver.trim();
             const _su=getDriverSelfie(_selfieOwner);
@@ -4343,7 +4377,13 @@ async function textClient(id){
   const nums=confirmationRecipients(r).map(x=>x.phone);
   if(!nums.length){ showToast('No phone numbers to text \u2014 add the client\u2019s number first','error'); return; }
   const _conf=buildConfirmationText(r);
-  const _fullMsg=_conf.message+(_conf.instructions?'\n\n'+_conf.instructions:'');
+  // Per-part toggles from the CLIENT OWNER's settings (missing = on).
+  const _sp=(driverSettings[feeOwnerFor(r.createdBy)||(r.driver||'').trim()]||{}).sendParts||{};
+  const _msgOn=_sp.message!==false;
+  const _instOn=_sp.instructions!==false;
+  const _msgPart=_msgOn?_conf.message:'';
+  const _instPart=(_instOn&&_conf.instructions)?_conf.instructions:'';
+  const _fullMsg=(_msgPart+((_msgPart&&_instPart)?'\n\n':'')+_instPart);
 
   // Pre-built files stored when To Confirm rendered
   let files=_confirmShareFiles[id]||[];
@@ -6828,7 +6868,7 @@ async function togglePushNotifications(){
 function nav(id){
   closeMenu();
   // Show contextual tutorial tip for this page (first visit per session)
-  var _tipPages=['dashboard','cal','myrides','clients','income','flights','chat','team'];
+  var _tipPages=['dashboard','cal','myrides','clients','income','flights','chat','team','myprofile'];
   if(_tipPages.indexOf(id)>=0) setTimeout(function(){ showPageTip(id); }, 600);
   // Small delay so menu closes visually before page switches
   setTimeout(function(){
@@ -7968,7 +8008,7 @@ function setClientAddress(clientKey,label,address,makeDefault){
   if(makeDefault) clientAddressOverrides[clientKey].forEach(function(a,i){
     if(a.address!==address) a.isDefault=false;
   });
-  storageSet("kat:clientAddresses",JSON.stringify(clientAddressOverrides)).catch(function(){});
+  storageSet("kat:clientAddresses",clientAddressOverrides).catch(function(){});
 }
 
 function checkQaClientOwnership(){
@@ -8026,7 +8066,7 @@ function offerSaveDefaultAddress(clientName,newAddr){
         showToast("\u2713 "+label+" saved for "+first);
       } else {
         clientAddressOverrides[_key]=[{label:"Default",address:newAddr,isDefault:true}];
-        storageSet("kat:clientAddresses",JSON.stringify(clientAddressOverrides)).catch(function(){});
+        storageSet("kat:clientAddresses",clientAddressOverrides).catch(function(){});
         showToast("\u2713 Address saved for "+first);
       }
     }
@@ -8164,6 +8204,9 @@ function maybeShowOnboarding(){
   try{
     var dn = getMyDriverName();
     if(!dn) return; // no driver profile mapping (shouldn't onboard)
+    // On the very first login of this version we send them straight to My Profile
+    // instead — don't also pop the overlay in the same session.
+    if(window._profileIntroThisSession) return;
     // dismissed forever?
     if(localStorage.getItem(_onbDismissKey()) === 'forever') return;
     // already has the essentials? skip
@@ -8338,6 +8381,65 @@ function closeOnboarding(forever){
     try{ localStorage.setItem(_onbDismissKey(), 'forever'); }catch(e){}
     showToast('Got it \u2014 you can update your info anytime in your profile');
   }
+  // First-login setup just finished — offer the tutorial or jumping into the app.
+  if(window._profileIntroThisSession && !window._profileIntroChoiceShown){
+    window._profileIntroChoiceShown=true;
+    setTimeout(function(){ try{ showPostSetupChoice(); }catch(e){} }, 400);
+  }
+}
+// After first-login setup: let the driver choose the tutorial or go straight to the app.
+// The message is honest about whether they've actually finished the essentials.
+function showPostSetupChoice(){
+  if(document.getElementById('post-setup-overlay')) return;
+  var dn=getMyDriverName();
+  var prof=(dn && DRIVER_PROFILES[dn])||{};
+  // Same "essentials" the setup checks for: home address, MPG, and Venmo.
+  var done = !!(prof.homeAddress) && !!(prof.mpg) && !!(dn && driverVenmo[dn]);
+  var head, sub, emoji, primaryLabel, secondaryLabel, finishBtn='';
+  if(done){
+    emoji='\uD83C\uDF89'; head='You\u2019re all set!';
+    sub='Want a quick walkthrough of how everything works, or would you rather jump right in?';
+    primaryLabel='\uD83D\uDCDA Show me the tutorial';
+    secondaryLabel='\uD83D\uDE80 Take me into the app';
+  } else {
+    emoji='\uD83D\uDC4B'; head='A few things left to set up';
+    sub='For the app to work its best \u2014 mileage routing, cost tracking, and payments \u2014 add your home address, MPG, and Venmo in your profile when you can. You can do it now or later.';
+    primaryLabel='\u270F\uFE0F Finish setting up now';
+    secondaryLabel='\uD83D\uDE80 I\u2019ll finish later \u2014 go to the app';
+    finishBtn='1';
+  }
+  var ov=document.createElement('div');
+  ov.id='post-setup-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.62);z-index:14200;display:flex;align-items:center;justify-content:center;padding:1.5rem;';
+  var btns;
+  if(finishBtn){
+    // Primary = reopen the setup popup; secondary = tutorial offer / app
+    btns='<button onclick="_postSetupFinish()" style="width:100%;padding:.8rem;background:var(--gold);color:#fff;border:none;border-radius:11px;font-family:\'DM Sans\',sans-serif;font-size:.95rem;font-weight:700;cursor:pointer;margin-bottom:.55rem;">'+primaryLabel+'</button>'
+      +'<button onclick="_postSetupGo(false)" style="width:100%;padding:.8rem;background:var(--surface);color:#0f172a;border:1.5px solid var(--light);border-radius:11px;font-family:\'DM Sans\',sans-serif;font-size:.95rem;font-weight:700;cursor:pointer;">'+secondaryLabel+'</button>';
+  } else {
+    btns='<button onclick="_postSetupGo(true)" style="width:100%;padding:.8rem;background:var(--gold);color:#fff;border:none;border-radius:11px;font-family:\'DM Sans\',sans-serif;font-size:.95rem;font-weight:700;cursor:pointer;margin-bottom:.55rem;">'+primaryLabel+'</button>'
+      +'<button onclick="_postSetupGo(false)" style="width:100%;padding:.8rem;background:var(--surface);color:#0f172a;border:1.5px solid var(--light);border-radius:11px;font-family:\'DM Sans\',sans-serif;font-size:.95rem;font-weight:700;cursor:pointer;">'+secondaryLabel+'</button>';
+  }
+  ov.innerHTML='<div style="background:#fff;border-radius:18px;max-width:360px;width:100%;padding:1.5rem 1.35rem;box-shadow:0 24px 60px rgba(0,0,0,.4);text-align:center;">'
+    +'<div style="font-size:2rem;margin-bottom:.4rem;">'+emoji+'</div>'
+    +'<div style="font-size:1.15rem;font-weight:800;color:#0f172a;margin-bottom:.4rem;">'+head+'</div>'
+    +'<div style="font-size:.86rem;color:#64748b;line-height:1.5;margin-bottom:1.2rem;">'+sub+'</div>'
+    +btns
+    +'</div>';
+  document.body.appendChild(ov);
+}
+// Reopen the setup popup to finish the essentials.
+function _postSetupFinish(){
+  var ov=document.getElementById('post-setup-overlay'); if(ov) ov.remove();
+  window._profileIntroChoiceShown=false;   // allow the choice to show again after they close it
+  try{ nav('myprofile'); }catch(e){}
+  setTimeout(function(){ try{ openOnboarding(); }catch(e){} }, 350);
+}
+function _postSetupGo(openTutorial){
+  var ov=document.getElementById('post-setup-overlay'); if(ov) ov.remove();
+  // Setup's done (or deferred) — send them to the dashboard, their normal home from here.
+  try{ nav('dashboard'); }catch(e){}
+  if(openTutorial){ try{ window.open('nwda-tutorial.html','_blank'); }catch(e){} }
 }
 
 async function saveQuickAddRide(){
@@ -8798,7 +8900,12 @@ function buildDashUpgradeBanner(){
 // standing arrangement for the pair until unwaived.
 function feeSettledForRide(fp, r){
   if(!fp) return false;
-  if(fp.waived) return true;
+  // Waiver: open-ended (waived, no waiveUntil) settles everything until unwaived; a
+  // timed waiver (waiveUntil = YYYY-MM-DD) settles only rides dated on/before that date.
+  if(fp.waived){
+    if(!fp.waiveUntil) return true;
+    if(r.date && r.date<=fp.waiveUntil) return true;
+  }
   if((fp.paidRides||[]).indexOf(r.id)>=0) return true;
   var lp=fp.legacyPaidThrough||(!fp.paidRides&&fp.paid&&fp.paidAt?String(fp.paidAt).slice(0,10):null);
   if(lp&&r.date&&r.date<=lp) return true;
@@ -8856,18 +8963,63 @@ async function unwaiveDashFee(owner, driver){
   if(!feePayments[key]) return;
   delete feePayments[key].waived;
   delete feePayments[key].waivedAt;
+  delete feePayments[key].waiveScope;
+  delete feePayments[key].waiveUntil;
   await saveFeePayments();
   renderDashFees();
   showToast('Fee restored \u2014 showing in Owed to you again');
 }
-async function waiveDashFee(owner, driver){
+// Ask the driver how long to waive this person's fees, then apply.
+function waiveDashFee(owner, driver){
+  window._wfOwner=owner; window._wfDriver=driver;
+  const ov=document.createElement('div');
+  ov.id='waive-scope-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:14000;display:flex;align-items:center;justify-content:center;padding:1.5rem;';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  const opt=function(label,scope,sub){
+    return '<button onclick="applyWaiveScope(\''+scope+'\')" '
+      +'style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:.7rem .9rem;margin-bottom:.45rem;'
+      +'background:var(--surface);border:1.5px solid var(--light);border-radius:10px;cursor:pointer;font-family:\'DM Sans\',sans-serif;text-align:left;">'
+      +'<span style="font-size:.86rem;font-weight:600;color:#0f172a;">'+label+'</span>'
+      +(sub?'<span style="font-size:.72rem;color:var(--mid);">'+sub+'</span>':'')
+      +'</button>';
+  };
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:340px;width:100%;padding:1.25rem;box-shadow:0 24px 60px rgba(0,0,0,.35);">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem;">'
+    +'<div style="font-size:1rem;font-weight:800;color:#0f172a;">Waive fees for how long?</div>'
+    +'<button onclick="document.getElementById(\'waive-scope-overlay\').remove()" style="background:none;border:none;font-size:1.4rem;color:#94a3b8;cursor:pointer;">&times;</button>'
+    +'</div>'
+    +'<div style="font-size:.76rem;color:var(--mid);margin-bottom:.9rem;">Waives '+escHtml(driver.split(' ')[0])+'\u2019s 15% fees to you for the chosen period.</div>'
+    +opt('Today only','day','ends tonight')
+    +opt('This week','week','next 7 days')
+    +opt('This month','month','next 30 days')
+    +opt('This year','year','next 365 days')
+    +opt('Until I change it','forever','no end date')
+    +'</div>';
+  document.body.appendChild(ov);
+}
+async function applyWaiveScope(scope){
+  const owner=window._wfOwner, driver=window._wfDriver;
+  const ov=document.getElementById('waive-scope-overlay'); if(ov) ov.remove();
   const key=owner+':recv:'+driver;
   if(!feePayments[key]) feePayments[key]={};
   feePayments[key].waived=true;
   feePayments[key].waivedAt=new Date().toISOString();
+  feePayments[key].waiveScope=scope;
+  let msg='\u2713 Fees waived';
+  if(scope==='forever'){
+    delete feePayments[key].waiveUntil;
+    msg='\u2713 Fees waived until you change it';
+  }else{
+    const days={day:0,week:7,month:30,year:365}[scope]||0;
+    const until=new Date(); until.setDate(until.getDate()+days);
+    feePayments[key].waiveUntil=toDateStr(until);
+    const label={day:'today',week:'this week',month:'this month',year:'this year'}[scope]||'';
+    msg='\u2713 Fees waived '+label+' (through '+fmtDateShort(feePayments[key].waiveUntil)+')';
+  }
   await saveFeePayments();
   renderDashFees();
-  showToast('\u2713 Fee waived');
+  showToast(msg);
 }
 
 function renderDashFees(){
@@ -8947,14 +9099,14 @@ function renderDashFees(){
     const dr=r.driver||null;
     if(!ow||!dr||ow===dr||ow!==dName) return;
     const fp2=feePayments[ow+':recv:'+dr]||{};
-    if(fp2.waived){ const fee2=parseFloat(r.price)*0.15; (waivedByMe[dr]=waivedByMe[dr]||{fee:0,n:0}); waivedByMe[dr].fee+=fee2; waivedByMe[dr].n++; }
+    if(fp2.waived && (!fp2.waiveUntil || r.date<=fp2.waiveUntil)){ const fee2=parseFloat(r.price)*0.15; (waivedByMe[dr]=waivedByMe[dr]||{fee:0,n:0,until:fp2.waiveUntil||null}); waivedByMe[dr].fee+=fee2; waivedByMe[dr].n++; }
   });
   if(Object.keys(waivedByMe).length){
     html+='<div style="font-size:.72rem;font-weight:600;color:var(--mid);padding:.45rem .85rem;border-bottom:1px solid var(--light);border-top:1px solid var(--light);">Waived by you</div>';
     Object.entries(waivedByMe).forEach(function([name,v]){
       html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.5rem .85rem;border-bottom:1px solid var(--light);gap:.6rem;">'
         +'<div><div style="font-size:.86rem;font-weight:600;text-decoration:line-through;color:var(--mid);">'+escHtml(name.split(' ')[0])+'</div>'
-        +'<div style="font-size:.72rem;color:var(--mid);">'+v.n+' ride'+(v.n!==1?'s':'')+' \u00b7 $'+v.fee.toFixed(2)+' waived</div></div>'
+        +'<div style="font-size:.72rem;color:var(--mid);">'+v.n+' ride'+(v.n!==1?'s':'')+' \u00b7 $'+v.fee.toFixed(2)+' waived \u00b7 '+(v.until?('through '+fmtDateShort(v.until)):'until you change it')+'</div></div>'
         +'<button onclick="unwaiveDashFee(\''+escAttr(dName)+'\',\''+escAttr(name)+'\')" '
         +'style="padding:.3rem .7rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Un-waive</button>'
         +'</div>';
@@ -9013,6 +9165,113 @@ let driverVenmo = {}; // { driverName: venmoHandle }
 async function loadDriverExtras(){
   const v = await storageGet('kat:driverVenmo');
   if(v) driverVenmo = v;
+}
+
+// ── ADMIN-ADDED DRIVERS ──────────────────────────────────────────────────
+// Drivers added through the UI live in one persisted list and get merged into all
+// the in-memory tables at boot (DRIVERS, USERS, USER_DRIVER_MAP, profiles, photo, login).
+async function loadAddedDrivers(){
+  const added = await storageGet('kat:addedDrivers');
+  if(!Array.isArray(added)) return;
+  added.forEach(function(rec){
+    if(!rec || !rec.driverName) return;
+    const dn = rec.driverName;
+    if(DRIVERS.indexOf(dn)<0) DRIVERS.push(dn);
+    if(!DRIVER_PROFILES[dn]) DRIVER_PROFILES[dn] = rec.profile || { phone:'', email:'', vehicle:'', notes:'' };
+    else Object.assign(DRIVER_PROFILES[dn], rec.profile||{});
+    if(rec.color) driverColors[dn] = rec.color;
+    if(rec.photo && typeof DRIVER_PHOTOS!=='undefined') DRIVER_PHOTOS[dn] = rec.photo;
+    if(rec.login){
+      USER_DRIVER_MAP[rec.login] = dn;
+      if(!USERS.some(function(u){ return u.name===rec.login; })){
+        USERS.push({ name:rec.login, initials:(dn.split(' ').map(function(n){return n[0];}).join('').slice(0,2).toUpperCase()), password:rec.password||'welcome2026', role:'driver', disabled:false });
+      }
+    }
+  });
+}
+async function saveAddedDriver(rec){
+  let added = await storageGet('kat:addedDrivers');
+  if(!Array.isArray(added)) added = [];
+  const i = added.findIndex(function(x){ return x && x.driverName===rec.driverName; });
+  if(i>=0) added[i]=rec; else added.push(rec);
+  await storageSet('kat:addedDrivers', added);
+}
+let _newDriverPhoto = '';
+function openAddDriverModal(){
+  if(!isAdmin()){ showToast('Only admins can add drivers','error'); return; }
+  _newDriverPhoto='';
+  const ov=document.createElement('div');
+  ov.id='add-driver-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:14000;display:flex;align-items:flex-start;justify-content:center;padding:1.5rem;overflow-y:auto;';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  const fld=function(label,id,ph,type){
+    return '<div style="margin-bottom:.7rem;"><div style="font-size:.66rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">'+label+'</div>'
+      +'<input type="'+(type||'text')+'" id="'+id+'" placeholder="'+ph+'" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.88rem;box-sizing:border-box;" /></div>';
+  };
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:420px;width:100%;padding:1.4rem;box-shadow:0 24px 60px rgba(0,0,0,.35);margin:auto;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">'
+    +'<div style="font-size:1.1rem;font-weight:800;color:#0f172a;">Add a driver</div>'
+    +'<button onclick="document.getElementById(\'add-driver-overlay\').remove()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button>'
+    +'</div>'
+    +fld('Full name (as shown on cards) *','nd-name','e.g. Sarah Collins')
+    +fld('Login username *','nd-login','e.g. Sarah')
+    +fld('Temporary password *','nd-password','they can change it later')
+    +fld('Phone','nd-phone','770-555-1234','tel')
+    +fld('Email','nd-email','name@example.com','email')
+    +fld('Vehicle year','nd-vyear','e.g. 2024')
+    +fld('Vehicle make/model','nd-vehicle','e.g. Toyota Sienna')
+    +'<div style="margin-bottom:.7rem;"><div style="font-size:.66rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">Card color</div>'
+    +'<input type="color" id="nd-color" value="#7c3aed" style="width:100%;height:40px;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;background:#fff;" /></div>'
+    +'<div style="margin-bottom:1rem;"><div style="font-size:.66rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">Driver card photo</div>'
+    +'<div style="display:flex;align-items:center;gap:.6rem;">'
+    +'<div id="nd-photo-preview" style="width:64px;height:40px;border-radius:6px;background:#f4f2f8 center/cover no-repeat;border:1.5px solid var(--light);flex-shrink:0;"></div>'
+    +'<label style="flex:1;padding:.5rem;background:var(--surface);border:1.5px dashed var(--accent);border-radius:8px;text-align:center;font-size:.8rem;color:var(--accent);font-weight:600;cursor:pointer;">Upload card image<input type="file" accept="image/*" onchange="_ndPhotoPick(this)" style="display:none;" /></label>'
+    +'</div><div style="font-size:.66rem;color:var(--mid);margin-top:3px;">The full driver card image (photo + vehicle). Optional — initials show if none.</div></div>'
+    +'<button onclick="submitNewDriver()" style="width:100%;padding:.7rem;background:var(--gold);color:#fff;border:none;border-radius:9px;font-family:\'DM Sans\',sans-serif;font-size:.92rem;font-weight:700;cursor:pointer;">Add driver</button>'
+    +'<div style="font-size:.7rem;color:var(--mid);margin-top:.6rem;line-height:1.5;">The driver logs in with the username and temporary password above. They can complete the rest of their profile themselves under My Profile.</div>'
+    +'</div>';
+  document.body.appendChild(ov);
+}
+function _ndPhotoPick(input){
+  const f=input.files&&input.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=function(){ _newDriverPhoto=rd.result; const pv=document.getElementById('nd-photo-preview'); if(pv) pv.style.backgroundImage='url('+rd.result+')'; };
+  rd.readAsDataURL(f);
+}
+async function submitNewDriver(){
+  if(!isAdmin()){ showToast('Only admins can add drivers','error'); return; }
+  const g=function(id){ const el=document.getElementById(id); return el?el.value.trim():''; };
+  const name=g('nd-name'), login=g('nd-login'), password=g('nd-password');
+  if(!name){ showToast('Enter the driver\u2019s full name','error'); return; }
+  if(!login){ showToast('Enter a login username','error'); return; }
+  if(!password){ showToast('Enter a temporary password','error'); return; }
+  if(DRIVERS.indexOf(name)>=0){ showToast('A driver named '+name+' already exists','error'); return; }
+  if(USERS.some(function(u){ return u.name.toLowerCase()===login.toLowerCase(); })){ showToast('That username is taken','error'); return; }
+  const profile={
+    phone:g('nd-phone'), email:g('nd-email'), vehicleYear:g('nd-vyear'),
+    vehicle:g('nd-vehicle'), notes:'', unavailableDates:[], weeklyOff:[]
+  };
+  const color=g('nd-color')||'#7c3aed';
+  const rec={ driverName:name, login:login, password:password, profile:profile, color:color, photo:_newDriverPhoto||'' };
+  // Apply live
+  if(DRIVERS.indexOf(name)<0) DRIVERS.push(name);
+  DRIVER_PROFILES[name]=profile;
+  driverColors[name]=color;
+  if(_newDriverPhoto && typeof DRIVER_PHOTOS!=='undefined') DRIVER_PHOTOS[name]=_newDriverPhoto;
+  USER_DRIVER_MAP[login]=name;
+  if(!USERS.some(function(u){ return u.name===login; })){
+    USERS.push({ name:login, initials:name.split(' ').map(function(n){return n[0];}).join('').slice(0,2).toUpperCase(), password:password, role:'driver', disabled:false });
+  }
+  // Persist
+  try{
+    await saveAddedDriver(rec);
+    await storageSet('kat:driverProfiles', DRIVER_PROFILES);
+    await storageSet('kat:driverColors', driverColors);
+    await savePasswords();
+  }catch(e){ console.warn('add driver save',e); }
+  const ov=document.getElementById('add-driver-overlay'); if(ov) ov.remove();
+  showToast('\u2713 '+name.split(' ')[0]+' added \u2014 they can log in as \u201c'+login+'\u201d');
+  renderDriverMembers();
 }
 
 function switchDriverTab(tab, el){
@@ -9573,16 +9832,81 @@ function renderDriverMembers(){
   if(_ub){
     if(admin){
       _ub.style.display='block';
-      _ub.innerHTML=`<button onclick="openClientUnlockPanel()" style="padding:.5rem 1rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">\uD83D\uDD12 Unlock a driver's client list</button><div style="font-size:.72rem;color:var(--mid);margin-top:.35rem;">Admins only \u2014 request temporary access to another driver's private client list.</div>`;
+      _ub.innerHTML=`<div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;"><button onclick="openClientUnlockPanel()" style="padding:.5rem 1rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">\uD83D\uDD12 Unlock a driver's client list</button><button onclick="openAddDriverModal()" style="padding:.5rem 1rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">\u2795 Add a driver</button></div><div style="font-size:.72rem;color:var(--mid);margin-top:.35rem;">Admins only \u2014 unlock another driver's client list, or add a new driver to the app.</div>`;
     } else {
       _ub.innerHTML=''; _ub.style.display='none';
     }
   }
-  grid.innerHTML=DRIVERS.map(d=>{
+  grid.innerHTML=DRIVERS.map(d=>buildMemberCard(d,{publicOnly:true})).join('');
+}
+// Renders the driver's own full editable card into the My Profile page.
+function renderMyProfileCard(){
+  const box=document.getElementById('myprofile-card'); if(!box) return;
+  const me=getMyDriverName();
+  if(!me){ box.innerHTML='<div style="color:var(--mid);font-size:.9rem;padding:1rem;">Your login isn\u2019t linked to a driver profile yet. Ask an admin to link your account on the Team page.</div>'; return; }
+  box.innerHTML=buildMemberCard(me,{forceEdit:true});
+}
+// Persistent welcome banner shown at the top of My Profile on the first login only.
+// Stays after the setup popup closes so the driver can finish the rest of the page.
+function showProfileSetupBubble(){
+  try{
+    var panel=document.getElementById('profile-panel-me'); if(!panel) return;
+    if(document.getElementById('profile-setup-bubble')) return;
+    var b=document.createElement('div');
+    b.id='profile-setup-bubble';
+    b.style.cssText='background:linear-gradient(135deg,#7c3aed,#6d28d9);color:#fff;border-radius:12px;padding:.9rem 1rem;margin-bottom:1rem;box-shadow:0 6px 18px rgba(124,58,237,.35);';
+    b.innerHTML='<div style="display:flex;align-items:flex-start;gap:.6rem;">'
+      +'<span style="font-size:1.3rem;line-height:1;flex-shrink:0;">\uD83E\uDEAA</span>'
+      +'<div style="flex:1;min-width:0;">'
+      +'<div style="font-weight:800;font-size:.95rem;margin-bottom:.2rem;">Welcome \u2014 let\u2019s set up your profile</div>'
+      +'<div style="font-size:.8rem;line-height:1.5;opacity:.95;">Fill in your vehicle, home address, gas price &amp; MPG, Venmo, day-of selfie, and confirmation text below, then tap <strong>Save My Info</strong>. The quick popup covers the basics \u2014 everything else lives right here on this page.</div>'
+      +'</div>'
+      +'<button onclick="var e=document.getElementById(\'profile-setup-bubble\');if(e)e.remove();" style="background:rgba(255,255,255,.2);border:none;color:#fff;width:26px;height:26px;border-radius:50%;font-size:1rem;cursor:pointer;flex-shrink:0;line-height:1;">&times;</button>'
+      +'</div>';
+    panel.insertBefore(b, panel.firstChild);
+  }catch(e){}
+}
+function switchProfileTab(which, btn){
+  ['me','avail'].forEach(function(t){
+    var p=document.getElementById('profile-panel-'+t); if(p) p.style.display=(t===which)?'block':'none';
+    var b=document.getElementById('mptab-'+t); if(b) b.classList.toggle('active', t===which);
+  });
+  if(which==='me') renderMyProfileCard();
+  if(which==='avail') renderTeamAvailability();
+}
+// Everyone can see who's off and when — standing days off + specific unavailable dates.
+function renderTeamAvailability(){
+  const box=document.getElementById('team-availability-list'); if(!box) return;
+  const today=toDateStr(new Date());
+  const rows=DRIVERS.map(function(d){
+    const prof=DRIVER_PROFILES[d]||{};
+    const color=driverColor(d);
+    const weekly=(prof.weeklyOff||[]).map(function(wi){ return WEEKDAY_ABBR[wi]; });
+    const upcoming=(prof.unavailableDates||[]).filter(function(dt){ return dt>=today; }).sort();
+    const hrs=(prof.unavailHours||[]);
+    const hasAny=weekly.length||upcoming.length||hrs.length;
+    return '<div style="border:1.5px solid var(--light);border-radius:12px;padding:.8rem .9rem;margin-bottom:.7rem;background:var(--white);">'
+      +'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem;">'
+      +'<span style="width:12px;height:12px;border-radius:50%;background:'+color+';flex-shrink:0;"></span>'
+      +'<span style="font-weight:700;font-size:.9rem;">'+escHtml(d)+(getMyDriverName()===d?' <span style="font-size:.65rem;color:var(--mid);">(you)</span>':'')+'</span>'
+      +'</div>'
+      +(weekly.length?'<div style="font-size:.78rem;margin-bottom:.3rem;"><span style="color:var(--mid);">Standing days off:</span> <strong>'+weekly.join(', ')+'</strong></div>':'')
+      +(upcoming.length?'<div style="font-size:.78rem;margin-bottom:.3rem;"><span style="color:var(--mid);">Unavailable dates:</span><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:3px;">'
+          +upcoming.map(function(dt){ return '<span style="font-size:.72rem;background:#fdecea;color:#b03a2e;border:1px solid #f3c4bd;border-radius:12px;padding:2px 8px;">'+fmtDateShort(dt)+'</span>'; }).join('')+'</div></div>':'')
+      +(hrs.length?'<div style="font-size:.78rem;margin-bottom:.2rem;"><span style="color:var(--mid);">Blocked hours:</span> '+hrs.map(function(h){ var _w=h.date?fmtDateShort(h.date):((h.days||[]).map(function(x){return WEEKDAY_ABBR[x];}).join('/')); return escHtml(_w+' '+(h.from||'')+'\u2013'+(h.to||'')); }).join(' \u00b7 ')+'</div>':'')
+      +(hasAny?'':'<div style="font-size:.78rem;color:var(--mid);">No blocked days \u2014 available anytime.</div>')
+      +'</div>';
+  }).join('');
+  box.innerHTML='<div style="font-size:.8rem;color:var(--mid);margin-bottom:.8rem;">Everyone\u2019s standing days off and blocked dates. Set your own under the <strong>My Info</strong> tab.</div>'+rows;
+}
+// One card builder for both the Team page (publicOnly) and My Profile (forceEdit).
+function buildMemberCard(d, opts){
+    opts=opts||{};
     const venmo=driverVenmo[d]||'';
     const prof=DRIVER_PROFILES[d]||{};
     const color=driverColor(d);
     const badgeText=contrastText(color, 0.8);   // badge bg is color at ~80% over white card
+    const vehText=contrastText(color, 1);        // vehicle bar bg is full-strength color
     const photoText=contrastText(color, 1);     // initials sit on the full-strength color
     const initials=d.split(' ').map(n=>n[0]).join('').slice(0,2);
     const dk=d.replace(/ /g,'_');
@@ -9590,7 +9914,8 @@ function renderDriverMembers(){
     // payment methods — are private to each driver. They only show/edit on your OWN
     // card, even for admins. Other drivers' cards show just public info + share.
     const myDriverName=getMyDriverName();
-    const canEdit=(myDriverName===d);
+    // Team page shows public-only cards; My Profile shows the owner's editable card.
+    const canEdit = opts.publicOnly ? false : (opts.forceEdit ? (myDriverName===d) : (myDriverName===d));
     const venmoLink=venmo
       ?`<a href="https://venmo.com/${venmo.replace('@','')}" target="_blank" style="color:var(--gold);font-size:.8rem;font-weight:600;text-decoration:none;">↗ Pay @${venmo.replace('@','')}</a>`
       :'';
@@ -9607,7 +9932,7 @@ function renderDriverMembers(){
       <!-- photo area -->
       <div class="member-card-photo" style="background:${color};position:relative;">
         ${DRIVER_PHOTOS[d]
-          ? '<img src="'+DRIVER_PHOTOS[d]+'" style="width:100%;height:100%;object-fit:cover;object-position:top center;" alt="'+d+'" />'
+          ? '<img src="'+DRIVER_PHOTOS[d]+'" style="width:100%;height:100%;object-fit:contain;object-position:center;background:#f4f2f8;" alt="'+d+'" />'
           : '<div class="member-card-initials" style="color:'+photoText+';">'+initials+'</div>'
         }
 
@@ -9619,10 +9944,10 @@ function renderDriverMembers(){
         </div>
         <div style="width:8px;height:8px;border-radius:50%;background:${badgeText};opacity:.55;"></div>
       </div>
-      <!-- vehicle bar -->
-      <div class="member-card-vehicle">
-        <svg width="14" height="14" fill="none" stroke="#888" stroke-width="1.5" viewBox="0 0 24 24"><path d="M5 17H3a2 2 0 01-2-2v-5a2 2 0 012-2l1-3h14l1 3a2 2 0 012 2v5a2 2 0 01-2 2h-2m-9 0h6m-6 0a1 1 0 100 2 1 1 0 000-2zm6 0a1 1 0 100 2 1 1 0 000-2z"/></svg>
-        <div class="member-card-vehicle-name">${prof.vehicle||'Vehicle not set'}</div>
+      <!-- vehicle bar (driver's assigned color) -->
+      <div class="member-card-vehicle" style="background:${color};">
+        <svg width="14" height="14" fill="none" stroke="${vehText}" stroke-width="1.5" viewBox="0 0 24 24"><path d="M5 17H3a2 2 0 01-2-2v-5a2 2 0 012-2l1-3h14l1 3a2 2 0 012 2v5a2 2 0 01-2 2h-2m-9 0h6m-6 0a1 1 0 100 2 1 1 0 000-2zm6 0a1 1 0 100 2 1 1 0 000-2z"/></svg>
+        <div class="member-card-vehicle-name" style="color:${vehText};">${prof.vehicle||'Vehicle not set'}</div>
       </div>
       <!-- body -->
       <div class="member-card-body">
@@ -9670,8 +9995,33 @@ function renderDriverMembers(){
           +'</div>'
           +'</div>')
           :''}
+        ${canEdit?((function(){var _sp=(driverSettings[d]||{}).sendParts||{};var chk=function(part){return (_sp[part]!==false)?' checked':'';};
+             return '<div style="margin:.6rem 0;padding-top:.55rem;border-top:1px solid var(--light);">'
+             +'<div style="font-size:.68rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:3px;">\\u{1F4E4} \u201cSend everything\u201d includes</div>'
+             +'<div style="font-size:.66rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Untick anything you don\u2019t want bundled into your all-in-one confirmation text.</div>'
+             +['message','instructions','selfie','vcard'].map(function(part){var lbl={message:"\\u2709\\uFE0F Confirmation message",instructions:"\\u{1F4CD} Pickup instructions",selfie:"\\u{1F933} Day-of selfie (airport rides)",vcard:"\\u{1F464} Contact card (vCard)"}[part];
+               return '<label style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;font-size:.8rem;cursor:pointer;">'
+                 +'<input type="checkbox" id="sendpart-'+part+'-'+dk+'"'+chk(part)+' style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;"/>'
+                 +'<span>'+lbl+'</span></label>';
+             }).join('')
+             +'</div>';
+           })()):''}
         ${canEdit?('<div style="margin:.6rem 0;padding-top:.55rem;border-top:1px solid var(--light);">'
           +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">My availability</div>'
+          +((function(){
+             var weekly=(prof.weeklyOff||[]).map(function(wi){return WEEKDAY_ABBR[wi];});
+             var _today=toDateStr(new Date());
+             var upcoming=(prof.unavailableDates||[]).filter(function(dt){return dt>=_today;}).sort();
+             var hrs=(prof.unavailHours||[]);
+             var any=weekly.length||upcoming.length||hrs.length;
+             return '<div style="background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.55rem .7rem;margin-bottom:.6rem;">'
+               +'<div style="font-size:.6rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Currently set</div>'
+               +(weekly.length?'<div style="font-size:.76rem;margin-bottom:.25rem;"><span style="color:var(--mid);">Days off:</span> <strong>'+weekly.join(', ')+'</strong></div>':'')
+               +(upcoming.length?'<div style="font-size:.76rem;margin-bottom:.25rem;"><span style="color:var(--mid);">Off dates:</span> '+upcoming.map(function(dt){return fmtDateShort(dt);}).join(', ')+'</div>':'')
+               +(hrs.length?'<div style="font-size:.76rem;margin-bottom:.25rem;"><span style="color:var(--mid);">Blocked hours:</span> '+hrs.map(function(h){var _w=h.date?fmtDateShort(h.date):((h.days||[]).map(function(x){return WEEKDAY_ABBR[x];}).join('/'));return escHtml(_w+' '+(h.from||'')+"\u2013"+(h.to||''));}).join(" \u00b7 ")+'</div>':'')
+               +(any?'':'<div style="font-size:.76rem;color:var(--mid);">Nothing blocked \u2014 available anytime.</div>')
+               +'</div>';
+           })())
           +'<div style="font-size:.68rem;color:var(--mid);margin-bottom:3px;">Standing days off</div>'
           +'<div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:.5rem;">'
           + WEEKDAY_ABBR.map(function(w,wi){ var on=(prof.weeklyOff||[]).includes(wi); return '<button onclick="toggleWeeklyOff(\''+d+'\','+wi+')" style="flex:1;min-width:34px;padding:.3rem .1rem;border:1.5px solid '+(on?'#b03a2e':'var(--light)')+';border-radius:6px;background:'+(on?'#b03a2e':'var(--white)')+';color:'+(on?'#fff':'var(--mid)')+';font-family:\'DM Sans\',sans-serif;font-size:.68rem;font-weight:600;cursor:pointer;">'+w+'</button>'; }).join('')
@@ -9730,7 +10080,6 @@ function renderDriverMembers(){
         :''}
       </div>
     </div>`;
-  }).join('');
 }
 
 async function saveDriverProfile(driverName){
@@ -9756,6 +10105,18 @@ async function saveDriverProfile(driverName){
   };
   const venmoEl=document.getElementById('venmo-'+dk);
   if(venmoEl) driverVenmo[driverName]=venmoEl.value.trim();
+  // Per-part "Send everything" toggles — unchecked = leave that part out of the bundle
+  var _spEl=function(part){ return document.getElementById('sendpart-'+part+'-'+dk); };
+  if(_spEl('message')){
+    if(!driverSettings[driverName]) driverSettings[driverName]={};
+    driverSettings[driverName].sendParts={
+      message:      !!_spEl('message').checked,
+      instructions: !!_spEl('instructions').checked,
+      selfie:       !!_spEl('selfie').checked,
+      vcard:        !!_spEl('vcard').checked
+    };
+    try{ await saveDriverSettings(); }catch(e){}
+  }
   await storageSet('kat:driverProfiles', DRIVER_PROFILES);
   await storageSet('kat:driverVenmo', driverVenmo);
   showToast(`${driverName.split(' ')[0]}'s profile saved ✓`);
@@ -12597,7 +12958,28 @@ function enterApp(){
   // Pre-render admin tools
   if(admin) setTimeout(function(){ renderAccessControl(); }, 100);
 
-  populateDriverFilter(); buildCalTabs(); refreshDash(); renderCal(); renderRides(); renderDriverSettings(); calcQuote(); updateNotifBadge(); updateTripFields(); updateChatBadge();
+  populateDriverFilter(); buildCalTabs(); refreshDash(); renderCal(); renderRides(); renderDriverSettings(); calcQuote();
+  // First login from this version onward: land on My Profile so the driver can set up
+  // their info — a welcome bubble points at the page and the setup popup opens over it
+  // for the essentials. Tracked per-driver on this device, so it happens once each.
+  // Every login after that opens normally to the dashboard.
+  try{
+    if(dName){
+      var _fpKey='nda_profile_intro_v1_'+dName.replace(/\s/g,'_');
+      if(!localStorage.getItem(_fpKey)){
+        localStorage.setItem(_fpKey,'1');
+        window._profileIntroThisSession=true;
+        setTimeout(function(){
+          try{
+            nav('myprofile');
+            showProfileSetupBubble();
+            // Give the page a beat to render, then open the focused setup popup over it.
+            setTimeout(function(){ try{ openOnboarding(); }catch(e){} }, 700);
+          }catch(e){}
+        }, 500);
+      }
+    }
+  }catch(e){} updateNotifBadge(); updateTripFields(); updateChatBadge();
   loadGoogleMapsAPI();
   setupFCMForeground();
   setupPushUI();
@@ -13042,6 +13424,7 @@ function showPage(id, el){
   }
   if(id==='chat') initChat();
   if(id==='myrides') renderMyCal();
+  if(id==='myprofile'){ switchProfileTab('me'); }
   if(id==='account') renderAccountPage();
   if(id==='income'){ renderIncome(); renderExpensesView(); }
   if(id==='costcalc') renderCostCalc();
