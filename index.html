@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090212">
+<meta name="version" content="202606090220">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -198,6 +198,13 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
 .detail-row{padding:.4rem 0;border-bottom:1px solid var(--light);}
 .driver-select-row{display:flex;gap:.5rem;align-items:center;margin-bottom:1.25rem;}
 .driver-select-row select{flex:1;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.9rem;}
+.rm-expander{border:1.5px solid var(--light);border-radius:12px;overflow:hidden;margin:.35rem 0 1rem;}
+.rm-exp-head{width:100%;display:flex;align-items:center;justify-content:space-between;gap:.5rem;background:var(--surface);border:none;padding:.7rem .9rem;font-family:'DM Sans',sans-serif;font-size:.86rem;font-weight:700;color:var(--black);cursor:pointer;}
+.rm-exp-hint{font-weight:400;font-size:.7rem;color:var(--mid);white-space:nowrap;}
+.rm-exp-arr{display:inline-block;transition:transform .2s;}
+.rm-exp-body{display:none;padding:1rem .9rem .5rem;border-top:1.5px solid var(--light);}
+.rm-expander.open .rm-exp-body{display:block;}
+.rm-expander.open .rm-exp-arr{transform:rotate(180deg);}
 
 /* COMMENTS */
 #quicknav{display:flex;justify-content:space-around;align-items:stretch;background:#150a25;border-top:1px solid #2d1460;border-bottom:1px solid #2d1460;padding:.25rem .05rem;}
@@ -518,6 +525,7 @@ input,select,textarea{font-size:16px;}
     <div id="dash-income-overview" style="margin-bottom:1.5rem;"></div>
     <div id="dash-confirmations" style="margin-bottom:1.5rem;"></div>
     <div id="dash-fees" style="margin-bottom:1.5rem;"></div>
+    <div id="dash-needs-attention" style="margin-bottom:1.5rem;"></div>
     <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.75rem;" id="dash-upcoming-label">Your upcoming rides</div>
     <div id="upcoming-list"></div>
   </div>
@@ -1043,7 +1051,7 @@ input,select,textarea{font-size:16px;}
 <div class="modal-overlay" id="upgrade-modal">
   <div class="modal" style="max-width:min(440px,95vw);padding:1.25rem;">
     <div id="upgrade-expired-banner" style="display:none;background:#fffbeb;border:1.5px solid #fcd34d;border-radius:10px;padding:.85rem;margin:.5rem 0 1rem;text-align:left;">
-      <div style="font-size:.85rem;color:#92400e;font-weight:600;margin-bottom:.35rem;">Your income tracking has expired.</div>
+      <div style="font-size:.85rem;color:#92400e;font-weight:600;margin-bottom:.35rem;">Your Driver Pro subscription has expired.</div>
       <div style="font-size:.8rem;color:#92400e;margin-bottom:.6rem;">You can renew below to keep tracking, or download all of your documentation (income, outside rides &amp; receipts) to keep for your records.</div>
       <button onclick="downloadMyDocumentation()" style="width:100%;padding:.6rem;background:#92400e;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">⬇ Download all my documentation</button>
     </div>
@@ -1070,7 +1078,7 @@ input,select,textarea{font-size:16px;}
           <div>✓ Gross · Cost · Net per ride</div><div>✓ Gas from MPG &amp; fuel price</div>
           <div>✓ Custom maintenance $/mi</div><div>✓ Tip entry per ride</div>
           <div>✓ 🚗 Start Ride — route to any nav app</div><div>✓ 📍 Log miles per ride</div>
-          <div>✓ 15% Client Fee log &amp; payment tracking</div>
+          <div>✓ 15% Client Fee log &amp; payment tracking</div><div>✓ 🧾 Branded client receipts (text or PDF)</div>
         </div>
       </div>
       <div>
@@ -1130,21 +1138,29 @@ input,select,textarea{font-size:16px;}
         <button id="rm-cancel-btn" class="btn-secondary" onclick="toggleEditMode(false)" style="display:none;font-size:.8rem;padding:.4rem .9rem;">Cancel</button>
       </div>
     </div>
-    <!-- VIEW MODE -->
+    <!-- VIEW MODE — ride facts first, driver actions next, dispatch tools folded below -->
     <div id="rm-view-mode">
-      <div id="rm-driver-row" class="driver-select-row">
-        <span style="font-size:.8rem;color:var(--mid);min-width:60px;">Driver</span>
-        <select id="rm-driver-select"></select>
-        <button onclick="assignDriver()" style="padding:.5rem 1rem;background:var(--gold);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;">Assign</button>
-       <div id="rm-share-loc-btn"></div>
-      </div>
-      <div id="rm-closest-wrap" style="margin:-.5rem 0 1rem;">
-        <button onclick="findClosestDrivers()" style="display:inline-flex;align-items:center;gap:.4rem;padding:.4rem .75rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;cursor:pointer;font-weight:600;font-size:.78rem;font-family:'DM Sans',sans-serif;">&#128205; Find closest drivers</button>
-        <div id="rm-closest-drivers"></div>
-      </div>
-      <div id="rm-interest"></div>
-      <div id="mt-wrap"></div>
       <div class="detail-grid" id="rm-detail-grid"></div>
+      <div id="mt-wrap"></div>
+      <div id="rm-share-loc-btn"></div>
+      <div id="rm-interest"></div>
+      <div class="rm-expander" id="rm-dispatch">
+        <button type="button" class="rm-exp-head" onclick="toggleDispatchTools()">
+          <span>&#128736; Dispatch tools</span>
+          <span class="rm-exp-hint">assign driver &middot; find closest&nbsp;&nbsp;<span class="rm-exp-arr">&#9662;</span></span>
+        </button>
+        <div class="rm-exp-body">
+          <div id="rm-driver-row" class="driver-select-row">
+            <span style="font-size:.8rem;color:var(--mid);min-width:60px;">Driver</span>
+            <select id="rm-driver-select"></select>
+            <button onclick="assignDriver()" style="padding:.5rem 1rem;background:var(--gold);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;">Assign</button>
+          </div>
+          <div id="rm-closest-wrap" style="margin:-.5rem 0 .25rem;">
+            <button onclick="findClosestDrivers()" style="display:inline-flex;align-items:center;gap:.4rem;padding:.4rem .75rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;cursor:pointer;font-weight:600;font-size:.78rem;font-family:'DM Sans',sans-serif;">&#128205; Find closest drivers</button>
+            <div id="rm-closest-drivers"></div>
+          </div>
+        </div>
+      </div>
     </div>
     <!-- EDIT MODE -->
     <div id="rm-edit-mode" style="display:none;">
@@ -1277,7 +1293,7 @@ input,select,textarea{font-size:16px;}
       <div style="border-top:1.5px solid var(--light);margin:1rem 0 .8rem;"></div>
       <div class="form-group" id="pay-receipt-section">
         <div id="pay-receipt-locked" style="display:none;background:#faf5ff;border:1.5px solid var(--pur3);border-radius:10px;padding:.75rem .85rem;text-align:center;">
-          <div style="font-size:.86rem;font-weight:700;color:var(--accent);margin-bottom:.15rem;">🔒 Client receipts are a premium feature</div>
+          <div style="font-size:.86rem;font-weight:700;color:var(--accent);margin-bottom:.15rem;">🔒 Client receipts are a Driver Pro feature</div>
           <div style="font-size:.74rem;color:var(--mid);line-height:1.4;margin-bottom:.5rem;">Send text &amp; downloadable branded receipts, plus tip tracking and income tools.</div>
           <button type="button" onclick="closePaymentModal();showIncomeOrUpgrade(null);" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.45rem 1.1rem;font-size:.8rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">Upgrade</button>
         </div>
@@ -1980,6 +1996,7 @@ async function initApp() {
     await loadClientRequests(); await loadClientReqDriver(); try{_mtTryRecover();}catch(e){} try{_rtTryRecover();}catch(e){} await loadClientUnlock(); try{_dmLoadPersistent();}catch(e){} try{_geoLoadPersistent();}catch(e){}
   await loadCautiousList(); await loadDeceasedClients(); await loadHiddenClients();
   await loadGlobalSettings();
+  await loadUiPrefs();
     await loadExpenses();
     await loadOutsideRides();
     await loadReceipts();
@@ -2328,7 +2345,7 @@ async function unlinkProfiles(driverName){
 }
 
 function maybShowTutorialBanner(){
-  if(localStorage.getItem('nda_tutorial_dismissed')==='forever') return;
+  if(isUiDismissed('tutorial')) return;
   // On the first-login setup session we ask about the tutorial AFTER setup instead,
   // so the setup popup isn't competing with this banner.
   if(window._profileIntroThisSession) return;
@@ -2344,15 +2361,15 @@ function maybShowTutorialBanner(){
   document.body.appendChild(b);
   b.querySelector('#tut-close-now').onclick=function(){ b.remove(); };
   b.querySelector('#tut-open').onclick=function(){ b.remove(); window.open('nwda-tutorial.html','_blank'); };
-  b.querySelector('#tut-never').onclick=function(){ localStorage.setItem('nda_tutorial_dismissed','forever'); b.remove(); };
+  b.querySelector('#tut-never').onclick=function(){ setUiDismissed('tutorial'); b.remove(); };
 }
 // ── In-app tutorial tip bubbles ──
 const TIP_DATA={
-  dashboard:{icon:'🏠',title:'Dashboard',text:'Tap any ride card to open the full details. If you see an orange banner at the top, you have confirmation texts due for tomorrow\'s rides.'},
-  cal:{icon:'📅',title:'Calendar',text:'Tap any ride to edit, cancel, duplicate, or post it to the Offerings channel for coverage. Linked AP Round Trip cards show a blue 🔗 Pair badge.'},
-  myrides:{icon:'📋',title:'My Rides & Confirmations',text:'The To Confirm tab shows tomorrow\'s rides needing a day-before text. The six send buttons plus Mark Sent are a Premium feature.'},
+  dashboard:{icon:'🏠',title:'Dashboard',text:'Tap any ride card to open the full details. An orange banner means confirmation texts are due for tomorrow. An amber \u201cRides to wrap up\u201d box lists past rides you haven\'t marked paid yet \u2014 tap one to finish it.'},
+  cal:{icon:'📅',title:'Calendar',text:'Tap any ride to edit, cancel, duplicate, or post it to the Offerings channel. Assigning a driver lives under 🛠 Dispatch tools inside the ride. Linked AP Round Trip cards show a blue 🔗 Pair badge.'},
+  myrides:{icon:'📋',title:'My Rides & Confirmations',text:'The To Confirm tab shows tomorrow\'s rides needing a day-before text. The six send buttons plus Mark Sent are a Driver Pro feature.'},
   clients:{icon:'👥',title:'Client List',text:'Your client list is 100% private — no other driver and no admin can see it. Clients are added automatically when you book rides.'},
-  income:{icon:'💰',title:'Income & Receipts',text:'Track gross fares, expenses, and net take-home here. Use the receipt scanner to snap a photo and auto-fill amounts. Premium subscription required.'},
+  income:{icon:'💰',title:'Income & Receipts',text:'Track gross fares, expenses, and net take-home here. Use the receipt scanner to snap a photo and auto-fill amounts. Requires Driver Pro.'},
   flights:{icon:'✈️',title:'Flights & Traffic',text:'Search any flight number for live tracking. Today\'s and tomorrow\'s airport rides are listed automatically with tracking links.'},
   chat:{icon:'💬',title:'Team Chat',text:'Offerings: post rides needing coverage — teammates tap ✅ to claim instantly. Updates: share traffic without buzzing anyone\'s phone.'},
   team:{icon:'🚘',title:'Team & Driver Cards',text:'Team driver cards live here — tap Share Card or Download to send yours. To edit your own info, use My Profile in the menu. Admins can add a new driver from this page.'},
@@ -2360,7 +2377,7 @@ const TIP_DATA={
 };
 let _shownTips=new Set();
 function showPageTip(pageId){
-  if(localStorage.getItem('nda_tips_dismissed')==='forever') return;
+  if(isUiDismissed('tips')) return;
   if(_shownTips.has(pageId)) return;
   const tip=TIP_DATA[pageId]; if(!tip) return;
   _shownTips.add(pageId);
@@ -2373,7 +2390,7 @@ function showPageTip(pageId){
     +'<div class="tip-bubble-body">'+tip.text+'</div>'
     +'<div class="tip-bubble-btns">'
     +'<button class="tip-close-now" onclick="document.getElementById(\'nda-tip-bubble\').remove()">Got it</button>'
-    +'<button class="tip-close-forever" onclick="localStorage.setItem(\'nda_tips_dismissed\',\'forever\');document.getElementById(\'nda-tip-bubble\').remove();">Turn off tips</button>'
+    +'<button class="tip-close-forever" onclick="setUiDismissed(\'tips\');document.getElementById(\'nda-tip-bubble\').remove();">Turn off tips</button>'
     +'</div>';
   document.body.appendChild(b);
   setTimeout(function(){ const el=document.getElementById('nda-tip-bubble'); if(el) el.remove(); }, 8000);
@@ -2462,6 +2479,14 @@ const WAIT_RATE      = 60;
 const ADDONS_FLAT    = { premium:30, holiday:30, christmas:35, late:20, traffic:15 };
 let addonState = { premium:false, holiday:false, christmas:false, late:false, fuel:false, traffic:false };
 let globalSettings = { fuelEnabled: true }; // admin-controlled global pricing flags
+// Per-LOGIN-NAME UI preferences (tutorial/tips dismissals), synced across devices so
+// dismissing on one device carries over to another. Keyed by login username.
+let uiPrefs = {};
+async function loadUiPrefs(){ try{ var d=await storageGet('kat:uiPrefs'); uiPrefs=(d&&typeof d==='object')?d:{}; }catch(e){ uiPrefs={}; } }
+async function saveUiPrefs(){ try{ await storageSet('kat:uiPrefs', uiPrefs); }catch(e){} }
+function _uiPrefUser(){ return (currentUser&&currentUser.name)||(function(){try{return localStorage.getItem('nda-session')||'';}catch(e){return '';}})(); }
+function isUiDismissed(key){ var u=_uiPrefUser(); return !!(u && uiPrefs[u] && uiPrefs[u][key]==='forever'); }
+function setUiDismissed(key){ var u=_uiPrefUser(); if(!u) return; if(!uiPrefs[u]) uiPrefs[u]={}; uiPrefs[u][key]='forever'; saveUiPrefs(); }
 async function loadGlobalSettings(){
   const d=await storageGet('kat:globalSettings');
   if(d&&typeof d==='object'){
@@ -2495,6 +2520,17 @@ async function saveBaseRates(){
 
 async function saveGlobalSettings(){
   await storageSet('kat:globalSettings',globalSettings);
+}
+// Admin action: re-prompt EVERY driver to review/update their profile at next login.
+// Bumps a global marker; each driver's onboarding clears their own pending state.
+async function resetAllOnboarding(){
+  if(!(currentUser && currentUser.role==='admin')){ showToast('Admins only','error'); return; }
+  if(!confirm('Re-prompt EVERY driver to review and update their profile info?\n\nThe next time each driver opens the app, the quick setup screen appears so they can fill in newly added fields (business name, logo, availability, and more). They can still skip it.\n\nThis affects all drivers.')) return;
+  try{
+    globalSettings.onboardingResetAt = Date.now();
+    await saveGlobalSettings();
+    showToast('\u2713 All drivers will be asked to review their info at next login');
+  }catch(e){ console.warn('reset onboarding', e); showToast('Could not save the reset','error'); }
 }
 let extraStops = 0; // extra pickups at $10 each
 
@@ -3942,7 +3978,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
         ${dayRides.length
           ? dayRides.map(r=>{
               const c=rideColor(r);
-              const ic=interestCount(r);
+              const ic=canSeeInterestList(r)?interestCount(r):0;
               const tc=contrastText(c,0.4);
               const badge=r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP'?'badge-ap':r.type==='ROUND TRIP'?'badge-rt':'badge-pt';
   const xxlBadge=r.xxl?'<span style="font-size:.55rem;font-weight:700;background:#6b21a8;color:#fff;border-radius:3px;padding:1px 4px;margin-left:2px;">XXL</span>':'';
@@ -4142,7 +4178,7 @@ function renderMyCal(){
       return `<div style="display:flex;align-items:center;gap:1rem;padding:.75rem 1rem;border-radius:10px;margin-bottom:.5rem;background:${c}66;border:2px solid ${c};cursor:pointer;flex-wrap:wrap;" onclick="openRideModal(${r.id})">
         <div style="width:8px;min-height:36px;border-radius:3px;background:${c};flex-shrink:0;align-self:stretch;"></div>
         <div class="ride-date" style="color:${tc};">${fmtDateShort(r.date)}<br>${fmtTime12(r.time)||'—'}</div>
-        <div class="ride-info"><div class="ride-client" style="color:${tc};">${r.client}${r.confirmSent?' <span style="color:var(--green);font-weight:900;">✓</span>':''}</div><div class="ride-detail" style="color:${tc};opacity:.78;">${rideDisplayType(r)} · ${driverTag}</div>${rideReqDriverTag(r)}${(_mtWatchId&&_mtRideIds.indexOf(r.id)>=0)?'<div style="margin-top:3px;"><span style="display:inline-block;font-size:.68rem;background:#f0fdf4;color:#16a34a;border:1px solid #86efac;border-radius:8px;padding:1px 7px;font-weight:700;animation:mt-pulse .9s ease-in-out infinite;">&#128205; Live tracking</span></div>':''}}</div>
+        <div class="ride-info"><div class="ride-client" style="color:${tc};">${r.client}${r.confirmSent?' <span style="color:var(--green);font-weight:900;">✓</span>':''}</div><div class="ride-detail" style="color:${tc};opacity:.78;">${rideDisplayType(r)} · ${driverTag}</div>${rideReqDriverTag(r)}${(_mtWatchId&&_mtRideIds.indexOf(r.id)>=0)?'<div style="margin-top:3px;"><span style="display:inline-block;font-size:.68rem;background:#f0fdf4;color:#16a34a;border:1px solid #86efac;border-radius:8px;padding:1px 7px;font-weight:700;animation:mt-pulse .9s ease-in-out infinite;">&#128205; Live tracking</span></div>':''}</div>
         <div class="ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}</div>
       </div>`;
     };
@@ -4871,6 +4907,7 @@ function closeDayModal(){document.getElementById('day-modal').classList.remove('
 // ═══════════════════════════════════════════
 // RIDE DETAIL MODAL
 // ═══════════════════════════════════════════
+function toggleDispatchTools(){ var e=document.getElementById('rm-dispatch'); if(e) e.classList.toggle('open'); }
 function openRideModal(id){
   activeRideId=id;
   const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
@@ -4879,6 +4916,9 @@ function openRideModal(id){
   // driver assign row
   const drRow=document.getElementById('rm-driver-row');
   drRow.style.display=canAssignOnRide(r)?'flex':'none';
+  // Dispatch tools: open by default for people who dispatch this ride, folded for drivers.
+  var _dx=document.getElementById('rm-dispatch');
+  if(_dx) _dx.classList.toggle('open', canAssignOnRide(r));
   const dSel=document.getElementById('rm-driver-select');
   dSel.innerHTML=driverOptionsHTML(r.driver, r.date);
   // reset closest-driver suggestions for the freshly-opened ride
@@ -4919,7 +4959,7 @@ function renderRideView(r){
   // Share Location button — driver+creator only, Premium (canSeeContact now in scope)
   var _slBtn=document.getElementById('rm-share-loc-btn');
   var _slLocalType=(r.type==='ONE WAY'||r.type==='ROUND TRIP');
-  if(_slBtn)_slBtn.innerHTML=canSeeContact&&hasIncomeAccess()&&_slLocalType?'<button onclick="shareLocationToClient('+r.id+')" style="padding:.45rem .75rem;background:#0f172a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;">&#128205; Share Location</button>':'';
+  if(_slBtn)_slBtn.innerHTML=canSeeContact&&hasIncomeAccess()&&_slLocalType?'<button onclick="shareLocationToClient('+r.id+')" style="padding:.45rem .75rem;background:#0f172a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;margin:0 0 .85rem;">&#128205; Share Location \u2014 let the client see you coming</button>':'';
   const _pairedRide = r.pairId ? (rides||[]).find(function(x){ return x.id!==r.id && x.pairId===r.pairId; }) : null;
   const _pairLabel = _pairedRide ? (_pairedRide.type==='AP PICK UP' ? '\u2708\ufe0f View return leg \u2192' : '\u2708\ufe0f View outbound leg \u2192') : null;
   const apType = r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP';
@@ -4949,7 +4989,7 @@ function renderRideView(r){
 
   document.getElementById('rm-detail-grid').innerHTML=`${rideReqDriverTag(r)}
     ${r.status==='cancelled'?`<div style="grid-column:1/-1;background:#fdecea;border:1.5px solid #e6a8a0;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#b03a2e;font-weight:700;font-size:.9rem;">🚫 CANCELLED${r.cancelledBy?' · by '+escHtml(String(r.cancelledBy)):''} — tap “Reactivate Ride” below to restore.</div>`:''}
-    ${r.status==='paid'?`<div style="grid-column:1/-1;background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#16a34a;font-weight:700;font-size:.9rem;">✅ CLIENT PAID${r.paidBy?' · marked by '+escHtml(String(r.paidBy)):''}${r.payment?' · <span style="font-weight:600;">'+escHtml(String(r.payment))+'</span>':''}<div style="margin-top:.4rem;font-weight:600;font-size:.78rem;"><button onclick="openPaymentModal(${r.id})" style="background:none;border:none;color:#16a34a;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;margin-right:.8rem;">Edit payment</button>${(typeof hasIncomeAccess==='function'&&hasIncomeAccess())?`<button onclick="sendReceiptToClient(${r.id})" style="background:none;border:none;color:#16a34a;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;margin-right:.8rem;">🧾 Text receipt</button><button onclick="downloadReceiptDocument(${r.id})" style="background:none;border:none;color:#16a34a;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;">📄 Download receipt</button>`:`<button onclick="showIncomeOrUpgrade(null)" style="background:none;border:none;color:#7c3aed;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;">🔒 Receipts (Premium)</button>`}</div></div>`:''}
+    ${r.status==='paid'?`<div style="grid-column:1/-1;background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#16a34a;font-weight:700;font-size:.9rem;">✅ CLIENT PAID${r.paidBy?' · marked by '+escHtml(String(r.paidBy)):''}${r.payment?' · <span style="font-weight:600;">'+escHtml(String(r.payment))+'</span>':''}<div style="margin-top:.4rem;font-weight:600;font-size:.78rem;"><button onclick="openPaymentModal(${r.id})" style="background:none;border:none;color:#16a34a;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;margin-right:.8rem;">Edit payment</button>${(typeof hasIncomeAccess==='function'&&hasIncomeAccess())?`<button onclick="sendReceiptToClient(${r.id})" style="background:none;border:none;color:#16a34a;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;margin-right:.8rem;">🧾 Text receipt</button><button onclick="downloadReceiptDocument(${r.id})" style="background:none;border:none;color:#16a34a;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;">📄 Download receipt</button>`:`<button onclick="showIncomeOrUpgrade(null)" style="background:none;border:none;color:#7c3aed;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;">🔒 Receipts (Driver Pro)</button>`}</div></div>`:''}
     ${(()=>{
       // Unpaid-carryover: on an AP ride whose client has a prior completed-but-
       // unpaid AP ride, warn (owner + assigned driver) and show a total-owed
@@ -5538,7 +5578,7 @@ async function savePaymentAndMaybeReceipt(){
 // shows the upgrade prompt and returns false.
 function _receiptAccessOrUpgrade(){
   if(typeof hasIncomeAccess==='function' && hasIncomeAccess()) return true;
-  try{ showIncomeOrUpgrade(null); }catch(e){ showToast('Receipts are a premium feature.','error'); }
+  try{ showIncomeOrUpgrade(null); }catch(e){ showToast('Receipts are a Driver Pro feature.','error'); }
   return false;
 }
 
@@ -5826,7 +5866,9 @@ async function saveRideEdits(){
   r.price     = parseFloat(document.getElementById('edit-price').value)||0;
   r.confirmed = document.getElementById('edit-confirmed').value==='true';
   r.notes     = document.getElementById('edit-notes').value.trim();
+  var _prevReqNote=r.reqDriverNote||'';
   if(currentUser&&currentUser.name===r.createdBy){ var _rdv=document.getElementById('edit-reqdriver'); if(_rdv){ var _v=_rdv.value.trim(); if(_v) r.reqDriverNote=_v; else delete r.reqDriverNote; } }
+  notifyRequestedDriver(r, _prevReqNote);
   r.driver    = document.getElementById('edit-driver').value;
   touchRide(r, 'edited');
   // Notify new driver if changed
@@ -7181,8 +7223,16 @@ function mtBarHtml(rid){
 
 function nameInitials(full){ return (full||'').trim().split(/\s+/).map(w=>w[0]||'').join('').slice(0,2).toUpperCase(); }
 function interestCount(r){ return r && r.interest ? Object.keys(r.interest).length : 0; }
+// Only the ride's owner may see WHO is interested (and how many). Kat and Morgan
+// resolve to the same owner via PROXY_MAP, so either sees lists on the other's rides.
+function canSeeInterestList(r){
+  if(!currentUser || !r) return false;
+  var me = PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name;
+  var cr = r.createdBy ? (PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy) : null;
+  return !!(me && cr && me===cr);
+}
 function _heartOwner(){ return (currentUser&&PROXY_MAP[currentUser.name])||getMyDriverName()||(currentUser&&currentUser.name)||''; }
-function myHeartedRides(){ var o=_heartOwner(); return (rides||[]).filter(function(r){ return r&&r.interest&&Object.keys(r.interest).some(function(k){ return (USER_DRIVER_MAP[k]||PROXY_MAP[k]||k)===o; }); }); }
+function myHeartedRides(){ var o=_heartOwner(); var _today=toDateStr(new Date()); return (rides||[]).filter(function(r){ return r&&r.status!=='cancelled'&&(r.date||'')>=_today&&r.interest&&Object.keys(r.interest).some(function(k){ return (USER_DRIVER_MAP[k]||PROXY_MAP[k]||k)===o; }); }); }
 function _myHeartTs(r){ var o=_heartOwner(),ts=0; Object.keys(r.interest||{}).forEach(function(k){ if((USER_DRIVER_MAP[k]||PROXY_MAP[k]||k)===o){ var t=r.interest[k]; if(typeof t==='number'&&(!ts||t<ts)) ts=t; } }); return ts; }
 function closeHeartedRides(){ var o=document.getElementById('hearted-overlay'); if(o) o.remove(); }
 function renderHeartedList(q){ var box=document.getElementById('hearted-list'); if(!box) return; q=(q||'').toLowerCase().trim(); var all=myHeartedRides(); var list=all.slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); }); if(q){ list=list.filter(function(r){ var hay=((r.date||'')+' '+fmtDateShort(r.date)+' '+(r.client||'')+' '+(r.type||'')+' '+(r.time||'')).toLowerCase(); return hay.indexOf(q)>=0; }); } var cnt=document.getElementById('hearted-count'); if(cnt) cnt.textContent=list.length+' ride'+(list.length!==1?'s':''); if(!list.length){ box.innerHTML='<div style="text-align:center;padding:2rem;color:var(--mid);font-size:.9rem;">'+(all.length?'No hearted rides match that search.':'You have not hearted any rides yet. Tap the \uD83E\uDD0D on a ride to add it here.')+'</div>'; return; } box.innerHTML=list.map(function(r){ var c=rideColor(r); var dt=r.driver?r.driver.split(' ')[0]:'Unassigned'; var ts=_myHeartTs(r); var when=ts?('<span style="font-size:.66rem;color:var(--mid);">\u2764 '+fmtTs(ts)+'</span>'):''; return '<div onclick="closeHeartedRides();openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.8rem;padding:.7rem .85rem;border-radius:10px;margin-bottom:.45rem;background:'+c+'22;border:1.5px solid '+c+';cursor:pointer;">'+'<div style="width:7px;align-self:stretch;border-radius:3px;background:'+c+';flex-shrink:0;"></div>'+'<div style="text-align:center;min-width:54px;font-size:.72rem;font-weight:700;color:var(--black);line-height:1.2;">'+fmtDateShort(r.date)+'<br><span style="font-weight:400;color:var(--mid);">'+(fmtTime12(r.time)||'\u2014')+'</span></div>'+'<div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:.9rem;color:var(--black);">'+escHtml(r.client||'\u2014')+'</div><div style="font-size:.74rem;color:var(--mid);">'+escHtml(r.type||'')+' \u00b7 '+escHtml(dt)+'</div>'+when+'</div>'+'<div style="font-weight:700;color:var(--green);font-size:.9rem;">$'+(r.price||0)+'</div></div>'; }).join(''); }
@@ -7198,11 +7248,11 @@ function renderInterest(r){
   const count = names.length;
   // Don't prompt the creator to be "interested" in their own ride. Hide the bubble
   // entirely when nobody else is interested; if others are, still show who (below).
-  const _pmI = currentUser?(PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name):null;
-  const _pcI = r.createdBy?(PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy):null;
-  const iCreated = !!(_pmI && _pcI && _pmI===_pcI);
+  const iCreated = canSeeInterestList(r);
   if(iCreated && count===0){ el.innerHTML=''; el.style.display='none'; return; }
-  const chips = names.map(n=>{
+  // Non-owners never see the list; without a driver identity there's nothing to show them.
+  if(!iCreated && !me){ el.innerHTML=''; el.style.display='none'; return; }
+  const chips = !iCreated ? '' : names.map(n=>{
     const c = driverColor(n);
     const first = n.split(' ')[0];
     const ts = interest[n];
@@ -7220,13 +7270,13 @@ function renderInterest(r){
     <div style="background:var(--gold-pale);border:1px solid var(--light);border-radius:10px;padding:.85rem 1rem;margin-bottom:.75rem;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap;">
         <div style="font-size:.78rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);">
-          ${count?`❤️ ${count} interested`:(r.driver?'Interested in covering this ride?':'Who can take this ride?')}
+          ${(count&&iCreated)?`❤️ ${count} interested`:(iAmIn?'❤️ You\'re interested in this ride':(r.driver?'Interested in covering this ride?':'Who can take this ride?'))}
         </div>
         ${(me && !iCreated)?`<button onclick="toggleInterest(${r.id})" style="display:inline-flex;align-items:center;gap:.4rem;cursor:pointer;border-radius:999px;padding:.45rem .95rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;${iAmIn?'background:#e0245e;color:#fff;border:1.5px solid #e0245e;':'background:transparent;color:#e0245e;border:1.5px solid #e0245e;'}">
             ${iAmIn?'❤️ Interested':'🤍 I\'m interested'}
           </button>`:''}
       </div>
-      ${count?`<div style="display:flex;flex-wrap:wrap;gap:.45rem;margin-top:.7rem;">${chips}</div>`:''}
+      ${(count&&iCreated)?`<div style="display:flex;flex-wrap:wrap;gap:.45rem;margin-top:.7rem;">${chips}</div>`:''}
     </div>`;
 }
 
@@ -7479,6 +7529,35 @@ function _reqOwner(){ return (currentUser&&PROXY_MAP[currentUser.name])||getMyDr
 function _reqKey(name){ return (_reqOwner()+'||'+(name||'').trim().toLowerCase()).replace(/[.#$\[\]\/]/g,'_'); }
 function getClientReqDriver(name){ return clientReqDriver[_reqKey(name)]||''; }
 async function setClientReqDriver(name,drv){ const k=_reqKey(name); if(drv) clientReqDriver[k]=drv; else delete clientReqDriver[k]; await saveClientReqDriver(); renderClients(); }
+// Resolve a free-text "requested driver" note to a real driver's full name.
+// Accepts a full name, a login key, or a first name (case-insensitive). Returns '' if no match.
+function resolveRequestedDriver(note){
+  if(!note) return '';
+  var q=String(note).trim().toLowerCase();
+  if(!q) return '';
+  var fulls={}; // set of canonical full names
+  Object.keys(USER_DRIVER_MAP).forEach(function(k){ fulls[USER_DRIVER_MAP[k]]=1; });
+  // exact login key (e.g. "Chase")
+  for(var k in USER_DRIVER_MAP){ if(k.toLowerCase()===q) return USER_DRIVER_MAP[k]; }
+  // exact full name
+  for(var f in fulls){ if(f.toLowerCase()===q) return f; }
+  // first-name match against full names (unique only, to avoid picking the wrong Herringdine)
+  var hits=Object.keys(fulls).filter(function(f){ return f.split(' ')[0].toLowerCase()===q; });
+  if(hits.length===1) return hits[0];
+  return '';
+}
+// Notify the requested driver (if the note resolves to a real driver and it changed).
+function notifyRequestedDriver(r, prevNote){
+  try{
+    var newFull=resolveRequestedDriver(r&&r.reqDriverNote);
+    var oldFull=resolveRequestedDriver(prevNote);
+    if(!newFull || newFull===oldFull) return;                 // nothing new to notify
+    if(newFull===r.driver) return;                             // already the assigned driver — assign notif covers it
+    var msg='You were requested for '+(r.client||'a ride')+' on '+fmtDateShort(r.date)+(r.time?' at '+r.time:'');
+    addNotification(newFull, r, 'requested', msg);
+    sendPushToDriver(newFull, '\u2b50 You were requested \u2014 NDA', (r.client||'A client')+' requested you \u00b7 '+fmtDateShort(r.date)+' '+(r.time||''));
+  }catch(e){ console.warn('notifyRequestedDriver', e); }
+}
 function rideReqDriverTag(r){ if(!r) return ''; if(!currentUser||currentUser.name!==r.createdBy) return ''; var d=r.reqDriverNote||''; if(!d) return ''; return '<div style="margin-top:4px;"><span style="display:inline-block;font-size:.9rem;background:#fff;color:#7c3aed;border:1.5px solid #c4b5fd;border-radius:9px;padding:4px 12px;font-weight:700;">\u2605 Requested: '+escHtml(d)+'</span></div>'; }
 
 // ── Owner or admin can push/release a client to another driver ──
@@ -8785,15 +8864,15 @@ function buildAccountStatusCard(sub, hasInc, expDate, daysLeft, trialDaysLeft){
     } else {
       statusBadge = '<span style="background:#dcfce7;color:#166534;font-size:.72rem;padding:3px 10px;border-radius:12px;font-weight:600;">Active</span>';
     }
-    statusDesc = '<div style="font-size:.82rem;color:var(--mid);margin-top:.35rem;">Income tracking active · renews '+expStr+'</div>';
+    statusDesc = '<div style="font-size:.82rem;color:var(--mid);margin-top:.35rem;">Driver Pro active · renews '+expStr+'</div>';
     renewBtn   = '<button onclick="renewIncomeUpgrade()" style="width:100%;padding:.65rem;margin-top:.85rem;background:#9c27b0;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.88rem;font-weight:600;cursor:pointer;">Renew — $15/month</button>';
   } else if(trialDaysLeft > 0){
     statusBadge = '<span style="background:#dbeafe;color:#1e40af;font-size:.72rem;padding:3px 10px;border-radius:12px;font-weight:600;">Trial — '+trialDaysLeft+' day'+(trialDaysLeft!==1?'s':'')+' left</span>';
-    statusDesc  = '<div style="font-size:.82rem;color:var(--mid);margin-top:.35rem;">Free income trial · subscribe to keep access</div>';
+    statusDesc  = '<div style="font-size:.82rem;color:var(--mid);margin-top:.35rem;">Driver Pro trial · subscribe to keep access</div>';
     renewBtn    = '<button onclick="renewIncomeUpgrade()" style="width:100%;padding:.65rem;margin-top:.85rem;background:#9c27b0;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.88rem;font-weight:600;cursor:pointer;">Subscribe — $15/month</button>';
   } else {
     statusBadge = '<span style="background:var(--surface);color:var(--mid);font-size:.72rem;padding:3px 10px;border-radius:12px;font-weight:600;">Free plan</span>';
-    statusDesc  = '<div style="font-size:.82rem;color:var(--mid);margin-top:.35rem;">Base app · upgrade for income tracking</div>';
+    statusDesc  = '<div style="font-size:.82rem;color:var(--mid);margin-top:.35rem;">Base app · upgrade to Driver Pro for income tracking</div>';
   }
 
   return '<div style="display:flex;align-items:center;gap:.85rem;margin-bottom:.85rem;">'
@@ -9188,6 +9267,16 @@ function _onbUploadPhoto(){
   document.body.appendChild(inp); inp.click();
   setTimeout(function(){ try{ document.body.removeChild(inp); }catch(e){} }, 1000);
 }
+function onboardingResetPending(dn){
+  // True when an admin has triggered a global "re-prompt everyone" reset that is
+  // newer than this driver's last completed/dismissed onboarding.
+  try{
+    var resetAt = (typeof globalSettings!=='undefined' && globalSettings.onboardingResetAt) || 0;
+    if(!resetAt) return false;
+    var prof = DRIVER_PROFILES[dn] || {};
+    return (prof.onboardedAt || 0) < resetAt;
+  }catch(e){ return false; }
+}
 function maybeShowOnboarding(){
   // Show only if: this user is a driver profile, hasn't dismissed forever,
   // and hasn't already filled in the basics.
@@ -9197,6 +9286,10 @@ function maybeShowOnboarding(){
     // On the very first login of this version we send them straight to My Profile
     // instead — don't also pop the overlay in the same session.
     if(window._profileIntroThisSession) return;
+    // Admin-triggered re-onboarding: a global reset newer than this driver's last
+    // completed/dismissed onboarding forces them through setup again — this overrides
+    // both the "dismissed forever" flag and the has-basics skip below.
+    if(onboardingResetPending(dn)){ openOnboarding(); return; }
     // dismissed forever?
     if(localStorage.getItem(_onbDismissKey()) === 'forever') return;
     // already has the essentials? skip
@@ -9391,6 +9484,8 @@ async function saveOnboarding(){
   if(selfieChoice && selfieChoice.value==='own' && _onbPhotoData){
     driverSettings[dn]=driverSettings[dn]||{}; driverSettings[dn].selfie=_onbPhotoData;
   }
+  // Mark onboarding as completed so an admin "re-prompt all" reset clears for this driver.
+  p.onboardedAt = Date.now();
   // Persist everything
   try{
     await storageSet('kat:driverProfiles', DRIVER_PROFILES);
@@ -9424,6 +9519,8 @@ function closeOnboarding(forever){
   if(m){ m.classList.remove('show'); m.style.display='none'; }
   if(forever){
     try{ localStorage.setItem(_onbDismissKey(), 'forever'); }catch(e){}
+    // They were re-prompted and chose to skip — clear any pending admin reset so we don't nag.
+    try{ var _dn=getMyDriverName(); if(_dn){ DRIVER_PROFILES[_dn]=DRIVER_PROFILES[_dn]||{}; DRIVER_PROFILES[_dn].onboardedAt=Date.now(); storageSet('kat:driverProfiles', DRIVER_PROFILES); } }catch(e){}
     showToast('Got it \u2014 you can update your info anytime in your profile');
   }
   // First-login setup just finished — offer the tutorial or jumping into the app.
@@ -9860,6 +9957,9 @@ function refreshDash(){
   // 15% finder fees owed / to be paid
   renderDashFees();
 
+  // Past rides not yet marked paid — a gentle "wrap these up" reminder
+  renderDashNeedsAttention();
+
   // "Your upcoming rides" — ONLY rides this user is DRIVING (rides they scheduled for others live in Confirmations)
   const dName=getMyDriverName();
   const lbl=document.getElementById('dash-upcoming-label');
@@ -9881,6 +9981,29 @@ function refreshDash(){
       <div class="ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}</div>
     </div>`;
   }).join(''):'<div style="text-align:center;padding:2rem 1rem;color:var(--mid);"><div style="font-size:2rem;margin-bottom:.4rem;">\uD83D\uDE97</div><div style="font-weight:600;color:var(--black);margin-bottom:.2rem;">No rides yet</div><div style="font-size:.85rem;line-height:1.5;">Nothing\u2019s broken \u2014 you just don\u2019t have any upcoming rides right now. New rides you\u2019re driving will show up here automatically.</div></div>';
+}
+
+// Past rides the driver hasn't marked paid yet — a "wrap these up" nudge on the dashboard.
+// Free for everyone: marking a ride paid / recording how the client paid is a core action.
+function renderDashNeedsAttention(){
+  var box=document.getElementById('dash-needs-attention'); if(!box) return;
+  var todayStr=toDateStr(new Date());
+  var overdue=(rides||[]).filter(function(r){ return r && isMyDrivingRide(r) && r.date && r.date<todayStr && r.status!=='cancelled' && r.status!=='paid'; })
+    .sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
+  if(!overdue.length){ box.innerHTML=''; return; }
+  var rows=overdue.slice(0,15).map(function(r){
+    return '<div onclick="openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem;border-bottom:1px solid #f3c98a;cursor:pointer;">'
+      +'<span style="min-width:52px;font-size:.76rem;font-weight:700;color:var(--black);">'+fmtDateShort(r.date)+'</span>'
+      +'<span style="flex:1;min-width:0;font-size:.85rem;color:var(--black);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+escHtml(r.client||'\u2014')+' <span style="color:var(--mid);font-size:.72rem;">'+escHtml(r.type||'')+'</span></span>'
+      +'<span style="font-size:.82rem;font-weight:700;color:var(--green);">$'+(r.price||0)+'</span>'
+      +'<button onclick="event.stopPropagation();openRideModal('+r.id+')" style="padding:.3rem .7rem;background:#b5651d;color:#fff;border:none;border-radius:7px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;">Mark paid</button>'
+      +'</div>';
+  }).join('');
+  box.innerHTML='<div style="background:#fff8ec;border:1.5px solid #f3c98a;border-radius:12px;padding:1rem;">'
+    +'<div style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#b5651d;margin-bottom:.4rem;">\u26A0\uFE0F Rides to wrap up \u00b7 '+overdue.length+'</div>'
+    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">These are past and not marked paid yet. Open one to mark it paid and record how the client paid.</div>'
+    +rows
+    +'</div>';
 }
 
 // Tomorrow's rides you SCHEDULED that still need a confirmation text — a simple list + link to My Rides.
@@ -9928,9 +10051,9 @@ function buildDashUpgradeBanner(){
     +'<button onclick="dismissDashUpgrade()" aria-label="Dismiss" style="position:absolute;top:.6rem;right:.7rem;background:none;border:none;color:#9482bf;font-size:1.1rem;cursor:pointer;line-height:1;">\u2715</button>'
     +'<div style="font-size:.62rem;letter-spacing:2px;text-transform:uppercase;color:#9c7bbf;font-weight:600;margin-bottom:.3rem;">NWDA Driver Pro</div>'
     +'<div style="font-family:\'Playfair Display\',serif;font-size:1.15rem;font-weight:600;color:#fff;margin-bottom:.2rem;">Your all-in-one driver toolkit</div>'
-    +'<div style="font-size:.82rem;color:#bba7e0;margin-bottom:1rem;">Confirmation texts, flight tracking, per-ride earnings, and tax-ready reports.</div>'
-    +cat('\ud83d\udcf1','Confirmations',['Confirmation texts — auto-written','Flight tracking link included','Terminal pickup instructions','📷 Driver selfie on AP pickups','One-tap send','Calendar confirmation log'])
-    +cat('\ud83d\udcb0','Per-Ride Earnings',['Gross \u00b7 Cost \u00b7 Net','Gas from MPG & price','Custom maintenance $/mi','Tip entry per ride','15% Client Fee & payment log'])
+    +'<div style="font-size:.82rem;color:#bba7e0;margin-bottom:1rem;">Confirmation texts, flight tracking, per-ride earnings, client receipts, and tax-ready reports.</div>'
+    +cat('\ud83d\udcf1','Confirmations',['Confirmation texts — auto-written','Flight tracking link included','Terminal pickup instructions','📷 Driver selfie on AP pickups','One-tap send','Calendar confirmation log','📍 Share live location with client','🚦 Live airport traffic'])
+    +cat('\ud83d\udcb0','Per-Ride Earnings',['Gross \u00b7 Cost \u00b7 Net','Gas from MPG & price','Custom maintenance $/mi','Tip entry per ride','15% Client Fee & payment log','🧾 Branded client receipts'])
     +cat('\ud83d\udcca','Income & Tax',['Weekly & monthly dashboard','Net take-home after costs','Receipt scanner','PDF & CSV export','Expense tracking','Log outside & cash rides'])
     +'<div style="display:flex;align-items:center;gap:.85rem;flex-wrap:wrap;margin-top:.75rem;">'
     +'<button onclick="showIncomeOrUpgrade(null)" style="padding:.7rem 1.4rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.9rem;font-weight:700;cursor:pointer;">Upgrade \u2014 $15/mo</button>'
@@ -10625,14 +10748,21 @@ function renderAccessControl(){
     return;
   }
   const list = document.getElementById('access-control-list');
-  list.innerHTML = USERS.map(function(u){
+  const _onbResetPanel = '<div style="border:1px solid var(--light);border-radius:10px;padding:.85rem;margin-bottom:1rem;background:var(--surface);">'
+    +'<div style="font-size:.8rem;font-weight:700;color:var(--black);margin-bottom:.25rem;">\uD83D\uDD04 Re-prompt drivers to update their info</div>'
+    +'<div style="font-size:.72rem;color:var(--mid);line-height:1.5;margin-bottom:.6rem;">Sends every driver back through the quick setup screen at their next login so they can fill in newly added fields (business name, logo, availability, and more). They can still skip it.</div>'
+    +'<button onclick="resetAllOnboarding()" style="padding:.5rem .9rem;border-radius:8px;border:1.5px solid var(--gold);background:none;color:var(--gold);font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.78rem;cursor:pointer;">Re-prompt all drivers</button>'
+    +'</div>';
+  list.innerHTML = _onbResetPanel + USERS.map(function(u){
     const dName  = USER_DRIVER_MAP[u.name]||'';
     const color  = dName ? driverColor(dName) : '#888888';
     const isMe   = u.name === currentUser.name;
     const active = !u.disabled;
     const isAdmin_u = u.role === 'admin';
     const sub    = subscriptions[u.name]||{};
-    const adminIncomeOn = isAdmin_u && sub.adminIncomeEnabled !== false; // default ON for admins
+    const isCoreFree = FREE_ACCESS_USERS.includes(u.name);
+    // Free access mirrors hasIncomeAccess(): core owners default ON; everyone else needs an explicit grant.
+    const adminIncomeOn = isCoreFree ? (sub.adminIncomeEnabled !== false) : (sub.adminIncomeEnabled === true);
     const hasIncome = adminIncomeOn || (sub.upgraded && new Date(sub.upgradeExpiresAt||0) > new Date()) || (sub.incomeTrial && new Date(sub.incomeTrialEnds||0) > new Date());
     const incExp = sub.upgradeExpiresAt ? new Date(sub.upgradeExpiresAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
 
@@ -10650,16 +10780,19 @@ function renderAccessControl(){
     // Income toggle — admins get an ON/OFF toggle for their free access; drivers get the subscription toggle
     const incomeToggle = isAdmin_u
       ? '<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">'
-        +'<label class="switch" style="transform:scale(.85);">'
-        +'<input type="checkbox" '+(adminIncomeOn?'checked ':'')+' onchange="toggleAdminIncomeAccess(this.dataset.u,this)" data-u="'+safeN+'" />'
-        +'<span class="slider"></span></label>'
-        +'<span style="font-size:.72rem;padding:2px 8px;border-radius:6px;background:'+(adminIncomeOn?'#f3eeff':'var(--surface)')+';color:'+(adminIncomeOn?'#6d28d9':'var(--mid)')+';">'+(adminIncomeOn?'Admin \u2014 Free':'Income off')+'</span>'
+        + (canGrantFreeAccess()
+            ? '<label class="switch" style="transform:scale(.85);">'
+              +'<input type="checkbox" '+(adminIncomeOn?'checked ':'')+' onchange="toggleAdminIncomeAccess(this.dataset.u,this)" data-u="'+safeN+'" />'
+              +'<span class="slider"></span></label>'
+            : '')
+        +'<span style="font-size:.72rem;padding:2px 8px;border-radius:6px;background:'+(adminIncomeOn?'#f3eeff':'var(--surface)')+';color:'+(adminIncomeOn?'#6d28d9':'var(--mid)')+';">'+(adminIncomeOn?'Free access':'Income off')+'</span>'
+        + (canGrantFreeAccess()?'':'<span style="font-size:.66rem;color:var(--mid);">Only Chase can change this</span>')
         +'</div>'
       : '<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">'
         +'<label class="switch" style="transform:scale(.85);">'
         +'<input type="checkbox" '+(hasIncome?'checked ':'')+' onchange="toggleIncomeAccess(this.dataset.u,this)" data-u="'+safeN+'" />'
         +'<span class="slider"></span></label>'
-        +'<span style="font-size:.72rem;color:var(--mid);">'+(hasIncome?'Income active'+(incExp?' · exp '+incExp:''):'No income access')+'</span>'
+        +'<span style="font-size:.72rem;color:var(--mid);">'+(hasIncome?'Driver Pro active'+(incExp?' · exp '+incExp:''):'No Driver Pro')+'</span>'
         +'<button onclick="grantUpgrade(this.dataset.u,1)" data-u="'+safeN+'" style="font-size:.68rem;padding:2px 7px;border-radius:5px;border:1px solid #16a34a;color:#16a34a;background:none;cursor:pointer;">+1mo</button>'
         +'<button onclick="grantUpgrade(this.dataset.u,3)" data-u="'+safeN+'" style="font-size:.68rem;padding:2px 7px;border-radius:5px;border:1px solid #16a34a;color:#16a34a;background:none;cursor:pointer;">+3mo</button>'
         +'<button onclick="grantUpgrade(this.dataset.u,12)" data-u="'+safeN+'" style="font-size:.68rem;padding:2px 7px;border-radius:5px;border:1px solid #7c3aed;color:#7c3aed;background:none;cursor:pointer;">+1yr</button>'
@@ -10677,7 +10810,7 @@ function renderAccessControl(){
       +'</div>'
       +'<div style="padding-left:2.75rem;">'
       +'<div style="font-size:.7rem;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">App access: '+(active?'<span style=\'color:#22c55e;\'>ON</span>':'<span style=\'color:#dc2626;\'>OFF</span>')+'</div>'
-      +'<div style="font-size:.7rem;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Income tracking:</div>'
+      +'<div style="font-size:.7rem;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Driver Pro (income tracking):</div>'
       +incomeToggle
       + (dName
           ? '<div style="font-size:.7rem;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin:.6rem 0 .35rem;">Calendar color</div>'
@@ -10706,12 +10839,12 @@ async function toggleIncomeAccess(userName, el){
 // Toggle whether an admin user gets FREE income access (default: ON).
 // When turned off, the admin must subscribe like any driver.
 async function toggleAdminIncomeAccess(userName, el){
-  if(!(currentUser && currentUser.role==='admin')){ el.checked=!el.checked; return; }
+  if(!canGrantFreeAccess()){ if(el) el.checked=!el.checked; showToast('Only Chase can grant free access','error'); return; }
   if(!subscriptions[userName]) subscriptions[userName]={};
-  subscriptions[userName].adminIncomeEnabled = el.checked; // false = paywall applies
+  subscriptions[userName].adminIncomeEnabled = el.checked; // true = free access, false = paywall applies
   await saveSubscriptions();
   renderAccessControl();
-  showToast(el.checked ? 'Free income access restored for '+userName.split(' ')[0] : 'Free access removed — '+userName.split(' ')[0]+' must now subscribe');
+  showToast(el.checked ? 'Free Driver Pro access granted to '+userName.split(' ')[0] : 'Free access removed — '+userName.split(' ')[0]+' must now subscribe');
 }
 
 async function revokeUpgrade(userName){
@@ -10721,7 +10854,7 @@ async function revokeUpgrade(userName){
   subscriptions[userName].incomeTrial = false;
   await saveSubscriptions();
   renderAccessControl();
-  showToast('Income access removed for '+userName.split(' ')[0]);
+  showToast('Driver Pro removed for '+userName.split(' ')[0]);
 }
 
 async function toggleUserAccess(userName, el){
@@ -11073,7 +11206,9 @@ function buildMemberCard(d, opts){
         ${editField('Vehicle Year',prof.vehicleYear,'prof-vehicleyear','e.g. 2022')}
         ${editField('Vehicle Make/Model',prof.vehicle,'prof-vehicle','e.g. Toyota Camry')}
         ${canEdit?('<div style="margin-bottom:.45rem;">'
-          +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Home address (for mileage routing)</div>'+'<input class="prof-fld" type="text" id="prof-homeaddress-'+dk+'" value="'+(prof.homeAddress||'')+'" placeholder="Your home address">'+'</div>'+'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Gas price ($/gal) &amp; your MPG</div>'
+          +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Home address (for mileage routing)</div>'+'<input class="prof-fld" type="text" id="prof-homeaddress-'+dk+'" value="'+(prof.homeAddress||'')+'" placeholder="Your home address">'+'</div>'
+          +'<div style="margin-bottom:.45rem;">'
+          +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Gas price ($/gal) &amp; your MPG</div>'
           +'<div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;">'
           +'<input class="prof-fld" type="number" id="prof-gasprice-'+dk+'" value="'+(prof.gasPrice||'')+'" placeholder="$/gal e.g. 3.49" min="0" step="0.01" style="flex:1;min-width:0;" />'
           +'<input class="prof-fld" type="number" id="prof-mpg-'+dk+'" value="'+(prof.mpg||'')+'" placeholder="MPG e.g. 22" min="1" max="150" step="0.1" style="flex:1;min-width:0;" />'
@@ -11097,7 +11232,7 @@ function buildMemberCard(d, opts){
         ${canEdit?('<div style="margin:.6rem 0;padding-top:.55rem;border-top:1px solid var(--light);">'
           
           +(canEdit?'<button type="button" onclick="openDriverPhotoUpload(\''+d+'\')" style="width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;font-size:.82rem;font-weight:600;color:var(--black);cursor:pointer;margin-bottom:.45rem;">&#x1F5BC;&#xFE0F; Edit card photo</button>':'')
-          +(canEdit?'<button type="button" onclick="manageBiometric(\''+d+'\')" style="width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;font-size:.82rem;font-weight:600;color:var(--black);cursor:pointer;margin-bottom:.45rem;">&#x1F510; Biometric &mdash; <span style="font-weight:400;color:var(--mid);font-size:.72rem;">'+((biometricCreds[biometricKeyFor(d)]||[]).length?'set up \u2713':'not set up')+'</span></button>':'')
+          +(canEdit?'<button type="button" onclick="manageBiometric(\''+d+'\')" style="width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;font-size:.82rem;font-weight:600;color:var(--black);cursor:pointer;margin-bottom:.45rem;">&#x1F510; Biometric &mdash; <span style="font-weight:400;color:var(--mid);font-size:.72rem;">'+(_bioThisDeviceHas(biometricKeyFor(d))?'set up \u2713':((biometricCreds[biometricKeyFor(d)]||[]).length?'on another device \u2014 tap to add':'not set up'))+'</span></button>':'')
           +(canEdit?('<button type="button" onclick="openDriverSelfieUpload(\''+d+'\')" style="width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;font-size:.82rem;font-weight:600;color:var(--black);cursor:pointer;margin-bottom:.45rem;display:flex;align-items:center;gap:.55rem;">'
             +'<span style="width:34px;height:34px;border-radius:8px;flex-shrink:0;background:#f3eeff url(\''+((driverSettings[d]||{}).selfie||SELFIE_DEFAULT||'')+'\') center/cover;border:1px solid var(--light);"></span>'
             +'<span>&#x1F933; Day-of-travel selfie &mdash; <span style="font-weight:400;color:var(--mid);font-size:.72rem;">'+((driverSettings[d]||{}).selfie?'your photo':'using default')+' &middot; tap to change</span></span>'
@@ -11619,7 +11754,7 @@ function getMyOutsideRidesAsRides(){
 }
 
 function openOutsideRideModal(){
-  if(!hasIncomeAccess()){ showToast('Income upgrade required','error'); return; }
+  if(!hasIncomeAccess()){ showToast('Driver Pro required','error'); return; }
   const today = toDateStr(new Date());
   const dNameForMpg = getMyDriverName()||currentUser?.name;
   const mpgSet = parseFloat(DRIVER_PROFILES[dNameForMpg]?.mpg)||0;
@@ -11669,7 +11804,7 @@ function openOutsideRideModal(){
 function closeOutsideRideModal(){ const m=document.getElementById('outside-ride-modal'); if(m) m.remove(); }
 
 async function saveOutsideRide(){
-  if(!hasIncomeAccess()){ showToast('Income upgrade required','error'); return; }
+  if(!hasIncomeAccess()){ showToast('Driver Pro required','error'); return; }
   const dName = getMyDriverName()||currentUser?.name;
   if(!dName) return;
   const client = document.getElementById('or-client').value.trim();
@@ -11788,15 +11923,21 @@ async function saveMyExpenses(){
 }
 
 // These users always have free access to everything behind the paywall,
-// regardless of their role or subscription status.
+// regardless of their role or subscription status. Only Chase edits this list.
 const FREE_ACCESS_USERS = ['Kat','Chase','Morgan'];
+
+// Only Chase may grant or revoke free (complimentary) access to paywalled features.
+// Other admins can still manage the admin ROLE, but not the paywall bypass.
+function canGrantFreeAccess(){ return !!(currentUser && currentUser.name === 'Chase'); }
 
 function hasIncomeAccess(){
   if(!currentUser) return false;
   const sub = subscriptions[currentUser.name] || {};
-  // Admins and FREE_ACCESS_USERS get income access unless explicitly disabled for their account
-  const isPrivileged = isAdmin() || FREE_ACCESS_USERS.includes(currentUser.name);
-  if(isPrivileged && sub.adminIncomeEnabled !== false) return true;
+  // Core owners (FREE_ACCESS_USERS) get free access unless it's been explicitly turned off.
+  if(FREE_ACCESS_USERS.includes(currentUser.name) && sub.adminIncomeEnabled !== false) return true;
+  // Complimentary access must be an EXPLICIT grant. Being an admin no longer auto-grants a
+  // paywall bypass; only Chase can grant free access (which sets adminIncomeEnabled=true).
+  if(sub.adminIncomeEnabled === true) return true;
   // Regular subscription check (also applies to admins whose free access was turned off)
   if(sub?.upgraded === true && new Date(sub?.upgradeExpiresAt||0) > new Date()) return true;
   if(sub?.incomeTrial === true && new Date(sub?.incomeTrialEnds||0) > new Date()) return true;
@@ -11865,7 +12006,7 @@ function showIncomeOrUpgrade(el){
       const title   = document.getElementById('upgrade-modal-title');
       const cta     = document.getElementById('upgrade-cta-btn');
       if(banner) banner.style.display = expired ? 'block' : 'none';
-      if(title)  title.textContent    = expired ? 'Renew Income Tracking' : 'Unlock Income Tracking';
+      if(title)  title.textContent    = expired ? 'Renew Driver Pro' : 'Unlock Driver Pro';
       if(cta)    cta.textContent       = expired ? 'Renew Monthly — $15/mo' : 'Pay Monthly — $15/mo';
       modal.classList.add('show');
     }
@@ -12829,17 +12970,43 @@ function biometricKeyFor(nameOrDriver){
   return nameOrDriver;
 }
 
+// Creds are now stored per LOGIN NAME in shared storage so the record follows you
+// across devices. WebAuthn private keys stay physically bound to the device that made
+// them, so each entry also records which device (dev) registered it. That lets us show
+// "set up on this device" correctly and lets a second device add its own key instead
+// of being blocked. Entries may be legacy strings or {id,dev} objects.
+function _bioEntries(user){ return (biometricCreds[user]||[]).map(function(e){ return (typeof e==='string')?{id:e,dev:''}:e; }); }
+function _bioThisDeviceHas(user){ var dk=getDeviceKey(); return _bioEntries(user).some(function(e){ return e.dev===dk; }); }
+function _bioAnyOnThisDevice(){ var dk=getDeviceKey(); return Object.keys(biometricCreds||{}).some(function(u){ return _bioEntries(u).some(function(e){ return e.dev===dk; }); }); }
 async function loadBiometricCreds(){
-  try{
-    const raw = localStorage.getItem('nda_biometric_creds');
-    const d = raw ? JSON.parse(raw) : null;
-    if(d && typeof d==='object') biometricCreds = d; else biometricCreds = {};
-  }catch(e){ biometricCreds = {}; }
+  var fromCloud=null, fromLocal=null;
+  try{ fromCloud = await storageGet('kat:biometricCreds'); }catch(e){}
+  try{ var raw=localStorage.getItem('nda_biometric_creds'); fromLocal = raw?JSON.parse(raw):null; }catch(e){}
+  biometricCreds = (fromCloud && typeof fromCloud==='object') ? fromCloud : {};
+  // Fold in any LEGACY device-local creds (plain strings / no device tag) as belonging to
+  // THIS device — they were stored in this device's localStorage before syncing existed, so
+  // existing biometric users keep working and their creds sync forward. Already-tagged
+  // entries (our synced cache) are skipped so other devices' keys aren't mis-tagged.
+  if(fromLocal && typeof fromLocal==='object'){
+    var dk=getDeviceKey(), changed=false;
+    Object.keys(fromLocal).forEach(function(u){
+      (fromLocal[u]||[]).forEach(function(e){
+        var legacy=(typeof e==='string')||!(e&&e.dev);
+        if(!legacy) return;
+        var id=(typeof e==='string')?e:(e&&e.id);
+        if(!id) return;
+        if(!biometricCreds[u]) biometricCreds[u]=[];
+        if(!_bioEntries(u).some(function(x){ return x.id===id; })){ biometricCreds[u].push({ id:id, dev:dk }); changed=true; }
+      });
+    });
+    if(changed){ try{ await saveBiometricCreds(); }catch(e){} }
+  }
   refreshBiometricButton();
 }
 
 async function saveBiometricCreds(){
-  // Device-specific — store ONLY in localStorage, never Firebase.
+  // Synced per login name so the record follows the user across devices, plus a local cache.
+  try{ await storageSet('kat:biometricCreds', biometricCreds); }catch(e){}
   try{ localStorage.setItem('nda_biometric_creds', JSON.stringify(biometricCreds)); }catch(e){}
 }
 
@@ -12859,7 +13026,7 @@ function anyPasskeyStored(){
 function refreshBiometricButton(){
   const btn = document.getElementById('biometric-btn');
   if(!btn) return;
-  const show = biometricSupported() && anyPasskeyStored();
+  const show = biometricSupported() && _bioAnyOnThisDevice();
   btn.style.display = show ? 'flex' : 'none';
 }
 
@@ -12919,8 +13086,9 @@ async function registerBiometric(userName){
     const rawId = new Uint8Array(credential.rawId);
     const credId = btoa(String.fromCharCode.apply(null, rawId));
     if(!biometricCreds[userName]) biometricCreds[userName] = [];
-    if(!biometricCreds[userName].includes(credId)){
-      biometricCreds[userName].push(credId);
+    var _dk=getDeviceKey();
+    if(!_bioEntries(userName).some(function(e){ return e.id===credId; })){
+      biometricCreds[userName].push({ id:credId, dev:_dk });
     }
     await saveBiometricCreds();
     refreshBiometricButton();
@@ -12933,18 +13101,18 @@ async function registerBiometric(userName){
 }
 
 async function authenticateWithBiometric(){
-  if(!biometricSupported() || !anyPasskeyStored()) return;
+  if(!biometricSupported() || !_bioAnyOnThisDevice()) return;
   const btn = document.getElementById('biometric-btn');
   if(btn){ btn.disabled=true; btn.textContent='\uD83D\uDD10 Checking\u2026'; }
   try{
     // Build the list of known credential IDs for allowCredentials
     const allowCreds = [];
-    Object.values(biometricCreds).forEach(function(ids){
-      (ids||[]).forEach(function(id){
+    Object.keys(biometricCreds).forEach(function(u){
+      _bioEntries(u).forEach(function(e){
         try{
-          const bytes = Uint8Array.from(atob(id), function(c){ return c.charCodeAt(0); });
+          const bytes = Uint8Array.from(atob(e.id), function(c){ return c.charCodeAt(0); });
           allowCreds.push({ type:'public-key', id:bytes });
-        }catch(e){}
+        }catch(err){}
       });
     });
     if(!allowCreds.length){ if(btn){ btn.disabled=false; refreshBiometricButton(); } return; }
@@ -12961,8 +13129,8 @@ async function authenticateWithBiometric(){
     // Match returned credential ID against stored IDs to find the user
     const returnedId = btoa(String.fromCharCode.apply(null, new Uint8Array(assertion.rawId)));
     let matchedUser = null;
-    for(const entry of Object.entries(biometricCreds)){
-      if((entry[1]||[]).includes(returnedId)){ matchedUser = entry[0]; break; }
+    for(const u of Object.keys(biometricCreds)){
+      if(_bioEntries(u).some(function(e){ return e.id===returnedId; })){ matchedUser = u; break; }
     }
     if(!matchedUser){
       showToast('Biometric not recognised — please sign in with your password', 'error');
@@ -12987,23 +13155,24 @@ async function authenticateWithBiometric(){
 // Removes all passkeys for a user (e.g. from their profile settings)
 function manageBiometric(userName){
   const key=biometricKeyFor(userName);
-  const hasCreds=biometricCreds[key]&&biometricCreds[key].length>0;
-  if(hasCreds){
-    if(confirm("Remove biometric login for "+userName.split(' ')[0]+"? You'll need to set it up again next time.")){
+  if(_bioThisDeviceHas(key)){
+    if(confirm("Remove biometric login on THIS device for "+userName.split(' ')[0]+"? Any other devices you set up stay enabled.")){
       removeBiometric(key);
     }
   } else {
-    // No creds yet — offer to set up (register under the login username)
+    // Not enabled on this device yet — register a key for this device (other devices' keys are kept).
     registerBiometric(key);
   }
 }
 
 async function removeBiometric(userName){
   if(!userName) return;
-  delete biometricCreds[userName];
+  var dk=getDeviceKey();
+  var remaining=_bioEntries(userName).filter(function(e){ return e.dev!==dk; });
+  if(remaining.length) biometricCreds[userName]=remaining; else delete biometricCreds[userName];
   await saveBiometricCreds();
   refreshBiometricButton();
-  showToast('\u2713 Biometric removed for '+userName.split(' ')[0]);
+  showToast('\u2713 Biometric removed on this device for '+userName.split(' ')[0]);
 }
 
 // Mark a confirmation part as sent and update button appearance
@@ -13583,7 +13752,7 @@ function buildIncomeFooterRows(admin,totalVehicleCost,netAfterVehicle,dName,expe
 }
 
 function exportIncomeCSV(){
-  if(!hasIncomeAccess()){ showToast('Income tracking required','error'); return; }
+  if(!hasIncomeAccess()){ showToast('Driver Pro required','error'); return; }
   const dName = isAdmin() ? null : getMyDriverName();
   const {start,end,label} = getIncomeDateRange();
   let filtered = rides.filter(r=>{
@@ -14971,7 +15140,7 @@ function switchIncomeTab(tab, el){
 function renderReceipts(){
   const sec = document.getElementById('income-receipts-section');
   if(!sec) return;
-  if(!hasIncomeAccess()){ sec.innerHTML='<p style="color:var(--mid);">Income upgrade required to access receipts.</p>'; return; }
+  if(!hasIncomeAccess()){ sec.innerHTML='<p style="color:var(--mid);">Driver Pro is required to access receipts.</p>'; return; }
 
   const dName = isAdmin() ? null : (getMyDriverName()||currentUser?.name);
   const myRecs = dName ? (receipts[dName]||[]) : Object.values(receipts).flat();
@@ -15037,7 +15206,7 @@ function renderReceipts(){
 
 // ── UPLOAD MODAL ──
 function openReceiptUpload(){
-  if(!hasIncomeAccess()){ showToast('Income upgrade required','error'); return; }
+  if(!hasIncomeAccess()){ showToast('Driver Pro required','error'); return; }
   const today = toDateStr(new Date());
   // Create modal
   const modal = document.createElement('div');
@@ -15635,7 +15804,7 @@ function viewDocImage(docId, index){
 
 // ── PDF EXPORT ──
 async function exportReceiptsPDF(){
-  if(!hasIncomeAccess()){ showToast('Income upgrade required','error'); return; }
+  if(!hasIncomeAccess()){ showToast('Driver Pro required','error'); return; }
   showToast('Building PDF…');
 
   const dName = isAdmin() ? null : (getMyDriverName()||currentUser?.name);
