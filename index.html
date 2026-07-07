@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090223">
+<meta name="version" content="202606090226">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -365,7 +365,29 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
   /* Quote form: comfortable two-column so it doesn't run edge-to-edge */
   #page-quote { max-width: 1080px; }
   /* Profile card comfortable width on desktop (was cramped at 420px) */
-  .myprofile-card-wrap { max-width: 640px; }
+  .myprofile-card-wrap { max-width: 760px; }
+  /* Let the profile card fill the wider wrap instead of the phone 300px cap */
+  #myprofile-card .member-card { max-width: none; }
+  /* Give the photo header more presence on desktop */
+  #myprofile-card .member-card-photo { height: 240px; }
+  /* Flow the simple edit fields into two columns; complex/full-width blocks stay single.
+     Children 1–7 are Email, Vehicle Year, Make/Model, Home address, Gas+MPG, Maintenance, Notes. */
+  #myprofile-card .member-card-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 1rem;
+    row-gap: .1rem;
+    align-items: start;
+  }
+  /* Phone number line, and everything from Receipt branding onward, span full width */
+  #myprofile-card .member-card-body > *:first-child,
+  #myprofile-card .member-card-body > *:nth-child(n+8) {
+    grid-column: 1 / -1;
+  }
+  /* Home address reads better full-width even in the two-col zone (Notes+below already full via n+8) */
+  #myprofile-card .member-card-body > *:nth-child(5) {
+    grid-column: 1 / -1;
+  }
 }
 
 /* Wide-monitor guard: don't let the summary cards sprawl across ultra-wide screens */
@@ -2478,7 +2500,12 @@ const RATE_PER_MILE  = 2.50;
 const WAIT_RATE      = 60;
 const ADDONS_FLAT    = { premium:30, holiday:30, christmas:35, late:20, traffic:15 };
 let addonState = { premium:false, holiday:false, christmas:false, late:false, fuel:false, traffic:false };
+let _fuelUserTouched = false; // once a driver toggles fuel on the quote, stop auto-forcing it
 let globalSettings = { fuelEnabled: true }; // admin-controlled global pricing flags
+// Fuel surcharge percentage (editable by admins). Stored as a whole number, default 8.
+function fuelPct(){ var p=parseFloat(globalSettings&&globalSettings.fuelPct); return (isFinite(p)&&p>=0)?p:8; }
+function fuelRate(){ return fuelPct()/100; }
+function fuelLabel(){ return 'Fuel surcharge ('+fuelPct()+'%)'; }
 // Per-LOGIN-NAME UI preferences (tutorial/tips dismissals), synced across devices so
 // dismissing on one device carries over to another. Keyed by login username.
 let uiPrefs = {};
@@ -2610,8 +2637,8 @@ function calcQuote() {
     const surcharges = getSurchargeLines();
     surcharges.forEach(s=>leg1Lines.push(s));
     const leg1Sub = base + overage + sumLines(surcharges);
-    const leg1Fuel = addonState.fuel ? leg1Sub*0.08 : 0;
-    if(leg1Fuel>0) leg1Lines.push({label:'Fuel surcharge (8%)', val:leg1Fuel});
+    const leg1Fuel = addonState.fuel ? leg1Sub*fuelRate() : 0;
+    if(leg1Fuel>0) leg1Lines.push({label:fuelLabel(), val:leg1Fuel});
     const leg1Total = leg1Sub + leg1Fuel;
 
     // Return leg (AP Pick Up) — may have different surcharges depending on return date/time
@@ -2628,8 +2655,8 @@ function calcQuote() {
     const leg2Surcharges = getReturnLegSurcharges(rtDate, rtTime);
     leg2Surcharges.forEach(s=>leg2Lines.push(s));
     const leg2Sub = base + overage + sumLines(leg2Surcharges);
-    const leg2Fuel = addonState.fuel ? leg2Sub*0.08 : 0;
-    if(leg2Fuel>0) leg2Lines.push({label:'Fuel surcharge (8%)', val:leg2Fuel});
+    const leg2Fuel = addonState.fuel ? leg2Sub*fuelRate() : 0;
+    if(leg2Fuel>0) leg2Lines.push({label:fuelLabel(), val:leg2Fuel});
     const leg2Total = leg2Sub + leg2Fuel;
 
     const grandTotal = leg1Total + leg2Total;
@@ -2692,7 +2719,7 @@ function calcQuote() {
   const flatTotal = sumLines(surcharges);
   const subtotal = tripTotal + flatTotal;
   let fuelFee = 0;
-  if(addonState.fuel){ fuelFee=subtotal*.08; lines.push({label:'Fuel surcharge (8%)', val:fuelFee}); }
+  if(addonState.fuel){ fuelFee=subtotal*fuelRate(); lines.push({label:fuelLabel(), val:fuelFee}); }
   const total = addonState.fuel ? Math.floor(subtotal + fuelFee) : subtotal + fuelFee;
   document.getElementById('quote-lines').innerHTML=lines.map(l=>`<div class="quote-line"><span style="color:#aaa">${l.label}${l.note?'<br><span style="font-size:.7rem;color:#666">'+l.note+'</span>':''}</span><span style="${l.val===0?'color:#666':''}">$${l.val.toFixed(2)}</span></div>`).join('');
   document.getElementById('quote-total').textContent=`$${total.toFixed(2)}`;
@@ -3339,8 +3366,8 @@ function onDateChange(){
     } else if(typeof HOLIDAY_DATES!=='undefined' && HOLIDAY_DATES.includes(mmdd)){
       addonState.holiday=true; addonState.christmas=false;
     }
-    // Fuel: always on when globally enabled
-    if(globalSettings.fuelEnabled !== false) addonState.fuel=true;
+    // Fuel: default on when globally enabled, but never override a driver's manual choice
+    if(globalSettings.fuelEnabled !== false && !_fuelUserTouched) addonState.fuel=true;
     const notice=document.getElementById('holiday-notice');
     if(notice){
       const name=(typeof HOLIDAY_NAMES!=='undefined') ? HOLIDAY_NAMES[mmdd] : '';
@@ -3382,8 +3409,8 @@ function onTimeChange(){
   if(tv){
     const [th,tm]=(tv||'').split(':').map(Number);
     const mins=(th||0)*60+(tm||0);
-    // Fuel: always on when globally enabled (in case date was set before time)
-    if(dv && globalSettings.fuelEnabled !== false) addonState.fuel=true;
+    // Fuel: default on when globally enabled, but never override a driver's manual choice
+    if(dv && globalSettings.fuelEnabled !== false && !_fuelUserTouched) addonState.fuel=true;
     // Premium hours: before 5:00 AM
     addonState.premium = mins > 0 && mins < 300;
     // Traffic: weekday AM rush (6:30–9:00) or PM rush (14:30–19:00)
@@ -3402,6 +3429,7 @@ function toggleAddon(k){
   if(k==='fuel' && globalSettings.fuelEnabled===false){
     showToast('Fuel surcharge is currently disabled by admin','error'); return;
   }
+  if(k==='fuel') _fuelUserTouched = true; // driver made a choice — respect it for this quote
   addonState[k]=!addonState[k];
   // Holiday and Christmas are mutually exclusive
   if(k==='holiday'&&addonState.holiday) addonState.christmas=false;
@@ -5291,8 +5319,8 @@ function buildRideBreakdown(r){
   // Fuel surcharge (8% of the subtotal so far) — flagged with fuel:'Y'
   if(String(r.fuel)==='Y'){
     const sub = lines.reduce((s,l)=>s+l.val,0);
-    const fuel = Math.round(sub*0.08*100)/100;
-    if(fuel>0) lines.push({label:'Fuel surcharge (8%)', val: fuel});
+    const fuel = Math.round(sub*fuelRate()*100)/100;
+    if(fuel>0) lines.push({label:fuelLabel(), val: fuel});
   }
 
   // Reconcile to the actual saved price
@@ -7341,7 +7369,7 @@ function buildFeeMathHTML(r){
   const miles = parseFloat(r.miles)||0;
   const apType = r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP';
   if(apType && miles>52){ const over=miles-50; const v=over*2.5; rows.push({label:`Mileage (${over} mi over 50 \u00d7 $2.50)`, val:v, add:true}); sub+=v; }
-  if(on(r.fuel)){ const v=sub*0.08; rows.push({label:'Fuel surcharge (8%)', val:v, add:true}); sub+=v; }
+  if(on(r.fuel)){ const v=sub*fuelRate(); rows.push({label:fuelLabel(), val:v, add:true}); sub+=v; }
   const price = parseFloat(r.price)||0;
   const diff  = Math.round((price - sub)*100)/100;
   if(Math.abs(diff) >= 0.01){
@@ -9688,6 +9716,7 @@ function policyTextMessage(firstName, rideDate, rideTime, ridePrice){
     +'We appreciate your business and look forward to driving you!';
 }
 function clearQuoteForm(){
+  _fuelUserTouched = false; // fresh quote — let fuel default on again (until the driver chooses otherwise)
   ['q-client','q-phone','q-pickup','q-dropoff','q-miles','q-flight','q-rt-flight','q-notes','q-wait']
     .forEach(function(id){ const el=document.getElementById(id); if(el) el.value=''; });
   var _sw=document.getElementById('q-stops-wrap'); if(_sw) _sw.innerHTML=''; _qStopCount=0; var _qac=document.getElementById('q-add-client'); if(_qac) _qac.checked=true; var _asb=document.getElementById('q-addstop-btn'); if(_asb) _asb.style.display='inline-block';
@@ -10570,6 +10599,16 @@ async function toggleGlobalFuel(){
   renderAddons(); // update quote form chip if open
   showToast('Fuel surcharge '+(globalSettings.fuelEnabled!==false?'enabled':'disabled')+'\u2713');
 }
+async function saveFuelPct(){
+  var el=document.getElementById('fuel-pct-input'); if(!el) return;
+  var v=parseFloat(el.value);
+  if(!isFinite(v)||v<0||v>100){ showToast('Enter a percentage between 0 and 100','error'); return; }
+  globalSettings.fuelPct = v;
+  await saveGlobalSettings();
+  renderPricingTracker();
+  renderAddons(); // update quote form chip if open
+  showToast('\u2713 Fuel surcharge set to '+v+'%');
+}
 
 function renderPricingTracker(){
   const panel=document.getElementById('driver-panel-pricing');
@@ -10581,34 +10620,36 @@ function renderPricingTracker(){
   let rateHTML='<div style="margin-bottom:1.5rem;">'
     +'<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;'
     +'color:var(--mid);margin-bottom:.75rem;">Base Vehicle Rates</div>'
-    +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.75rem;margin-bottom:.75rem;">';
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.75rem;margin-bottom:.75rem;align-items:stretch;">';
   vehicles.forEach(function(vp){
     const v=vp[0],def=vp[1];
     const saved=rates[v]>0?rates[v]:null;
     const current=saved||def||null;
     const id='rate-'+v.replace(/[ /]/g,'-');
-    rateHTML+='<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.65rem .75rem;">'
-      +'<div style="font-size:.68rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:4px;">'+v+'</div>'
+    rateHTML+='<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.7rem .75rem;min-height:118px;display:flex;flex-direction:column;">'
+      +'<div style="font-size:.68rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:6px;min-height:2.1em;display:flex;align-items:flex-start;">'+v+'</div>'
       +'<div style="display:flex;align-items:center;gap:4px;">'
       +'<span style="font-size:.85rem;color:var(--mid);">$</span>'
       +'<input type="number" id="'+id+'" min="0" step="1" '
       +(current?'value="'+current+'" ':'placeholder="No rate set" ')
-      +'style="width:100%;padding:.3rem .4rem;border:1px solid #ddd;border-radius:6px;'
-      +'font-size:.88rem;font-weight:600;" />'
+      +'style="width:100%;padding:.35rem .4rem;border:1px solid #ddd;border-radius:6px;'
+      +'font-size:.88rem;font-weight:600;box-sizing:border-box;" />'
       +'</div>'
-      +(def&&!saved?'<div style="font-size:.64rem;color:var(--mid);margin-top:3px;">default $'+def+'</div>':''
-      +(v==='Sprinter Van'&&!saved?'<div style="font-size:.64rem;color:#f59e0b;margin-top:3px;">⚠️ No rate set — contact Kat or Morgan</div>':'')
-      )+'</div>';
+      +'<div style="margin-top:auto;padding-top:6px;">'
+      +(def&&!saved?'<div style="font-size:.64rem;color:var(--mid);">default $'+def+'</div>':'')
+      +(v==='Sprinter Van'&&!saved?'<div style="font-size:.64rem;color:#f59e0b;">⚠️ No rate set — contact Kat or Morgan</div>':'')
+      +'</div>'
+      +'</div>';
   });
-  // Sprinter Van hourly rate (for round trips / local)
-  rateHTML+='<div style="margin-top:.75rem;background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.65rem .75rem;">'
-    +'<div style="font-size:.68rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:4px;">Sprinter Van — Round Trip / Hourly</div>'
+  // Sprinter Van hourly rate (for round trips / local) — same uniform box, inside the grid
+  rateHTML+='<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.7rem .75rem;min-height:118px;display:flex;flex-direction:column;">'
+    +'<div style="font-size:.68rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:6px;min-height:2.1em;display:flex;align-items:flex-start;">Sprinter Van — Round Trip / Hourly</div>'
     +'<div style="display:flex;align-items:center;gap:4px;">'
     +'<span style="font-size:.85rem;color:var(--mid);">$</span>'
     +'<input type="number" id="rate-sprint-hourly" min="0" step="1" value="'+(globalSettings.sprintHourly||150)+'"'
-    +' style="width:100px;padding:.3rem .4rem;border:1px solid #ddd;border-radius:6px;font-size:.88rem;font-weight:600;" />'
-    +'/hr</div>'
-    +'<div style="font-size:.64rem;color:var(--mid);margin-top:3px;">Used when Sprinter Van is booked as a round trip or local ride</div>'
+    +' style="width:100%;padding:.35rem .4rem;border:1px solid #ddd;border-radius:6px;font-size:.88rem;font-weight:600;box-sizing:border-box;" /><span style="font-size:.8rem;color:var(--mid);margin-left:2px;">/hr</span>'
+    +'</div>'
+    +'<div style="margin-top:auto;padding-top:6px;"><div style="font-size:.64rem;color:var(--mid);">Round trip / local ride rate</div></div>'
     +'</div>';
   rateHTML+='</div>'
     +'<button onclick="saveBaseRates()" style="padding:.5rem 1.25rem;background:#9c27b0;'
@@ -10635,31 +10676,36 @@ function renderPricingTracker(){
     yearOpts+=`<option value="${y}"${String(y)===selYear?' selected':''}>${y}</option>`;
   }
 
-  // Compute stats per driver
+  // Summary is OFF by default (mileage data isn't fully migrated yet, so the % are skewed).
+  // Admins run it on demand via the button below.
+  const summaryOn = panel.dataset.summary === 'on';
   const driverStats={};
-  DRIVERS.forEach(d=>{ driverStats[d]={monthly:{total:0,under:0,rides:[]},yearly:{total:0,under:0}}; });
-
-  rides.forEach(r=>{
-    if(!r.driver||!r.date||!driverStats[r.driver]) return;
-    const [ry,rmo]=r.date.split('-').map(Number);
-    const exp=computeExpectedPrice(r);
-    const actual=parseFloat(r.price)||0;
-    const pct=exp>0?((exp-actual)/exp*100):0;
-    const isUnder=pct>15;
-    // Yearly
-    if(String(ry)===selYear){
-      driverStats[r.driver].yearly.total++;
-      if(isUnder) driverStats[r.driver].yearly.under++;
-    }
-    // Monthly
-    if(ry===sy&&rmo===sm){
-      driverStats[r.driver].monthly.total++;
-      if(isUnder){
-        driverStats[r.driver].monthly.under++;
-        driverStats[r.driver].monthly.rides.push({r,exp,actual,pct});
+  if(summaryOn){
+    DRIVERS.forEach(d=>{ driverStats[d]={monthly:{total:0,under:0,rides:[]},yearly:{total:0,under:0}}; });
+    rides.forEach(r=>{
+      if(!r.date) return;
+      // Pricing is set by the CLIENT OWNER (whoever booked the ride), not the assigned driver.
+      // Resolve owner proxy-aware (Morgan's bookings belong to Kat).
+      const owner = feeOwnerFor(r.createdBy) || getClientOwner(r.client);
+      if(!owner || !driverStats[owner]) return;
+      const [ry,rmo]=r.date.split('-').map(Number);
+      const exp=computeExpectedPrice(r);
+      const actual=parseFloat(r.price)||0;
+      const pct=exp>0?((exp-actual)/exp*100):0;
+      const isUnder=pct>15;
+      if(String(ry)===selYear){
+        driverStats[owner].yearly.total++;
+        if(isUnder) driverStats[owner].yearly.under++;
       }
-    }
-  });
+      if(ry===sy&&rmo===sm){
+        driverStats[owner].monthly.total++;
+        if(isUnder){
+          driverStats[owner].monthly.under++;
+          driverStats[owner].monthly.rides.push({r,exp,actual,pct});
+        }
+      }
+    });
+  }
 
   // Build HTML
   // ── Global pricing settings card (admin-only) ──
@@ -10667,31 +10713,43 @@ function renderPricingTracker(){
   let html=rateHTML+`<div style="padding:.5rem 0 1rem;">
     <div style="background:var(--surface);border:1.5px solid var(--light);border-radius:12px;padding:.85rem 1rem;margin-bottom:1.25rem;">
       <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">Global Pricing Settings</div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;">
-        <div>
-          <div style="font-size:.88rem;font-weight:600;color:var(--black);">Fuel surcharge (8%)</div>
-          <div style="font-size:.75rem;color:var(--mid);">When ON, fuel is auto-applied to every new quote. Admins can still remove it per quote.</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+        <div style="flex:1;min-width:180px;">
+          <div style="font-size:.88rem;font-weight:600;color:var(--black);">Fuel surcharge</div>
+          <div style="font-size:.75rem;color:var(--mid);">When ON, fuel is auto-applied to every new quote at the rate below. Admins can still remove it per quote.</div>
         </div>
-        <div onclick="toggleGlobalFuel()" style="width:46px;height:26px;border-radius:13px;background:${fuelOn?'#16a34a':'#ccc'};cursor:pointer;position:relative;flex-shrink:0;transition:background .2s;">
-          <div style="position:absolute;top:3px;${fuelOn?'right:3px':'left:3px'};width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:all .2s;"></div>
+        <div style="display:flex;align-items:center;gap:.4rem;flex-shrink:0;">
+          <input type="number" id="fuel-pct-input" min="0" max="100" step="0.5" value="${fuelPct()}" style="width:64px;padding:.35rem .4rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.9rem;font-weight:700;text-align:right;" />
+          <span style="font-size:.9rem;color:var(--mid);font-weight:600;">%</span>
+          <button onclick="saveFuelPct()" style="padding:.35rem .8rem;background:#9c27b0;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-weight:700;font-size:.8rem;cursor:pointer;">Save</button>
+          <div onclick="toggleGlobalFuel()" title="Turn the fuel surcharge on/off" style="width:46px;height:26px;border-radius:13px;background:${fuelOn?'#16a34a':'#ccc'};cursor:pointer;position:relative;flex-shrink:0;transition:background .2s;margin-left:.3rem;">
+            <div style="position:absolute;top:3px;${fuelOn?'right:3px':'left:3px'};width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:all .2s;"></div>
+          </div>
         </div>
       </div>
     </div>
-    <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem;">
-      <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);">Month</div>
-      <select onchange="document.getElementById('driver-panel-pricing').dataset.month=this.value;renderPricingTracker();"
-        style="padding:.35rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;">${monthOpts}</select>
-      <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-left:.5rem;">Year</div>
-      <select onchange="document.getElementById('driver-panel-pricing').dataset.year=this.value;renderPricingTracker();"
-        style="padding:.35rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;">${yearOpts}</select>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem;">
+      <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);">Pricing Summary</div>
+      <button onclick="document.getElementById('driver-panel-pricing').dataset.summary='${summaryOn?'off':'on'}';renderPricingTracker();" style="padding:.4rem .9rem;border-radius:8px;border:1.5px solid var(--gold);background:${summaryOn?'none':'var(--gold)'};color:${summaryOn?'var(--gold)':'#fff'};font-family:'DM Sans',sans-serif;font-weight:700;font-size:.78rem;cursor:pointer;">${summaryOn?'Hide summary':'Run Pricing Summary'}</button>
     </div>
-    <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Pricing Summary</div>
-    <div style="font-size:.72rem;color:var(--mid);margin-bottom:1rem;">Flags rides priced &gt;15% below the calculated rate (base + mileage + auto-detected surcharges).</div>`;
+    ${summaryOn?`
+      <div style="font-size:.72rem;color:var(--mid);margin-bottom:1rem;background:#fff8ec;border:1px solid #f3d9a0;border-radius:8px;padding:.55rem .7rem;line-height:1.5;">\u26A0\uFE0F Heads-up: mileage data isn't fully migrated to the app yet, so these percentages can be skewed. Treat as a rough check, not gospel.</div>
+      <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem;">
+        <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);">Month</div>
+        <select onchange="document.getElementById('driver-panel-pricing').dataset.month=this.value;renderPricingTracker();"
+          style="padding:.35rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;">${monthOpts}</select>
+        <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-left:.5rem;">Year</div>
+        <select onchange="document.getElementById('driver-panel-pricing').dataset.year=this.value;renderPricingTracker();"
+          style="padding:.35rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;">${yearOpts}</select>
+      </div>
+      <div style="font-size:.72rem;color:var(--mid);margin-bottom:1rem;">Grouped by the <strong>client owner</strong> (whoever booked the ride). Flags rides priced &gt;15% below the calculated rate (base + mileage + auto-detected surcharges).</div>`
+    :`<div style="font-size:.8rem;color:var(--mid);margin-bottom:1rem;line-height:1.5;">The under-priced ride report is off for now. Tap <strong>Run Pricing Summary</strong> to pull it on demand \u2014 it stays available for when the mileage data is fully moved over.</div>`}`;
 
-  // Summary table header
+  // Summary table (only when the on-demand summary is active)
+  if(summaryOn){
   html+=`<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:.8rem;">
     <thead><tr style="background:var(--light);text-align:left;">
-      <th style="padding:.4rem .6rem;">Driver</th>
+      <th style="padding:.4rem .6rem;">Client Owner</th>
       <th style="padding:.4rem .6rem;text-align:center;">Monthly Rides</th>
       <th style="padding:.4rem .6rem;text-align:center;">Monthly Under</th>
       <th style="padding:.4rem .6rem;text-align:center;">Under %</th>
@@ -10738,7 +10796,9 @@ function renderPricingTracker(){
     }
   });
 
-  html+=`</tbody></table></div></div>`;
+  html+=`</tbody></table></div>`;
+  } // end if(summaryOn) — table only renders on demand
+  html+=`</div>`;
   panel.innerHTML=html;
 }
 
