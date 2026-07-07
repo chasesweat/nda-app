@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090173">
+<meta name="version" content="202606090186">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1179,7 +1179,7 @@ input,select,textarea{font-size:16px;}
     <div class="modal-footer">
       <button id="rm-delete-btn" class="btn-danger" onclick="deleteRide(activeRideId)">Delete Ride</button>
       <button id="rm-cancelride-btn" class="btn-secondary" onclick="cancelRide(activeRideId)" style="color:#b03a2e;border-color:#b03a2e;">🚫 Cancel Ride</button>
-      <button id="rm-paid-btn" class="btn-secondary" onclick="toggleRidePaid(activeRideId)" style="color:var(--green);border-color:var(--green);">💰 Mark Paid</button>
+      <button id="rm-paid-btn" class="btn-secondary" onclick="toggleRidePaid(activeRideId)" style="color:var(--green);border-color:var(--green);">💰 Mark Completed & Paid</button>
       <button class="btn-secondary" onclick="openDuplicateModal(activeRideId)" style="color:var(--gold);border-color:var(--gold);">⧉ Duplicate</button>
       <button class="btn-secondary" onclick="closeRideModal()">Close</button>
     </div>
@@ -1332,7 +1332,7 @@ input,select,textarea{font-size:16px;}
         <div class="form-group"><label>Gas price ($/gal) <span style="font-weight:400;color:#16a34a;font-size:.72rem;">(optional)</span></label>
           <input type="number" id="onb-gasprice" placeholder="e.g. 3.49" inputmode="decimal" /></div>
       </div>
-      <div style="font-size:.7rem;color:var(--mid);margin:-.3rem 0 .5rem;line-height:1.4;">MPG &amp; gas price are only used to calculate your fuel cost on the income page. Skip them if you\u2019re not tracking profit.</div>
+      <div style="font-size:.7rem;color:var(--mid);margin:-.3rem 0 .5rem;line-height:1.4;">MPG &amp; gas price are only used to calculate your fuel cost on the income page. Skip them if you&rsquo;re not tracking profit.</div>
 
       <div class="form-group"><label>Venmo username <span style="font-weight:400;color:#16a34a;font-size:.72rem;">(optional)</span></label>
         <div style="font-size:.7rem;color:var(--mid);margin:-2px 0 4px;line-height:1.4;">Lets clients pay you with one tap. Add it now or anytime later in your profile.</div>
@@ -1944,17 +1944,21 @@ async function initApp() {
     // Still try to show the app with defaults
     rides = rides.length ? rides : SEED_RIDES;
   }
-  document.getElementById('loading-screen').style.display = 'none';
-  // Auto-login if a session was saved on this device
+  // Decide where to land BEFORE hiding the loading screen, so the login screen
+  // never flashes for users with a saved session.
+  let autoLoggedIn = false;
   try{
     const savedName = localStorage.getItem('nda-session');
     if(savedName){
       const u = USERS.find(x=>x.name===savedName);
-      if(u && !u.disabled){ currentUser = u; enterApp(); return; }
-      localStorage.removeItem('nda-session');
+      if(u && !u.disabled){ currentUser = u; enterApp(); autoLoggedIn = true; }
+      else localStorage.removeItem('nda-session');
     }
   }catch(e){}
-  document.getElementById('auth-screen').style.display    = 'flex';
+  document.getElementById('loading-screen').style.display = 'none';
+  if(!autoLoggedIn){
+    document.getElementById('auth-screen').style.display = 'flex';
+  }
 }
 
 // ── Tutorial banner shown on login ──
@@ -2900,10 +2904,42 @@ function openGoogleMaps(){
 // AP RUN = client going TO airport → terminal fills PICKUP
 // AP PICK UP = client arriving FROM airport → terminal fills DROPOFF
 const TERMINAL_ADDRESSES = {
+  // These are the addresses that resolve correctly in Google Maps for the ACTUAL
+  // pickup curbs (confirmed by Chase, who drives these daily). Note: North and
+  // South are NOT the same pin — "6000 S Terminal Pkwy" lands at the South
+  // pickup, "6000 N Terminal Pkwy" at the North. Precise GPS coordinates can be
+  // set per terminal (see TERMINAL_COORDS) and take priority when present.
   'North Domestic':  '6000 N Terminal Pkwy, Atlanta, GA 30320',
   'South Domestic':  '6000 S Terminal Pkwy, Atlanta, GA 30337',
-  'International':   '2600 Maynard H Jackson Jr Blvd, Atlanta, GA 30337',
+  'International':    '2600 Maynard H Jackson Jr Blvd, Atlanta, GA 30337',
 };
+// Optional precise pickup coordinates per terminal, filled in from real GPS pins
+// at the actual pickup spot. When a terminal has coords here, the route uses
+// them instead of the street address (a lat/lng pin can't be mis-geocoded).
+// Format: 'lat,lng' string, or '' if not set yet.
+const TERMINAL_COORDS = {
+  'North Domestic':  '33.641888,-84.445453',
+  'South Domestic':  '33.640060,-84.443648',
+  'International':    '33.640580,-84.418729',
+};
+// Resolve a stored terminal value to a navigable destination. Prefers a precise
+// GPS coordinate pin (TERMINAL_COORDS) when one is set, else the street address.
+// Tolerant of both the full form ('North Domestic') and legacy short form
+// ('North'); returns '' if there's no terminal set or no match.
+function terminalToAddress(term){
+  if(!term) return '';
+  var key=String(term).trim();
+  if(!TERMINAL_ADDRESSES[key]){
+    var low=key.toLowerCase();
+    if(low.indexOf('north')===0)      key='North Domestic';
+    else if(low.indexOf('south')===0) key='South Domestic';
+    else if(low.indexOf('int')===0)   key='International';
+    else return '';
+  }
+  var coord=(TERMINAL_COORDS[key]||'').trim();
+  if(coord) return coord;               // a lat,lng pin — most reliable
+  return TERMINAL_ADDRESSES[key]||'';
+}
 
 function autoFillTerminalAddress(){
   const terminal = document.getElementById('q-terminal').value;
@@ -4620,6 +4656,34 @@ function renderRideView(r){
   document.getElementById('rm-detail-grid').innerHTML=`${rideReqDriverTag(r)}
     ${r.status==='cancelled'?`<div style="grid-column:1/-1;background:#fdecea;border:1.5px solid #e6a8a0;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#b03a2e;font-weight:700;font-size:.9rem;">🚫 CANCELLED${r.cancelledBy?' · by '+escHtml(String(r.cancelledBy)):''} — tap “Reactivate Ride” below to restore.</div>`:''}
     ${r.status==='paid'?`<div style="grid-column:1/-1;background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#16a34a;font-weight:700;font-size:.9rem;">✅ CLIENT PAID${r.paidBy?' · marked by '+escHtml(String(r.paidBy)):''}</div>`:''}
+    ${(()=>{
+      // Unpaid-carryover: on an AP ride whose client has a prior completed-but-
+      // unpaid AP ride, warn (owner + assigned driver) and show a total-owed
+      // summary. Drops once THIS ride is marked paid (option 2).
+      if(r.status==='paid') return '';
+      const prev = previousUnpaidAPRide(r);
+      if(!prev) return '';
+      // Visible to the assigned driver and the client's OWNER (proxy-aware:
+      // Morgan's clients belong to Kat), matching how fees resolve ownership.
+      const myDrv = getMyDriverName();
+      const ownerDrv = feeOwnerFor(r.createdBy) || getClientOwner(r.client);
+      const canSee = (currentUser && (myDrv===r.driver || (ownerDrv && ownerDrv===myDrv)));
+      if(!canSee) return '';
+      const prevDriver = prev.driver || 'the previous driver';
+      const thisFare = parseFloat(r.price||0);
+      const prevFare = parseFloat(prev.price||0);
+      const total = thisFare + prevFare;
+      const fmt = n => '$'+Number(n).toFixed(2).replace(/\.00$/,'');
+      return `<div style="grid-column:1/-1;background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:.7rem .9rem;margin-bottom:.5rem;">
+        <div style="font-weight:700;color:#b91c1c;font-size:.9rem;margin-bottom:.35rem;">⚠️ Previous ride unpaid</div>
+        <div style="font-size:.82rem;color:#7f1d1d;line-height:1.5;">${escHtml(prevDriver)} is owed ${fmt(prevFare)} for ${escHtml(r.client)}'s ${fmtDateShort(prev.date)} ride, which hasn't been marked paid yet.</div>
+        <div style="margin-top:.5rem;padding-top:.5rem;border-top:1px dashed #fca5a5;font-size:.82rem;color:#7f1d1d;line-height:1.7;">
+          Amount owed for this ride: <strong>${fmt(thisFare)}</strong><br>
+          Amount owed to ${escHtml(prevDriver)} for previous ride: <strong>${fmt(prevFare)}</strong><br>
+          <span style="font-size:.92rem;color:#b91c1c;">Total owed: <strong>${fmt(total)}</strong></span>
+        </div>
+      </div>`;
+    })()}
     <div style="grid-column:1/-1;background:${color}66;border-left:5px solid ${color};border-radius:8px;padding:.85rem 1rem;margin-bottom:.5rem;">
       <div style="font-size:1.05rem;font-weight:600;color:var(--black);margin-bottom:.2rem;">${rideDisplayType(r)} — ${r.client}${(()=>{const _cr=(rides||[]).find(function(x){return x.client&&x.client.toLowerCase()===r.client.toLowerCase()&&x.createdBy;});const _ol=_cr?(_cr.createdBy==='Morgan'?'Kat':_cr.createdBy):null;const _dLogin=Object.keys(USER_DRIVER_MAP).find(function(k){return USER_DRIVER_MAP[k]===r.driver;})||driverFirst;return (_ol&&_ol!==_dLogin)?'<span style="font-weight:400;font-size:.88rem;color:'+ink+';opacity:.85;">('+ _ol +')</span>':'';})()}</div>
       <div style="font-size:.78rem;color:var(--mid);">Created by ${r.createdBy||'—'}</div>
@@ -4746,11 +4810,13 @@ function renderRideView(r){
 // Payment owed:
 //   • Owner drives the ride  → client owes the driver the FULL fare.
 //   • Owner assigns it out   → the assigned driver collects the fare and owes the owner 15% of the fare.
-const RIDE_STAGES = ['scheduled','confirmed','completed','paid'];
-const RIDE_STAGE_LABEL = {scheduled:'Scheduled', confirmed:'Confirmed', completed:'Completed', paid:'Paid'};
+const RIDE_STAGES = ['scheduled','confirmed','paid'];
+const RIDE_STAGE_LABEL = {scheduled:'Scheduled', confirmed:'Confirmed', completed:'Completed & Paid', paid:'Completed & Paid'};
 function buildRideLifecycle(r){
   if(!hasIncomeAccess()) return '';
-  const cur = RIDE_STAGES.includes(r.status) ? r.status : 'scheduled';
+  // Legacy rides stored as 'completed' now map to the combined 'paid' stage.
+  const rawStatus = r.status==='completed' ? 'paid' : r.status;
+  const cur = RIDE_STAGES.includes(rawStatus) ? rawStatus : 'scheduled';
   const chips = RIDE_STAGES.map(s=>{
     const active = s===cur;
     const done = RIDE_STAGES.indexOf(s) <= RIDE_STAGES.indexOf(cur);
@@ -4794,22 +4860,50 @@ function buildRideLifecycle(r){
 
 async function toggleRidePaid(id){
   const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r||r.status==='cancelled') return;
-  await setRideStatus(id, r.status==='paid'?'scheduled':'paid');
+  // One ride-card state: "Completed & Paid" (stored as 'paid') vs not.
+  const nowPaid = r.status!=='paid';
+  await setRideStatus(id, nowPaid?'paid':'scheduled');
   const btn=document.getElementById('rm-paid-btn');
-  if(btn) btn.style.fontWeight=r.status==='paid'?'700':'400';
+  if(btn) btn.style.fontWeight=nowPaid?'700':'400';
 }
 
 async function setRideStatus(id, status){
   const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   r.status = status;
   touchRide(r, 'set status to '+status);
-  if(status==='paid'){ r.paidAt = Date.now(); r.paidBy = currentUser?.name||''; }
+  if(status==='paid'){
+    r.paidAt = Date.now(); r.paidBy = currentUser?.name||'';
+    // If this AP ride had a prior completed-but-unpaid AP ride for the same
+    // client, let the previous driver AND that client's owner know the money
+    // has now been collected, so they can settle up. The previous ride stays
+    // unpaid until the previous driver marks it paid themselves.
+    try{
+      const prev = previousUnpaidAPRide(r);
+      // Notify once per (this ride, that prev ride) pair — re-toggling paid
+      // shouldn't spam the previous driver.
+      if(prev && r.carryoverNotified!==prev.id){
+        const prevDriver = prev.driver || '';
+        const owner = feeOwnerFor(prev.createdBy) || getClientOwner(prev.client);
+        const msg = `${r.paidBy||'A driver'} collected payment on ${r.client}'s ${fmtDateShort(r.date)} ride. You're owed $${(parseFloat(prev.price||0)).toFixed(2)} for the ${fmtDateShort(prev.date)} ride — mark it paid once you've received it.`;
+        const notified = {};
+        [prevDriver, owner].forEach(function(who){
+          if(who && !notified[who]){
+            notified[who]=1;
+            addNotification(who, prev, 'carryover_paid', msg);
+            sendPushToDriver(who, '\uD83D\uDCB0 Payment collected \u2014 NDA', msg);
+          }
+        });
+        r.carryoverNotified = prev.id;
+        await saveNotifs(); updateNotifBadge();
+      }
+    }catch(e){ console.warn('carryover notify failed', e); }
+  }
   else { delete r.paidAt; delete r.paidBy; }
   await saveRides();
   renderRideView(r);
   if(typeof refreshDash==='function') refreshDash();
   const paidBtn=document.getElementById('rm-paid-btn');
-  if(paidBtn){ paidBtn.textContent=r.status==='paid'?'💰 Paid ✓':'💰 Mark Paid';
+  if(paidBtn){ paidBtn.textContent=r.status==='paid'?'✓ Completed & Paid':'💰 Mark Completed & Paid';
     paidBtn.style.fontWeight=r.status==='paid'?'700':'400';
     paidBtn.style.background=r.status==='paid'?'#f0fdf4':''; }
   if(document.getElementById('page-income')?.classList.contains('active') && typeof renderIncome==='function') renderIncome();
@@ -5198,10 +5292,19 @@ function _buildRouteUrlsFrom(r, startAddr, endAddr){
   var endPt   = (endAddr!==undefined&&endAddr!==null ? String(endAddr) : home).trim();
   var pickup  = (r.pickup||'').trim();
   var dropoff = (r.home||'').trim();
+  var t       = r.type||'';
+  // For airport rides, prefer the terminal's street address when a terminal is
+  // set (falls back to the saved address otherwise). AP PICK UP: the client is
+  // picked up AT the terminal, so the terminal is the PICKUP. AP RUN: the client
+  // is dropped AT the terminal, so the terminal is the DROP-OFF.
+  var termAddr = terminalToAddress(r.terminal);
+  if(termAddr){
+    if(t==='AP PICK UP') pickup = termAddr;
+    else if(t==='AP RUN' || t==='AP ROUND TRIP') dropoff = termAddr;
+  }
   // Extra stop addresses (shown once the extra-stop fee is set) slot in between
   // pickup and dropoff; several can be separated with ';'
   var extras  = (r.xstopAddr||'').split(';').map(function(x){return x.trim();}).filter(Boolean);
-  var t       = r.type||'';
   // Build ordered stop list based on ride type:
   // AP RUN / ROUND TRIP / ONE WAY: start → pickup → [extra stops] → dropoff → end (end defaults to start)
   // AP PICK UP: pickup IS the airport; dropoff is where client goes
@@ -8050,6 +8153,33 @@ function clientIsDriver(clientName){
   const key = clientName.toLowerCase().trim();
   return DRIVERS.some(function(d){ return d.toLowerCase().trim()===key; });
 }
+// True for the airport ride types that this unpaid-carryover logic applies to.
+function isAPRideType(t){
+  return t==='AP RUN' || t==='AP PICK UP' || t==='AP ROUND TRIP';
+}
+// Find a client's most recent PRIOR AP ride (relative to refRide) that is
+// completed but not yet marked paid. Returns the ride or null. "Prior" is by
+// date+time, and we skip the reference ride itself and cancelled rides.
+function previousUnpaidAPRide(refRide){
+  if(!refRide || !refRide.client || !isAPRideType(refRide.type)) return null;
+  const key = String(refRide.client).toLowerCase().trim();
+  const refStamp = (refRide.date||'') + 'T' + (refRide.time||'00:00');
+  const today = toDateStr(new Date());
+  let best = null, bestStamp = '';
+  (rides||[]).forEach(function(r){
+    if(!r || r.id===refRide.id) return;
+    if(r.status==='cancelled') return;
+    if(!r.client || String(r.client).toLowerCase().trim()!==key) return;
+    if(!isAPRideType(r.type)) return;
+    const stamp = (r.date||'') + 'T' + (r.time||'00:00');
+    if(stamp >= refStamp) return;                 // must be strictly before
+    // completed-but-unpaid: earned (past/completed) yet status not 'paid'
+    const earned = r.status==='completed' || (r.date && r.date < today);
+    if(r.status==='paid' || !earned) return;
+    if(stamp > bestStamp){ best = r; bestStamp = stamp; }  // most recent prior
+  });
+  return best;
+}
 function getClientOwner(clientName){
   if(!clientName) return null;
   const key=(clientName||''). toLowerCase().trim();
@@ -9278,8 +9408,22 @@ function renderDashIncome(){
   }
   const gross=monthRides.reduce((s,r)=>s+parseFloat(r.price||0),0);
   const count=monthRides.length;
+  // NET mirrors the Income page: gross minus per-ride vehicle cost (driven miles
+  // x cost/mile) and the 15% finder's fee where it applies, then minus any
+  // manually-entered monthly expenses.
+  const costPerMile = calcCostPerMile(dName);
+  let vehicleCost = 0, feeCost = 0;
+  monthRides.forEach(r=>{
+    const miles = parseFloat(r.drivenMiles||r.miles||0);
+    vehicleCost += miles * costPerMile;
+    // 15% owed only when driving someone else's client, and never when the
+    // client is themselves a driver in the group.
+    const fare = parseFloat(r.price||0);
+    const owner = clientIsDriver(r.client) ? null : (feeOwnerFor(r.createdBy) || getClientOwner(r.client));
+    if(owner && owner!==dName) feeCost += fare*0.15;
+  });
   const monthlyExp=getMonthlyExpenseTotal();
-  const net=gross-monthlyExp;
+  const net=gross - vehicleCost - feeCost - monthlyExp;
   const monthName=now.toLocaleDateString('en-US',{month:'long',year:'numeric'});
   const card=(label,val,color)=>`<div style="background:var(--surface);border-radius:10px;padding:.9rem;text-align:center;border:1.5px solid var(--light);">
       <div style="font-size:.66rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.3rem;">${label}</div>
@@ -14760,7 +14904,7 @@ function fireLocalNotification(title, body, notifData){
     else if(notifData.channel) _nurl='./?nchan='+encodeURIComponent(notifData.channel);
     else if(notifData.type) _nurl='./?ntype='+encodeURIComponent(notifData.type);
   }
-  const opts = { body: body||'', icon:'https://chasesweat.github.io/nda-app/icon-192.png', badge:'https://chasesweat.github.io/nda-app/icon-192.png', tag:_tag, data:{type:notifData&&notifData.type,rideId:notifData&&notifData.rideId,channel:notifData&&notifData.channel,url:_nurl} };
+  const opts = { body: body||'', icon:'https://chasesweat.github.io/nda-app/icon-192.png', badge:'data:image/png;base64,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', tag:_tag, data:{type:notifData&&notifData.type,rideId:notifData&&notifData.rideId,channel:notifData&&notifData.channel,url:_nurl} };
   try{
     if(navigator.serviceWorker && navigator.serviceWorker.ready){
       navigator.serviceWorker.ready.then(reg=> reg.showNotification(title, opts))
