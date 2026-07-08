@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090246">
+<meta name="version" content="202606090249">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -542,10 +542,12 @@ input,select,textarea{font-size:16px;}
         <div class="page-sub" id="dash-date"></div>
       </div>
     </div>
+    <!-- Income/summary cards on top -->
     <div id="dash-morgan-counter" style="margin-bottom:1.5rem;"></div>
     <div id="dash-income-overview" style="margin-bottom:1.5rem;"></div>
-    <div id="dash-confirmations" style="margin-bottom:1.5rem;"></div>
     <div id="dash-fees" style="margin-bottom:1.5rem;"></div>
+    <!-- Action blocks: confirmations to send, then rides to wrap up, then upcoming -->
+    <div id="dash-confirmations" style="margin-bottom:1.5rem;"></div>
     <div id="dash-needs-attention" style="margin-bottom:1.5rem;"></div>
     <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.75rem;" id="dash-upcoming-label">Your upcoming rides</div>
     <div id="upcoming-list"></div>
@@ -1311,6 +1313,12 @@ input,select,textarea{font-size:16px;}
       <div class="form-group" id="pay-other-wrap" style="display:none;">
         <label>What was it?</label>
         <input type="text" id="pay-other-text" placeholder="e.g. Check, Square, CashApp…" style="width:100%;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;box-sizing:border-box;" />
+      </div>
+      <div class="form-group" id="pay-tip-section" style="display:none;">
+        <label for="pay-tip">💵 Tip received (optional)</label>
+        <div style="display:flex;align-items:center;gap:.4rem;margin-top:.3rem;"><span style="font-size:1rem;color:var(--mid);">$</span>
+        <input type="number" id="pay-tip" min="0" step="0.01" placeholder="0.00" inputmode="decimal" style="flex:1;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;box-sizing:border-box;" /></div>
+        <div style="font-size:.68rem;color:var(--mid);margin-top:.3rem;">Saved straight to your income — no need to go enter it separately.</div>
       </div>
       <div style="border-top:1.5px solid var(--light);margin:1rem 0 .8rem;"></div>
       <div class="form-group" id="pay-receipt-section">
@@ -2404,7 +2412,7 @@ function maybShowTutorialBanner(){
 }
 // ── In-app tutorial tip bubbles ──
 const TIP_DATA={
-  dashboard:{icon:'🏠',title:'Dashboard',text:'Tap any ride card to open the full details. An orange banner means confirmation texts are due for tomorrow. An amber \u201cRides to wrap up\u201d box lists past rides you haven\'t marked paid yet \u2014 tap one to finish it.'},
+  dashboard:{icon:'🏠',title:'Dashboard',text:'Your income summary sits up top. Below it are your action lists: confirmations to send, the amber \u201cRides to wrap up\u201d box (completed rides you haven\'t marked paid yet), and then your upcoming rides. Tap any card to open the full details.'},
   cal:{icon:'📅',title:'Calendar',text:'Tap any ride to edit, cancel, duplicate, or post it to the Offerings channel. Assigning a driver lives under 🛠 Dispatch tools inside the ride. Linked AP Round Trip cards show a blue 🔗 Pair badge.'},
   myrides:{icon:'📋',title:'My Rides & Confirmations',text:'The To Confirm tab shows tomorrow\'s rides needing a day-before text. The six send buttons plus Mark Sent are a Driver Pro feature.'},
   clients:{icon:'👥',title:'Client List',text:'Your client list is 100% private — no other driver and no admin can see it. Clients are added automatically when you book rides.'},
@@ -2536,11 +2544,15 @@ function sedanBase(){ return BASE['Sedan']||105; }
 function vehUpcharge(veh){ var d=(BASE[veh]||sedanBase())-sedanBase(); return d>0?d:0; }
 // ── EDITABLE SURCHARGE TRIGGERS (time windows / days / holiday dates) ──
 function _hm(str){ if(!str||typeof str!=='string'||str.indexOf(':')<0) return null; var p=str.split(':'); var h=parseInt(p[0],10), m=parseInt(p[1],10); return (isFinite(h)&&isFinite(m))?h*60+m:null; }
-function premiumBefore(){ return (globalSettings.premiumBefore)||'05:00'; }
-function premiumAfter(){ return (globalSettings.premiumAfter)||''; }  // optional late-night start; '' = disabled
-function premiumBeforeMin(){ var m=_hm(premiumBefore()); return m==null?300:m; }
-function premiumAfterMin(){ var m=_hm(premiumAfter()); return m; }  // null if disabled/blank
-function isPremiumTime(mins){ if(mins<=0) return false; if(mins<premiumBeforeMin()) return true; var a=premiumAfterMin(); return a!=null && mins>=a; }
+// Premium is a time RANGE. Default 00:00–05:00. If start>end the range wraps past midnight (e.g. 22:00–05:00).
+function premiumStart(){ return (globalSettings.premiumStart!=null?globalSettings.premiumStart:'00:00'); }
+function premiumEnd(){ return (globalSettings.premiumEnd!=null?globalSettings.premiumEnd:(globalSettings.premiumBefore||'05:00')); }
+function premiumStartMin(){ var m=_hm(premiumStart()); return m==null?0:m; }
+function premiumEndMin(){ var m=_hm(premiumEnd()); return m==null?300:m; }
+// Back-compat shims (older callers/tests may still reference these)
+function premiumBefore(){ return premiumEnd(); }
+function premiumBeforeMin(){ return premiumEndMin(); }
+function isPremiumTime(mins){ if(mins<0) return false; var st=premiumStartMin(), en=premiumEndMin(); if(st===en) return false; if(st<en){ return mins>=st && mins<en; } return mins>=st || mins<en; }
 function trafficDaysList(){ var d=globalSettings.trafficDays; return Array.isArray(d)?d:[1,2,3,4,5]; }
 function trafficAm(){ var w=globalSettings.trafficAm||{}; return {start:w.start||'06:30', end:w.end||'09:00'}; }
 function trafficPm(){ var w=globalSettings.trafficPm||{}; return {start:w.start||'14:30', end:w.end||'19:00'}; }
@@ -5592,6 +5604,10 @@ function openPaymentModal(id){
   if(otherTxt) otherTxt.value = (r.payment && PAY_METHODS.indexOf(r.payment)<0) ? r.payment : '';
   // Reset receipt
   const rc = document.getElementById('pay-send-receipt'); if(rc) rc.checked=false;
+  // Tip capture at mark-paid (income/tip-tracking users only) — prefill with any existing tip.
+  var _tipHasAcc = (typeof hasIncomeAccess==='function') ? hasIncomeAccess() : false;
+  var _tipSec = document.getElementById('pay-tip-section'); if(_tipSec) _tipSec.style.display = _tipHasAcc ? 'block' : 'none';
+  var _tipIn = document.getElementById('pay-tip'); if(_tipIn) _tipIn.value = (r.tip!=null && r.tip!=='' && +r.tip>0) ? r.tip : '';
   const pv = document.getElementById('pay-receipt-preview'); if(pv){ pv.style.display='none'; pv.textContent=''; }
   // Receipts are a premium feature — show the locked panel for non-subscribers.
   const hasAcc = (typeof hasIncomeAccess==='function') ? hasIncomeAccess() : true;
@@ -5658,7 +5674,15 @@ async function savePaymentAndMaybeReceipt(){
     const t=(document.getElementById('pay-other-text')?.value||'').trim();
     method = t || 'Other';
   }
-  if(method){ r.payment = method; touchRide(r,'set payment method'); await saveRides(); }
+  if(method){ r.payment = method; touchRide(r,'set payment method'); }
+  // Capture tip entered at mark-paid (income/tip-tracking users)
+  var _tipEl = document.getElementById('pay-tip');
+  if(_tipEl && document.getElementById('pay-tip-section')?.style.display!=='none'){
+    var _tv = parseFloat(_tipEl.value);
+    if(isFinite(_tv) && _tv>0){ r.tip=_tv; touchRide(r,'set tip'); }
+    else if(_tipEl.value.trim()==='' && r.tip){ delete r.tip; touchRide(r,'clear tip'); }
+  }
+  await saveRides();
   const wantReceipt = !!document.getElementById('pay-send-receipt')?.checked;
   // Refresh the open ride card so the payment method shows
   try{ if(document.getElementById('ride-modal')?.classList.contains('show')) renderRideView(r); }catch(e){}
@@ -10824,9 +10848,8 @@ function buildSurchargeTriggersHTML(){
     +'<div style="padding:0 1rem 1rem;">'
     +'<div style="font-size:.74rem;color:var(--mid);line-height:1.55;margin-bottom:1rem;">These set when a surcharge is <em>auto-suggested</em> on a new quote. Whoever is scheduling can always switch any surcharge on or off per ride.</div>'
     +'<div style="font-size:.66rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Premium hours</div>'
-    +'<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem;font-size:.82rem;color:var(--black);">Auto-suggest premium for pickups before '+ti('trg-premium-before',premiumBefore())+'</div>'
-    +'<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.35rem;font-size:.82rem;color:var(--black);">…and for pickups at or after '+ti('trg-premium-after',premiumAfter())+'</div>'
-    +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:1.1rem;">Leave the second time blank for none. Example: before 05:00 AM plus after 10:00 PM covers overnight rides on both sides of midnight.</div>'
+    +'<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.4rem;font-size:.82rem;color:var(--black);">Auto-suggest premium for pickups between '+ti('trg-premium-start',premiumStart())+' and '+ti('trg-premium-end',premiumEnd())+'</div>'
+    +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:1.1rem;">A start–end window. If the start is later than the end it wraps past midnight — e.g. 10:00 PM to 05:00 AM covers overnight rides on both sides of midnight.</div>'
     +'<div style="font-size:.66rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Traffic hours</div>'
     +'<div style="font-size:.72rem;color:var(--mid);margin-bottom:.4rem;">Days:</div><div style="display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-bottom:.6rem;">'+dayBoxes+'</div>'
     +'<div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-bottom:.4rem;font-size:.82rem;color:var(--black);">Morning rush '+ti('trg-am-start',am.start)+' to '+ti('trg-am-end',am.end)+'</div>'
@@ -10842,8 +10865,9 @@ function buildSurchargeTriggersHTML(){
 }
 async function saveSurchargeTriggers(){
   if(typeof isAdmin==='function' && !isAdmin()){ showToast('Admins only','error'); return; }
-  var pb=document.getElementById('trg-premium-before'); if(pb&&pb.value) globalSettings.premiumBefore=pb.value;
-  var pa=document.getElementById('trg-premium-after'); globalSettings.premiumAfter = (pa&&pa.value)?pa.value:'';
+  var ps=document.getElementById('trg-premium-start'); if(ps&&ps.value) globalSettings.premiumStart=ps.value;
+  var pe=document.getElementById('trg-premium-end');   if(pe&&pe.value) globalSettings.premiumEnd=pe.value;
+  delete globalSettings.premiumBefore; delete globalSettings.premiumAfter;
   var days=[]; document.querySelectorAll('.trf-day').forEach(function(c){ if(c.checked) days.push(parseInt(c.getAttribute('data-day'),10)); });
   globalSettings.trafficDays=days;
   var ams=document.getElementById('trg-am-start'), ame=document.getElementById('trg-am-end');
