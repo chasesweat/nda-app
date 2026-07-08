@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090260">
+<meta name="version" content="202606090279">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -580,10 +580,12 @@ input,select,textarea{font-size:16px;}
             <button class="tog" onclick="setTripType('AP PICK UP',this)">AP Pick Up</button>
             <button class="tog" onclick="setTripType('ROUND TRIP',this)">Round Trip</button>
             <button class="tog" onclick="setTripType('ONE WAY',this)">One Way</button>
+            <button class="tog" onclick="setTripType('MEDICAL',this)">Medical Transport</button>
           </div>
           <input type="hidden" id="q-type" value="AP ROUND TRIP" />
           <div id="q-pickup-note" style="display:none;margin-top:.5rem;font-size:.75rem;line-height:1.4;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;border-radius:8px;padding:.5rem .7rem;"></div>
         </div>
+        <div class="form-group" id="q-med-hours-group" style="display:none;"><label>Medical transport hours</label><input type="number" id="q-med-hours" min="0" step="0.5" placeholder="e.g. 3" inputmode="decimal" oninput="calcQuote()" /><div style="font-size:.72rem;color:var(--mid);margin-top:3px;line-height:1.4;">Billed hourly at your waiting-time rate. The assigned driver or an admin can adjust the hours during the ride. Add any surcharges below if needed.</div></div>
         <div class="form-group"><label id="q-pickup-label">Home address</label><input type="text" id="q-pickup" placeholder="Start typing…" oninput="debounceMileage()" /></div>
         <div id="q-stops-wrap"></div><div class="form-group" style="margin-top:-.3rem;margin-bottom:.75rem;"><button type="button" id="q-addstop-btn" onclick="qAddStop()" style="background:none;border:1px dashed var(--gold);color:var(--gold);border-radius:8px;padding:.45rem .9rem;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:600;cursor:pointer;">+ Add Stop</button><span style="font-size:.72rem;color:var(--mid);margin-left:.5rem;">Extra pickups between start &amp; drop-off</span></div><div class="form-group" id="q-dropoff-group"><label id="q-dropoff-label">Destination address</label><input type="text" id="q-dropoff" placeholder="Start typing…" oninput="debounceMileage()" /></div>
         <div id="q-mileage-box" style="background:var(--black);border-radius:10px;padding:1rem;margin-bottom:1rem;">
@@ -841,6 +843,7 @@ input,select,textarea{font-size:16px;}
     <div class="page-title" style="margin-bottom:1rem;">Team</div>
     <div style="display:flex;gap:.5rem;border-bottom:2px solid var(--light);padding-bottom:.75rem;margin-bottom:1.25rem;">
       <button class="cal-tab active" id="dtab-members" onclick="switchDriverTab('members',this)">Driver Cards</button>
+      <button class="cal-tab" id="dtab-availability" onclick="switchDriverTab('availability',this)">Team Availability</button>
       <button class="cal-tab" id="dtab-settings" onclick="switchDriverTab('settings',this)" style="display:none;">Colors</button>
       <button class="cal-tab" id="dtab-access" onclick="switchDriverTab('access',this)" style="display:none;">Access control</button>
       <button class="cal-tab" id="dtab-pricing" onclick="switchDriverTab('pricing',this)" style="display:none;">Pricing</button>
@@ -850,6 +853,7 @@ input,select,textarea{font-size:16px;}
       <div id="driver-unlock-bar" style="display:none;margin-bottom:1rem;"></div>
       <div id="driver-members-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;"></div>
     </div>
+    <div id="driver-panel-availability" style="display:none;"><div id="team-availability-list"></div></div>
     <div id="driver-panel-access" style="display:none;"><div id="access-control-list"></div></div>
     <div id="driver-panel-pricing" style="display:none;"></div>
   </div>
@@ -859,17 +863,15 @@ input,select,textarea{font-size:16px;}
     <div class="page-title" style="margin-bottom:1rem;">My Profile</div>
     <div style="display:flex;gap:.5rem;border-bottom:2px solid var(--light);padding-bottom:.75rem;margin-bottom:1.25rem;flex-wrap:wrap;">
       <button class="cal-tab active" id="mptab-me" onclick="switchProfileTab('me',this)">My Info</button>
-      <button class="cal-tab" id="mptab-avail" onclick="switchProfileTab('avail',this)">Team Availability</button>
-      <button class="cal-tab" id="mptab-account" onclick="switchProfileTab('account',this)">Account</button>
+      <button class="cal-tab" id="mptab-account" onclick="switchProfileTab('account',this)">Account Settings</button>
     </div>
     <div id="profile-panel-me">
       <div id="myprofile-card" class="myprofile-card-wrap" style="margin:0 auto;"></div>
     </div>
-    <div id="profile-panel-avail" style="display:none;">
-      <div id="team-availability-list"></div>
-    </div>
     <div id="profile-panel-account" style="display:none;">
       <div style="max-width:520px;">
+        <div id="mp-account-settings-slot"></div>
+        <button id="mp-settings-save" onclick="saveDriverProfile(getMyDriverName())" style="display:none;width:100%;margin-bottom:1.25rem;padding:.6rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-weight:700;font-size:.85rem;cursor:pointer;">Save settings</button>
         <div id="mp-account-status-card" style="background:var(--surface);border-radius:12px;padding:1.25rem;margin-bottom:1rem;"></div>
         <div id="mp-account-upgrade-card" style="margin-bottom:1rem;"></div>
         <div id="mp-account-billing" style="margin-bottom:1rem;"></div>
@@ -941,7 +943,7 @@ input,select,textarea{font-size:16px;}
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
         <button onclick="openOutsideRideModal()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">+ Outside Ride</button>
         <button onclick="generateYearEndPL()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">📊 Year-End P&amp;L</button>
-        <button id="pricing-audit-btn" onclick="generatePricingAudit()" style="display:none;background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;margin-right:.4rem;">&#128203; Pricing Audit</button>
+        <button id="rides-report-btn" onclick="generateRidesReport()" style="display:none;background:#0891b2;color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;margin-right:.4rem;">&#128200; Rides Report</button><button id="pricing-audit-btn" onclick="generatePricingAudit()" style="display:none;background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;margin-right:.4rem;">&#128203; Pricing Audit</button>
          <button onclick="exportIncomeCSV()" style="background:#16a34a;color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">⬇ Export CSV</button>
         <button onclick="loadRideHistory()" title="Load archived older rides into view" style="background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">🗄 Load history</button>
         <button id="archive-rides-btn" onclick="archiveOldRides()" title="Move old rides out of the live app to keep it fast (admin)" style="display:none;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">📦 Archive old</button>
@@ -1230,8 +1232,9 @@ input,select,textarea{font-size:16px;}
           </div>
         </div>
         <div class="form-group"><label>Travel Type</label>
-          <select id="edit-type" onchange="editTypeChanged();_editAutoPrice()"><option>AP ROUND TRIP</option><option>AP RUN</option><option>AP PICK UP</option><option>ROUND TRIP</option><option>ONE WAY</option></select>
+          <select id="edit-type" onchange="editTypeChanged();_editAutoPrice()"><option>AP ROUND TRIP</option><option>AP RUN</option><option>AP PICK UP</option><option>ROUND TRIP</option><option>ONE WAY</option><option value="MEDICAL">Medical Transport</option></select>
         </div>
+        <div class="form-group" id="edit-med-hours-group" style="display:none;"><label>Medical hours</label><input type="number" id="edit-med-hours" min="0" step="0.5" oninput="_editAutoPrice()" /></div>
         <div class="form-group"><label>Driver</label>
           <select id="edit-driver"><option value="">Unassigned</option></select>
         </div>
@@ -1518,7 +1521,7 @@ input,select,textarea{font-size:16px;}
         <div style="display:flex;flex-wrap:wrap;gap:.5rem .9rem;"><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.8rem;color:var(--black);"><input type="checkbox" id="onb-auto-premium" checked style="width:15px;height:15px;accent-color:#16a34a;" />Premium</label><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.8rem;color:var(--black);"><input type="checkbox" id="onb-auto-traffic" checked style="width:15px;height:15px;accent-color:#16a34a;" />Traffic</label><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.8rem;color:var(--black);"><input type="checkbox" id="onb-auto-holiday" checked style="width:15px;height:15px;accent-color:#16a34a;" />Holiday</label><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.8rem;color:var(--black);"><input type="checkbox" id="onb-auto-christmas" checked style="width:15px;height:15px;accent-color:#16a34a;" />Christmas</label><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.8rem;color:var(--black);"><input type="checkbox" id="onb-auto-fuel" checked style="width:15px;height:15px;accent-color:#16a34a;" />Fuel</label></div>
       </div>
 
-      <div class="form-group"><label>Confirmation text</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">The message clients get when their ride is confirmed. Set one per ride type, or just a general default.</div><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.4rem;"><input type="radio" name="onb-conf-mode" value="default" checked onchange="_onbConfMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Stay with the default text</strong></span></label><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.6rem;"><input type="radio" name="onb-conf-mode" value="custom" onchange="_onbConfMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Customize my own</strong></span></label><div id="onb-conf-fields" style="display:none;border:1.5px solid var(--light);border-radius:10px;padding:.7rem;"><div style="font-size:.68rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Placeholders <code style="font-size:.66rem;">{client}</code> <code style="font-size:.66rem;">{date}</code> <code style="font-size:.66rem;">{time}</code> <code style="font-size:.66rem;">{pickup}</code> <code style="font-size:.66rem;">{dropoff}</code> <code style="font-size:.66rem;">{driver}</code> <code style="font-size:.66rem;">{me}</code> <code style="font-size:.66rem;">{amount}</code> <code style="font-size:.66rem;">{flight}</code> <code style="font-size:.66rem;">{terminal}</code> <code style="font-size:.66rem;">{phone}</code> fill in automatically.</div><div style="margin-bottom:.7rem;"><div style="font-size:.7rem;font-weight:700;color:var(--black);margin-bottom:2px;">General default <span style="font-weight:400;color:var(--mid);">(used when a ride type is blank)</span></div><textarea id="onb-conf" rows="4" placeholder="Type your default confirmation message…" style="width:100%;padding:.5rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea><button type="button" onclick="_onbInsertConfExample()" style="margin-top:3px;font-size:.68rem;padding:2px 8px;background:none;border:1px solid var(--accent);color:var(--accent);border-radius:8px;cursor:pointer;font-family:'DM Sans',sans-serif;">Insert example</button></div><div style="font-size:.66rem;font-weight:700;color:var(--mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:.4rem;">Per ride type (optional)</div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">AP Run</div><textarea id="onb-conf-aprun" rows="3" placeholder="Confirmation message for AP Run rides… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">AP Pick Up</div><textarea id="onb-conf-appickup" rows="3" placeholder="Confirmation message for AP Pick Up rides… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Local One Way</div><textarea id="onb-conf-oneway" rows="3" placeholder="Confirmation message for Local One Way rides… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Local Round Trip</div><textarea id="onb-conf-roundtrip" rows="3" placeholder="Confirmation message for Local Round Trip rides… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea></div></div></div><div class="form-group"><label>Pickup instructions (airport)</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">How clients are told where to meet you at each terminal.</div><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.4rem;"><input type="radio" name="onb-pickup-mode" value="default" checked onchange="_onbPickupMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Stay with the default instructions</strong></span></label><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.6rem;"><input type="radio" name="onb-pickup-mode" value="custom" onchange="_onbPickupMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Customize my own</strong></span></label><div id="onb-pickup-fields" style="display:none;border:1.5px solid var(--light);border-radius:10px;padding:.7rem;"><div style="font-size:.68rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Placeholders <code style="font-size:.66rem;">{terminal}</code> <code style="font-size:.66rem;">{driver}</code> <code style="font-size:.66rem;">{phone}</code> fill in automatically. Leave a terminal blank to use your general default.</div><div style="margin-bottom:.7rem;"><div style="font-size:.7rem;font-weight:700;color:var(--black);margin-bottom:2px;">General default <span style="font-weight:400;color:var(--mid);">(round trips, AP Runs &amp; any terminal left blank)</span></div><textarea id="onb-pickup-default" rows="2" placeholder="e.g. When you land, text me once you have your bags and head to the lower-level pickup area." style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;"></textarea><button type="button" onclick="_onbInsertPickupDefault()" style="margin-top:3px;font-size:.68rem;padding:2px 8px;background:none;border:1px solid var(--accent);color:var(--accent);border-radius:8px;cursor:pointer;font-family:'DM Sans',sans-serif;">Insert example</button></div><div style="font-size:.66rem;font-weight:700;color:var(--mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:.4rem;">Per-terminal (optional)</div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">North Domestic</div><textarea id="onb-pickup-north" rows="2" placeholder="Where you meet clients arriving at North Domestic… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">South Domestic</div><textarea id="onb-pickup-south" rows="2" placeholder="Where you meet clients arriving at South Domestic… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">International</div><textarea id="onb-pickup-intl" rows="2" placeholder="Where you meet clients arriving at International… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;"></textarea></div></div></div><div class="form-group"><label>Your day-of-travel selfie</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.4rem;line-height:1.4;">This is the photo clients see so they can recognize you on pickup day. Add your own, or leave it to use the shared default.</div><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.5rem;"><input type="radio" name="onb-selfie-choice" value="default" checked onchange="_onbSelfieChoice()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Use the shared default selfie</strong></span></label><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.5rem;"><input type="radio" name="onb-selfie-choice" value="own" onchange="_onbSelfieChoice()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Use my own selfie</strong></span></label><div id="onb-selfie-uploader" style="display:none;align-items:center;gap:.7rem;"><div id="onb-photo-preview" style="width:48px;height:48px;border-radius:10px;background:#f3eeff;border:1.5px solid var(--light);background-size:cover;background-position:center;flex-shrink:0;"></div><button type="button" onclick="_onbUploadPhoto()" class="btn-secondary" style="padding:.5rem .9rem;font-size:.8rem;">📷 Upload photo</button><span id="onb-photo-status" style="font-size:.72rem;color:var(--mid);">No photo yet</span></div></div><div style="color:var(--red);font-size:.82rem;min-height:1rem;margin:.4rem 0;" id="onb-error"></div>
+      <div class="form-group"><label>Confirmation text</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">The message clients get when their ride is confirmed. Set one per ride type, or just a general default.</div><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.4rem;"><input type="radio" name="onb-conf-mode" value="default" checked onchange="_onbConfMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Stay with the default text</strong></span></label><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.6rem;"><input type="radio" name="onb-conf-mode" value="custom" onchange="_onbConfMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Customize my own</strong></span></label><div id="onb-conf-fields" style="display:none;border:1.5px solid var(--light);border-radius:10px;padding:.7rem;"><div style="background:#f3eeff;border:1px solid var(--accent);border-radius:8px;padding:.65rem .75rem;margin-bottom:.75rem;"><div style="font-size:.78rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Already have a message you send?</div><div style="font-size:.7rem;color:var(--mid);margin-bottom:.55rem;line-height:1.4;">Paste it and we&rsquo;ll turn the parts that change every ride into tokens automatically — no need to learn the placeholders.</div><button type="button" onclick="openConfImporter('onb-conf')" style="padding:.45rem 1rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">✨ Import my confirmation text</button></div><div style="font-size:.68rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Placeholders <code style="font-size:.66rem;">{client}</code> <code style="font-size:.66rem;">{date}</code> <code style="font-size:.66rem;">{time}</code> <code style="font-size:.66rem;">{pickup}</code> <code style="font-size:.66rem;">{dropoff}</code> <code style="font-size:.66rem;">{driver}</code> <code style="font-size:.66rem;">{me}</code> <code style="font-size:.66rem;">{amount}</code> <code style="font-size:.66rem;">{flight}</code> <code style="font-size:.66rem;">{terminal}</code> <code style="font-size:.66rem;">{phone}</code> fill in automatically.</div><div style="margin-bottom:.7rem;"><div style="font-size:.7rem;font-weight:700;color:var(--black);margin-bottom:2px;">General default <span style="font-weight:400;color:var(--mid);">(used when a ride type is blank)</span></div><textarea id="onb-conf" rows="4" placeholder="Type your default confirmation message…" style="width:100%;padding:.5rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea><button type="button" onclick="_onbInsertConfExample()" style="margin-top:3px;font-size:.68rem;padding:2px 8px;background:none;border:1px solid var(--accent);color:var(--accent);border-radius:8px;cursor:pointer;font-family:'DM Sans',sans-serif;">Insert example</button></div><div style="font-size:.66rem;font-weight:700;color:var(--mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:.4rem;">Per ride type (optional)</div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">AP Run</div><textarea id="onb-conf-aprun" rows="3" placeholder="Confirmation message for AP Run rides… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">AP Pick Up</div><textarea id="onb-conf-appickup" rows="3" placeholder="Confirmation message for AP Pick Up rides… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Local One Way</div><textarea id="onb-conf-oneway" rows="3" placeholder="Confirmation message for Local One Way rides… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Local Round Trip</div><textarea id="onb-conf-roundtrip" rows="3" placeholder="Confirmation message for Local Round Trip rides… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea></div></div></div><div class="form-group"><label>Pickup instructions (airport)</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">How clients are told where to meet you at each terminal.</div><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.4rem;"><input type="radio" name="onb-pickup-mode" value="default" checked onchange="_onbPickupMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Stay with the default instructions</strong></span></label><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.6rem;"><input type="radio" name="onb-pickup-mode" value="custom" onchange="_onbPickupMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Customize my own</strong></span></label><div id="onb-pickup-fields" style="display:none;border:1.5px solid var(--light);border-radius:10px;padding:.7rem;"><div style="background:#f3eeff;border:1px solid var(--accent);border-radius:8px;padding:.65rem .75rem;margin-bottom:.75rem;"><div style="font-size:.78rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Already have pickup instructions you send?</div><div style="font-size:.7rem;color:var(--mid);margin-bottom:.55rem;line-height:1.4;">Paste them and we&rsquo;ll tokenize the changing parts for you.</div><button type="button" onclick="openConfImporter('onb-pickup-default')" style="padding:.45rem 1rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">✨ Import my pickup instructions</button></div><div style="font-size:.68rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Placeholders <code style="font-size:.66rem;">{terminal}</code> <code style="font-size:.66rem;">{driver}</code> <code style="font-size:.66rem;">{phone}</code> fill in automatically. Leave a terminal blank to use your general default.</div><div style="margin-bottom:.7rem;"><div style="font-size:.7rem;font-weight:700;color:var(--black);margin-bottom:2px;">General default <span style="font-weight:400;color:var(--mid);">(round trips, AP Runs &amp; any terminal left blank)</span></div><textarea id="onb-pickup-default" rows="2" placeholder="e.g. When you land, text me once you have your bags and head to the lower-level pickup area." style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;"></textarea><button type="button" onclick="_onbInsertPickupDefault()" style="margin-top:3px;font-size:.68rem;padding:2px 8px;background:none;border:1px solid var(--accent);color:var(--accent);border-radius:8px;cursor:pointer;font-family:'DM Sans',sans-serif;">Insert example</button></div><div style="font-size:.66rem;font-weight:700;color:var(--mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:.4rem;">Per-terminal (optional)</div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">North Domestic</div><textarea id="onb-pickup-north" rows="2" placeholder="Where you meet clients arriving at North Domestic… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">South Domestic</div><textarea id="onb-pickup-south" rows="2" placeholder="Where you meet clients arriving at South Domestic… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">International</div><textarea id="onb-pickup-intl" rows="2" placeholder="Where you meet clients arriving at International… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;"></textarea></div></div></div><div class="form-group"><label>✨ Your driver card</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Don’t have a card yet? Build one from a photo of you and a photo of your vehicle — we’ll lay it out for you.</div><button type="button" onclick="openCardGenerator((document.getElementById('onb-name')||{}).value||'', function(url){ _onbGeneratedCard=url; var p=document.getElementById('onb-cardgen-prev'); if(p){ p.style.display='block'; p.innerHTML='<img src=&quot;'+url+'&quot; style=&quot;width:100%;border-radius:8px;display:block;&quot;>'; } })" style="padding:.5rem 1rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">✨ Generate my driver card</button><div id="onb-cardgen-prev" style="display:none;margin-top:.6rem;"></div></div><div class="form-group"><label>Your day-of-travel selfie</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.4rem;line-height:1.4;">This is the photo clients see so they can recognize you on pickup day. Add your own, or leave it to use the shared default.</div><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.5rem;"><input type="radio" name="onb-selfie-choice" value="default" checked onchange="_onbSelfieChoice()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Use the shared default selfie</strong></span></label><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.5rem;"><input type="radio" name="onb-selfie-choice" value="own" onchange="_onbSelfieChoice()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Use my own selfie</strong></span></label><div id="onb-selfie-uploader" style="display:none;align-items:center;gap:.7rem;"><div id="onb-photo-preview" style="width:48px;height:48px;border-radius:10px;background:#f3eeff;border:1.5px solid var(--light);background-size:cover;background-position:center;flex-shrink:0;"></div><button type="button" onclick="_onbUploadPhoto()" class="btn-secondary" style="padding:.5rem .9rem;font-size:.8rem;">📷 Upload photo</button><span id="onb-photo-status" style="font-size:.72rem;color:var(--mid);">No photo yet</span></div></div><div style="color:var(--red);font-size:.82rem;min-height:1rem;margin:.4rem 0;" id="onb-error"></div>
 
       <div style="display:flex;flex-direction:column;gap:.5rem;margin-top:.5rem;">
         <button onclick="saveOnboarding()" class="btn-primary" style="width:100%;padding:.85rem;">Save &amp; Get Started</button>
@@ -1555,6 +1558,7 @@ input,select,textarea{font-size:16px;}
           <option>AP PICK UP</option>
           <option>ROUND TRIP</option>
           <option>ONE WAY</option>
+          <option value="MEDICAL">Medical Transport</option>
         </select>
       </div>
       <div id="qa-rt-section" style="grid-column:1/-1;display:none;background:#f9f4ff;border-radius:10px;padding:.75rem;margin-top:.25rem;">
@@ -2443,11 +2447,11 @@ const TIP_DATA={
   cal:{icon:'📅',title:'Calendar',text:'Tap any ride to edit, cancel, duplicate, or post it to the Offerings channel. Assigning a driver lives under 🛠 Dispatch tools inside the ride. Linked AP Round Trip cards show a blue 🔗 Pair badge.'},
   myrides:{icon:'📋',title:'My Rides & Confirmations',text:'The To Confirm tab shows tomorrow\'s rides needing a day-before text. The six send buttons plus Mark Sent are a Driver Pro feature.'},
   clients:{icon:'👥',title:'Client List',text:'Your client list is 100% private — no other driver and no admin can see it. Clients are added automatically when you book rides. Tap Select to remove several clients at once.'},
-  income:{icon:'💰',title:'Income & Receipts',text:'Track gross fares, expenses, and net take-home here. Tips are captured right when you mark a ride paid, so you rarely need to come here to add them. Use the receipt scanner to snap a photo and auto-fill amounts. Requires Driver Pro.'},
+  income:{icon:'💰',title:'Income & Receipts',text:'Track gross fares, expenses, and net take-home here — costs show in red, everything you keep in green. Tips are captured right when you mark a ride paid. Use the receipt scanner to auto-fill amounts. Requires Driver Pro. (Admins get a Rides Report button for rides-per-month, year over year.)'},
   flights:{icon:'✈️',title:'Flights & Traffic',text:'Search any flight number for live tracking. Today\'s and tomorrow\'s airport rides are listed automatically with tracking links.'},
   chat:{icon:'💬',title:'Team Chat',text:'Offerings: post rides needing coverage — teammates volunteer, then the ride\'s owner assigns whoever they pick, and the card marks itself covered. Updates: share traffic without buzzing phones. You can delete your own messages anywhere; admins can delete any message in the group channels. Delete a whole DM from its header.'},
-  team:{icon:'🚘',title:'Team & Driver Cards',text:'Team driver cards live here — tap Share Card or Download to send yours. Admins can Edit driver, change a card\'s color, and add new drivers here. If a driver runs more than one vehicle, each has its own card, and the confirmation sender picks which one to send.'},
-  myprofile:{icon:'🪪',title:'My Profile',text:'Set up everything about you here: vehicle, home address, gas/MPG, Venmo, confirmation text, day-of selfie, and which parts your all-in-one text includes. The Team Availability tab shows when everyone is off.'},
+  team:{icon:'🚘',title:'Team & Driver Cards',text:'Team driver cards live here — tap Share Card or Download to send yours. No card yet, or adding a vehicle? Tap Edit / generate driver card to build one from a photo of you plus your vehicle. Each vehicle keeps its own card, and the confirmation sender picks which to send. Admins can also Edit driver, change a card\'s color, and add drivers.'},
+  myprofile:{icon:'🪪',title:'My Profile',text:'My Info holds your card, your availability, and your Share/Download/Venmo buttons. Days off can repeat weekly, monthly, or yearly, and one-time dates drop off after they pass. Receipt branding, payment methods, and your confirmation text & pickup instructions live on the Account Settings tab — where you can also paste your existing text and let the app tokenize it. (Team Availability is now on the Team page.)'},
 };
 let _shownTips=new Set();
 function showPageTip(pageId){
@@ -2792,6 +2796,7 @@ function calcQuote() {
 
   const owType  = type==='ONE WAY';
   const lcType  = type==='LOCAL';
+  const medType = type==='MEDICAL';
 
   if(rtType){
     const rtMiles   = miles * 2;
@@ -2810,6 +2815,13 @@ function calcQuote() {
     lines.push(miles>0?{label:'Mileage', val:owCharge, note:`${miles} mi × $${mileageRate().toFixed(2)}/mi`}:{label:'Mileage', val:0, note:'Enter miles above'});
     lines.push({label:'Pickup/Drop-off fee', val:owService});
     if(vehUp>0) lines.push({label:`Vehicle upcharge (${vehicle})`, val:vehUp});
+  } else if(medType){
+    const medHours = parseFloat(document.getElementById('q-med-hours')?.value)||0;
+    const medBase  = medHours * waitRate();
+    tripTotal = medBase;
+    lines.push(medHours>0
+      ? {label:`Medical transport (${medHours}h × $${waitRate()}/hr)`, val:medBase}
+      : {label:'Medical transport', val:0, note:'Enter hours above'});
   } else {
     const overMiles = apType && miles > 52 ? miles - 50 : 0;
     const overage   = overMiles * mileageRate();
@@ -2986,6 +2998,12 @@ function _editAutoPrice(){
   // Airport types keep manual entry because fuel/surcharges aren't captured on this form.
   var pe=document.getElementById('edit-price'); if(!pe) return;
   var type=(document.getElementById('edit-type')||{}).value||'';
+  if(type==='MEDICAL'){
+    // Price = hours × waiting-time rate, keeping whatever surcharges were already on the ride.
+    var _mh=parseFloat((document.getElementById('edit-med-hours')||{}).value)||0;
+    pe.value=Math.round((_mh*waitRate()+(window._editMedExtras||0))*100)/100;
+    return;
+  }
   var miles=parseFloat((document.getElementById('edit-miles')||{}).value)||0;
   if(miles<=0) return;
   var vehicle=(document.getElementById('edit-vehicle')||{}).value||'Sedan';
@@ -3416,7 +3434,9 @@ function updateTripFields(){
   const isAPRT  = type==='AP ROUND TRIP';
   const isRT    = type==='ROUND TRIP';
   const isOneWay= type==='ONE WAY';
+  const isMed   = type==='MEDICAL';
   const show=(id,on)=>{ const el=document.getElementById(id); if(el) el.style.display = on?'block':'none'; };
+  show('q-med-hours-group', isMed);
   // Flight # + Terminal only make sense for airport trips
   show('q-flight-group', isAP);
   show('q-terminal-group', isAP);
@@ -3698,6 +3718,7 @@ async function saveQuote(){
     xstop: extraStops,
     xstopAddr:(document.getElementById('q-xstop-addr')?.value||'').trim(),
     wait:parseFloat(document.getElementById('q-wait').value)||0,
+    medHours:parseFloat(document.getElementById('q-med-hours')?.value)||0,
     confirmed:false, createdBy:currentUser?.name||'',
     newClient: !!(document.getElementById('q-new-client')?.checked),
   };
@@ -5080,12 +5101,30 @@ function openRideModal(id){
   document.getElementById('ride-modal').classList.add('show');
 }
 
+async function updateMedHours(id){
+  var r=(rides||[]).find(function(x){ return x.id===id; }); if(!r) return;
+  var me=getMyDriverName();
+  if(!((typeof isAdmin==='function'&&isAdmin()) || (me && me===r.driver))){ showToast('Only the assigned driver or an admin can change the hours','error'); return; }
+  var el=document.getElementById('med-hours-inline-'+id); if(!el) return;
+  var nh=parseFloat(el.value);
+  if(!isFinite(nh)||nh<0){ showToast('Enter a valid number of hours','error'); return; }
+  var oh=parseFloat(r.medHours)||0;
+  var delta=(nh-oh)*waitRate();               // only the hours portion moves — surcharges stay
+  r.medHours=nh;
+  r.price=Math.round(((parseFloat(r.price)||0)+delta)*100)/100;
+  try{ touchRide(r,'edit medical hours'); }catch(e){}
+  await saveRides();
+  showToast('\u2713 Hours updated: '+nh+'h \u2014 $'+(parseFloat(r.price)||0).toFixed(2));
+  try{ renderRideView(r); }catch(e){}
+  try{ refreshDash(); }catch(e){}
+}
 function renderRideView(r){
   const driverFirst = r.driver ? r.driver.split(' ')[0] : 'Unassigned';
   const color = rideColor(r);
   const ink = readableInk(color);
   const feeBreak = buildFeeBreakdown(r);
   const _myDName = getMyDriverName();
+  const canEditMedHours = (_myDName && _myDName===r.driver) || (typeof isAdmin==='function' && isAdmin());
   const _ccRm = currentUser ? (PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name) : null;
   const _ccRc = r.createdBy ? (PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy) : null;
   const canSeeContact = (_ccRm && _ccRc && _ccRm === _ccRc)
@@ -5119,8 +5158,9 @@ function renderRideView(r){
   const shareOfferingsBtn = (r.status!=='cancelled' && canPostOfferings)
     ? '<div class="detail-row" style="grid-column:1/-1;margin-top:.25rem;">'+(_alreadyOffered?'<div style="padding:.5rem;text-align:center;font-size:.84rem;color:var(--green);font-weight:600;">\u2705 Posted to Offerings</div>':'<button onclick="shareRideToOfferings('+r.id+')" style="width:100%;padding:.55rem;background:none;border:1.5px solid #7c3aed;color:#7c3aed;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.84rem;font-weight:600;cursor:pointer;">\uD83D\uDCE4 Post to Offerings</button>')+'</div>'
     : '';
-  const address = r.type==='AP RUN' ? r.home :
-                  r.type==='AP PICK UP' ? r.pickup : r.home;
+  const _bothAddr = (r.type==='MEDICAL'||r.type==='ROUND TRIP'||r.type==='ONE WAY');
+  const address = _bothAddr ? '' : (r.type==='AP RUN' ? r.home :
+                  r.type==='AP PICK UP' ? r.pickup : r.home);
 
   document.getElementById('rm-detail-grid').innerHTML=`${rideReqDriverTag(r)}
     ${r.status==='cancelled'?`<div style="grid-column:1/-1;background:#fdecea;border:1.5px solid #e6a8a0;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#b03a2e;font-weight:700;font-size:.9rem;">🚫 CANCELLED${r.cancelledBy?' · by '+escHtml(String(r.cancelledBy)):''} — tap “Reactivate Ride” below to restore.</div>`:''}
@@ -5183,6 +5223,22 @@ function renderRideView(r){
       <div style="display:flex;align-items:flex-start;gap:.75rem;">
         <i class="ti ti-map-pin" style="font-size:18px;color:var(--mid);margin-top:2px;" aria-hidden="true"></i>
         <div style="font-size:.88rem;color:var(--black);">${mapsLink(address, "var(--accent)")}</div>
+      </div>
+    </div>` : ''}
+
+    ${_bothAddr && (r.pickup||r.home) ? `<div class="detail-row" style="grid-column:1/-1;">
+      <div style="display:flex;flex-direction:column;gap:.4rem;">
+        ${r.pickup?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:58px;margin-top:2px;">PICKUP</span><div style="font-size:.86rem;">${mapsLink(r.pickup,"var(--accent)")}</div></div>`:''}
+        ${r.home?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:58px;margin-top:2px;">DROP-OFF</span><div style="font-size:.86rem;">${mapsLink(r.home,"var(--accent)")}</div></div>`:''}
+      </div>
+    </div>` : ''}
+
+    ${r.type==='MEDICAL' ? `<div class="detail-row" style="grid-column:1/-1;">
+      <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;">
+        <span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);">HOURS</span>
+        ${canEditMedHours
+          ? `<input type="number" id="med-hours-inline-${r.id}" value="${r.medHours||0}" min="0" step="0.5" style="width:72px;padding:.3rem .45rem;border:1.5px solid var(--light);border-radius:6px;font-size:.85rem;" /><button onclick="updateMedHours(${r.id})" style="padding:.32rem .8rem;background:var(--accent);color:#fff;border:none;border-radius:7px;font-size:.78rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">Update</button><span style="font-size:.72rem;color:var(--mid);">× $${waitRate()}/hr</span>`
+          : `<span style="font-size:.9rem;font-weight:600;">${r.medHours||0} h</span>`}
       </div>
     </div>` : ''}
 
@@ -5937,6 +5993,7 @@ function editTypeChanged(){
   var _isAP=(t==='AP RUN'||t==='AP PICK UP'||t==='AP ROUND TRIP');
   var _efg=document.getElementById('edit-flight-group'); if(_efg) _efg.style.display=_isAP?'':'none';
   var _etg=document.getElementById('edit-terminal-group'); if(_etg) _etg.style.display=_isAP?'':'none';
+  var _emhg=document.getElementById('edit-med-hours-group'); if(_emhg) _emhg.style.display=(t==='MEDICAL')?'block':'none';
 }
 
 function toggleEditMode(on){
@@ -5987,6 +6044,8 @@ function toggleEditMode(on){
   }
   document.getElementById('edit-type').value     = r.type||'AP RUN';
   editTypeChanged(); // refresh address labels + return-trip section now that type is set
+  window._editMedExtras = Math.max(0,(r.price||0) - (r.medHours||0)*waitRate());
+  var _emh0=document.getElementById('edit-med-hours'); if(_emh0) _emh0.value = r.medHours||'';
   document.getElementById('edit-pickup').value   = r.pickup||'';
   document.getElementById('edit-home').value     = r.home||'';
   document.getElementById('edit-price').value    = r.price||0;
@@ -6027,6 +6086,7 @@ async function saveRideEdits(){
   r.driver2   = r.xxl?(document.getElementById('edit-driver2')?.value||''):'';
   r.price2    = r.xxl?(parseFloat(document.getElementById('edit-price2')?.value)||0):0;
   r.type      = document.getElementById('edit-type').value;
+  r.medHours  = parseFloat((document.getElementById('edit-med-hours')||{}).value)||0;
   r.pickup    = document.getElementById('edit-pickup').value.trim();
   r.home      = document.getElementById('edit-home').value.trim();
   r.price     = parseFloat(document.getElementById('edit-price').value)||0;
@@ -9495,6 +9555,7 @@ function _onbDismissKey(){
 }
 
 var _onbPhotoData = null;  // holds uploaded photo (base64) for save
+var _onbGeneratedCard = null; // generated driver card (base64) for save
 var _onbLogoData = null;   // holds uploaded business logo (base64) for save
 function _onbUploadLogo(){
   var inp = document.createElement('input');
@@ -9528,6 +9589,72 @@ function _onbConfMode(){
   var mode = document.querySelector('input[name="onb-conf-mode"]:checked');
   var fields = document.getElementById('onb-conf-fields');
   if(fields) fields.style.display = (mode && mode.value==='custom') ? 'block' : 'none';
+}
+function _escReImport(s){ return String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
+// Turn a real example message into a tokenized template the generator can auto-fill.
+function _tokenizeConfText(text, opts){
+  opts=opts||{};
+  var out=String(text||'');
+  var me=(typeof getMyDriverName==='function'?getMyDriverName():'')||'';
+  var prof=(me && typeof DRIVER_PROFILES!=='undefined')?(DRIVER_PROFILES[me]||{}):{};
+  // 1) Greeting name -> {client}  (Hi Bob, / Hello Bob / Dear Bob)
+  out=out.replace(/\b(Hi|Hello|Hey|Dear)\s+([A-Z][a-zA-Z'\-]+)/g, function(m,g){ return g+' {client}'; });
+  // 2) Explicit client name the user typed in
+  if(opts.clientName){ var cn=String(opts.clientName).trim(); if(cn.length>1){ out=out.split(cn).join('{client}'); } }
+  // 3) Flight number (only when the word "flight" is nearby)
+  out=out.replace(/flight\s*#?\s*([A-Za-z]{2}\s?\d{2,4})/gi, 'flight {flight}');
+  // 4) Money -> {amount}
+  out=out.replace(/\$\s?\d[\d,]*(?:\.\d{2})?/g, '{amount}');
+  // 5) Dates -> {date}
+  out=out.replace(/\b(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?/gi, '{date}');
+  out=out.replace(/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g, '{date}');
+  // 6) Times -> {time}
+  out=out.replace(/\b\d{1,2}:\d{2}\s?(?:[AaPp]\.?[Mm]\.?)?/g, '{time}');
+  // 7) Phones -> {phone}
+  out=out.replace(/\(\d{3}\)\s?\d{3}[-.\s]?\d{4}/g, '{phone}');
+  out=out.replace(/\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b/g, '{phone}');
+  // 8) The driver's own name -> {driver}
+  if(me){
+    out=out.split(me).join('{driver}');
+    var first=me.split(' ')[0];
+    if(first && first.length>2) out=out.replace(new RegExp('\\b'+_escReImport(first)+'\\b','g'),'{driver}');
+  }
+  return out;
+}
+var _confImportTarget=null;
+function openConfImporter(targetId){
+  _confImportTarget=targetId;
+  var ov=document.createElement('div'); ov.id='conf-import-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:16000;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:460px;width:100%;max-height:92vh;overflow:auto;padding:1.35rem;box-shadow:0 24px 60px rgba(0,0,0,.4);">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem;"><div style="font-size:1.05rem;font-weight:800;color:#0f172a;">Import your existing text</div><button onclick="document.getElementById(\'conf-import-overlay\').remove()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button></div>'
+    +'<div style="font-size:.78rem;color:var(--mid);margin-bottom:.7rem;line-height:1.45;">Paste a message you normally send. We\u2019ll swap the parts that change every ride \u2014 name, date, time, phone, price, flight \u2014 for tokens so the app fills them in automatically. Review the result and tweak anything.</div>'
+    +'<label style="font-size:.72rem;font-weight:700;color:var(--mid);">Your example message</label>'
+    +'<textarea id="conf-import-src" rows="5" placeholder="Paste here\u2026" style="width:100%;margin:.25rem 0 .6rem;padding:.5rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;"></textarea>'
+    +'<label style="font-size:.72rem;font-weight:700;color:var(--mid);">Client\u2019s name in your example <span style="font-weight:400;">(optional \u2014 helps replace it with {client})</span></label>'
+    +'<input type="text" id="conf-import-client" placeholder="e.g. John" style="width:100%;margin:.25rem 0 .7rem;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;" />'
+    +'<button onclick="_runConfImport()" style="width:100%;padding:.6rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;font-weight:700;cursor:pointer;margin-bottom:.8rem;">\u2728 Insert tokens</button>'
+    +'<label style="font-size:.72rem;font-weight:700;color:var(--mid);">Tokenized result <span style="font-weight:400;">(edit as needed)</span></label>'
+    +'<textarea id="conf-import-out" rows="6" placeholder="Your tokenized message appears here\u2026" style="width:100%;margin:.25rem 0 .5rem;padding:.5rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea>'
+    +'<div style="font-size:.66rem;color:var(--mid);margin-bottom:.8rem;line-height:1.4;">Available tokens: <code>{client}</code> <code>{date}</code> <code>{time}</code> <code>{pickup}</code> <code>{dropoff}</code> <code>{driver}</code> <code>{me}</code> <code>{phone}</code> <code>{amount}</code> <code>{flight}</code> <code>{terminal}</code></div>'
+    +'<button onclick="_useConfImport()" style="width:100%;padding:.65rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.9rem;font-weight:700;cursor:pointer;">Use this text</button>'
+    +'</div>';
+  document.body.appendChild(ov);
+}
+function _runConfImport(){
+  var src=(document.getElementById('conf-import-src')||{}).value||'';
+  var cn=(document.getElementById('conf-import-client')||{}).value||'';
+  if(!src.trim()){ showToast('Paste your message first','error'); return; }
+  var out=_tokenizeConfText(src,{clientName:cn});
+  var o=document.getElementById('conf-import-out'); if(o) o.value=out;
+}
+function _useConfImport(){
+  var out=(document.getElementById('conf-import-out')||{}).value||'';
+  if(!out.trim()){ showToast('Nothing to use yet \u2014 tap Insert tokens','error'); return; }
+  if(_confImportTarget){ var t=document.getElementById(_confImportTarget); if(t){ t.value=out; } }
+  var ov=document.getElementById('conf-import-overlay'); if(ov) ov.remove();
+  showToast('\u2713 Imported \u2014 review & Save My Info');
 }
 function _onbInsertConfExample(){
   var el = document.getElementById('onb-conf');
@@ -9641,7 +9768,7 @@ function openOnboarding(){
         + 'font-size:.8rem;font-weight:600;cursor:pointer;font-family:\'DM Sans\',sans-serif;">'+escHtml(p)+'</button>';
     }).join('');
   }
-  _onbPhotoData=null;
+  _onbPhotoData=null; _onbGeneratedCard=null;
   // Prefill confirmation text (general + per-type)
   var _dsX = driverSettings[dn] || {};
   var existingConf = (_dsX.confTemplate) || prof.confirmTemplate || '';
@@ -9803,6 +9930,12 @@ async function saveOnboarding(){
   var selfieChoice = document.querySelector('input[name=\'onb-selfie-choice\']:checked');
   if(selfieChoice && selfieChoice.value==='own' && _onbPhotoData){
     driverSettings[dn]=driverSettings[dn]||{}; driverSettings[dn].selfie=_onbPhotoData;
+  }
+  // Generated driver card becomes the primary card image.
+  if(_onbGeneratedCard){
+    if(typeof DRIVER_PHOTOS!=='undefined') DRIVER_PHOTOS[dn]=_onbGeneratedCard;
+    if(Array.isArray(p.vehicles) && p.vehicles.length) p.vehicles[0].photo=_onbGeneratedCard;
+    try{ var _ov=await storageGet('kat:driverPhotoOverrides'); if(!_ov||typeof _ov!=='object')_ov={}; _ov[dn]=_onbGeneratedCard; await storageSet('kat:driverPhotoOverrides',_ov); }catch(e){}
   }
   // Mark onboarding as completed so an admin "re-prompt all" reset clears for this driver.
   p.onboardedAt = Date.now();
@@ -10758,7 +10891,7 @@ function openEditDriverModal(dName){
     +fld('Vehicle make/model','ed-vehicle',p.vehicle)
     +'<div style="margin-bottom:1rem;"><div style="font-size:.66rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">Calendar color</div><input type="color" id="ed-color" value="'+driverColor(dName)+'" style="width:100%;height:40px;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;background:#fff;" /></div>'
     +'<button onclick="submitEditDriver(\''+dName.replace(/'/g,"\\'")+'\')" style="width:100%;padding:.7rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.92rem;font-weight:700;cursor:pointer;">Save changes</button>'
-    +'<div style="font-size:.7rem;color:var(--mid);margin-top:.6rem;line-height:1.5;">To change the card photo, use “Edit card photo” on the card. Login &amp; password are managed under Access control.</div>'
+    +'<div style="font-size:.7rem;color:var(--mid);margin-top:.6rem;line-height:1.5;">To change or generate the card, use “Edit / generate driver card” on the card. Login &amp; password are managed under Access control.</div>'
     +'</div>';
   document.body.appendChild(ov);
 }
@@ -10804,50 +10937,163 @@ function _ndPhotoPick(input){
 // ── EDIT A DRIVER CARD PHOTO (the driver themselves, or any admin) ──
 let _editPhotoData='';
 let _editPhotoDriver='';
-function openDriverPhotoUpload(driverName){
-  var me=getMyDriverName();
-  if(!(isAdmin() || me===driverName)){ showToast('You can only change your own card photo','error'); return; }
-  _editPhotoData=''; _editPhotoDriver=driverName;
-  var current=(typeof DRIVER_PHOTOS!=='undefined' && DRIVER_PHOTOS[driverName]) ? DRIVER_PHOTOS[driverName] : '';
-  var ov=document.createElement('div');
-  ov.id='edit-photo-overlay';
-  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.62);z-index:14200;display:flex;align-items:center;justify-content:center;padding:1.5rem;';
+let _editCards=[];
+let _editCardsDriver='';
+// ── AUTO-GENERATE A DRIVER CARD (headshot + vehicle + name, matching the house style) ──
+function generateDriverCard(photoUrl, vehicleUrl, name){
+  return new Promise(function(resolve){
+    var W=560,H=332;
+    var cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+    var ctx=cv.getContext('2d');
+    ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,W,H);
+    function load(src){ return new Promise(function(res){ if(!src){res(null);return;} var im=new Image(); im.onload=function(){res(im);}; im.onerror=function(){res(null);}; im.src=src; }); }
+    function cover(img,x,y,w,h){ var ir=img.width/img.height, tr=w/h, sw,sh,sx,sy; if(ir>tr){ sh=img.height; sw=sh*tr; sx=(img.width-sw)/2; sy=0; } else { sw=img.width; sh=sw/tr; sx=0; sy=(img.height-sh)/2; } ctx.drawImage(img,sx,sy,sw,sh,x,y,w,h); }
+    function contain(img,x,y,w,h){ var ir=img.width/img.height, tr=w/h, dw,dh; if(ir>tr){ dw=w; dh=w/ir; } else { dh=h; dw=h*ir; } ctx.drawImage(img,x+(w-dw)/2,y+(h-dh)/2,dw,dh); }
+    Promise.all([load(photoUrl),load(vehicleUrl)]).then(function(a){
+      if(a[0]) cover(a[0],22,20,180,252);       // headshot, left
+      if(a[1]) contain(a[1],212,20,326,252);    // vehicle, right
+      ctx.fillStyle='#1a1a1a'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+      var nm=(name||'').trim(), fs=44;
+      var fam='"Cormorant Garamond",Georgia,"Times New Roman",serif';
+      ctx.font=fs+'px '+fam;
+      while(nm && ctx.measureText(nm).width>W-44 && fs>18){ fs-=2; ctx.font=fs+'px '+fam; }
+      ctx.fillText(nm, W/2, 312);
+      resolve(cv.toDataURL('image/jpeg',0.9));
+    });
+  });
+}
+var _cardGenPhoto='', _cardGenVehicle='', _cardGenCb=null, _cardGenResult='';
+function openCardGenerator(prefillName, onUse){
+  _cardGenPhoto=''; _cardGenVehicle=''; _cardGenResult=''; _cardGenCb=onUse||null;
+  var ov=document.createElement('div'); ov.id='cardgen-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.62);z-index:16500;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
   ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
-  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:400px;width:100%;padding:1.35rem;box-shadow:0 24px 60px rgba(0,0,0,.4);">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.9rem;">'
-    +'<div style="font-size:1.05rem;font-weight:800;color:#0f172a;">Driver card photo</div>'
-    +'<button onclick="document.getElementById(\'edit-photo-overlay\').remove()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button>'
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:470px;width:100%;max-height:92vh;overflow:auto;padding:1.35rem;box-shadow:0 24px 60px rgba(0,0,0,.4);">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem;"><div style="font-size:1.05rem;font-weight:800;color:#0f172a;">Generate a driver card</div><button onclick="document.getElementById(\'cardgen-overlay\').remove()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button></div>'
+    +'<div style="font-size:.78rem;color:var(--mid);margin-bottom:.9rem;line-height:1.45;">Add a photo of yourself, a photo of your vehicle, and your name. We\u2019ll build a clean card for you \u2014 no design needed.</div>'
+    +'<div style="display:flex;gap:.6rem;margin-bottom:.7rem;">'
+    +'<label style="flex:1;text-align:center;padding:.6rem;border:1.5px dashed var(--accent);border-radius:9px;cursor:pointer;font-size:.8rem;color:var(--accent);font-weight:700;">Your photo<div id="cardgen-photo-prev" style="width:100%;height:74px;margin-top:.4rem;border-radius:6px;background:#f4f2f8 center/cover no-repeat;"></div><input type="file" accept="image/*" onchange="_cardGenPick(this,\'photo\')" style="display:none;"></label>'
+    +'<label style="flex:1;text-align:center;padding:.6rem;border:1.5px dashed var(--accent);border-radius:9px;cursor:pointer;font-size:.8rem;color:var(--accent);font-weight:700;">Your vehicle<div id="cardgen-veh-prev" style="width:100%;height:74px;margin-top:.4rem;border-radius:6px;background:#f4f2f8 center/contain no-repeat;"></div><input type="file" accept="image/*" onchange="_cardGenPick(this,\'vehicle\')" style="display:none;"></label>'
     +'</div>'
-    +'<div style="font-size:.8rem;color:#64748b;margin-bottom:.9rem;">Upload the full driver card image for <strong>'+escHtml(driverName)+'</strong> (photo + vehicle). It updates the card everywhere.</div>'
-    +'<div id="edit-photo-preview" style="width:100%;height:150px;border-radius:10px;background:#f4f2f8 center/contain no-repeat;border:1.5px solid var(--light);margin-bottom:.8rem;'+(current?'background-image:url('+current+');':'')+'"></div>'
-    +'<label style="display:block;width:100%;padding:.7rem;background:var(--surface);border:1.5px dashed var(--accent);border-radius:9px;text-align:center;font-size:.85rem;color:var(--accent);font-weight:700;cursor:pointer;margin-bottom:.8rem;">Choose image<input type="file" accept="image/*" onchange="_editPhotoPick(this)" style="display:none;" /></label>'
-    +'<button onclick="saveDriverPhoto()" style="width:100%;padding:.75rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.92rem;font-weight:700;cursor:pointer;">Save photo</button>'
+    +'<input type="text" id="cardgen-name" value="'+escAttr(prefillName||'')+'" placeholder="Your name" style="width:100%;padding:.5rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-size:.85rem;box-sizing:border-box;margin-bottom:.7rem;font-family:\'DM Sans\',sans-serif;">'
+    +'<button onclick="_cardGenBuild()" style="width:100%;padding:.6rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-weight:700;font-size:.85rem;cursor:pointer;margin-bottom:.8rem;font-family:\'DM Sans\',sans-serif;">\u2728 Generate preview</button>'
+    +'<div id="cardgen-preview" style="width:100%;border-radius:10px;border:1.5px solid var(--light);margin-bottom:.8rem;min-height:60px;background:#fafafa;display:flex;align-items:center;justify-content:center;color:var(--mid);font-size:.78rem;">Preview appears here</div>'
+    +'<button onclick="_cardGenUse()" style="width:100%;padding:.65rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-weight:700;font-size:.9rem;cursor:pointer;font-family:\'DM Sans\',sans-serif;">Use this card</button>'
     +'</div>';
   document.body.appendChild(ov);
 }
-function _editPhotoPick(input){
+function _cardGenPick(input,which){
   var f=input.files&&input.files[0]; if(!f) return;
   var rd=new FileReader();
-  rd.onload=function(){ _editPhotoData=rd.result; var pv=document.getElementById('edit-photo-preview'); if(pv) pv.style.backgroundImage='url('+rd.result+')'; };
+  rd.onload=function(){ if(which==='photo'){ _cardGenPhoto=rd.result; var p=document.getElementById('cardgen-photo-prev'); if(p)p.style.backgroundImage='url('+rd.result+')'; } else { _cardGenVehicle=rd.result; var v=document.getElementById('cardgen-veh-prev'); if(v)v.style.backgroundImage='url('+rd.result+')'; } };
   rd.readAsDataURL(f);
 }
-async function saveDriverPhoto(){
-  var dn=_editPhotoDriver;
+function _cardGenBuild(){
+  var name=(document.getElementById('cardgen-name')||{}).value||'';
+  if(!_cardGenPhoto && !_cardGenVehicle){ showToast('Add a photo or vehicle first','error'); return; }
+  generateDriverCard(_cardGenPhoto,_cardGenVehicle,name).then(function(url){
+    _cardGenResult=url;
+    var pv=document.getElementById('cardgen-preview'); if(pv){ pv.innerHTML='<img src="'+url+'" style="width:100%;border-radius:8px;display:block;">'; }
+  });
+}
+function _cardGenUse(){
+  if(!_cardGenResult){ showToast('Generate the preview first','error'); return; }
+  var cb=_cardGenCb, url=_cardGenResult;
+  var ov=document.getElementById('cardgen-overlay'); if(ov) ov.remove();
+  if(typeof cb==='function') cb(url);
+  showToast('\u2713 Card created');
+}
+// Called from the Vehicles & cards manager to build a card for a specific vehicle row.
+function _cardGenForVehicle(i){
+  openCardGenerator(_editCardsDriver, function(url){
+    if(_editCards[i]){ _editCards[i].photo=url; var pv=document.getElementById('edit-card-prev-'+i); if(pv) pv.style.backgroundImage='url('+url+')'; }
+  });
+}
+function openDriverPhotoUpload(driverName){
+  var me=getMyDriverName();
+  if(!(isAdmin() || me===driverName)){ showToast('You can only change your own cards','error'); return; }
+  _editCardsDriver=driverName;
+  // Working copy of the driver's vehicles (each has its own card photo + costs).
+  var list=(typeof driverVehicles==='function') ? driverVehicles(driverName) : [];
+  _editCards = (list||[]).map(function(v){ return { label:v.label||'', year:v.year||'', mpg:v.mpg||'', gasPrice:v.gasPrice||'', maintRate:v.maintRate||'', photo:v.photo||'' }; });
+  if(!_editCards.length) _editCards=[{label:'',year:'',mpg:'',gasPrice:'',maintRate:'',photo:''}];
+  var ov=document.createElement('div');
+  ov.id='edit-photo-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.62);z-index:14200;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:430px;width:100%;padding:1.35rem;box-shadow:0 24px 60px rgba(0,0,0,.4);max-height:90vh;overflow:auto;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem;">'
+    +'<div style="font-size:1.05rem;font-weight:800;color:#0f172a;">Vehicles &amp; cards</div>'
+    +'<button onclick="document.getElementById(\'edit-photo-overlay\').remove()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button>'
+    +'</div>'
+    +'<div style="font-size:.8rem;color:#64748b;margin-bottom:.9rem;">A card for each vehicle <strong>'+escHtml(driverName)+'</strong> drives (photo + vehicle). When a ride is confirmed, the sender picks which one to send, and its costs drive that ride\u2019s income.</div>'
+    +'<div id="edit-cards-list"></div>'
+    +'<button onclick="_editCardAdd()" style="width:100%;padding:.55rem;background:none;border:1.5px dashed var(--accent);border-radius:9px;color:var(--accent);font-weight:700;font-size:.84rem;cursor:pointer;font-family:\'DM Sans\',sans-serif;margin-bottom:.8rem;">+ Add another vehicle</button>'
+    +'<button onclick="saveDriverCards()" style="width:100%;padding:.75rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.92rem;font-weight:700;cursor:pointer;">Save</button>'
+    +'</div>';
+  document.body.appendChild(ov);
+  _renderEditCards();
+}
+function _renderEditCards(){
+  var box=document.getElementById('edit-cards-list'); if(!box) return;
+  box.innerHTML=_editCards.map(function(v,i){
+    var canRemove=_editCards.length>1;
+    var pv=v.photo?('background-image:url('+v.photo+');'):'';
+    return '<div style="border:1.5px solid var(--light);border-radius:11px;padding:.8rem;margin-bottom:.7rem;">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;">'
+      +'<div style="font-size:.68rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);">Vehicle '+(i+1)+(i===0?' (primary)':'')+'</div>'
+      +(canRemove?'<button onclick="_editCardRemove('+i+')" style="background:none;border:none;color:#dc2626;font-size:.74rem;font-weight:600;cursor:pointer;text-decoration:underline;font-family:\'DM Sans\',sans-serif;">Remove</button>':'')
+      +'</div>'
+      +'<div id="edit-card-prev-'+i+'" style="width:100%;height:132px;border-radius:9px;background:#f4f2f8 center/contain no-repeat;'+pv+'border:1.5px solid var(--light);margin-bottom:.55rem;"></div>'
+      +'<label style="display:block;width:100%;padding:.55rem;background:var(--surface);border:1.5px dashed var(--accent);border-radius:8px;text-align:center;font-size:.82rem;color:var(--accent);font-weight:700;cursor:pointer;margin-bottom:.4rem;">Choose card image<input type="file" accept="image/*" onchange="_editCardPick('+i+',this)" style="display:none;" /></label>'+'<button type="button" onclick="_cardGenForVehicle('+i+')" style="width:100%;padding:.5rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;font-size:.78rem;font-weight:700;cursor:pointer;margin-bottom:.55rem;font-family:\'DM Sans\',sans-serif;">\u2728 Generate a card from photos</button>'
+      +'<input type="text" value="'+escAttr(v.label||'')+'" oninput="_editCardSet('+i+',\'label\',this.value)" placeholder="Vehicle e.g. Ford Expedition" style="width:100%;padding:.45rem .55rem;border:1px solid var(--light);border-radius:7px;font-size:.85rem;box-sizing:border-box;margin-bottom:.45rem;font-family:\'DM Sans\',sans-serif;" />'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:.4rem;">'
+      +'<input type="text" value="'+escAttr(v.year||'')+'" oninput="_editCardSet('+i+',\'year\',this.value)" placeholder="Year" inputmode="numeric" style="padding:.4rem;border:1px solid var(--light);border-radius:7px;font-size:.78rem;box-sizing:border-box;font-family:\'DM Sans\',sans-serif;" />'
+      +'<input type="number" value="'+escAttr(v.mpg===0?'':(v.mpg||''))+'" oninput="_editCardSet('+i+',\'mpg\',this.value)" placeholder="MPG" inputmode="decimal" style="padding:.4rem;border:1px solid var(--light);border-radius:7px;font-size:.78rem;box-sizing:border-box;font-family:\'DM Sans\',sans-serif;" />'
+      +'<input type="number" value="'+escAttr(v.gasPrice===0?'':(v.gasPrice||''))+'" oninput="_editCardSet('+i+',\'gasPrice\',this.value)" placeholder="$/gal" inputmode="decimal" style="padding:.4rem;border:1px solid var(--light);border-radius:7px;font-size:.78rem;box-sizing:border-box;font-family:\'DM Sans\',sans-serif;" />'
+      +'<input type="number" value="'+escAttr(v.maintRate===0?'':(v.maintRate||''))+'" oninput="_editCardSet('+i+',\'maintRate\',this.value)" placeholder="$/mi" inputmode="decimal" style="padding:.4rem;border:1px solid var(--light);border-radius:7px;font-size:.78rem;box-sizing:border-box;font-family:\'DM Sans\',sans-serif;" />'
+      +'</div>'
+      +'</div>';
+  }).join('');
+}
+function _editCardSet(i,key,val){ if(_editCards[i]) _editCards[i][key]=val; }
+function _editCardPick(i,input){
+  var f=input.files&&input.files[0]; if(!f) return;
+  var rd=new FileReader();
+  rd.onload=function(){ if(_editCards[i]){ _editCards[i].photo=rd.result; var pv=document.getElementById('edit-card-prev-'+i); if(pv) pv.style.backgroundImage='url('+rd.result+')'; } };
+  rd.readAsDataURL(f);
+}
+function _editCardAdd(){ _editCards.push({label:'',year:'',mpg:'',gasPrice:'',maintRate:'',photo:''}); _renderEditCards(); }
+function _editCardRemove(i){ if(_editCards.length>1){ _editCards.splice(i,1); _renderEditCards(); } }
+async function saveDriverCards(){
+  var dn=_editCardsDriver;
   var me=getMyDriverName();
   if(!(isAdmin() || me===dn)){ showToast('Not allowed','error'); return; }
-  if(!_editPhotoData){ showToast('Choose an image first','error'); return; }
-  if(typeof DRIVER_PHOTOS==='undefined'){ showToast('Photo store unavailable','error'); return; }
-  DRIVER_PHOTOS[dn]=_editPhotoData;
+  // Keep vehicles that have at least a label or a photo.
+  var kept=_editCards.filter(function(v){ return (v.label&&v.label.trim()) || v.photo; });
+  if(!kept.length){ showToast('Add a card image or a vehicle name first','error'); return; }
+  var num=function(x){ var n=parseFloat(x); return isNaN(n)?'':n; };
+  var vehicles=kept.map(function(v){ return { label:(v.label||'').trim(), year:(v.year||'').trim(), mpg:num(v.mpg), gasPrice:num(v.gasPrice), maintRate:num(v.maintRate), photo:v.photo||'' }; });
+  if(typeof DRIVER_PROFILES==='undefined'){ showToast('Profile store unavailable','error'); return; }
+  DRIVER_PROFILES[dn]=DRIVER_PROFILES[dn]||{};
+  DRIVER_PROFILES[dn].vehicles=vehicles;
+  // Mirror the primary vehicle into the legacy fields + the shared photo store.
+  DRIVER_PROFILES[dn].vehicle=vehicles[0].label||DRIVER_PROFILES[dn].vehicle||'';
+  if(vehicles[0].year) DRIVER_PROFILES[dn].vehicleYear=vehicles[0].year;
+  if(vehicles[0].mpg!=='') DRIVER_PROFILES[dn].mpg=vehicles[0].mpg;
+  if(vehicles[0].gasPrice!=='') DRIVER_PROFILES[dn].gasPrice=vehicles[0].gasPrice;
+  if(vehicles[0].maintRate!=='') DRIVER_PROFILES[dn].maintRate=vehicles[0].maintRate;
+  if(typeof DRIVER_PHOTOS!=='undefined') DRIVER_PHOTOS[dn]=vehicles[0].photo||'';
+  try{ await storageSet('kat:driverProfiles', DRIVER_PROFILES); }catch(e){ console.warn('save profiles', e); }
   try{
     var overrides=await storageGet('kat:driverPhotoOverrides');
     if(!overrides || typeof overrides!=='object') overrides={};
-    overrides[dn]=_editPhotoData;
+    overrides[dn]=vehicles[0].photo||'';
     await storageSet('kat:driverPhotoOverrides', overrides);
   }catch(e){ console.warn('save driver photo', e); }
-  // Rebuild any cached share-card image for this driver so shares use the new photo.
   try{ if(typeof _driverCardImgCache!=='undefined') delete _driverCardImgCache[dn]; }catch(e){}
   var ov=document.getElementById('edit-photo-overlay'); if(ov) ov.remove();
-  showToast('\u2713 Card photo updated for '+dn.split(' ')[0]);
+  showToast('\u2713 '+(vehicles.length>1?vehicles.length+' vehicle cards saved':'Card saved')+' for '+dn.split(' ')[0]);
   try{ renderDriverMembers(); }catch(e){}
   try{ if(typeof renderMyProfileCard==='function') renderMyProfileCard(); }catch(e){}
 }
@@ -10894,6 +11140,8 @@ function switchDriverTab(tab, el){
   document.getElementById('driver-panel-members').style.display  = tab==='members' ?'block':'none';
   document.getElementById('driver-panel-access').style.display   = tab==='access'  ?'block':'none';
   var _pp=document.getElementById('driver-panel-pricing'); if(_pp) _pp.style.display = tab==='pricing'?'block':'none';
+  var _pav=document.getElementById('driver-panel-availability'); if(_pav) _pav.style.display = tab==='availability'?'block':'none';
+  if(tab==='availability') renderTeamAvailability();
   if(tab==='members') renderDriverMembers();
   if(tab==='access')  renderAccessControl();
   if(tab==='pricing') renderPricingTracker();
@@ -11633,7 +11881,15 @@ function renderMyProfileCard(){
   const box=document.getElementById('myprofile-card'); if(!box) return;
   const me=getMyDriverName();
   if(!me){ box.innerHTML='<div style="color:var(--mid);font-size:.9rem;padding:1rem;">Your login isn\u2019t linked to a driver profile yet. Ask an admin to link your account on the Team page.</div>'; return; }
+  try{ var _pp=DRIVER_PROFILES[me]; if(_pp){ var _ch=migrateWeeklyOff(_pp); if(pruneExpiredDaysOff(_pp)) _ch=true; if(_ch) persistDriverProfiles(); } }catch(e){}
   box.innerHTML=buildMemberCard(me,{forceEdit:true});
+  // Move the settings block (receipt branding, payments, toggles, confirmation text) into the
+  // Account Settings tab so My Info stays short. Fields keep their IDs, so Save still works.
+  try{
+    var _sb=document.getElementById('profile-settings-block');
+    var _slot=document.getElementById('mp-account-settings-slot');
+    if(_sb && _slot){ _slot.innerHTML=''; _slot.appendChild(_sb); var _sv=document.getElementById('mp-settings-save'); if(_sv) _sv.style.display='block'; }
+  }catch(e){}
 }
 // Persistent welcome banner shown at the top of My Profile on the first login only.
 // Stays after the setup popup closes so the driver can finish the rest of the page.
@@ -11656,12 +11912,11 @@ function showProfileSetupBubble(){
   }catch(e){}
 }
 function switchProfileTab(which, btn){
-  ['me','avail','account'].forEach(function(t){
+  ['me','account'].forEach(function(t){
     var p=document.getElementById('profile-panel-'+t); if(p) p.style.display=(t===which)?'block':'none';
     var b=document.getElementById('mptab-'+t); if(b) b.classList.toggle('active', t===which);
   });
   if(which==='me') renderMyProfileCard();
-  if(which==='avail') renderTeamAvailability();
   if(which==='account') renderAccountInProfile();
 }
 // Mirror the account/subscription info into the My Profile → Account tab.
@@ -11680,7 +11935,7 @@ function renderTeamAvailability(){
   const rows=DRIVERS.map(function(d){
     const prof=DRIVER_PROFILES[d]||{};
     const color=driverColor(d);
-    const weekly=(prof.weeklyOff||[]).map(function(wi){ return WEEKDAY_ABBR[wi]; });
+    const weekly=weeklyOffDays(prof);
     const upcoming=(prof.unavailableDates||[]).filter(function(dt){ return dt>=today; }).sort();
     const hrs=(prof.unavailHours||[]);
     const hasAny=weekly.length||upcoming.length||hrs.length;
@@ -11762,7 +12017,7 @@ function buildMemberCard(d, opts){
           +'</div>')
           :''}  
         ${editField('Notes',prof.notes,'prof-notes','Any notes…')}
-        ${canEdit?('<div style="margin:.6rem 0;padding-top:.55rem;border-top:1px solid var(--light);">'
+        ${canEdit?('<div id="profile-settings-block" style="margin:.6rem 0;padding-top:.55rem;border-top:1px solid var(--light);">'
           +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:.35rem;">\uD83E\uDDFE Receipt branding <span style="text-transform:none;letter-spacing:0;">(shown on receipts you send clients)</span></div>'
           +'<input class="prof-fld" type="text" id="prof-bizname-'+dk+'" value="'+escAttr(prof.businessName||'')+'" placeholder="Your business name (optional)" style="margin-bottom:.45rem;">'
           +'<button type="button" onclick="openBusinessLogoUpload(\''+d+'\')" style="width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;font-size:.82rem;font-weight:600;color:var(--black);cursor:pointer;display:flex;align-items:center;gap:.55rem;">'
@@ -11772,7 +12027,7 @@ function buildMemberCard(d, opts){
           +'</div>'):''}
         ${canEdit?('<div style="margin:.6rem 0;padding-top:.55rem;border-top:1px solid var(--light);">'
           
-          +(canEdit?'<button type="button" onclick="openDriverPhotoUpload(\''+d+'\')" style="width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;font-size:.82rem;font-weight:600;color:var(--black);cursor:pointer;margin-bottom:.45rem;">&#x1F5BC;&#xFE0F; Edit card photo</button>':'')
+          +(canEdit?'<button type="button" onclick="openDriverPhotoUpload(\''+d+'\')" style="width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;font-size:.82rem;font-weight:600;color:var(--black);cursor:pointer;margin-bottom:.45rem;">&#x1F5BC;&#xFE0F; Edit / generate driver card</button>':'')
           +(canEdit?'<button type="button" onclick="manageBiometric(\''+d+'\')" style="width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;font-size:.82rem;font-weight:600;color:var(--black);cursor:pointer;margin-bottom:.45rem;">&#x1F510; Biometric &mdash; <span style="font-weight:400;color:var(--mid);font-size:.72rem;">'+(_bioThisDeviceHas(biometricKeyFor(d))?'set up \u2713':((biometricCreds[biometricKeyFor(d)]||[]).length?'on another device \u2014 tap to add':'not set up'))+'</span></button>':'')
           +(canEdit?('<button type="button" onclick="openDriverSelfieUpload(\''+d+'\')" style="width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;font-size:.82rem;font-weight:600;color:var(--black);cursor:pointer;margin-bottom:.45rem;display:flex;align-items:center;gap:.55rem;">'
             +'<span style="width:34px;height:34px;border-radius:8px;flex-shrink:0;background:#f3eeff url(\''+((driverSettings[d]||{}).selfie||SELFIE_DEFAULT||'')+'\') center/cover;border:1px solid var(--light);"></span>'
@@ -11811,7 +12066,7 @@ function buildMemberCard(d, opts){
         ${canEdit?('<div style="margin:.6rem 0;padding-top:.55rem;border-top:1px solid var(--light);">'
           +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">My availability</div>'
           +((function(){
-             var weekly=(prof.weeklyOff||[]).map(function(wi){return WEEKDAY_ABBR[wi];});
+             var weekly=weeklyOffDays(prof);
              var _today=toDateStr(new Date());
              var upcoming=(prof.unavailableDates||[]).filter(function(dt){return dt>=_today;}).sort();
              var avExc=(prof.availableDates||[]).filter(function(dt){return dt>=_today;}).sort();
@@ -11826,19 +12081,18 @@ function buildMemberCard(d, opts){
                +(any?'':'<div style="font-size:.76rem;color:var(--mid);">Nothing blocked \u2014 available anytime.</div>')
                +'</div>';
            })())
-          +'<div style="font-size:.68rem;color:var(--mid);margin-bottom:1px;font-weight:600;">Days I never work</div>'
-          +'<div style="font-size:.63rem;color:var(--mid);margin-bottom:4px;line-height:1.4;">Tap a day to turn it off (highlighted = you don\u2019t work that day, every week). Tap again to turn it back on.</div>'
-          +'<div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:.7rem;">'
-          + WEEKDAY_ABBR.map(function(w,wi){ var on=(prof.weeklyOff||[]).includes(wi); return '<button onclick="toggleWeeklyOff(\''+d+'\','+wi+')" style="flex:1;min-width:34px;padding:.3rem .1rem;border:1.5px solid '+(on?'#b03a2e':'var(--light)')+';border-radius:8px;background:'+(on?'#b03a2e':'var(--white)')+';color:'+(on?'#fff':'var(--mid)')+';font-family:\'DM Sans\',sans-serif;font-size:.68rem;font-weight:600;cursor:pointer;">'+w+'</button>'; }).join('')
-          +'</div>'
           +'<div style="font-size:.68rem;color:var(--mid);margin-bottom:1px;font-weight:600;">Specific days off</div>'
           +'<div style="font-size:.63rem;color:var(--mid);margin-bottom:4px;line-height:1.4;">Pick a single date you can\u2019t drive (like a vacation day). Each date you add is kept \u2014 adding a new one won\u2019t erase the others.</div>'
           +'<div style="display:flex;gap:.4rem;margin-bottom:.4rem;">'
           +'<input type="date" id="avail-date-'+dk+'" style="flex:1;padding:.35rem .5rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
+          +'<select id="avail-repeat-'+dk+'" style="padding:.35rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;"><option value="none">One-time</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select>'
           +'<button onclick="addUnavailDate(\''+d+'\')" style="padding:.35rem .8rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Add</button>'
           +'</div>'
           +'<div style="display:flex;flex-wrap:wrap;gap:4px;">'
           + (prof.unavailableDates||[]).filter(function(dt){ return dt>=toDateStr(new Date()); }).map(function(dt){ return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:.72rem;background:#fdecea;color:#b03a2e;border:1px solid #f3c4bd;border-radius:12px;padding:2px 8px;">'+fmtDateShort(dt)+' <span onclick="removeUnavailDate(\''+d+'\',\''+dt+'\')" style="cursor:pointer;font-weight:700;">×</span></span>'; }).join('')
+          +'</div>'
+          +'<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">'
+          + (prof.recurringOff||[]).map(function(x){ return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:.72rem;background:#efe7fb;color:#6d28d9;border:1px solid #d8c9f5;border-radius:12px;padding:2px 8px;">'+fmtDateShort(x.date)+' ('+x.repeat+') <span onclick="removeRecurringOff(\''+d+'\',\''+x.date+'\',\''+x.repeat+'\')" style="cursor:pointer;font-weight:700;">×</span></span>'; }).join('')
           +'</div>'
           +'<div style="margin-top:.7rem;font-size:.68rem;color:var(--mid);margin-bottom:3px;">Available anyway (override a day off)</div>'
           +'<div style="font-size:.64rem;color:var(--mid);margin-bottom:4px;line-height:1.4;">Mark a single date you <em>can</em> drive even though it&rsquo;s a standing day off &mdash; e.g. a weekday your day job is closed. Doesn&rsquo;t change your regular schedule.</div>'
@@ -11847,19 +12101,7 @@ function buildMemberCard(d, opts){
           +'<button onclick="addAvailableDate(\''+d+'\')" style="padding:.35rem .8rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Add</button>'
           +'</div>'
           +'<div style="display:flex;flex-wrap:wrap;gap:4px;">'
-          + (prof.availableDates||[]).map(function(dt){ return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:.72rem;background:#e7f7ec;color:#15803d;border:1px solid #bbe8c9;border-radius:12px;padding:2px 8px;">'+fmtDateShort(dt)+' <span onclick="removeAvailableDate(\''+d+'\',\''+dt+'\')" style="cursor:pointer;font-weight:700;">&times;</span></span>'; }).join('')
-          +'</div>'
-          +'</div>')
-          :''}
-        ${venmoLink?('<div style="margin-top:.5rem;">'+venmoLink+'</div>'):''}
-        <div style="display:flex;gap:.4rem;margin-top:.6rem;">
-          <button onclick="shareDriverCard('${d}')" style="flex:1;padding:.45rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">↗ Share Card</button>
-          <button onclick="downloadDriverCard('${d}')" style="flex:1;padding:.45rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">⬇ Download</button>
-        </div>
-        ${(opts.publicOnly && isAdmin())?`<button onclick="openDriverPhotoUpload('${d}')" style="width:100%;margin-top:.4rem;padding:.45rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.76rem;font-weight:600;cursor:pointer;">🖼️ Edit card photo</button>`:''}${(opts.publicOnly && isAdmin())?`<button onclick="openEditDriverModal('${d}')" style="width:100%;margin-top:.4rem;padding:.45rem;background:var(--gold);border:none;color:#fff;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.76rem;font-weight:700;cursor:pointer;">\u2699\uFE0F Edit driver</button><div style="display:flex;align-items:center;gap:.5rem;margin-top:.4rem;font-size:.74rem;color:var(--mid);"><span>Calendar color</span><input type="color" value="${driverColor(d)}" onchange="setDriverColor('${d}',this.value)" style="width:34px;height:26px;border:1.5px solid var(--light);border-radius:6px;background:none;cursor:pointer;padding:0;" /><span>${driverColor(d)}</span></div>${(opts.publicOnly && isAdmin())?(function(){var ty=[['premium','Premium'],['traffic','Traffic'],['holiday','Holiday'],['christmas','Christmas'],['fuel','Fuel']];var off=ty.filter(function(t){return driverAutoOffFor(d,t[0]);});return '<div style="margin-top:.45rem;font-size:.7rem;color:var(--mid);line-height:1.5;">⏰ Auto-add: '+(off.length?off.map(function(t){return '<span style=\'background:var(--light);border-radius:10px;padding:1px 6px;margin:0 3px 3px 0;display:inline-block;\'>'+t[1]+' off'+'</span>';}).join(''):'<span style=\'color:#16a34a;font-weight:600;\'>all on</span>')+'</div>';})():''}`:''}
-        ${venmo?('<button onclick="shareDriverVenmo(\''+d+'\')" style="width:100%;margin-top:.4rem;padding:.45rem;background:#3d95ce;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">↗ Share Venmo link</button>'):''}
-        ${canEdit?('<div style="display:flex;gap:.4rem;align-items:center;margin-top:.5rem;">'
-          +'<input type="text" id="venmo-'+dk+'" value="'+venmo+'" placeholder="@venmohandle" style="flex:1;padding:.35rem .65rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
+          + (prof.availableDates||[]).filter(function(dt){ return dt>=toDateStr(new Date()); }).map(function(dt){ return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:.72rem;background:#e7f7ec;color:#15803d;border:1px solid #bbe8c9;border-radius:12px;padding:2px 8px;">'+fmtDateShort(dt)+' <span onclick="removeAvailableDate(\''+d+'\',\''+dt+'\')" style="cursor:pointer;font-weight:700;">&times;</span></span>'; }).join('')
           +'</div>'
           +'<div style="margin-top:.6rem;">'
           +'<div style="font-size:.68rem;color:var(--mid);margin-bottom:1px;font-weight:600;">Hours I can\u2019t drive</div>'
@@ -11891,6 +12133,18 @@ function buildMemberCard(d, opts){
               +'</div>';
             }).join('')
           :'')
+          +'</div>'
+          +'</div>')
+          :''}
+        ${venmoLink?('<div style="margin-top:.5rem;">'+venmoLink+'</div>'):''}
+        <div style="display:flex;gap:.4rem;margin-top:.6rem;">
+          <button onclick="shareDriverCard('${d}')" style="flex:1;padding:.45rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">↗ Share Card</button>
+          <button onclick="downloadDriverCard('${d}')" style="flex:1;padding:.45rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">⬇ Download</button>
+        </div>
+        ${(opts.publicOnly && isAdmin())?`<button onclick="openDriverPhotoUpload('${d}')" style="width:100%;margin-top:.4rem;padding:.45rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.76rem;font-weight:600;cursor:pointer;">🖼️ Edit / generate driver card</button>`:''}${(opts.publicOnly && isAdmin())?`<button onclick="openEditDriverModal('${d}')" style="width:100%;margin-top:.4rem;padding:.45rem;background:var(--gold);border:none;color:#fff;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.76rem;font-weight:700;cursor:pointer;">\u2699\uFE0F Edit driver</button><div style="display:flex;align-items:center;gap:.5rem;margin-top:.4rem;font-size:.74rem;color:var(--mid);"><span>Calendar color</span><input type="color" value="${driverColor(d)}" onchange="setDriverColor('${d}',this.value)" style="width:34px;height:26px;border:1.5px solid var(--light);border-radius:6px;background:none;cursor:pointer;padding:0;" /><span>${driverColor(d)}</span></div>${(opts.publicOnly && isAdmin())?(function(){var ty=[['premium','Premium'],['traffic','Traffic'],['holiday','Holiday'],['christmas','Christmas'],['fuel','Fuel']];var off=ty.filter(function(t){return driverAutoOffFor(d,t[0]);});return '<div style="margin-top:.45rem;font-size:.7rem;color:var(--mid);line-height:1.5;">⏰ Auto-add: '+(off.length?off.map(function(t){return '<span style=\'background:var(--light);border-radius:10px;padding:1px 6px;margin:0 3px 3px 0;display:inline-block;\'>'+t[1]+' off'+'</span>';}).join(''):'<span style=\'color:#16a34a;font-weight:600;\'>all on</span>')+'</div>';})():''}`:''}
+        ${venmo?('<button onclick="shareDriverVenmo(\''+d+'\')" style="width:100%;margin-top:.4rem;padding:.45rem;background:#3d95ce;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">↗ Share Venmo link</button>'):''}
+        ${canEdit?('<div style="display:flex;gap:.4rem;align-items:center;margin-top:.5rem;">'
+          +'<input type="text" id="venmo-'+dk+'" value="'+venmo+'" placeholder="@venmohandle" style="flex:1;padding:.35rem .65rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
           +'</div>'
           +'<button onclick="saveDriverProfile(\''+d+'\')" style="width:100%;margin-top:.6rem;padding:.5rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:600;font-size:.82rem;cursor:pointer;">Save My Info</button>')
         :''}
@@ -11953,6 +12207,7 @@ function isDriverAvailable(driverName, dateStr, timeStr){
   // the driver's day job is closed. An explicit unavailableDates entry still wins over it.
   if((prof.unavailableDates||[]).includes(dateStr)) return false;
   const isException = (prof.availableDates||[]).includes(dateStr);
+  if(!isException && driverRecurringOff(prof, dateStr)) return false; // recurring monthly/yearly day off
   const wd = new Date(dateStr+'T12:00:00').getDay();
   if(!isException && (prof.weeklyOff||[]).includes(wd)) return false;
   if(!isException && timeStr && (prof.unavailHours||[]).length){
@@ -12036,15 +12291,71 @@ function removeUnavailHour(driverName,id){
   persistDriverProfiles(); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
 }
 
+// Weekday abbreviations a driver is off every week — unions legacy weeklyOff with
+// the new weekly recurring entries so both migrated and un-migrated profiles display right.
+function weeklyOffDays(prof){
+  var out=[];
+  (prof&&prof.weeklyOff||[]).forEach(function(wi){ var a=WEEKDAY_ABBR[wi]; if(a&&out.indexOf(a)<0) out.push(a); });
+  (prof&&prof.recurringOff||[]).forEach(function(x){ if(x&&x.repeat==='weekly'){ var a=WEEKDAY_ABBR[new Date(x.date+'T12:00:00').getDay()]; if(a&&out.indexOf(a)<0) out.push(a); } });
+  return out;
+}
+// One-time migration: fold legacy "Days I never work" (weeklyOff) into weekly recurring days off.
+function migrateWeeklyOff(prof){
+  if(!prof || !Array.isArray(prof.weeklyOff) || !prof.weeklyOff.length) return false;
+  prof.recurringOff = prof.recurringOff||[];
+  var base=new Date(); base.setHours(12,0,0,0);
+  prof.weeklyOff.forEach(function(wi){
+    var exists=prof.recurringOff.some(function(x){ return x && x.repeat==='weekly' && new Date(x.date+'T12:00:00').getDay()===wi; });
+    if(!exists){ var dd=new Date(base); dd.setDate(dd.getDate() + ((wi - dd.getDay() + 7) % 7)); prof.recurringOff.push({date:toDateStr(dd), repeat:'weekly'}); }
+  });
+  prof.weeklyOff=[];
+  return true;
+}
+// Recurring day off match: monthly = same day-of-month, yearly = same month+day.
+function driverRecurringOff(prof, dateStr){
+  const list = prof && prof.recurringOff;
+  if(!Array.isArray(list) || !list.length || !dateStr) return false;
+  const md = dateStr.slice(5), dom = dateStr.slice(8);
+  return list.some(function(x){
+    if(!x || !x.date) return false;
+    if(x.repeat==='yearly')  return x.date.slice(5)===md;
+    if(x.repeat==='monthly') return x.date.slice(8)===dom;
+    if(x.repeat==='weekly')  return new Date(x.date+'T12:00:00').getDay()===new Date(dateStr+'T12:00:00').getDay();
+    return false;
+  });
+}
+// Drop one-time days-off (and available-anyway dates) that are now in the past. Recurring stay.
+function pruneExpiredDaysOff(prof){
+  if(!prof) return false;
+  const today = toDateStr(new Date());
+  let changed=false;
+  if(Array.isArray(prof.unavailableDates)){ const b=prof.unavailableDates.length; prof.unavailableDates=prof.unavailableDates.filter(function(d){return d>=today;}); if(prof.unavailableDates.length!==b) changed=true; }
+  if(Array.isArray(prof.availableDates)){ const b=prof.availableDates.length; prof.availableDates=prof.availableDates.filter(function(d){return d>=today;}); if(prof.availableDates.length!==b) changed=true; }
+  return changed;
+}
+function removeRecurringOff(driverName, date, repeat){
+  const myDriverName = getMyDriverName();
+  if(!(isAdmin() || myDriverName===driverName)){ showToast('You can only edit your own availability','error'); return; }
+  const prof = DRIVER_PROFILES[driverName]; if(!prof || !Array.isArray(prof.recurringOff)) return;
+  prof.recurringOff = prof.recurringOff.filter(function(x){ return !(x && x.date===date && x.repeat===repeat); });
+  persistDriverProfiles(); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
+}
 function addUnavailDate(driverName){
   const myDriverName = getMyDriverName();
   if(!(isAdmin() || myDriverName===driverName)){ showToast('You can only edit your own availability','error'); return; }
   const dk = driverName.replace(/ /g,'_');
   const val = document.getElementById('avail-date-'+dk)?.value;
   if(!val) return;
+  const rep = (document.getElementById('avail-repeat-'+dk)||{}).value || 'none';
   const prof = DRIVER_PROFILES[driverName] = DRIVER_PROFILES[driverName]||{};
-  const set = new Set(prof.unavailableDates||[]); set.add(val);
-  prof.unavailableDates = [...set].sort();
+  if(rep==='weekly' || rep==='monthly' || rep==='yearly'){
+    prof.recurringOff = prof.recurringOff||[];
+    if(!prof.recurringOff.some(function(x){ return x.date===val && x.repeat===rep; })) prof.recurringOff.push({date:val, repeat:rep});
+  } else {
+    const set = new Set(prof.unavailableDates||[]); set.add(val);
+    prof.unavailableDates = [...set].sort();
+  }
+  pruneExpiredDaysOff(prof);
   persistDriverProfiles(); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
 }
 function removeUnavailDate(driverName, date){
@@ -12096,11 +12407,6 @@ function rideVehicle(r){
   if(!r) return {};
   var list = driverVehicles(r.driver);
   return list[rideVehicleIdx(r)] || list[0] || {};
-}
-function rideDriverCardImage(r){
-  var v = rideVehicle(r);
-  if(v && v.photo) return v.photo;
-  return (typeof DRIVER_PHOTOS!=='undefined' && r && DRIVER_PHOTOS[r.driver]) ? DRIVER_PHOTOS[r.driver] : '';
 }
 
 // ── VEHICLE COST PER MILE ──
@@ -12656,6 +12962,8 @@ function getIncomeDateRange(){
 function renderIncome(){
   if(!document.getElementById('income-summary-cards')) return;
   if(!hasIncomeAccess()) return;
+  var _rrBtn=document.getElementById('rides-report-btn');
+  if(_rrBtn) _rrBtn.style.display=isAdmin()?'inline-block':'none';
   var _paBtn=document.getElementById('pricing-audit-btn');
   if(_paBtn) _paBtn.style.display=isAdmin()?'inline-block':'none';
   var _arBtn=document.getElementById('archive-rides-btn');
@@ -12783,23 +13091,23 @@ function renderIncome(){
   const netTakeHome    = totalEarnings + totalTips - totalVehicleCost - proratedExp;
 
   // Summary cards — show gas & maintenance prominently so they're never hidden below the fold
+  // Consistent green for money made; costs shown as positive RED and labeled "… Cost".
+  const GREEN='var(--green)', REDCOST='#dc2626';
   const cards = [
-    {label:'Gross Fares',  val:`$${totalEarnings.toFixed(2)}`, color:'var(--green)'},
-    ...(totalTips>0?[{label:'Tips',val:`$${totalTips.toFixed(2)}`,color:'#7c3aed'}]:[]),
-    ...(personalView&&totalGasCost>0?[{label:`Gas (${gasCpm.toFixed(3)}/mi)`,val:`−$${totalGasCost.toFixed(2)}`,color:'#dc2626'}]:[]),
-    ...(personalView&&totalMaintCost>0?[{label:`Maint. ($${maintCpm.toFixed(2)}/mi)`,val:`−$${totalMaintCost.toFixed(2)}`,color:'#dc2626'}]:[]),
-    {label:'Rides',        val:rideCount,                       color:'var(--gold)'},
-    {label:'Avg per Ride', val:`$${avgPerRide.toFixed(2)}`,     color:'#1e88e5'},
-    {label:'Miles Driven', val:`${cardMiles.toFixed(1)} mi`,   color:'#0891b2'},
+    {label:'Gross Fares',  val:`$${totalEarnings.toFixed(2)}`, color:GREEN},
+    ...(totalTips>0?[{label:'Tips',val:`$${totalTips.toFixed(2)}`,color:GREEN}]:[]),
+    ...(personalView&&totalGasCost>0?[{label:`Gas Cost (${gasCpm.toFixed(3)}/mi)`,val:`$${totalGasCost.toFixed(2)}`,color:REDCOST}]:[]),
+    ...(personalView&&totalMaintCost>0?[{label:`Maintenance Cost ($${maintCpm.toFixed(2)}/mi)`,val:`$${totalMaintCost.toFixed(2)}`,color:REDCOST}]:[]),
+    {label:'Rides',        val:rideCount,                       color:GREEN},
+    {label:'Avg per Ride', val:`$${avgPerRide.toFixed(2)}`,     color:GREEN},
+    {label:'Miles Driven', val:`${cardMiles.toFixed(1)} mi`,   color:GREEN},
   ];
   if(personalView && monthlyExp > 0){
-    cards.push({label:`Expenses (${incomeTab==='weekly'?'~week':incomeTab==='monthly'?'month':'period'})`, val:`−$${proratedExp.toFixed(2)}`, color:'#dc2626'});
+    cards.push({label:`Expenses Cost (${incomeTab==='weekly'?'~week':incomeTab==='monthly'?'month':'period'})`, val:`$${proratedExp.toFixed(2)}`, color:REDCOST});
   }
   if(personalView && (totalVehicleCost > 0 || monthlyExp > 0)){
-    cards.push({label:'Net Take-Home', val:`$${netTakeHome.toFixed(2)}`, color: netTakeHome>=0?'var(--green)':'#dc2626', highlight:true});
+    cards.push({label:'Net Take-Home', val: netTakeHome>=0?`$${netTakeHome.toFixed(2)}`:`−$${Math.abs(netTakeHome).toFixed(2)}`, color: netTakeHome>=0?GREEN:REDCOST, highlight:true});
   }
-  cards.push({label:'AP Rides', val:apRides, color:'#7c3aed'});
-  cards.push({label:'Round Trips', val:rtRides, color:'#ff6d00'});
 
   // Per-ride breakdown table
   document.getElementById('income-summary-cards').innerHTML = cards.map(c=>`
@@ -12900,8 +13208,8 @@ async function renderIncomeTripProfit(dName, start, end, proratedExp){
     ${row('Gas', '− '+m(gas), {color:'#dc2626'})}
     ${row('Maintenance', '− '+m(maint), {color:'#dc2626'})}
     ${row('Trip profit', m(profit), {strong:true, border:true, color: profit>=0?'var(--green)':'#dc2626'})}
-    ${proratedExp>0?row('Monthly expenses (prorated)', '− '+m(proratedExp), {color:'#dc2626'}):''}
-    ${row('Net Take-Home', m(net), {strong:true, border:true, color: net>=0?'var(--green)':'#dc2626'})}
+    ${proratedExp>0?row('Monthly expenses (prorated)', m(proratedExp), {color:'#dc2626'}):''}
+    ${row('Net Take-Home · '+MONTHS[new Date().getMonth()], net>=0?m(net):'−'+m(Math.abs(net)), {strong:true, border:true, color: net>=0?'var(--green)':'#dc2626'})}
     <div style="font-size:.72rem;color:var(--mid);margin-top:.5rem;">Tips and per-trip costs come from your Trip Profit entries for this period. Log trips under 💵 Trip Profit to keep this accurate.</div>
   </div>`;
 }
@@ -14387,7 +14695,7 @@ function buildIncomeRow(r, i, admin){
       + '<td style="padding:.55rem .75rem;text-align:right;font-weight:700;color:var(--green);">$' + gross.toFixed(2) + '</td>'
       + '<td></td>';
   } else {
-    costCols = '<td style="padding:.55rem .75rem;text-align:right;font-size:.78rem;color:#dc2626;">' + (vCost>0?'-$'+vCost.toFixed(2):'—') + '</td>'
+    costCols = '<td style="padding:.55rem .75rem;text-align:right;font-size:.78rem;color:#dc2626;">' + (vCost>0?'$'+vCost.toFixed(2):'—') + '</td>'
       + '<td style="padding:.55rem .75rem;text-align:right;font-weight:700;color:var(--green);">$' + gross.toFixed(2) + '</td>'
       + '<td style="padding:.55rem .75rem;text-align:right;font-weight:700;color:'+netColor+';">$' + net.toFixed(2) + '</td>';
   }
@@ -14412,15 +14720,17 @@ function buildIncomeFooterRows(admin,totalVehicleCost,netAfterVehicle,dName,expe
   let rows='';
   if(!admin&&totalVehicleCost>0){
     const cpm = calcCostPerMile(dName||'').toFixed(3);
-    rows+=`<tr style="background:#fff5f5;"><td colspan="4" style="padding:.5rem .75rem;color:#dc2626;font-size:.82rem;"><strong>Vehicle Costs</strong> <span style="font-size:.72rem;">(gas+maintenance @ $${cpm}/mi)</span></td><td></td><td style="padding:.5rem .75rem;text-align:right;font-weight:600;color:#dc2626;">-$${totalVehicleCost.toFixed(2)}</td><td style="padding:.5rem .75rem;text-align:right;font-weight:700;color:${netAfterVehicle>=0?'var(--green)':'#dc2626'};">$${netAfterVehicle.toFixed(2)}</td></tr>`;
+    rows+=`<tr style="background:#fff5f5;"><td colspan="4" style="padding:.5rem .75rem;color:#dc2626;font-size:.82rem;"><strong>Vehicle Costs</strong> <span style="font-size:.72rem;">(gas+maintenance @ $${cpm}/mi)</span></td><td></td><td style="padding:.5rem .75rem;text-align:right;font-weight:600;color:#dc2626;">$${totalVehicleCost.toFixed(2)}</td><td style="padding:.5rem .75rem;text-align:right;font-weight:700;color:${netAfterVehicle>=0?'var(--green)':'#dc2626'};">$${netAfterVehicle.toFixed(2)}</td></tr>`;
   }
   if(!admin&&expenseItems.length){
-    rows+=`<tr style="background:#fff5f5;"><td colspan="4" style="padding:.5rem .75rem;color:#dc2626;font-size:.82rem;"><strong>Monthly Expenses</strong> <span style="font-size:.72rem;">(pro-rated)</span></td><td></td><td style="padding:.5rem .75rem;text-align:right;font-weight:600;color:#dc2626;">-$${proratedExp.toFixed(2)}</td><td></td></tr>`;
+    rows+=`<tr style="background:#fff5f5;"><td colspan="4" style="padding:.5rem .75rem;color:#dc2626;font-size:.82rem;"><strong>Monthly Expenses</strong> <span style="font-size:.72rem;">(pro-rated)</span></td><td></td><td style="padding:.5rem .75rem;text-align:right;font-weight:600;color:#dc2626;">$${proratedExp.toFixed(2)}</td><td></td></tr>`;
     expenseItems.forEach(e=>{
-      rows+=`<tr style="background:#fff5f5;"><td colspan="4" style="padding:.3rem .75rem .3rem 1.5rem;font-size:.78rem;color:#dc2626;">&#8627; ${e.label}</td><td></td><td style="padding:.3rem .75rem;text-align:right;font-size:.78rem;color:#dc2626;">-$${(e.amount*(proratedExp/monthlyExp||1)).toFixed(2)}</td><td></td></tr>`;
+      rows+=`<tr style="background:#fff5f5;"><td colspan="4" style="padding:.3rem .75rem .3rem 1.5rem;font-size:.78rem;color:#dc2626;">&#8627; ${e.label}</td><td></td><td style="padding:.3rem .75rem;text-align:right;font-size:.78rem;color:#dc2626;">$${(e.amount*(proratedExp/monthlyExp||1)).toFixed(2)}</td><td></td></tr>`;
     });
     const netColor = netEarnings>=0?'var(--green)':'#dc2626';
-    rows+=`<tr style="background:#f0fdf4;border-top:2px solid var(--green);"><td colspan="4" style="padding:.7rem .75rem;color:var(--green);font-weight:700;">NET TAKE-HOME</td><td></td><td style="padding:.7rem .75rem;text-align:right;font-weight:700;font-size:1.1rem;color:${netColor};">$${netEarnings.toFixed(2)}</td><td></td></tr>`;
+    const _moName = MONTHS[new Date().getMonth()];
+    const _netStr = netEarnings>=0?`$${netEarnings.toFixed(2)}`:`−$${Math.abs(netEarnings).toFixed(2)}`;
+    rows+=`<tr style="background:#f0fdf4;border-top:2px solid var(--green);"><td colspan="4" style="padding:.7rem .75rem;color:var(--green);font-weight:700;">NET TAKE-HOME · ${_moName}</td><td></td><td style="padding:.7rem .75rem;text-align:right;font-weight:700;font-size:1.1rem;color:${netColor};">${_netStr}</td><td></td></tr>`;
   }
   return rows;
 }
@@ -14526,6 +14836,72 @@ function _auditBaseBreakdown(r){
   return out;
 }
 
+function generateRidesReport(){
+  if(!isAdmin()){ showToast('Admins only','error'); return; }
+  // Count rides scheduled per month, grouped by year (cancelled excluded).
+  var byYM={}, years={};
+  (rides||[]).forEach(function(r){
+    if(!r || !r.date || r.status==='cancelled') return;
+    var y=r.date.slice(0,4), m=parseInt(r.date.slice(5,7),10)-1;
+    if(!/^[0-9]{4}$/.test(y) || isNaN(m) || m<0 || m>11) return;
+    years[y]=true;
+    byYM[y]=byYM[y]||new Array(12).fill(0);
+    byYM[y][m]++;
+  });
+  var yrs=Object.keys(years).sort();
+  if(!yrs.length){ showToast('No rides to report yet','error'); return; }
+  var yrTotal={}; yrs.forEach(function(y){ yrTotal[y]=byYM[y].reduce(function(a,b){return a+b;},0); });
+  var grand=yrs.reduce(function(a,y){return a+yrTotal[y];},0);
+  var latest=yrs[yrs.length-1], prior=yrs.length>1?yrs[yrs.length-2]:null;
+  function yoyCell(cur,prev){
+    if(prev==null) return '';
+    var d=cur-prev;
+    var col=d>0?'#16a34a':(d<0?'#dc2626':'var(--mid)');
+    var sign=d>0?'+':'';
+    var pct=prev>0?(' ('+sign+Math.round(d/prev*100)+'%)'):'';
+    return '<span style="color:'+col+';font-weight:600;">'+sign+d+pct+'</span>';
+  }
+  // Build table
+  var showYoY = !!prior;
+  var head='<tr style="background:var(--black);color:var(--gold);"><th style="padding:.5rem .7rem;text-align:left;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Month</th>'
+    + yrs.map(function(y){ return '<th style="padding:.5rem .7rem;text-align:right;font-size:.72rem;">'+y+'</th>'; }).join('')
+    + (showYoY?'<th style="padding:.5rem .7rem;text-align:right;font-size:.72rem;">'+latest+' vs '+prior+'</th>':'')
+    + '</tr>';
+  var body='';
+  for(var m=0;m<12;m++){
+    var anyThisMonth=yrs.some(function(y){ return (byYM[y][m]||0)>0; });
+    var cells=yrs.map(function(y){ var v=byYM[y][m]||0; return '<td style="padding:.4rem .7rem;text-align:right;color:'+(v?'var(--black)':'#cbd5e1')+';">'+v+'</td>'; }).join('');
+    var yoy=showYoY?('<td style="padding:.4rem .7rem;text-align:right;">'+(anyThisMonth?yoyCell(byYM[latest][m]||0, byYM[prior][m]||0):'')+'</td>'):'';
+    body+='<tr style="border-bottom:1px solid var(--light);'+(m%2?'background:var(--surface);':'')+'"><td style="padding:.4rem .7rem;font-weight:600;">'+MONTHS[m]+'</td>'+cells+yoy+'</tr>';
+  }
+  var totalRow='<tr style="background:#f0fdf4;border-top:2px solid var(--green);font-weight:700;"><td style="padding:.55rem .7rem;color:var(--green);">TOTAL</td>'
+    + yrs.map(function(y){ return '<td style="padding:.55rem .7rem;text-align:right;color:var(--green);">'+yrTotal[y]+'</td>'; }).join('')
+    + (showYoY?'<td style="padding:.55rem .7rem;text-align:right;">'+yoyCell(yrTotal[latest], yrTotal[prior])+'</td>':'')
+    + '</tr>';
+  var busiest = MONTHS[byYM[latest].indexOf(Math.max.apply(null,byYM[latest]))];
+  var ov=document.createElement('div'); ov.id='rides-report-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:15000;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:640px;width:100%;max-height:90vh;overflow:auto;padding:1.35rem;box-shadow:0 24px 60px rgba(0,0,0,.4);">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem;"><div style="font-size:1.1rem;font-weight:800;color:#0f172a;">\uD83D\uDCC8 Rides per Month</div><button onclick="document.getElementById(\'rides-report-overlay\').remove()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button></div>'
+    +'<div style="font-size:.8rem;color:var(--mid);margin-bottom:.9rem;line-height:1.4;">Rides scheduled per month across '+yrs.length+' year'+(yrs.length>1?'s':'')+' ('+grand+' total, cancelled excluded). '+(showYoY?'The last column compares '+latest+' to '+prior+'.':'')+'</div>'
+    +'<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:.85rem;"><thead>'+head+'</thead><tbody>'+body+totalRow+'</tbody></table></div>'
+    +'<div style="margin-top:.9rem;display:flex;gap:.5rem;flex-wrap:wrap;"><button onclick="_exportRidesReportCSV()" style="padding:.5rem 1rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">\u2b07 Export CSV</button></div>'
+    +'</div>';
+  document.body.appendChild(ov);
+  // stash data for CSV export
+  window._ridesReportData={yrs:yrs, byYM:byYM, yrTotal:yrTotal};
+}
+function _exportRidesReportCSV(){
+  var d=window._ridesReportData; if(!d) return;
+  var rows=[['Month'].concat(d.yrs).map(_csvCell).join(',')];
+  for(var m=0;m<12;m++){ rows.push([MONTHS[m]].concat(d.yrs.map(function(y){return d.byYM[y][m]||0;})).map(_csvCell).join(',')); }
+  rows.push(['TOTAL'].concat(d.yrs.map(function(y){return d.yrTotal[y];})).map(_csvCell).join(','));
+  var csv=rows.join('\n');
+  var fname='NWDA-rides-per-month-'+(new Date().toISOString().slice(0,10))+'.csv';
+  if(typeof downloadTextFile==='function'){ downloadTextFile(csv, fname, 'text/csv'); showToast('\uD83D\uDCC8 Rides report exported \u2713'); }
+  else showToast('Download helper missing','error');
+}
 function generatePricingAudit(){
   if(!isAdmin()){ showToast('Admins only','error'); return; }
 
