@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090249">
+<meta name="version" content="202606090258">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -815,6 +815,11 @@ input,select,textarea{font-size:16px;}
     </div>
     <input type="text" id="client-search" placeholder="Search by name or phone…" oninput="renderClients()" style="width:100%;padding:.55rem .85rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;margin-bottom:1rem;" />
     <div id="client-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.75rem;margin-bottom:1.25rem;"></div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:.6rem;"><button id="client-select-btn" onclick="toggleClientSelectMode()" style="padding:.4rem .85rem;background:none;border:1.5px solid var(--light);color:var(--mid);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Select</button></div>
+    <div id="client-delete-bar" style="display:none;align-items:center;justify-content:space-between;gap:.6rem;background:#fef2f2;border:1.5px solid #fecaca;border-radius:10px;padding:.6rem .85rem;margin-bottom:.8rem;">
+      <span id="client-delete-label" style="font-size:.85rem;font-weight:600;color:#b91c1c;">Delete 0 clients</span>
+      <div style="display:flex;gap:.5rem;"><button onclick="clearClientSelection()" style="padding:.4rem .8rem;background:none;border:1.5px solid #fca5a5;color:#b91c1c;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Cancel</button><button onclick="deleteSelectedClients()" style="padding:.4rem .9rem;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Delete selected</button></div>
+    </div>
     <div id="client-list"></div>
   </div>
 
@@ -1466,6 +1471,28 @@ input,select,textarea{font-size:16px;}
           <input type="number" id="onb-gasprice" placeholder="e.g. 3.49" inputmode="decimal" /></div>
       </div>
       <div style="font-size:.7rem;color:var(--mid);margin:-.3rem 0 .5rem;line-height:1.4;">MPG &amp; gas price are only used to calculate your fuel cost on the income page. Skip them if you&rsquo;re not tracking profit.</div>
+
+      <!-- OPTIONAL SECOND VEHICLE -->
+      <div id="onb-veh2-toggle" onclick="_onbToggleVeh2()" style="cursor:pointer;font-size:.82rem;font-weight:600;color:var(--accent);margin:.2rem 0 .6rem;">+ Add a second vehicle</div>
+      <div id="onb-veh2-block" style="display:none;border:1.5px solid var(--light);border-radius:10px;padding:.8rem;margin-bottom:.7rem;background:var(--surface);">
+        <div style="font-size:.66rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Second vehicle</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;">
+          <div class="form-group"><label>Vehicle</label><input type="text" id="onb-vehicle2" placeholder="e.g. Sprinter Van" /></div>
+          <div class="form-group"><label>Vehicle year</label><input type="text" id="onb-vehicleyear2" placeholder="e.g. 2024" inputmode="numeric" /></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.6rem;">
+          <div class="form-group"><label>MPG</label><input type="number" id="onb-mpg2" placeholder="e.g. 16" inputmode="decimal" /></div>
+          <div class="form-group"><label>Gas ($/gal)</label><input type="number" id="onb-gasprice2" placeholder="e.g. 4.49" inputmode="decimal" /></div>
+          <div class="form-group"><label>Maint ($/mi)</label><input type="number" id="onb-maint2" placeholder="0.13" inputmode="decimal" /></div>
+        </div>
+        <div class="form-group"><label>Card photo for this vehicle</label>
+          <div style="display:flex;align-items:center;gap:.6rem;">
+            <div id="onb-veh2-photo-preview" style="width:64px;height:40px;border-radius:6px;background:#f4f2f8 center/cover no-repeat;border:1.5px solid var(--light);flex-shrink:0;"></div>
+            <label style="flex:1;padding:.5rem;background:#fff;border:1.5px dashed var(--accent);border-radius:8px;text-align:center;font-size:.8rem;color:var(--accent);font-weight:600;cursor:pointer;">Upload card image<input type="file" accept="image/*" onchange="_onbVeh2PhotoPick(this)" style="display:none;" /></label>
+          </div>
+          <div style="font-size:.66rem;color:var(--mid);margin-top:3px;">The headshot + this vehicle&rsquo;s photo. Sent to clients when you use this vehicle.</div>
+        </div>
+      </div>
 
       <div class="form-group"><label>Venmo username <span style="font-weight:400;color:#16a34a;font-size:.72rem;">(optional)</span></label>
         <div style="font-size:.7rem;color:var(--mid);margin:-2px 0 4px;line-height:1.4;">Lets clients pay you with one tap. Add it now or anytime later in your profile.</div>
@@ -2415,11 +2442,11 @@ const TIP_DATA={
   dashboard:{icon:'🏠',title:'Dashboard',text:'Your income summary sits up top. Below it are your action lists: confirmations to send, the amber \u201cRides to wrap up\u201d box (completed rides you haven\'t marked paid yet), and then your upcoming rides. Tap any card to open the full details.'},
   cal:{icon:'📅',title:'Calendar',text:'Tap any ride to edit, cancel, duplicate, or post it to the Offerings channel. Assigning a driver lives under 🛠 Dispatch tools inside the ride. Linked AP Round Trip cards show a blue 🔗 Pair badge.'},
   myrides:{icon:'📋',title:'My Rides & Confirmations',text:'The To Confirm tab shows tomorrow\'s rides needing a day-before text. The six send buttons plus Mark Sent are a Driver Pro feature.'},
-  clients:{icon:'👥',title:'Client List',text:'Your client list is 100% private — no other driver and no admin can see it. Clients are added automatically when you book rides.'},
-  income:{icon:'💰',title:'Income & Receipts',text:'Track gross fares, expenses, and net take-home here. Use the receipt scanner to snap a photo and auto-fill amounts. Requires Driver Pro.'},
+  clients:{icon:'👥',title:'Client List',text:'Your client list is 100% private — no other driver and no admin can see it. Clients are added automatically when you book rides. Tap Select to remove several clients at once.'},
+  income:{icon:'💰',title:'Income & Receipts',text:'Track gross fares, expenses, and net take-home here. Tips are captured right when you mark a ride paid, so you rarely need to come here to add them. Use the receipt scanner to snap a photo and auto-fill amounts. Requires Driver Pro.'},
   flights:{icon:'✈️',title:'Flights & Traffic',text:'Search any flight number for live tracking. Today\'s and tomorrow\'s airport rides are listed automatically with tracking links.'},
-  chat:{icon:'💬',title:'Team Chat',text:'Offerings: post rides needing coverage — teammates tap ✅ to claim instantly. Updates: share traffic without buzzing anyone\'s phone.'},
-  team:{icon:'🚘',title:'Team & Driver Cards',text:'Team driver cards live here — tap Share Card or Download to send yours. To edit your own info, use My Profile in the menu. Admins can add a new driver from this page.'},
+  chat:{icon:'💬',title:'Team Chat',text:'Offerings: post rides needing coverage — teammates volunteer, then the ride\'s owner assigns whoever they pick, and the card marks itself covered. Updates: share traffic without buzzing phones. You can delete your own messages anywhere; admins can delete any message in the group channels. Delete a whole DM from its header.'},
+  team:{icon:'🚘',title:'Team & Driver Cards',text:'Team driver cards live here — tap Share Card or Download to send yours. Admins can Edit driver, change a card\'s color, and add new drivers here. If a driver runs more than one vehicle, each has its own card, and the confirmation sender picks which one to send.'},
   myprofile:{icon:'🪪',title:'My Profile',text:'Set up everything about you here: vehicle, home address, gas/MPG, Venmo, confirmation text, day-of selfie, and which parts your all-in-one text includes. The Team Availability tab shows when everyone is off.'},
 };
 let _shownTips=new Set();
@@ -5488,7 +5515,10 @@ function buildReceiptHTML(r){
   const driver = (r.driver||'').trim();
   const prof = (typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[driver]) ? DRIVER_PROFILES[driver] : {};
   const bizName = (prof.businessName||'').trim();
-  const logo = prof.logo||'';
+  // Logo priority: the client's OWNER's business logo, then the driving driver's, then (below) the app default.
+  var _ownerName = (typeof getClientOwner==='function') ? getClientOwner(r.client) : null;
+  var _ownerProf = (_ownerName && typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[_ownerName]) ? DRIVER_PROFILES[_ownerName] : {};
+  const logo = (_ownerProf.logo||'') || (prof.logo||'');
   const driverPhone = prof.phone||'';
   const rn = _receiptNumber(r);
   const dateStr = _receiptDate(r.date);
@@ -5497,8 +5527,11 @@ function buildReceiptHTML(r){
 
   // Header identity: business name if set, else NWDA; driver always shown as provider.
   const orgName = bizName || 'Northwest Drivers Association (NWDA)';
-  const logoHtml = logo
-    ? '<img src="'+logo+'" alt="logo" style="max-height:70px;max-width:180px;object-fit:contain;margin-bottom:10px;">'
+  // Receipt logo: the driver's uploaded business logo, or the app's standard logo if they haven't set one.
+  const appLogo = (document.querySelector('img[alt="NDA Logo"]')||{}).src || '';
+  const shownLogo = logo || appLogo;
+  const logoHtml = shownLogo
+    ? '<img src="'+shownLogo+'" alt="logo" style="max-height:70px;max-width:180px;object-fit:contain;margin-bottom:10px;">'
     : '';
 
   const rowsHtml = bd.lines.map(function(l){
@@ -5605,12 +5638,12 @@ function openPaymentModal(id){
   // Reset receipt
   const rc = document.getElementById('pay-send-receipt'); if(rc) rc.checked=false;
   // Tip capture at mark-paid (income/tip-tracking users only) — prefill with any existing tip.
-  var _tipHasAcc = (typeof hasIncomeAccess==='function') ? hasIncomeAccess() : false;
+  var _tipHasAcc = (typeof rideTipReceiptAllowed==='function') ? rideTipReceiptAllowed(r) : false;
   var _tipSec = document.getElementById('pay-tip-section'); if(_tipSec) _tipSec.style.display = _tipHasAcc ? 'block' : 'none';
   var _tipIn = document.getElementById('pay-tip'); if(_tipIn) _tipIn.value = (r.tip!=null && r.tip!=='' && +r.tip>0) ? r.tip : '';
   const pv = document.getElementById('pay-receipt-preview'); if(pv){ pv.style.display='none'; pv.textContent=''; }
   // Receipts are a premium feature — show the locked panel for non-subscribers.
-  const hasAcc = (typeof hasIncomeAccess==='function') ? hasIncomeAccess() : true;
+  const hasAcc = (typeof rideTipReceiptAllowed==='function') ? rideTipReceiptAllowed(r) : true;
   const locked = document.getElementById('pay-receipt-locked');
   const unlocked = document.getElementById('pay-receipt-unlocked');
   if(locked) locked.style.display = hasAcc ? 'none' : 'block';
@@ -5684,6 +5717,19 @@ async function savePaymentAndMaybeReceipt(){
   }
   await saveRides();
   const wantReceipt = !!document.getElementById('pay-send-receipt')?.checked;
+  // If someone OTHER than the assigned driver marked this paid and no tip was recorded,
+  // ping the driver to add the tip they received (goes to their income sheet).
+  try{
+    var _drv = (r.driver||'').trim();
+    var _me  = (typeof getMyDriverName==='function') ? (getMyDriverName()||'') : '';
+    var _tipRecorded = (r.tip!=null && r.tip!=='' && parseFloat(r.tip)>0);
+    if(_drv && _drv!==_me && !_tipRecorded){
+      var _tmsg = 'Your '+ (r.client||'client') +' ride on '+fmtDateShort(r.date)+' was marked paid'+(r.paidBy?(' by '+r.paidBy):'')+'. Open it to add the tip you received.';
+      addNotification(_drv, r, 'tip_reminder', _tmsg);
+      if(typeof sendPushToDriver==='function') sendPushToDriver(_drv, '\uD83D\uDCB0 Add your tip \u2014 NDA', _tmsg);
+      await saveNotifs(); updateNotifBadge();
+    }
+  }catch(e){ console.warn('tip reminder notify failed', e); }
   // Refresh the open ride card so the payment method shows
   try{ if(document.getElementById('ride-modal')?.classList.contains('show')) renderRideView(r); }catch(e){}
   closePaymentModal();
@@ -8228,18 +8274,39 @@ function buildRideOfferCard(m){
   const price=rd.price?'$'+rd.price:'';
   const when=(rd.date?fmtDateShort(rd.date):'')+(rd.time?' at '+rd.time:'');
   const driverTxt=rd.driver?rd.driver.split(' ')[0]:'Unassigned';
-  const viewBtn=m.rideId
-    ? '<button onclick="openRideFromChat('+m.rideId+')" style="margin-top:.5rem;width:100%;padding:.4rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">View Ride</button>'
-      +'<button onclick="claimRideFromOfferings('+m.rideId+')" style="margin-top:.3rem;width:100%;padding:.4rem;background:#16a34a;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">\u2705 I\'ll take it</button>'
-    : '';
-  return '<div style="background:var(--surface);border:1.5px solid #7c3aed;border-radius:10px;padding:.7rem .85rem;min-width:190px;max-width:240px;">'
-    +'<div style="font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#7c3aed;margin-bottom:.35rem;">\uD83D\uDE97 Ride Available</div>'
-    +'<div style="font-size:.9rem;font-weight:600;color:var(--black);margin-bottom:.2rem;">'+escHtml(rd.client||'\u2014')+'</div>'
-    +(when?'<div style="font-size:.8rem;color:var(--mid);">\uD83D\uDCC5 '+escHtml(when)+'</div>':'')
-    +'<div style="font-size:.8rem;color:var(--mid);">'+escHtml(rd.type||'')+' \u00b7 '+escHtml(rd.vehicle||'')+(price?' \u00b7 '+price:'')+'</div>'
-    +(rd.driver?'<div style="font-size:.76rem;color:var(--mid);">Driver: '+escHtml(driverTxt)+'</div>':'<div style="font-size:.76rem;color:#b45309;">Unassigned</div>')
-    +(rd.pickup?'<div style="font-size:.76rem;color:var(--mid);">\uD83D\uDCCD '+escHtml(rd.pickup.slice(0,38))+'</div>':'')
-    +viewBtn
+  // Live ride state: covered? who volunteered? am I the owner?
+  const live = m.rideId ? rides.find(x=>x&&(x.id===m.rideId||x.id===+m.rideId||String(x.id)===String(m.rideId))) : null;
+  const covered = !!(live && live.offerCovered);
+  const coveredBy = (covered && live && live.driver) ? live.driver.split(' ')[0] : '';
+  const vols = (live && Array.isArray(live.volunteers)) ? live.volunteers : [];
+  const myDriver = (typeof getMyDriverName==='function') ? getMyDriverName() : '';
+  const owner = live ? _offerOwner(live) : '';
+  const iAmOwner = !!owner && ((myDriver && myDriver===owner) || (typeof isAdmin==='function' && isAdmin()));
+  const _bs='font-family:\'DM Sans\',sans-serif;cursor:pointer;';
+  let btns='';
+  if(m.rideId && !covered){
+    btns += '<button onclick="openRideFromChat('+m.rideId+')" style="margin-top:.5rem;width:100%;padding:.4rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;'+_bs+'font-size:.78rem;font-weight:600;">View Ride</button>';
+    if(iAmOwner && vols.length){
+      btns += '<div style="margin-top:.5rem;font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#7c3aed;">Volunteers \u2014 tap to assign</div>';
+      vols.forEach(function(v){ btns += '<button onclick="assignVolunteer('+m.rideId+',\''+String(v).replace(/'/g,"\\'")+'\')" style="margin-top:.3rem;width:100%;padding:.4rem;background:#16a34a;color:#fff;border:none;border-radius:8px;'+_bs+'font-size:.78rem;font-weight:700;">Assign '+escHtml(String(v).split(' ')[0])+'</button>'; });
+    } else {
+      var mine = vols.indexOf(myDriver)>=0;
+      btns += '<button onclick="volunteerForRide('+m.rideId+')" '+(mine?'disabled ':'')+'style="margin-top:.3rem;width:100%;padding:.4rem;background:'+(mine?'#9ca3af':'#16a34a')+';color:#fff;border:none;border-radius:8px;'+_bs+'font-size:.78rem;font-weight:700;'+(mine?'cursor:default;':'')+'">'+(mine?'\u2705 You volunteered':'\uD83D\uDE4B I can cover it')+'</button>';
+      if(iAmOwner && !vols.length){ btns += '<div style="margin-top:.35rem;font-size:.7rem;color:var(--mid);">No volunteers yet.</div>'; }
+    }
+  } else if(m.rideId && covered){
+    btns += '<button onclick="openRideFromChat('+m.rideId+')" style="margin-top:.5rem;width:100%;padding:.4rem;background:none;border:1.5px solid var(--light);color:var(--mid);border-radius:8px;'+_bs+'font-size:.76rem;">View Ride</button>';
+  }
+  var _fade = covered ? 'opacity:.62;' : '';
+  var _strike = covered ? 'text-decoration:line-through;' : '';
+  return '<div style="background:var(--surface);border:1.5px solid '+(covered?'#9ca3af':'#7c3aed')+';border-radius:10px;padding:.7rem .85rem;min-width:190px;max-width:240px;'+_fade+'">'
+    +'<div style="font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:'+(covered?'#6b7280':'#7c3aed')+';margin-bottom:.35rem;">'+(covered?'\u2705 Covered':'\uD83D\uDE97 Ride Available')+'</div>'
+    +'<div style="font-size:.9rem;font-weight:600;color:var(--black);margin-bottom:.2rem;'+_strike+'">'+escHtml(rd.client||'\u2014')+'</div>'
+    +(when?'<div style="font-size:.8rem;color:var(--mid);'+_strike+'">\uD83D\uDCC5 '+escHtml(when)+'</div>':'')
+    +'<div style="font-size:.8rem;color:var(--mid);'+_strike+'">'+escHtml(rd.type||'')+' \u00b7 '+escHtml(rd.vehicle||'')+(price?' \u00b7 '+price:'')+'</div>'
+    +(covered?'<div style="font-size:.78rem;color:#16a34a;font-weight:700;margin-top:.2rem;">\u2705 Covered by '+escHtml(coveredBy||'a driver')+'</div>':(rd.driver?'<div style="font-size:.76rem;color:var(--mid);">Driver: '+escHtml(driverTxt)+'</div>':'<div style="font-size:.76rem;color:#b45309;">Unassigned</div>'))
+    +(rd.pickup?'<div style="font-size:.76rem;color:var(--mid);'+_strike+'">\uD83D\uDCCD '+escHtml(rd.pickup.slice(0,38))+'</div>':'')
+    +btns
     +'</div>';
 }
 function openRideFromChat(id){
@@ -8247,25 +8314,47 @@ function openRideFromChat(id){
   nav('calendar');
   setTimeout(function(){ openRideModal(id); }, 150);
 }
-async function claimRideFromOfferings(id){
+function _offerOwner(r){ return (typeof getClientOwner==='function' && getClientOwner(r.client)) || (typeof feeOwnerFor==='function' && feeOwnerFor(r.createdBy)) || ''; }
+// Volunteer to cover an offered ride. Does NOT assign \u2014 the ride's owner assigns.
+async function volunteerForRide(id){
   const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   const myDriver=getMyDriverName();
-  if(!myDriver){ showToast('You need a driver profile to claim rides','error'); return; }
+  if(!myDriver){ showToast('You need a driver profile to volunteer','error'); return; }
   if(r.status==='cancelled'){ showToast('This ride is cancelled','error'); return; }
-  if(!confirm('Take this ride? You\u2019ll be assigned as the driver.')){ return; }
-  const oldDriver=r.driver||'';
-  r.driver=myDriver;
-  touchRide(r,'claimed via Offerings');
-  await saveRides();
-  refreshDash(); renderCal(); renderMyCal && renderMyCal();
-  // Post claimed message to offerings channel
-  const claimMsg={sender:currentUser?.name||'',text:'\u2705 '+myDriver.split(' ')[0]+' is covering this ride \u2014 '+r.client+' on '+fmtDateShort(r.date),ts:Date.now(),read:false};
-  if(fbDB){ try{ await ensureFbAuth(); await fbRef('nda/kat/chat/offerings').push(claimMsg); }catch(e){} }
+  if(r.offerCovered){ showToast('This ride is already covered','error'); return; }
+  if(!Array.isArray(r.volunteers)) r.volunteers=[];
+  if(r.volunteers.indexOf(myDriver)>=0){ showToast('You already volunteered for this ride'); return; }
+  r.volunteers.push(myDriver);
+  touchRide(r,'volunteered'); await saveRides();
+  var owner=_offerOwner(r); var first=myDriver.split(' ')[0];
+  var nmsg=first+' is willing to cover '+(r.client||'a ride')+' on '+fmtDateShort(r.date)+'. Open the ride to assign a driver.';
+  if(owner && owner!==myDriver){ try{ addNotification(owner, r, 'volunteer', nmsg); if(typeof sendPushToDriver==='function') sendPushToDriver(owner, '\uD83D\uDE4B Someone can cover \u2014 NDA', nmsg); await saveNotifs(); updateNotifBadge(); }catch(e){} }
+  var cmsg={sender:currentUser?.name||'',text:'\uD83D\uDE4B '+first+' can cover '+(r.client||'this ride')+' on '+fmtDateShort(r.date)+' \u2014 waiting for '+(owner?owner.split(' ')[0]:'the owner')+' to assign.',ts:Date.now(),read:false};
+  if(fbDB){ try{ await ensureFbAuth(); await fbRef('nda/kat/chat/offerings').push(cmsg); }catch(e){} }
   if(!chatMessages.offerings) chatMessages.offerings=[];
-  chatMessages.offerings.push(claimMsg);
+  chatMessages.offerings.push(cmsg);
   if(chatChannel==='offerings'){ renderChatMessages(); }
-  showToast('\u2705 You\u2019re on it! Ride assigned to you.');
+  showToast('\u2705 You volunteered \u2014 the owner will assign the driver.');
 }
+// The ride's owner (or an admin) assigns one of the volunteers.
+async function assignVolunteer(id, driverName){
+  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
+  var owner=_offerOwner(r); var me=getMyDriverName();
+  if(!((typeof isAdmin==='function'&&isAdmin()) || (me && me===owner))){ showToast('Only the ride owner can assign this ride','error'); return; }
+  if(!driverName){ return; }
+  r.driver=driverName; r.offerCovered=true;
+  touchRide(r,'assigned via Offerings'); await saveRides();
+  try{ refreshDash(); renderCal(); renderMyCal && renderMyCal(); }catch(e){}
+  var first=driverName.split(' ')[0];
+  try{ addNotification(driverName, r, 'assigned', 'You were assigned '+(r.client||'a ride')+' on '+fmtDateShort(r.date)+' at '+(r.time||'\u2014')+' ($'+(r.price||0)+')'); if(typeof sendPushToDriver==='function') sendPushToDriver(driverName, '\uD83D\uDE97 Ride assigned \u2014 NDA', (r.client||'A ride')+' \u00b7 '+fmtDateShort(r.date)); await saveNotifs(); updateNotifBadge(); }catch(e){}
+  var cmsg={sender:currentUser?.name||'',text:'\u2705 '+first+' is covering '+(r.client||'this ride')+' on '+fmtDateShort(r.date)+'.',ts:Date.now(),read:false};
+  if(fbDB){ try{ await ensureFbAuth(); await fbRef('nda/kat/chat/offerings').push(cmsg); }catch(e){} }
+  if(!chatMessages.offerings) chatMessages.offerings=[];
+  chatMessages.offerings.push(cmsg);
+  if(chatChannel==='offerings'){ renderChatMessages(); }
+  showToast('\u2705 '+first+' assigned.');
+}
+async function claimRideFromOfferings(id){ return volunteerForRide(id); } // back-compat alias
 async function shareRideToOfferings(id){
   const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
   if(r.status==='cancelled'){ showToast('Cannot share a cancelled ride','error'); return; }
@@ -8365,7 +8454,21 @@ function renderChatTabs(){
   // Update subtitle
   const sub = document.getElementById('chat-subtitle');
   const _chSubs={group:'Team channel \u2014 everyone',offerings:'\uD83D\uDE97 Ride offerings \u2014 post rides needing coverage',updates:'\uD83D\uDEA6 Traffic, road updates \u2014 no OS notifications'};
-  if(sub) sub.textContent=_chSubs[chatChannel]||'Direct message';
+  if(sub){
+    var _isDM = chatChannel!=='group' && chatChannel!=='offerings' && chatChannel!=='updates';
+    sub.innerHTML = escHtml(_chSubs[chatChannel]||'Direct message')
+      + (_isDM ? ' <button onclick="deleteChatChannel(\''+chatChannel+'\')" style="margin-left:.4rem;background:none;border:none;color:#dc2626;font-size:.72rem;cursor:pointer;text-decoration:underline;font-family:\'DM Sans\',sans-serif;">Delete chat</button>' : '');
+  }
+}
+async function deleteChatChannel(key){
+  if(!key || key==='group' || key==='offerings' || key==='updates') return;
+  if(!confirm('Delete this entire conversation? This removes it for both people and can\u2019t be undone.')) return;
+  try{ if(fbDB){ await ensureFbAuth(); await fbRef('nda/kat/chat/'+key).remove(); } }catch(e){}
+  try{ delete chatMessages[key]; }catch(e){}
+  try{ if(typeof openedDMs!=='undefined' && openedDMs.delete) openedDMs.delete(key); }catch(e){}
+  chatChannel='offerings';
+  renderChatTabs(); renderChatMessages(); updateChatBadge();
+  showToast('Chat deleted');
 }
 
 function getDMChannels(){
@@ -8450,8 +8553,12 @@ function renderChatMessages(){
 
     html += `<div class="chat-msg-wrap ${side}">`;
     const _bubble = m.type==='ride_offer' ? buildRideOfferCard(m) : escHtml(m.text);
-    const _del=(isMe||isAdmin())&&m._fbKey
-      ?`<button onclick="deleteChatMsg('${chatChannel}','${m._fbKey}')" title="Delete" style="background:none;border:none;color:#aaa;cursor:pointer;font-size:.9rem;padding:0 3px;opacity:.45;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.45'">×</button>`
+    // You can always delete your OWN messages. Admins can delete anyone's message, but only in
+    // the shared group channels — never inside someone's private one-on-one DM.
+    const _isGroupCh = (chatChannel==='group'||chatChannel==='offerings'||chatChannel==='updates');
+    const _canDel = isMe || (isAdmin() && _isGroupCh);
+    const _del=_canDel
+      ?`<button onclick="deleteChatMsg('${chatChannel}','${m._fbKey||''}',${m.ts||0})" title="Delete" style="background:none;border:none;color:#aaa;cursor:pointer;font-size:.9rem;padding:0 3px;opacity:.55;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.55'">×</button>`
       :'';
     if(!isMe){
       html += `<div style="display:flex;align-items:flex-end;gap:6px;">
@@ -8464,7 +8571,7 @@ function renderChatMessages(){
       </div>`;
     } else {
       html += `<div class="chat-bubble mine">${_bubble}</div>
-        <div class="chat-meta" style="justify-content:flex-end;">${timeStr} ${m.read?'✓✓':'✓'}</div>`;
+        <div class="chat-meta" style="justify-content:flex-end;">${_del} ${timeStr} ${m.read?'✓✓':'✓'}</div>`;
     }
     html += `</div>`;
   });
@@ -8517,12 +8624,15 @@ async function sendChatMessage(){
   notifyChatMembers(chatChannel, msg);
 }
 
-async function deleteChatMsg(channel,fbKey){
-  if(!fbKey||!confirm('Delete this message?')) return;
+async function deleteChatMsg(channel,fbKey,ts){
+  if(!confirm('Delete this message?')) return;
   try{
-    if(fbDB) await fbRef('nda/kat/chat/'+channel+'/'+fbKey).remove();
+    if(fbDB && fbKey){ await ensureFbAuth(); await fbRef('nda/kat/chat/'+channel+'/'+fbKey).remove(); }
     if(chatMessages[channel]){
-      chatMessages[channel]=chatMessages[channel].filter(m=>m._fbKey!==fbKey);
+      chatMessages[channel]=chatMessages[channel].filter(function(m){
+        if(fbKey) return m._fbKey!==fbKey;
+        return String(m.ts||0)!==String(ts); // no Firebase key (local/legacy) — match by timestamp
+      });
       renderChatMessages();
     }
   }catch(e){ showToast('Could not delete','error'); }
@@ -9505,6 +9615,8 @@ function openOnboarding(){
   setV('onb-vehicleyear', prof.vehicleYear || '');
   setV('onb-mpg', prof.mpg || '');
   setV('onb-gasprice', prof.gasPrice || '');
+  // Prefill an existing second vehicle, if any
+  try{ if(Array.isArray(prof.vehicles) && prof.vehicles.length>1){ var _v2=prof.vehicles[1]||{}; _onbVeh2Photo=_v2.photo||''; var _b=document.getElementById('onb-veh2-block'), _t=document.getElementById('onb-veh2-toggle'); if(_b){ _b.style.display='block'; if(_t) _t.textContent='− Remove second vehicle'; } setV('onb-vehicle2',_v2.label||''); setV('onb-vehicleyear2',_v2.year||''); setV('onb-mpg2',_v2.mpg||''); setV('onb-gasprice2',_v2.gasPrice||''); setV('onb-maint2',_v2.maintRate||''); var _pv=document.getElementById('onb-veh2-photo-preview'); if(_pv && _v2.photo) _pv.style.backgroundImage='url('+_v2.photo+')'; } else { _onbVeh2Photo=''; } }catch(e){}
   setV('onb-venmo', (typeof driverVenmo!=='undefined' && driverVenmo[dn]) ? driverVenmo[dn] : '');
   setV('onb-bizname', prof.businessName || '');
   ['premium','traffic','holiday','christmas','fuel'].forEach(function(t){ var el=document.getElementById('onb-auto-'+t); if(el) el.checked = !driverAutoOffFor(dn,t); });
@@ -9628,6 +9740,18 @@ async function saveOnboarding(){
   if(gv('onb-vehicleyear')) p.vehicleYear = gv('onb-vehicleyear');
   var mpg = parseFloat(gv('onb-mpg'));      if(!isNaN(mpg)) p.mpg = mpg;
   var gas = parseFloat(gv('onb-gasprice')); if(!isNaN(gas)) p.gasPrice = gas;
+
+  // Vehicles list: primary (from the fields above) + optional second vehicle.
+  var _v2label = gv('onb-vehicle2');
+  if(_v2label){
+    var _num = function(id){ var n=parseFloat(gv(id)); return isNaN(n)?'':n; };
+    p.vehicles = [
+      { label: p.vehicle||gv('onb-vehicle'), year: p.vehicleYear||gv('onb-vehicleyear'), mpg: (p.mpg!=null?p.mpg:''), gasPrice: (p.gasPrice!=null?p.gasPrice:''), maintRate: (p.maintRate!=null?p.maintRate:''), photo: (typeof DRIVER_PHOTOS!=='undefined' && DRIVER_PHOTOS[dn]) ? DRIVER_PHOTOS[dn] : '' },
+      { label: _v2label, year: gv('onb-vehicleyear2'), mpg: _num('onb-mpg2'), gasPrice: _num('onb-gasprice2'), maintRate: _num('onb-maint2'), photo: _onbVeh2Photo||'' }
+    ];
+  } else if(Array.isArray(p.vehicles) && p.vehicles.length>1){
+    p.vehicles = [ p.vehicles[0] ]; // second vehicle removed
+  }
 
   // Venmo
   var venmo = gv('onb-venmo').replace(/^@/,'');
@@ -10563,7 +10687,7 @@ async function loadAddedDrivers(){
     if(DRIVERS.indexOf(dn)<0) DRIVERS.push(dn);
     if(!DRIVER_PROFILES[dn]) DRIVER_PROFILES[dn] = rec.profile || { phone:'', email:'', vehicle:'', notes:'' };
     else Object.assign(DRIVER_PROFILES[dn], rec.profile||{});
-    if(rec.color) driverColors[dn] = rec.color;
+    if(rec.color && !driverColors[dn]) driverColors[dn] = rec.color; // seed only — an edited color in kat:driverColors wins
     if(rec.photo && typeof DRIVER_PHOTOS!=='undefined') DRIVER_PHOTOS[dn] = rec.photo;
     if(rec.login){
       USER_DRIVER_MAP[rec.login] = dn;
@@ -10667,6 +10791,9 @@ async function submitEditDriver(oldName){
   if(typeof renderDriverMembers==='function') renderDriverMembers();
   showToast('Saved changes for '+newName.split(' ')[0]);
 }
+var _onbVeh2Photo='';
+function _onbToggleVeh2(){ var b=document.getElementById('onb-veh2-block'); var t=document.getElementById('onb-veh2-toggle'); if(!b) return; var show=b.style.display==='none'; b.style.display=show?'block':'none'; if(t) t.textContent=show?'− Remove second vehicle':'+ Add a second vehicle'; if(!show){ ['onb-vehicle2','onb-vehicleyear2','onb-mpg2','onb-gasprice2','onb-maint2'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; }); _onbVeh2Photo=''; var pv=document.getElementById('onb-veh2-photo-preview'); if(pv) pv.style.backgroundImage=''; } }
+function _onbVeh2PhotoPick(input){ var f=input.files&&input.files[0]; if(!f) return; var rd=new FileReader(); rd.onload=function(){ _onbVeh2Photo=rd.result; var pv=document.getElementById('onb-veh2-photo-preview'); if(pv) pv.style.backgroundImage='url('+rd.result+')'; }; rd.readAsDataURL(f); }
 function _ndPhotoPick(input){
   const f=input.files&&input.files[0]; if(!f) return;
   const rd=new FileReader();
@@ -10846,9 +10973,9 @@ function buildSurchargeTriggersHTML(){
   return '<details style="margin-bottom:1.25rem;border:1.5px solid var(--light);border-radius:12px;background:var(--surface);overflow:hidden;">'
     +'<summary style="cursor:pointer;padding:.85rem 1rem;font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);display:flex;align-items:center;justify-content:space-between;"><span>Surcharge Triggers</span><span style="font-size:.66rem;font-weight:600;color:var(--accent);text-transform:none;letter-spacing:0;">When premium / traffic / holidays apply</span></summary>'
     +'<div style="padding:0 1rem 1rem;">'
-    +'<div style="font-size:.74rem;color:var(--mid);line-height:1.55;margin-bottom:1rem;">These set when a surcharge is <em>auto-suggested</em> on a new quote. Whoever is scheduling can always switch any surcharge on or off per ride.</div>'
+    +'<div style="font-size:.74rem;color:var(--mid);line-height:1.55;margin-bottom:1rem;">These are the current default hours a surcharge is suggested for on a new quote — edit them below. Whoever is scheduling can always switch any surcharge on or off per ride.</div>'
     +'<div style="font-size:.66rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Premium hours</div>'
-    +'<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.4rem;font-size:.82rem;color:var(--black);">Auto-suggest premium for pickups between '+ti('trg-premium-start',premiumStart())+' and '+ti('trg-premium-end',premiumEnd())+'</div>'
+    +'<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.4rem;font-size:.82rem;color:var(--black);">Current default premium hours are '+ti('trg-premium-start',premiumStart())+' and '+ti('trg-premium-end',premiumEnd())+'</div>'
     +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:1.1rem;">A start–end window. If the start is later than the end it wraps past midnight — e.g. 10:00 PM to 05:00 AM covers overnight rides on both sides of midnight.</div>'
     +'<div style="font-size:.66rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Traffic hours</div>'
     +'<div style="font-size:.72rem;color:var(--mid);margin-bottom:.4rem;">Days:</div><div style="display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-bottom:.6rem;">'+dayBoxes+'</div>'
@@ -11947,17 +12074,49 @@ function removeAvailableDate(driverName, date){
   persistDriverProfiles(); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
 }
 
+// ── PER-DRIVER VEHICLES (each with its own costs + card photo) ──
+// A driver can have more than one vehicle. Each carries its own MPG, gas price,
+// maintenance rate and card photo. Legacy single-vehicle profiles are migrated
+// on read into a one-item list, so nothing else has to change.
+function driverVehicles(name){
+  var prof = (typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[name]) ? DRIVER_PROFILES[name] : {};
+  if(Array.isArray(prof.vehicles) && prof.vehicles.length) return prof.vehicles;
+  return [{
+    label: prof.vehicle||'', year: prof.vehicleYear||'',
+    mpg: prof.mpg||'', gasPrice: prof.gasPrice||'', maintRate: prof.maintRate||'',
+    photo: (typeof DRIVER_PHOTOS!=='undefined' && DRIVER_PHOTOS[name]) ? DRIVER_PHOTOS[name] : ''
+  }];
+}
+function rideVehicleIdx(r){
+  if(!r) return 0;
+  var list = driverVehicles(r.driver);
+  return (typeof r.vehicleIdx==='number' && r.vehicleIdx>=0 && r.vehicleIdx<list.length) ? r.vehicleIdx : 0;
+}
+function rideVehicle(r){
+  if(!r) return {};
+  var list = driverVehicles(r.driver);
+  return list[rideVehicleIdx(r)] || list[0] || {};
+}
+function rideDriverCardImage(r){
+  var v = rideVehicle(r);
+  if(v && v.photo) return v.photo;
+  return (typeof DRIVER_PHOTOS!=='undefined' && r && DRIVER_PHOTOS[r.driver]) ? DRIVER_PHOTOS[r.driver] : '';
+}
+
 // ── VEHICLE COST PER MILE ──
 const IRS_MAINTENANCE_RATE = 0.13; // maintenance per mile (set by owner)
 
-function calcCostPerMile(driverName){
+// Cost per mile for a driver. Pass a specific vehicle object to use that
+// vehicle's numbers; otherwise falls back to the driver's primary profile fields.
+function calcCostPerMile(driverName, veh){
   const prof      = DRIVER_PROFILES[driverName]||{};
-  const mpg       = parseFloat(prof.mpg)||0;
-  const gasPrice  = parseFloat(prof.gasPrice)||3.50; // default $3.50/gal
-  const maintRate = parseFloat(prof.maintRate)||IRS_MAINTENANCE_RATE; // driver's custom rate, default $0.13/mi
+  const src       = veh || {};
+  const _pick     = function(a,b){ return (a!=null && a!=='') ? a : b; };
+  const mpg       = parseFloat(_pick(src.mpg, prof.mpg))||0;
+  const gasPrice  = parseFloat(_pick(src.gasPrice, prof.gasPrice))||3.50; // default $3.50/gal
+  const maintRate = parseFloat(_pick(src.maintRate, prof.maintRate))||IRS_MAINTENANCE_RATE; // default $0.13/mi
   if(!mpg) return maintRate; // fallback: just maintenance
-  const gasCostPerMile = gasPrice / mpg;
-  return gasCostPerMile + maintRate;
+  return (gasPrice / mpg) + maintRate;
 }
 
 function getRideVehicleCost(ride){
@@ -11965,7 +12124,7 @@ function getRideVehicleCost(ride){
   if(!dName) return 0;
   const miles = parseFloat(ride.miles)||0;
   if(!miles) return 0;
-  return miles * calcCostPerMile(dName);
+  return miles * calcCostPerMile(dName, rideVehicle(ride)); // use the ride's chosen vehicle
 }
 
 // ── SHAREABLE DRIVER CARDS (available to everyone) ──
@@ -12346,17 +12505,31 @@ const FREE_ACCESS_USERS = ['Kat','Chase','Morgan'];
 // Other admins can still manage the admin ROLE, but not the paywall bypass.
 function canGrantFreeAccess(){ return !!(currentUser && currentUser.name === 'Chase'); }
 
-function hasIncomeAccess(){
-  if(!currentUser) return false;
-  const sub = subscriptions[currentUser.name] || {};
+function hasIncomeAccessFor(name){
+  if(!name) return false;
+  const sub = subscriptions[name] || {};
   // Core owners (FREE_ACCESS_USERS) get free access unless it's been explicitly turned off.
-  if(FREE_ACCESS_USERS.includes(currentUser.name) && sub.adminIncomeEnabled !== false) return true;
-  // Complimentary access must be an EXPLICIT grant. Being an admin no longer auto-grants a
-  // paywall bypass; only Chase can grant free access (which sets adminIncomeEnabled=true).
+  if(FREE_ACCESS_USERS.includes(name) && sub.adminIncomeEnabled !== false) return true;
+  // Complimentary access must be an EXPLICIT grant.
   if(sub.adminIncomeEnabled === true) return true;
-  // Regular subscription check (also applies to admins whose free access was turned off)
   if(sub?.upgraded === true && new Date(sub?.upgradeExpiresAt||0) > new Date()) return true;
   if(sub?.incomeTrial === true && new Date(sub?.incomeTrialEnds||0) > new Date()) return true;
+  return false;
+}
+function hasIncomeAccess(){
+  if(!currentUser) return false;
+  return hasIncomeAccessFor(currentUser.name);
+}
+// For the payment modal: the tip belongs to the ride's DRIVER and the receipt uses the
+// DRIVER/owner branding, so an admin marking a ride paid on their behalf should be able to
+// record the tip / send the receipt when THAT driver (or the client's owner) has access.
+function rideTipReceiptAllowed(r){
+  if(hasIncomeAccess()) return true;
+  if(!r || typeof isAdmin!=='function' || !isAdmin()) return false;
+  var driver = (r.driver||'').trim();
+  if(driver && hasIncomeAccessFor(driver)) return true;
+  var owner = (typeof getClientOwner==='function') ? getClientOwner(r.client) : null;
+  if(owner && hasIncomeAccessFor(owner)) return true;
   return false;
 }
 
@@ -12979,6 +13152,32 @@ function toggleClientSelect(name){
   else selectedClients.add(name);
   updateClientDeleteBar();
   renderClients();
+}
+function toggleClientSelectMode(){
+  clientSelectMode=!clientSelectMode;
+  if(!clientSelectMode) selectedClients.clear();
+  var b=document.getElementById('client-select-btn'); if(b){ b.textContent=clientSelectMode?'Done':'Select'; b.style.borderColor=clientSelectMode?'var(--gold)':'var(--light)'; b.style.color=clientSelectMode?'var(--gold)':'var(--mid)'; }
+  updateClientDeleteBar();
+  renderClients();
+}
+function clearClientSelection(){
+  selectedClients.clear(); clientSelectMode=false;
+  var b=document.getElementById('client-select-btn'); if(b){ b.textContent='Select'; b.style.borderColor='var(--light)'; b.style.color='var(--mid)'; }
+  updateClientDeleteBar(); renderClients();
+}
+async function deleteSelectedClients(){
+  var names=Array.from(selectedClients);
+  if(!names.length){ showToast('No clients selected'); return; }
+  if(!confirm('Remove '+names.length+' client'+(names.length===1?'':'s')+' from your list?\n\nThis hides them from your list. Their past rides stay on record.')) return;
+  var me=(typeof _deceasedOwner==='function')?_deceasedOwner():((currentUser&&PROXY_MAP[currentUser.name])||getMyDriverName());
+  if(typeof hiddenClients==='undefined'){ window.hiddenClients=[]; }
+  names.forEach(function(nm){ hiddenClients.push({owner:me,name:String(nm).trim(),ts:Date.now()}); });
+  try{ await storageSet('kat:hiddenClients',hiddenClients); }catch(e){}
+  for(var i=0;i<names.length;i++){ try{ if(typeof unmarkClientDeceased==='function') await unmarkClientDeceased(names[i]); }catch(e){} }
+  selectedClients.clear(); clientSelectMode=false;
+  var b=document.getElementById('client-select-btn'); if(b){ b.textContent='Select'; b.style.borderColor='var(--light)'; b.style.color='var(--mid)'; }
+  updateClientDeleteBar(); renderClients();
+  showToast(names.length+' client'+(names.length===1?'':'s')+' removed');
 }
 function updateClientDeleteBar(){
   const bar=document.getElementById("client-delete-bar"); if(!bar) return;
@@ -13922,9 +14121,48 @@ function renderFlightsPage(){
 function sendConfText(id){
   if(!confirmTextGate()) return;
   const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
+  // Driver with more than one vehicle and none chosen yet? Let the sender pick which
+  // one — that sets both the card sent to the client and the vehicle costs on the income sheet.
+  if(r.driver && typeof driverVehicles==='function' && driverVehicles(r.driver).length>1 && typeof r.vehicleIdx!=='number'){
+    openVehiclePicker(id, function(){ _doSendConfText(id); });
+    return;
+  }
+  _doSendConfText(id);
+}
+function _doSendConfText(id){
+  const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
   const conf=buildConfirmationText(r);
   openGroupThread(id, conf.message);
   markPartSent(id,'text');
+}
+var _vehPickerCb=null;
+function openVehiclePicker(id, onChosen){
+  const r=rides.find(function(x){ return x.id===id; }); if(!r){ if(onChosen) onChosen(); return; }
+  const list=driverVehicles(r.driver);
+  _vehPickerCb=onChosen||null;
+  var ov=document.createElement('div'); ov.id='veh-picker-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:15000;display:flex;align-items:center;justify-content:center;padding:1.5rem;';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  var rows=list.map(function(v,i){
+    var thumb = v.photo
+      ? '<div style="width:58px;height:40px;border-radius:6px;background:#eee center/cover no-repeat;background-image:url(\''+v.photo+'\');flex-shrink:0;border:1px solid var(--light);"></div>'
+      : '<div style="width:58px;height:40px;border-radius:6px;background:#f4f2f8;flex-shrink:0;border:1px solid var(--light);"></div>';
+    var name=(v.label||('Vehicle '+(i+1)))+(v.year?(' \u00b7 '+v.year):'');
+    return '<button onclick="_vehPickerChoose('+id+','+i+')" style="display:flex;align-items:center;gap:.7rem;width:100%;text-align:left;padding:.6rem;margin-bottom:.5rem;border:1.5px solid var(--light);border-radius:10px;background:#fff;cursor:pointer;font-family:\'DM Sans\',sans-serif;">'+thumb+'<span style="font-size:.9rem;font-weight:600;color:var(--black);">'+name+'</span></button>';
+  }).join('');
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:380px;width:100%;padding:1.3rem;box-shadow:0 24px 60px rgba(0,0,0,.35);">'
+    +'<div style="font-size:1.05rem;font-weight:800;color:#0f172a;margin-bottom:.3rem;">Which vehicle for this ride?</div>'
+    +'<div style="font-size:.76rem;color:var(--mid);margin-bottom:.9rem;line-height:1.4;">Sends that vehicle\u2019s card to the client and uses its costs on the income sheet.</div>'
+    +rows
+    +'<button onclick="document.getElementById(\'veh-picker-overlay\').remove()" style="width:100%;margin-top:.3rem;padding:.5rem;background:none;border:none;color:var(--mid);font-size:.8rem;cursor:pointer;">Cancel</button>'
+    +'</div>';
+  document.body.appendChild(ov);
+}
+async function _vehPickerChoose(id, idx){
+  const r=rides.find(function(x){ return x.id===id; });
+  if(r){ r.vehicleIdx=idx; try{ touchRide(r,'set vehicle'); }catch(e){} try{ await saveRides(); }catch(e){} }
+  var ov=document.getElementById('veh-picker-overlay'); if(ov) ov.remove();
+  var cb=_vehPickerCb; _vehPickerCb=null; if(typeof cb==='function') cb();
 }
 
 function sendConfInstructions(id){
@@ -13937,7 +14175,8 @@ function sendConfInstructions(id){
 
 async function sendSelfiePic(id){
   const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
-  const selfieDataUrl=getDriverSelfie(feeOwnerFor(r.createdBy)||(r.driver||'').trim());
+  var _vehCard = (typeof r.vehicleIdx==='number' && typeof rideVehicle==='function') ? (rideVehicle(r).photo||'') : '';
+  const selfieDataUrl=_vehCard || getDriverSelfie(feeOwnerFor(r.createdBy)||(r.driver||'').trim());
   if(!selfieDataUrl){ showToast('No selfie card available','error'); return; }
   const copied=await copyImageToClipboard(selfieDataUrl);
   openGroupThread(id, '');
