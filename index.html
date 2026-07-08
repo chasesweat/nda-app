@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090244">
+<meta name="version" content="202606090246">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -443,7 +443,6 @@ input,select,textarea{font-size:16px;}
   <div id="menu-costcalc" onclick="nav('costcalc')" style="display:none;padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;align-items:center;gap:.75rem;">💵 Profit calculator</div>
   <div style="padding:.6rem 1.1rem .35rem;font-size:.66rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#7c5cbf;">Admin</div>
   <div onclick="nav('drivers')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🚘 Team</div>
-  <div id="menu-access" onclick="nav('access')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:none;align-items:center;gap:.75rem;">🔐 Access Control</div>
   <div style="padding:.6rem 1.1rem .35rem;font-size:.66rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#7c5cbf;">Help</div>
   <div onclick="closeMenu(); window.open('nwda-tutorial.html','_blank');" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">📚 Driver Tutorial</div>
   <div id="menu-admin-guide" onclick="closeMenu(); window.open('nwda-admin-tutorial.html','_blank');" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:none;align-items:center;gap:.75rem;">🔒 Admin Guide</div>
@@ -2538,8 +2537,10 @@ function vehUpcharge(veh){ var d=(BASE[veh]||sedanBase())-sedanBase(); return d>
 // ── EDITABLE SURCHARGE TRIGGERS (time windows / days / holiday dates) ──
 function _hm(str){ if(!str||typeof str!=='string'||str.indexOf(':')<0) return null; var p=str.split(':'); var h=parseInt(p[0],10), m=parseInt(p[1],10); return (isFinite(h)&&isFinite(m))?h*60+m:null; }
 function premiumBefore(){ return (globalSettings.premiumBefore)||'05:00'; }
+function premiumAfter(){ return (globalSettings.premiumAfter)||''; }  // optional late-night start; '' = disabled
 function premiumBeforeMin(){ var m=_hm(premiumBefore()); return m==null?300:m; }
-function isPremiumTime(mins){ return mins>0 && mins<premiumBeforeMin(); }
+function premiumAfterMin(){ var m=_hm(premiumAfter()); return m; }  // null if disabled/blank
+function isPremiumTime(mins){ if(mins<=0) return false; if(mins<premiumBeforeMin()) return true; var a=premiumAfterMin(); return a!=null && mins>=a; }
 function trafficDaysList(){ var d=globalSettings.trafficDays; return Array.isArray(d)?d:[1,2,3,4,5]; }
 function trafficAm(){ var w=globalSettings.trafficAm||{}; return {start:w.start||'06:30', end:w.end||'09:00'}; }
 function trafficPm(){ var w=globalSettings.trafficPm||{}; return {start:w.start||'14:30', end:w.end||'19:00'}; }
@@ -3925,6 +3926,9 @@ function renderNotifPanel(){
 // DRIVER COLOR HELPERS
 // ═══════════════════════════════════════════
 function driverColor(name){ return driverColors[name]||'#888888'; }
+const COLOR_POOL = ['#7c3aed','#4a148c','#f5a623','#ffcba4','#000000','#e53935','#43a047','#1e88e5','#e0c3fc','#a0522d','#a0a0a0','#ff6d00','#8b0000','#2e7d32','#ff6b6b','#c8920a','#0097a7','#e91e8c','#00838f','#5d4037','#c2185b','#00897b','#6d4c41','#455a64','#d84315','#827717'];
+function _norm(c){ return (c||'').toLowerCase(); }
+function pickUnusedColor(){ var used=Object.values(driverColors).map(_norm); var free=COLOR_POOL.filter(function(c){ return used.indexOf(_norm(c))<0; }); if(free.length) return free[Math.floor(Math.random()*free.length)]; var r=function(){return Math.floor(Math.random()*180+30);}; return '#'+[r(),r(),r()].map(function(n){return n.toString(16).padStart(2,'0');}).join(''); }
 
 // Returns '#fff' or a dark color — whichever is actually more readable on the given
 // background hex. `alpha` accounts for badges drawn at partial opacity over the white card.
@@ -8009,7 +8013,32 @@ function nav(id){
 // ── ADMIN PROTECTION ──
 // Removing an admin requires approval from the other 2 admins
 let adminRemovalRequests = {}; // { targetAdmin: Set of approving admins }
+let adminPromotionRequests = {}; // { targetDriver: Set of approving admins }
 
+async function requestAdminPromotion(targetName){
+  if(!currentUser || currentUser.role !== 'admin'){ showToast('Only admins can request this','error'); return; }
+  const target = USERS.find(u=>u.name===targetName);
+  if(!target){ showToast('User not found','error'); return; }
+  if(target.role==='admin'){ showToast(targetName+' is already an admin','error'); return; }
+  if(!adminPromotionRequests[targetName]) adminPromotionRequests[targetName]=new Set();
+  if(adminPromotionRequests[targetName].has(currentUser.name)){ showToast('You already approved this — a second admin is needed'); return; }
+  adminPromotionRequests[targetName].add(currentUser.name);
+  const approvals=adminPromotionRequests[targetName].size;
+  if(approvals>=2){
+    target.role='admin';
+    await savePasswords();
+    var approvedBy=Array.from(adminPromotionRequests[targetName]).join(', ');
+    delete adminPromotionRequests[targetName];
+    if(fbDB){ try{ await fbRef('nda/kat/adminPromotionRequests/'+targetName.replace(/[.#$/\[\]]/g,'_')).remove(); }catch(e){}
+      fbRef('nda/kat/notifications/admin').push({ msg: targetName+' was promoted to admin. Approved by: '+approvedBy+'. (Only Chase can grant Driver Pro / paywall access.)', ts: Date.now() }); }
+    renderAccessControl();
+    showToast(targetName+' is now an admin — approved by 2 admins');
+  } else {
+    if(fbDB){ try{ await fbRef('nda/kat/adminPromotionRequests/'+targetName.replace(/[.#$/\[\]]/g,'_')).set({ requestedBy: currentUser.name, ts: Date.now() }); }catch(e){} }
+    renderAccessControl();
+    showToast('Promotion approved '+approvals+'/2 — one more admin needed');
+  }
+}
 async function requestAdminRemoval(targetName){
   if(!currentUser || currentUser.role !== 'admin'){
     showToast('Only admins can request this', 'error'); return;
@@ -8065,6 +8094,18 @@ async function loadAdminRemovalRequests(){
       renderAccessControl();
     }
   });
+  fbRef('nda/kat/adminPromotionRequests').on('value', snap=>{
+    adminPromotionRequests = {};
+    const data = (snap.exists() && snap.val())||{};
+    Object.entries(data).forEach(([target, req])=>{
+      const nm = USERS.find(u=>u.name.replace(/[.#$/\[\]]/g,'_')===target)?.name || target;
+      if(!adminPromotionRequests[nm]) adminPromotionRequests[nm] = new Set();
+      if(req && req.requestedBy) adminPromotionRequests[nm].add(req.requestedBy);
+    });
+    if(document.getElementById('page-drivers')?.classList.contains('active')){
+      renderAccessControl();
+    }
+  });
 }
 
 function toggleUserMenu(){
@@ -8102,9 +8143,6 @@ function setupHamburgerMenu(){
   // Income — always visible
   const inc = document.getElementById('menu-income');
   if(inc) inc.style.display = 'block';
-  // Access Control shortcut — admins only
-  const ax = document.getElementById('menu-access');
-  if(ax) ax.style.display = admin ? 'block' : 'none';
   const agd = document.getElementById('menu-admin-guide');
   if(agd) agd.style.display = admin ? 'flex' : 'none';
 }
@@ -10543,7 +10581,7 @@ function openAddDriverModal(){
     +fld('Vehicle year','nd-vyear','e.g. 2024')
     +fld('Vehicle make/model','nd-vehicle','e.g. Toyota Sienna')
     +'<div style="margin-bottom:.7rem;"><div style="font-size:.66rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">Card color</div>'
-    +'<input type="color" id="nd-color" value="#7c3aed" style="width:100%;height:40px;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;background:#fff;" /></div>'
+    +'<input type="color" id="nd-color" value="'+pickUnusedColor()+'" style="width:100%;height:40px;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;background:#fff;" /></div>'
     +'<div style="margin-bottom:1rem;"><div style="font-size:.66rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">Driver card photo</div>'
     +'<div style="display:flex;align-items:center;gap:.6rem;">'
     +'<div id="nd-photo-preview" style="width:64px;height:40px;border-radius:6px;background:#f4f2f8 center/cover no-repeat;border:1.5px solid var(--light);flex-shrink:0;"></div>'
@@ -10553,6 +10591,57 @@ function openAddDriverModal(){
     +'<div style="font-size:.7rem;color:var(--mid);margin-top:.6rem;line-height:1.5;">The driver logs in with the username and temporary password above. They can complete the rest of their profile themselves under My Profile.</div>'
     +'</div>';
   document.body.appendChild(ov);
+}
+function openEditDriverModal(dName){
+  if(!isAdmin()){ showToast('Only admins can edit drivers','error'); return; }
+  var p=(typeof DRIVER_PROFILES!=='undefined'&&DRIVER_PROFILES[dName])||{};
+  var login=''; for(var k in USER_DRIVER_MAP){ if(USER_DRIVER_MAP[k]===dName){ login=k; break; } }
+  var ov=document.createElement('div'); ov.id='edit-driver-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:14000;display:flex;align-items:flex-start;justify-content:center;padding:1.5rem;overflow-y:auto;';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  var esc=function(v){ return String(v||'').replace(/"/g,'&quot;'); };
+  var fld=function(label,id,val,type){ return '<div style="margin-bottom:.7rem;"><div style="font-size:.66rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">'+label+'</div><input type="'+(type||'text')+'" id="'+id+'" value="'+esc(val)+'" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.88rem;box-sizing:border-box;" /></div>'; };
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:420px;width:100%;padding:1.4rem;box-shadow:0 24px 60px rgba(0,0,0,.35);margin:auto;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;"><div style="font-size:1.1rem;font-weight:800;color:#0f172a;">Edit '+dName+'</div><button onclick="document.getElementById(\'edit-driver-overlay\').remove()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button></div>'
+    +fld('Full name (as shown on cards)','ed-name',dName)
+    +fld('Phone','ed-phone',p.phone,'tel')
+    +fld('Email','ed-email',p.email,'email')
+    +fld('Vehicle year','ed-vyear',p.vehicleYear)
+    +fld('Vehicle make/model','ed-vehicle',p.vehicle)
+    +'<div style="margin-bottom:1rem;"><div style="font-size:.66rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">Calendar color</div><input type="color" id="ed-color" value="'+driverColor(dName)+'" style="width:100%;height:40px;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;background:#fff;" /></div>'
+    +'<button onclick="submitEditDriver(\''+dName.replace(/'/g,"\\'")+'\')" style="width:100%;padding:.7rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.92rem;font-weight:700;cursor:pointer;">Save changes</button>'
+    +'<div style="font-size:.7rem;color:var(--mid);margin-top:.6rem;line-height:1.5;">To change the card photo, use “Edit card photo” on the card. Login &amp; password are managed under Access control.</div>'
+    +'</div>';
+  document.body.appendChild(ov);
+}
+async function submitEditDriver(oldName){
+  if(!isAdmin()){ showToast('Only admins can edit drivers','error'); return; }
+  var g=function(id){ var el=document.getElementById(id); return el?el.value.trim():''; };
+  var newName=g('ed-name')||oldName;
+  var p=DRIVER_PROFILES[oldName]||{phone:'',email:'',vehicleYear:'',vehicle:'',notes:'',unavailableDates:[],weeklyOff:[]};
+  p.phone=g('ed-phone'); p.email=g('ed-email'); p.vehicleYear=g('ed-vyear'); p.vehicle=g('ed-vehicle');
+  var color=g('ed-color')||driverColor(oldName);
+  if(newName!==oldName){
+    if(DRIVERS.indexOf(newName)>=0){ showToast('A driver named '+newName+' already exists','error'); return; }
+    var idx=DRIVERS.indexOf(oldName); if(idx>=0) DRIVERS[idx]=newName;
+    DRIVER_PROFILES[newName]=p; if(newName!==oldName) delete DRIVER_PROFILES[oldName];
+    driverColors[newName]=color; delete driverColors[oldName];
+    if(typeof DRIVER_PHOTOS!=='undefined' && DRIVER_PHOTOS[oldName]){ DRIVER_PHOTOS[newName]=DRIVER_PHOTOS[oldName]; delete DRIVER_PHOTOS[oldName]; }
+    for(var k in USER_DRIVER_MAP){ if(USER_DRIVER_MAP[k]===oldName) USER_DRIVER_MAP[k]=newName; }
+    if(typeof driverSettings!=='undefined' && driverSettings[oldName]){ driverSettings[newName]=driverSettings[oldName]; delete driverSettings[oldName]; }
+  } else {
+    DRIVER_PROFILES[oldName]=p; driverColors[oldName]=color;
+  }
+  try{
+    await storageSet('kat:driverProfiles', DRIVER_PROFILES);
+    await storageSet('kat:driverColors', driverColors);
+    if(typeof saveDriverSettings==='function') await saveDriverSettings();
+  }catch(e){ console.warn('edit driver save', e); }
+  var ov=document.getElementById('edit-driver-overlay'); if(ov) ov.remove();
+  if(typeof refreshDash==='function') refreshDash();
+  if(typeof renderCal==='function') renderCal();
+  if(typeof renderDriverMembers==='function') renderDriverMembers();
+  showToast('Saved changes for '+newName.split(' ')[0]);
 }
 function _ndPhotoPick(input){
   const f=input.files&&input.files[0]; if(!f) return;
@@ -10624,7 +10713,7 @@ async function submitNewDriver(){
     phone:g('nd-phone'), email:g('nd-email'), vehicleYear:g('nd-vyear'),
     vehicle:g('nd-vehicle'), notes:'', unavailableDates:[], weeklyOff:[]
   };
-  const color=g('nd-color')||'#7c3aed';
+  const color=g('nd-color')||pickUnusedColor();
   const rec={ driverName:name, login:login, password:password, profile:profile, color:color, photo:_newDriverPhoto||'' };
   // Apply live
   if(DRIVERS.indexOf(name)<0) DRIVERS.push(name);
@@ -10735,7 +10824,9 @@ function buildSurchargeTriggersHTML(){
     +'<div style="padding:0 1rem 1rem;">'
     +'<div style="font-size:.74rem;color:var(--mid);line-height:1.55;margin-bottom:1rem;">These set when a surcharge is <em>auto-suggested</em> on a new quote. Whoever is scheduling can always switch any surcharge on or off per ride.</div>'
     +'<div style="font-size:.66rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Premium hours</div>'
-    +'<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:1.1rem;font-size:.82rem;color:var(--black);">Auto-suggest premium for pickups before '+ti('trg-premium-before',premiumBefore())+'</div>'
+    +'<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem;font-size:.82rem;color:var(--black);">Auto-suggest premium for pickups before '+ti('trg-premium-before',premiumBefore())+'</div>'
+    +'<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.35rem;font-size:.82rem;color:var(--black);">…and for pickups at or after '+ti('trg-premium-after',premiumAfter())+'</div>'
+    +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:1.1rem;">Leave the second time blank for none. Example: before 05:00 AM plus after 10:00 PM covers overnight rides on both sides of midnight.</div>'
     +'<div style="font-size:.66rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Traffic hours</div>'
     +'<div style="font-size:.72rem;color:var(--mid);margin-bottom:.4rem;">Days:</div><div style="display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-bottom:.6rem;">'+dayBoxes+'</div>'
     +'<div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-bottom:.4rem;font-size:.82rem;color:var(--black);">Morning rush '+ti('trg-am-start',am.start)+' to '+ti('trg-am-end',am.end)+'</div>'
@@ -10752,6 +10843,7 @@ function buildSurchargeTriggersHTML(){
 async function saveSurchargeTriggers(){
   if(typeof isAdmin==='function' && !isAdmin()){ showToast('Admins only','error'); return; }
   var pb=document.getElementById('trg-premium-before'); if(pb&&pb.value) globalSettings.premiumBefore=pb.value;
+  var pa=document.getElementById('trg-premium-after'); globalSettings.premiumAfter = (pa&&pa.value)?pa.value:'';
   var days=[]; document.querySelectorAll('.trf-day').forEach(function(c){ if(c.checked) days.push(parseInt(c.getAttribute('data-day'),10)); });
   globalSettings.trafficDays=days;
   var ams=document.getElementById('trg-am-start'), ame=document.getElementById('trg-am-end');
@@ -11063,7 +11155,11 @@ function renderAccessControl(){
       : isAdmin_u
         ? '<button onclick="requestAdminRemoval(this.dataset.n)" data-n="'+safeN+'" style="font-size:.72rem;padding:3px 9px;border-radius:8px;border:1px solid #dc2626;color:#dc2626;background:none;cursor:pointer;">'
           +(iAlreadyRequested ? 'Requested ('+pendingApprovals+'/2)' : 'Remove admin')+'</button>'
-        : '<label class="switch"><input type="checkbox" '+(active?'checked ':'')+' onchange="toggleUserAccess(this.dataset.u,this)" data-u="'+safeN+'" /><span class="slider"></span></label>';
+        : ('<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;justify-content:flex-end;">'
+          +'<button onclick="requestAdminPromotion(this.dataset.n)" data-n="'+safeN+'" style="font-size:.72rem;padding:3px 9px;border-radius:8px;border:1px solid #7c3aed;color:#7c3aed;background:none;cursor:pointer;">'
+          +((adminPromotionRequests[u.name]&&adminPromotionRequests[u.name].has(currentUser.name)) ? 'Requested ('+(adminPromotionRequests[u.name].size)+'/2)' : ((adminPromotionRequests[u.name]&&adminPromotionRequests[u.name].size)? 'Make admin ('+adminPromotionRequests[u.name].size+'/2)' : 'Make admin'))+'</button>'
+          +'<label class="switch"><input type="checkbox" '+(active?'checked ':'')+' onchange="toggleUserAccess(this.dataset.u,this)" data-u="'+safeN+'" /><span class="slider"></span></label>'
+          +'</div>');
 
     // Income toggle — admins get an ON/OFF toggle for their free access; drivers get the subscription toggle
     const incomeToggle = isAdmin_u
@@ -11609,7 +11705,7 @@ function buildMemberCard(d, opts){
           <button onclick="shareDriverCard('${d}')" style="flex:1;padding:.45rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">↗ Share Card</button>
           <button onclick="downloadDriverCard('${d}')" style="flex:1;padding:.45rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">⬇ Download</button>
         </div>
-        ${(opts.publicOnly && isAdmin())?`<button onclick="openDriverPhotoUpload('${d}')" style="width:100%;margin-top:.4rem;padding:.45rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.76rem;font-weight:600;cursor:pointer;">🖼️ Edit card photo</button>`:''}
+        ${(opts.publicOnly && isAdmin())?`<button onclick="openDriverPhotoUpload('${d}')" style="width:100%;margin-top:.4rem;padding:.45rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.76rem;font-weight:600;cursor:pointer;">🖼️ Edit card photo</button>`:''}${(opts.publicOnly && isAdmin())?`<button onclick="openEditDriverModal('${d}')" style="width:100%;margin-top:.4rem;padding:.45rem;background:var(--gold);border:none;color:#fff;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.76rem;font-weight:700;cursor:pointer;">\u2699\uFE0F Edit driver</button><div style="display:flex;align-items:center;gap:.5rem;margin-top:.4rem;font-size:.74rem;color:var(--mid);"><span>Calendar color</span><input type="color" value="${driverColor(d)}" onchange="setDriverColor('${d}',this.value)" style="width:34px;height:26px;border:1.5px solid var(--light);border-radius:6px;background:none;cursor:pointer;padding:0;" /><span>${driverColor(d)}</span></div>${(opts.publicOnly && isAdmin())?(function(){var ty=[['premium','Premium'],['traffic','Traffic'],['holiday','Holiday'],['christmas','Christmas'],['fuel','Fuel']];var off=ty.filter(function(t){return driverAutoOffFor(d,t[0]);});return '<div style="margin-top:.45rem;font-size:.7rem;color:var(--mid);line-height:1.5;">⏰ Auto-add: '+(off.length?off.map(function(t){return '<span style=\'background:var(--light);border-radius:10px;padding:1px 6px;margin:0 3px 3px 0;display:inline-block;\'>'+t[1]+' off'+'</span>';}).join(''):'<span style=\'color:#16a34a;font-weight:600;\'>all on</span>')+'</div>';})():''}`:''}
         ${venmo?('<button onclick="shareDriverVenmo(\''+d+'\')" style="width:100%;margin-top:.4rem;padding:.45rem;background:#3d95ce;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">↗ Share Venmo link</button>'):''}
         ${canEdit?('<div style="display:flex;gap:.4rem;align-items:center;margin-top:.5rem;">'
           +'<input type="text" id="venmo-'+dk+'" value="'+venmo+'" placeholder="@venmohandle" style="flex:1;padding:.35rem .65rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
