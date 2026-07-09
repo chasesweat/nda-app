@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090313">
+<meta name="version" content="202606090314">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -869,6 +869,7 @@ input,select,textarea{font-size:16px;}
       <button class="cal-tab" id="mptab-pricing" onclick="switchProfileTab('pricing',this)" style="display:none;">Pricing</button>
     </div>
     <div id="profile-panel-me">
+      <div id="profile-driver-picker"></div>
       <div id="myprofile-card" class="myprofile-card-wrap" style="margin:0 auto;"></div>
     </div>
     <div id="profile-panel-account" style="display:none;">
@@ -11183,7 +11184,7 @@ function _editCardAdd(){ _editCards.push({label:'',year:'',mpg:'',gasPrice:'',ma
 function _editCardRemove(i){ if(_editCards.length>1){ _editCards.splice(i,1); _renderEditCards(); } }
 async function saveDriverCards(){
   var dn=_editCardsDriver;
-  var me=getMyDriverName();
+  var me=profileDriver();
   if(!(isAdmin() || me===dn)){ showToast('Not allowed','error'); return; }
   // Keep vehicles that have at least a label or a photo.
   var kept=_editCards.filter(function(v){ return (v.label&&v.label.trim()) || v.photo; });
@@ -12014,9 +12015,45 @@ function renderDriverMembers(){
   grid.innerHTML=driversForDisplay().map(d=>buildMemberCard(d,{publicOnly:true})).join('');
 }
 // Renders the driver's own full editable card into the My Profile page.
+
+// ── Admin: edit any driver's profile ──────────────────────────────
+// profileDriver() = the driver whose profile the page is editing. Defaults to your own;
+// an admin can point it at another driver via the picker. Gated to admins so a stray
+// value can never affect a non-admin. Only the profile-editing functions use this — every
+// "who am I" path (notifications, SOS, receipts, income, rides) still uses getMyDriverName().
+function profileDriver(){
+  try{ if(window._profileAs && typeof isAdmin==='function' && isAdmin()) return window._profileAs; }catch(e){}
+  return getMyDriverName();
+}
+function _pickProfileDriver(name){
+  var me=getMyDriverName();
+  window._profileAs = (!name || name===me) ? null : name;
+  try{ renderMyProfileCard(); }catch(e){}
+  renderProfileDriverPicker();
+}
+function renderProfileDriverPicker(){
+  var box=document.getElementById('profile-driver-picker'); if(!box) return;
+  if(!(typeof isAdmin==='function' && isAdmin())){ box.innerHTML=''; box.style.display='none'; window._profileAs=null; return; }
+  box.style.display='block';
+  var me=getMyDriverName();
+  var cur=profileDriver();
+  var list=(typeof DRIVERS!=='undefined'?DRIVERS.slice():[]);
+  if(me && list.indexOf(me)<0) list.unshift(me);
+  list=list.filter(Boolean);
+  list.sort(function(a,b){ if(a===me)return -1; if(b===me)return 1; return a.localeCompare(b); });
+  var opts=list.map(function(d){ return '<option value="'+escAttr(d)+'"'+(d===cur?' selected':'')+'>'+escHtml(d)+(d===me?' (you)':'')+'</option>'; }).join('');
+  var other=(cur && cur!==me);
+  box.innerHTML=
+    '<div style="background:var(--surface);border:1.5px solid '+(other?'var(--gold)':'var(--light)')+';border-radius:12px;padding:.85rem 1rem;margin-bottom:1rem;">'
+    +'<div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">\uD83D\uDC64 Admin \u2014 whose profile to edit</div>'
+    +'<select id="profile-driver-select" onchange="_pickProfileDriver(this.value)" style="width:100%;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-size:.9rem;background:var(--white);">'+opts+'</select>'
+    +(other?('<div style="margin-top:.55rem;font-size:.8rem;color:#92400e;background:#fef3c7;border-radius:8px;padding:.5rem .65rem;line-height:1.4;">\u26A0\uFE0F You\u2019re editing <b>'+escHtml(cur)+'</b>\u2019s profile \u2014 changes save to their account. <button onclick="_pickProfileDriver(\''+escAttr(me||'')+'\')" style="margin-left:.25rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:6px;font-size:.72rem;font-weight:600;padding:.15rem .55rem;cursor:pointer;white-space:nowrap;">Back to mine</button></div>'):'')
+    +'</div>';
+}
+
 function renderMyProfileCard(){
   const box=document.getElementById('myprofile-card'); if(!box) return;
-  const me=getMyDriverName();
+  const me=profileDriver();
   if(!me){ box.innerHTML='<div style="color:var(--mid);font-size:.9rem;padding:1rem;">Your login isn\u2019t linked to a driver profile yet. Ask an admin to link your account on the Team page.</div>'; return; }
   try{ var _pp=DRIVER_PROFILES[me]; if(_pp){ var _ch=migrateWeeklyOff(_pp); if(pruneExpiredDaysOff(_pp)) _ch=true; if(_ch) persistDriverProfiles(); } }catch(e){}
   box.innerHTML=buildMemberCard(me,{forceEdit:true});
@@ -12107,7 +12144,7 @@ function buildMemberCard(d, opts){
     // card, even for admins. Other drivers' cards show just public info + share.
     const myDriverName=getMyDriverName();
     // Team page shows public-only cards; My Profile shows the owner's editable card.
-    const canEdit = opts.publicOnly ? false : (opts.forceEdit ? (myDriverName===d) : (myDriverName===d));
+    const canEdit = opts.publicOnly ? false : (opts.forceEdit || myDriverName===d);
     const _venmoHandle=venmoToHandle(venmo);
     const venmoLink=_venmoHandle
       ?`<a href="https://venmo.com/${_venmoHandle}" target="_blank" style="color:var(--gold);font-size:.8rem;font-weight:600;text-decoration:none;">↗ Pay @${_venmoHandle}</a>`
@@ -12292,7 +12329,7 @@ function buildMemberCard(d, opts){
 }
 
 async function saveDriverProfile(driverName){
-  const myDriverName = getMyDriverName();
+  const myDriverName = profileDriver();
   const canEdit = isAdmin() || myDriverName===driverName;
   if(!canEdit){ showToast('You can only edit your own profile.','error'); return; }
   const dk=driverName.replace(/ /g,'_');
@@ -13958,7 +13995,7 @@ function getDriverSelfie(driverName){
 // Upload a business logo for receipts. Resizes to max 300px to keep storage small,
 // stores as a data URL on the driver's profile.
 function openBusinessLogoUpload(driverName){
-  const myDriverName = getMyDriverName();
+  const myDriverName = profileDriver();
   if(!(isAdmin() || myDriverName===driverName)){ showToast('You can only edit your own profile.','error'); return; }
   const inp=document.createElement('input');
   inp.type='file'; inp.accept='image/*'; inp.style.display='none';
@@ -16170,7 +16207,7 @@ function showPage(id, el){
   }
   if(id==='chat') initChat();
   if(id==='myrides') renderMyCal();
-  if(id==='myprofile'){ var _adm=currentUser&&currentUser.role==='admin'; var _ta=document.getElementById('mptab-access'); if(_ta) _ta.style.display=_adm?'inline-block':'none'; var _tp=document.getElementById('mptab-pricing'); if(_tp) _tp.style.display=_adm?'inline-block':'none'; switchProfileTab('me'); }
+  if(id==='myprofile'){ window._profileAs=null; var _adm=currentUser&&currentUser.role==='admin'; var _ta=document.getElementById('mptab-access'); if(_ta) _ta.style.display=_adm?'inline-block':'none'; var _tp=document.getElementById('mptab-pricing'); if(_tp) _tp.style.display=_adm?'inline-block':'none'; switchProfileTab('me'); if(typeof renderProfileDriverPicker==='function') renderProfileDriverPicker(); }
   if(id==='account') renderAccountPage();
   if(id==='income'){ renderIncome(); renderExpensesView(); }
   if(id==='costcalc') renderCostCalc();
