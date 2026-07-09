@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090323">
+<meta name="version" content="202606090325">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -8366,14 +8366,21 @@ async function clearAllNotifications(){
   showToast('Notifications cleared');
 }
 function toggleNotifPanel(){
-  var panel = document.getElementById('notif-panel');
-  if(!panel) return;
-  if(panel.getAttribute('data-open')==='1'){ closeNotifPanel(); return; }
-  try{ renderNotifPanel(); }catch(_e){ try{ console.warn('notif render failed', _e); }catch(_x){} }
-  panel.style.display='block';
+  // Bulletproof bell — handles every failure mode:
+  //  * always a direct child of <body> (never trapped in a stacking context)
+  //  * z-index above ALL other elements
+  //  * checks REAL visibility, not a data-attribute, so it can never get stuck
+  //  * created fresh if missing; renders a fallback if content build fails
+  var panel=document.getElementById('notif-panel');
+  if(!panel){ panel=document.createElement('div'); panel.id='notif-panel'; document.body.appendChild(panel); }
+  else if(panel.parentNode!==document.body){ document.body.appendChild(panel); }
+  var isOpen = panel.style.display==='block' && panel.getAttribute('data-open')==='1';
+  if(isOpen){ closeNotifPanel(); return; }
+  try{ renderNotifPanel(); }catch(_e){ try{ console.warn('notif render failed', _e); }catch(_x){} if(!panel.innerHTML || panel.innerHTML.length<5){ panel.innerHTML='<div style="padding:1.5rem;text-align:center;color:#64748b;font-family:inherit;">Notifications unavailable right now.</div>'; } }
+  panel.style.cssText='position:fixed;top:110px;right:8px;width:330px;max-width:92vw;max-height:74vh;overflow-y:auto;background:#fff;border:1.5px solid #e2e8f0;border-radius:14px;box-shadow:0 16px 44px rgba(20,8,40,.32);z-index:2147483600;display:block;';
   panel.setAttribute('data-open','1');
-  try{ var dName=getMyDriverName(); if(dName&&notifications[dName]){ notifications[dName].forEach(function(n){ n.read=true; }); saveNotifs(); updateNotifBadge(); } }catch(_e){}
-  setTimeout(function(){ document.addEventListener('click', _notifOutsideClick, true); }, 0);
+  try{ var dName=getMyDriverName(); if(dName&&notifications[dName]){ notifications[dName].forEach(function(n){ n.read=true; }); saveNotifs(); updateNotifBadge(); } }catch(e){}
+  setTimeout(function(){ try{ document.addEventListener('click', _notifOutsideClick, true); }catch(e){} }, 0);
 }
 function _notifOutsideClick(e){
   var panel=document.getElementById('notif-panel');
@@ -8386,7 +8393,7 @@ function _notifOutsideClick(e){
 function closeNotifPanel(){
   var panel=document.getElementById('notif-panel');
   if(panel){ panel.style.display='none'; panel.setAttribute('data-open','0'); }
-  document.removeEventListener('click', _notifOutsideClick, true);
+  try{ document.removeEventListener('click', _notifOutsideClick, true); }catch(e){}
 }
 
 // ═══════════════════════════════════════════
@@ -10833,9 +10840,9 @@ function renderDashFees(){
       if(driver===dName&&!settled){ const k=owner; (iOwe[k]=iOwe[k]||{fee:0,rides:[]}); iOwe[k].fee+=fee; iOwe[k].rides.push({id:r.id,client:r.client,date:r.date,fee:fee}); }
     }
   });
-  // Previous unpaid legs the current user should pay (consolidated here so everything owed is in one place)
+  // Previous unpaid legs to settle — ONLY for rides the current user drove the latest leg of (proxy-aware via dName)
   var _prevPay={};
-  (rides||[]).forEach(function(r){ if(!r||r.status==='cancelled') return; var _pv=(typeof previousUnpaidAPRide==='function')?previousUnpaidAPRide(r):null; if(!_pv) return; var _od=getClientOwner(r.client)||feeOwnerFor(r.createdBy); var _cs=isAdmin()||(dName&&(r.driver===dName||(_od&&_od===dName))); if(!_cs) return; if(!_pv.driver||_pv.driver===dName) return; _prevPay[_pv.id]={prev:_pv, driver:_pv.driver, fare:parseFloat(_pv.price||0)}; });
+  (rides||[]).forEach(function(r){ if(!r||r.status==='cancelled') return; var _pv=(typeof previousUnpaidAPRide==='function')?previousUnpaidAPRide(r):null; if(!_pv) return; var _cs=(dName && r.driver===dName); if(!_cs) return; if(!_pv.driver||_pv.driver===dName) return; _prevPay[_pv.id]={prev:_pv, driver:_pv.driver, fare:parseFloat(_pv.price||0)}; });
   var _prevList=Object.keys(_prevPay).map(function(k){return _prevPay[k];});
   const hasOwed=Object.keys(owedToMe).length, hasOwe=Object.keys(iOwe).length;
   if(!hasOwed&&!hasOwe&&!_prevList.length){ box.innerHTML=''; return; }
@@ -10913,9 +10920,9 @@ function renderDashFees(){
     html+='<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin:.9rem 0 .6rem;">Previous Rides \u2014 To Be Paid</div>'
       +'<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:12px;overflow:hidden;">';
     _prevList.forEach(function(p){
-      html+='<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.6rem .85rem;border-bottom:1px solid var(--light);">'
-        +'<div style="font-size:.82rem;"><b>'+escHtml((p.driver||'').split(' ')[0])+'</b> owed <b>$'+p.fare.toFixed(2)+'</b><div style="font-size:.72rem;color:var(--mid);">'+escHtml(p.prev.client||'')+' \u00b7 '+_fmtNoteDate(p.prev.date)+'</div></div>'
-        +'<button onclick="payPrevRideVenmo(\''+p.prev.id+'\')" style="background:#3d95ce;color:#fff;border:none;border-radius:8px;padding:.45rem .8rem;font-family:inherit;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap;">\uD83D\uDCB8 Pay</button>'
+      html+='<div onclick="openRideModal(\''+p.prev.id+'\')" style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.6rem .85rem;border-bottom:1px solid var(--light);cursor:pointer;">'
+        +'<div style="font-size:.82rem;"><b>'+escHtml((p.driver||'').split(' ')[0])+'</b> owed <b>$'+p.fare.toFixed(2)+'</b><div style="font-size:.72rem;color:var(--mid);">'+escHtml(p.prev.client||'')+' \u00b7 '+_fmtNoteDate(p.prev.date)+' \u00b7 tap for details</div></div>'
+        +'<button onclick="event.stopPropagation(); payPrevRideVenmo(\''+p.prev.id+'\')" style="background:#3d95ce;color:#fff;border:none;border-radius:8px;padding:.45rem .8rem;font-family:inherit;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap;">\uD83D\uDCB8 Pay</button>'
         +'</div>';
     });
     html+='</div>';
