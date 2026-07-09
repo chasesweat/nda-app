@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090342">
+<meta name="version" content="202606090345">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -28,7 +28,7 @@
 <style>
 :root {
   --black:#1a0d2e; --white:#fdfcff; --gold:#7c3aed; --gold-pale:#f3eeff;
-  --charcoal:#2d1f45; --mid:#6b5e85; --light:#e2d9f3; --surface:#f7f3ff;
+  --charcoal:#2d1f45; --mid:#463c5f; --light:#e2d9f3; --surface:#f7f3ff;
   --red:#b03a2e; --green:#2e6b46; --blue:#1e4f87;
   --accent:#0d9488;
 }
@@ -880,6 +880,7 @@ input,select,textarea{font-size:16px;}
         <div id="mp-account-billing" style="margin-bottom:1rem;"></div>
         <div style="background:var(--surface);border-radius:12px;padding:1.25rem;border:1.5px solid var(--light);margin-bottom:1rem;">
           <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.75rem;">Account</div> <button id="push-pref-btn" onclick="togglePushPref()" style="width:100%;text-align:left;padding:.65rem .85rem;background:var(--white);border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;cursor:pointer;color:var(--black);margin-bottom:.5rem;">🔔 Push notifications</button>
+          <button id="admin-audit-btn" onclick="toggleChaseAudit()" style="display:none;width:100%;text-align:left;padding:.65rem .85rem;background:var(--white);border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;cursor:pointer;color:var(--black);margin-bottom:.5rem;">&#128276; Admin change alerts</button>
           <button onclick="openPwModal(null)" style="width:100%;text-align:left;padding:.65rem .85rem;background:var(--white);border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;cursor:pointer;color:var(--black);margin-bottom:.5rem;">Change password</button>
           <button onclick="logout()" style="width:100%;text-align:left;padding:.65rem .85rem;background:var(--white);border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;cursor:pointer;color:var(--red);">Sign out</button>
         </div>
@@ -1956,7 +1957,8 @@ const CHASE_AUDIT_ENABLED = true;
 let chaseAuditOn = true;   // Chase-toggleable (default ON for testing)
 async function saveChaseAudit(){ try{ await storageSet('kat:chaseAuditOn', chaseAuditOn); }catch(e){} }
 async function loadChaseAudit(){ try{ const d=await storageGet('kat:chaseAuditOn'); if(typeof d==='boolean') chaseAuditOn=d; }catch(e){} }
-function toggleChaseAudit(){ if(!currentUser || currentUser.name!=='Chase') return; chaseAuditOn=!chaseAuditOn; saveChaseAudit(); if(typeof showToast==='function') showToast(chaseAuditOn?'\u2713 Admin change alerts ON':'Admin change alerts OFF'); try{ if(typeof renderNotifPrefs==='function') renderNotifPrefs(); }catch(e){} }
+function _updateAdminAuditBtn(){ try{ var b=document.getElementById('admin-audit-btn'); if(!b) return; if(currentUser && currentUser.name==='Chase'){ b.style.display='block'; b.innerHTML='&#128276; Admin change alerts &middot; <b style="color:'+(chaseAuditOn?'var(--green)':'var(--mid)')+';">'+(chaseAuditOn?'On':'Off')+'</b>'; } else { b.style.display='none'; } }catch(e){} }
+function toggleChaseAudit(){ if(!currentUser || currentUser.name!=='Chase') return; chaseAuditOn=!chaseAuditOn; saveChaseAudit(); if(typeof showToast==='function') showToast(chaseAuditOn?'\u2713 Admin change alerts ON':'Admin change alerts OFF'); try{ if(typeof _updateAdminAuditBtn==='function') _updateAdminAuditBtn(); }catch(e){} }
 function _chaseAuditToggleHtml(){ if(!currentUser || currentUser.name!=='Chase') return ''; var on=chaseAuditOn; return '<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.5rem .7rem;background:#f8fafc;border-bottom:1px solid var(--light);font-size:.74rem;position:sticky;top:0;z-index:4;"><span style="color:var(--mid);">\uD83D\uDD14 Admin change alerts</span><button onclick="toggleChaseAudit()" style="font-size:.68rem;font-weight:700;padding:.25rem .65rem;border-radius:99px;border:none;cursor:pointer;background:'+(on?'#0d9488':'#e2e8f0')+';color:'+(on?'#fff':'#64748b')+';">'+(on?'ON':'OFF')+'</button></div>'; }
 const _AUDIT_SKIP = ['kat:rides','kat:ridesArchive','kat:outsideRides','kat:feePayments','kat:receipts',
   'kat:notifications','kat:chatLastRead','kat:comments','kat:biometricCreds','kat:pendingAdminTutorial',
@@ -4051,7 +4053,7 @@ function renderNotifPanel(){
     myRequests.forEach(r=>{
       html += `<div style="padding:.75rem;border-bottom:1px solid var(--light);background:#fdf4ff;">
         <div style="font-size:.82rem;font-weight:600;margin-bottom:.3rem;">⇄ Client Transfer Request</div>
-        <div style="font-size:.78rem;color:var(--charcoal);margin-bottom:.3rem;"><strong>${r.toDriver?.split(' ')[0]}</strong> wants to take over <strong>${r.clientName}</strong></div>
+        <div style="font-size:.78rem;color:var(--charcoal);margin-bottom:.3rem;"><strong>${(r.toDriver||'').split(' ')[0]||'A driver'}</strong> wants to take over <strong>${r.clientName||'a client'}</strong></div>
         <div style="font-size:.75rem;color:var(--mid);margin-bottom:.4rem;">from ${(r.fromDriver||'').split(', ').map(d=>(d||'').split(' ')[0]).join(', ')} · ${new Date(r.ts).toLocaleDateString()} · <em>${r.scope==='client_only'?'Client card only':'Client + future rides'}</em></div>
         ${r.reason?`<div style="font-size:.78rem;color:var(--charcoal);margin-bottom:.5rem;font-style:italic;">"${r.reason}"</div>`:''}
         <div style="font-size:.7rem;color:var(--mid);margin-bottom:.4rem;">${dName && (r.fromDriver||'').split(', ').some(d=>d===dName)?'Your approval alone executes this transfer.':'2 admin approvals needed — '+((r.approvals||[]).filter(a=>{const u=USERS.find(x=>x.name===a);return u&&u.role==='admin';}).length)+'/2 so far.'}</div>
@@ -8178,7 +8180,7 @@ async function approveTransfer(reqId){
   const req = clientRequests[reqId];
   if(!req||req.status!=='pending'){ showToast('Request already resolved','error'); return; }
   const myDriver=getMyDriverName();
-  const isOwner = req.fromDriver.split(', ').some(d=>d===myDriver);
+  const isOwner = (req.fromDriver||'').split(', ').some(d=>d===myDriver);
   if(!isOwner){
     if(!isAdmin()){ showToast('Only the original driver or an admin can approve','error'); return; }
     req.approvals = req.approvals||[];
@@ -8202,17 +8204,17 @@ async function approveTransfer(reqId){
   let reassigned=0;
   if(req.scope !== 'client_only'){
     rides.forEach(r=>{
-      if(r.client?.toLowerCase()===req.clientName.toLowerCase() && r.date>=today){
+      if(r.client?.toLowerCase()===(req.clientName||'').toLowerCase() && r.date>=today){
         r.driver=req.toDriver; reassigned++;
       }
     });
   }
 
   // Transfer imported client card from old driver(s) to new driver
-  const fromDrivers = req.fromDriver.split(', ');
+  const fromDrivers = (req.fromDriver||'').split(', ');
   fromDrivers.forEach(fd=>{
     if(importedClients[fd]){
-      const idx=importedClients[fd].findIndex(c=>c.name.toLowerCase()===req.clientName.toLowerCase());
+      const idx=importedClients[fd].findIndex(c=>c.name.toLowerCase()===(req.clientName||'').toLowerCase());
       if(idx!==-1){
         const clientRec=importedClients[fd].splice(idx,1)[0];
         if(!importedClients[req.toDriver]) importedClients[req.toDriver]=[];
@@ -8223,7 +8225,7 @@ async function approveTransfer(reqId){
 
   // Dismiss any duplicate pending requests for the same client
   Object.values(clientRequests).forEach(r2=>{
-    if(r2.id!==reqId && r2.status==='pending' && r2.clientName.toLowerCase()===req.clientName.toLowerCase()){
+    if(r2.id!==reqId && r2.status==='pending' && r2.clientName.toLowerCase()===(req.clientName||'').toLowerCase()){
       r2.status='superseded';
     }
   });
@@ -8253,7 +8255,7 @@ async function denyTransfer(reqId){
   const req=clientRequests[reqId];
   if(!req||req.status!=='pending'){ showToast('Request already resolved','error'); return; }
   const myDriver=getMyDriverName();
-  if(!isAdmin()&&!req.fromDriver.includes(myDriver)){ showToast('Only the original driver or an admin can deny','error'); return; }
+  if(!isAdmin()&&!(req.fromDriver||'').includes(myDriver)){ showToast('Only the original driver or an admin can deny','error'); return; }
 
   req.status='denied';
   req.decidedBy=currentUser?.name;
@@ -9313,6 +9315,7 @@ function stopPresence(){
 
 function renderAccountPage(){
   if(!currentUser) return;
+  try{ _updateAdminAuditBtn(); }catch(e){}
   const admin   = currentUser.role === 'admin';
   const sub     = subscriptions[currentUser.name] || {};
   const hasInc  = hasIncomeAccess();
@@ -17883,8 +17886,7 @@ function renderNotifPrefs(){
     +_prefRow('pref-offer', "toggleDriverPref('offeringAlerts',true)", '\uD83D\uDE97','Ride offering alerts', 'Notify me when a ride needs coverage',              _driverPref('offeringAlerts',true))
     +_prefRow('pref-chat',  "toggleDriverPref('chatAlerts',true)",     '\uD83D\uDCAC','Team chat alerts',     'Notify me about new team chat messages',            _driverPref('chatAlerts',true))
     +_prefRow('pref-sound', "toggleSosSound()",                        '\uD83D\uDD14','SOS alert sound',      'Play a siren on this device when an SOS is raised', _sosSoundOn())
-    +_prefRow('pref-selfie',"toggleDriverPref('selfieEnabled',true)",  '\uD83D\uDCF7','Day-of selfie',        'Show my selfie on airport pickups',                _driverPref('selfieEnabled',true))
-    + ((currentUser && currentUser.name==='Chase') ? _prefRow('pref-audit',"toggleChaseAudit()",'\uD83D\uDD14','Admin change alerts','Tell me when another admin changes settings, pricing, clients, drivers, etc. (rides excluded)', chaseAuditOn) : '');
+    +_prefRow('pref-selfie',"toggleDriverPref('selfieEnabled',true)",  '\uD83D\uDCF7','Day-of selfie',        'Show my selfie on airport pickups',                _driverPref('selfieEnabled',true));
 }
 
 function maybeShowNotifPrompt(){
