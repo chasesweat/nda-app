@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090314">
+<meta name="version" content="202606090323">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -549,6 +549,7 @@ input,select,textarea{font-size:16px;}
     </div>
     <!-- Income/summary cards on top -->
     <div id="dash-morgan-counter" style="margin-bottom:1.5rem;"></div>
+            <div id="dash-km-pay"></div>
     <div id="dash-income-overview" style="margin-bottom:1.5rem;"></div>
     <div id="dash-fees" style="margin-bottom:1.5rem;"></div>
     <!-- Action blocks: confirmations to send, then rides to wrap up, then upcoming -->
@@ -985,7 +986,8 @@ input,select,textarea{font-size:16px;}
         </div>
       </div>
     </div>
-    <div id="income-summary-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,200px));gap:.75rem;margin-bottom:1.25rem;width:100%;justify-content:start;"></div>
+    <div id="income-km-pay"></div>
+        <div id="income-summary-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,200px));gap:.75rem;margin-bottom:1.25rem;width:100%;justify-content:start;"></div>
     <div id="income-my-fares"></div>
     <div id="income-tripprofit"></div>
     <div id="income-finderfees"></div>
@@ -2088,6 +2090,8 @@ async function initApp() {
   // recovery cluster, and the proxy migration all keep their original order (above/below).
   await Promise.all([
     loadCautiousList(),
+    loadClientOwners(),
+    loadKmData(),
     loadDeceasedClients(),
     loadHiddenClients(),
     loadGlobalSettings(),
@@ -2488,13 +2492,14 @@ function showPageTip(pageId){
   if(_shownTips.has(pageId)) return;
   const tip=TIP_DATA[pageId]; if(!tip) return;
   _shownTips.add(pageId);
+  var _tipText=tip.text; try{ if(pageId==='dashboard' && typeof kmVisible==='function' && kmVisible()){ _tipText+=' <br><br><b>\uD83E\uDD1D Kat\u2013Morgan payments:</b> the teal card shows what Kat owes Morgan for completed rides Morgan scheduled \u2014 pay by Venmo or mark paid (alerts Morgan and resets it), set the rate ($/ride or % of fare), and view a date-range report.'; } }catch(e){}
   const old=document.getElementById('nda-tip-bubble');
   if(old) old.remove();
   const b=document.createElement('div');
   b.id='nda-tip-bubble';
   b.className='tip-bubble';
   b.innerHTML='<div class="tip-bubble-title">'+tip.icon+' '+tip.title+'</div>'
-    +'<div class="tip-bubble-body">'+tip.text+'</div>'
+    +'<div class="tip-bubble-body">'+_tipText+'</div>'
     +'<div class="tip-bubble-btns">'
     +'<button class="tip-close-now" onclick="document.getElementById(\'nda-tip-bubble\').remove()">Got it</button>'
     +'<button class="tip-close-forever" onclick="setUiDismissed(\'tips\');document.getElementById(\'nda-tip-bubble\').remove();">Turn off tips</button>'
@@ -5150,6 +5155,44 @@ async function updateMedHours(id){
   try{ renderRideView(r); }catch(e){}
   try{ refreshDash(); }catch(e){}
 }
+
+// ── Pay the previous (unpaid) leg via Venmo: choose fare-only or fare + tip ──
+function _fmtNoteDate(ds){ try{ var p=String(ds).split('-'); if(p.length===3) return parseInt(p[1],10)+'/'+parseInt(p[2],10)+'/'+p[0]; }catch(e){} return ds||''; }
+function payPrevRideVenmo(prevRideId){
+  var prev=(typeof rides!=='undefined')?rides.find(function(x){return String(x.id)===String(prevRideId);}):null;
+  if(!prev){ showToast('Ride not found','error'); return; }
+  var recipient = prev.driver || '';
+  var handle = (typeof driverVenmo!=='undefined' ? (driverVenmo[recipient]||'') : '');
+  if(!handle){ showToast((recipient?recipient.split(' ')[0]:'That driver')+' has no Venmo saved','error'); return; }
+  var fare = parseFloat(prev.price||0);
+  window._prevPay = { id: prevRideId, handle: handle, fare: fare, recipient: recipient };
+  var ov=document.createElement('div'); ov.id='prev-pay-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:16000;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+  ov.onclick=function(e){ if(e.target===ov){ ov.remove(); window._prevPay=null; } };
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:400px;width:100%;padding:1.5rem;box-shadow:0 24px 60px rgba(0,0,0,.4);">'
+    +'<div style="font-size:1.05rem;font-weight:800;color:#0f172a;margin-bottom:.35rem;">Pay '+escHtml((recipient||'').split(' ')[0])+' via Venmo</div>'
+    +'<div style="font-size:.85rem;color:#64748b;margin-bottom:1.1rem;line-height:1.5;">'+escHtml(prev.client||'client')+'\u2019s '+_tripTypeLabel(prev.type)+' on '+_fmtNoteDate(prev.date)+'. How much are you sending?</div>'
+    +'<button onclick="_prevPaySend(false)" style="width:100%;padding:.8rem;border:1.5px solid var(--accent,#7c3aed);background:var(--accent,#7c3aed);color:#fff;border-radius:10px;font-family:inherit;font-size:.95rem;font-weight:700;cursor:pointer;margin-bottom:.7rem;">Just the fare \u2014 $'+fare.toFixed(2)+'</button>'
+    +'<div style="border-top:1px solid #e2e8f0;padding-top:.7rem;">'
+    +'<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.55rem;"><span style="font-size:.85rem;color:#475569;">Fare + tip of $</span><input id="prev-tip-input" type="number" step="0.5" min="0" placeholder="0" oninput="_prevPayUpdateTotal()" style="flex:1;padding:.5rem;border:1.5px solid #e2e8f0;border-radius:8px;font-size:.9rem;"></div>'
+    +'<button onclick="_prevPaySend(true)" style="width:100%;padding:.8rem;border:1.5px solid var(--accent,#7c3aed);background:none;color:var(--accent,#7c3aed);border-radius:10px;font-family:inherit;font-size:.95rem;font-weight:700;cursor:pointer;">Pay fare + tip \u2014 <span id="prev-pay-total">$'+fare.toFixed(2)+'</span></button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+}
+function _prevPayUpdateTotal(){ var d=window._prevPay; if(!d) return; var t=parseFloat((document.getElementById('prev-tip-input')||{}).value)||0; var el=document.getElementById('prev-pay-total'); if(el) el.textContent='$'+(d.fare+t).toFixed(2); }
+function _prevPaySend(withTip){
+  var d=window._prevPay; if(!d){ return; }
+  var prev=(typeof rides!=='undefined')?rides.find(function(x){return String(x.id)===String(d.id);}):null;
+  var amt=d.fare, kind='fare';
+  if(withTip){ var t=parseFloat((document.getElementById('prev-tip-input')||{}).value)||0; amt=d.fare+t; kind = t>0 ? 'fare + tip' : 'fare'; }
+  var base = prev ? _venmoRideNote(prev) : '';
+  var note = (base+' ('+kind+')').trim();
+  var url = (typeof venmoPayUrl==='function') ? venmoPayUrl(d.handle, amt, note) : '';
+  var ov=document.getElementById('prev-pay-overlay'); if(ov) ov.remove();
+  window._prevPay=null;
+  if(url) window.open(url,'_blank'); else showToast('Could not build Venmo link','error');
+}
+
 function renderRideView(r){
   const driverFirst = r.driver ? r.driver.split(' ')[0] : 'Unassigned';
   const color = rideColor(r);
@@ -5207,7 +5250,7 @@ function renderRideView(r){
       // Visible to the assigned driver and the client's OWNER (proxy-aware:
       // Morgan's clients belong to Kat), matching how fees resolve ownership.
       const myDrv = getMyDriverName();
-      const ownerDrv = feeOwnerFor(r.createdBy) || getClientOwner(r.client);
+      const ownerDrv = getClientOwner(r.client) || feeOwnerFor(r.createdBy);
       const canSee = (currentUser && (myDrv===r.driver || (ownerDrv && ownerDrv===myDrv)));
       if(!canSee) return '';
       const prevDriver = prev.driver || 'the previous driver';
@@ -5223,6 +5266,7 @@ function renderRideView(r){
           Amount owed to ${escHtml(prevDriver)} for previous ride: <strong>${fmt(prevFare)}</strong><br>
           <span style="font-size:.92rem;color:#b91c1c;">Total owed: <strong>${fmt(total)}</strong></span>
         </div>
+        <div style="margin-top:.55rem;"><button onclick="payPrevRideVenmo('${prev.id}')" style="background:#3d95ce;color:#fff;border:none;border-radius:8px;padding:.5rem .9rem;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;">\uD83D\uDCB8 Pay ${escHtml((prevDriver||'').split(' ')[0])} for previous ride</button></div>
       </div>`;
     })()}
     <div style="grid-column:1/-1;background:${color}66;border-left:5px solid ${color};border-radius:8px;padding:.85rem 1rem;margin-bottom:.5rem;">
@@ -5384,7 +5428,7 @@ function buildRideLifecycle(r){
 
   const fare = parseFloat(r.price)||0;
   // Driver-as-client rides owe no fee; otherwise resolve owner proxy-aware.
-  const owner  = clientIsDriver(r.client) ? null : (feeOwnerFor(r.createdBy) || getClientOwner(r.client));
+  const owner  = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
   const driver = r.driver || null;
   let payHtml;
   if(!driver){
@@ -5880,7 +5924,7 @@ async function setRideStatus(id, status){
       // shouldn't spam the previous driver.
       if(prev && r.carryoverNotified!==prev.id){
         const prevDriver = prev.driver || '';
-        const owner = feeOwnerFor(prev.createdBy) || getClientOwner(prev.client);
+        const owner = getClientOwner(prev.client) || feeOwnerFor(prev.createdBy);
         const msg = `${r.paidBy||'A driver'} collected payment on ${r.client}'s ${fmtDateShort(r.date)} ride. You're owed $${(parseFloat(prev.price||0)).toFixed(2)} for the ${fmtDateShort(prev.date)} ride — mark it paid once you've received it.`;
         const notified = {};
         [prevDriver, owner].forEach(function(who){
@@ -9337,7 +9381,8 @@ function previousUnpaidAPRide(refRide){
 }
 function getClientOwner(clientName){
   if(!clientName) return null;
-  const key=(clientName||''). toLowerCase().trim();
+  const key=(clientName||'').toLowerCase().trim();
+  if(clientOwners && clientOwners[key]) return clientOwners[key];
   const r=(rides||[]).find(function(r){ return r.client&&r.client.toLowerCase().trim()===key&&r.createdBy; });
   if(!r) return null;
   return feeOwnerFor(r.createdBy);
@@ -10076,6 +10121,8 @@ async function saveQuickAddRide(){
   const _reenableBtn=()=>{ if(saveBtn){ saveBtn.disabled=false; saveBtn.style.opacity='1'; } };
   if(saveBtn&&saveBtn.disabled) return;   // already submitting
   const client=document.getElementById('qa-client').value.trim();
+  if(!window._qaOwnerResolved && typeof _maybePromptClientOwner==='function' && _maybePromptClientOwner(client)){ return; }
+  window._qaOwnerResolved=false;
   const date  =document.getElementById('qa-date').value;
   const errEl =document.getElementById('qa-error');
   if(!client){errEl.textContent='Client name is required.'; _reenableBtn(); return;}
@@ -10444,7 +10491,7 @@ function refreshDash(){
   document.getElementById('dash-date').textContent=now.toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
 
   // Morgan dispatch counter
-  renderMorganCounter();
+  renderMorganCounter(); try{ renderKmPayCard(); }catch(e){}
 
   // Income overview (only if the user has the upgrade / is admin)
   renderDashIncome();
@@ -10786,8 +10833,12 @@ function renderDashFees(){
       if(driver===dName&&!settled){ const k=owner; (iOwe[k]=iOwe[k]||{fee:0,rides:[]}); iOwe[k].fee+=fee; iOwe[k].rides.push({id:r.id,client:r.client,date:r.date,fee:fee}); }
     }
   });
+  // Previous unpaid legs the current user should pay (consolidated here so everything owed is in one place)
+  var _prevPay={};
+  (rides||[]).forEach(function(r){ if(!r||r.status==='cancelled') return; var _pv=(typeof previousUnpaidAPRide==='function')?previousUnpaidAPRide(r):null; if(!_pv) return; var _od=getClientOwner(r.client)||feeOwnerFor(r.createdBy); var _cs=isAdmin()||(dName&&(r.driver===dName||(_od&&_od===dName))); if(!_cs) return; if(!_pv.driver||_pv.driver===dName) return; _prevPay[_pv.id]={prev:_pv, driver:_pv.driver, fare:parseFloat(_pv.price||0)}; });
+  var _prevList=Object.keys(_prevPay).map(function(k){return _prevPay[k];});
   const hasOwed=Object.keys(owedToMe).length, hasOwe=Object.keys(iOwe).length;
-  if(!hasOwed&&!hasOwe){ box.innerHTML=''; return; }
+  if(!hasOwed&&!hasOwe&&!_prevList.length){ box.innerHTML=''; return; }
 
   function _rideLabel(ri){
     return escHtml(ri.client||'Ride')+(ri.date?' \u00b7 '+ri.date.slice(5).replace('-','/'):'')+' \u00b7 $'+ri.fee.toFixed(2);
@@ -10858,6 +10909,17 @@ function renderDashFees(){
   }
   html+='<div style="padding:.5rem .85rem;font-size:.72rem;color:var(--mid);">View full breakdown in <span onclick="nav(\'income\')" style="color:var(--accent);cursor:pointer;text-decoration:underline;">Income</span></div>'
     +'</div>';
+  if(_prevList.length){
+    html+='<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin:.9rem 0 .6rem;">Previous Rides \u2014 To Be Paid</div>'
+      +'<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:12px;overflow:hidden;">';
+    _prevList.forEach(function(p){
+      html+='<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.6rem .85rem;border-bottom:1px solid var(--light);">'
+        +'<div style="font-size:.82rem;"><b>'+escHtml((p.driver||'').split(' ')[0])+'</b> owed <b>$'+p.fare.toFixed(2)+'</b><div style="font-size:.72rem;color:var(--mid);">'+escHtml(p.prev.client||'')+' \u00b7 '+_fmtNoteDate(p.prev.date)+'</div></div>'
+        +'<button onclick="payPrevRideVenmo(\''+p.prev.id+'\')" style="background:#3d95ce;color:#fff;border:none;border-radius:8px;padding:.45rem .8rem;font-family:inherit;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap;">\uD83D\uDCB8 Pay</button>'
+        +'</div>';
+    });
+    html+='</div>';
+  }
   box.innerHTML=html;
 }
 
@@ -10893,7 +10955,7 @@ function renderDashIncome(){
     // 15% owed only when driving someone else's client, and never when the
     // client is themselves a driver in the group.
     const fare = parseFloat(r.price||0);
-    const owner = clientIsDriver(r.client) ? null : (feeOwnerFor(r.createdBy) || getClientOwner(r.client));
+    const owner = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
     if(owner && owner!==dName) feeCost += fare*clientFeeRate();
   });
   const monthlyExp=getMonthlyExpenseTotal();
@@ -11540,7 +11602,7 @@ function renderPricingTracker(){
       const day=String(r.date).slice(0,10);
       if(day<rFrom||day>rTo) return;
       // Pricing is set by the CLIENT OWNER (whoever booked the ride), not the assigned driver.
-      const owner = feeOwnerFor(r.createdBy) || getClientOwner(r.client);
+      const owner = getClientOwner(r.client) || feeOwnerFor(r.createdBy);
       if(!owner || !driverStats[owner]) return;
       const exp=computeExpectedPrice(r);
       const actual=parseFloat(r.price)||0;
@@ -13138,6 +13200,7 @@ function getIncomeDateRange(){
 function renderIncome(){
   if(!document.getElementById('income-summary-cards')) return;
   if(!hasIncomeAccess()) return;
+  try{ renderKmPayCard(); }catch(e){}
   var _rrBtn=document.getElementById('rides-report-btn');
   if(_rrBtn) _rrBtn.style.display=isAdmin()?'inline-block':'none';
   var _paBtn=document.getElementById('pricing-audit-btn');
@@ -13418,7 +13481,7 @@ function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm,
     // don't carry createdBy themselves.
     // Exception: if the CLIENT is themselves a driver in the group, the ride is
     // that driver's own client and never owes a fee, no matter who drives it.
-    const owner = clientIsDriver(r.client) ? null : (feeOwnerFor(r.createdBy) || getClientOwner(r.client));
+    const owner = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
     const fee   = (owner && owner!==dName) ? fare*clientFeeRate() : 0;
     const gross = fare + tip;
     const cost  = gas + maint + fee;
@@ -13519,7 +13582,7 @@ async function persistRideTip(rideId,val){
 // Key format: "driverName:owe|recv:counterpartyName"
 let feePayments = {};
 async function loadFeePayments(){ const d=await storageGet('kat:feePayments'); if(d) feePayments=d; }
-let cautiousList=[];
+let cautiousList=[]; let clientOwners={};
 let deceasedClients=[];
 let hiddenClients=[];
 async function loadHiddenClients(){ const d=await storageGet('kat:hiddenClients'); if(Array.isArray(d)) hiddenClients=d; }
@@ -13532,6 +13595,8 @@ async function markClientDeceased(name){ if(!name) return; var me=_deceasedOwner
 async function unmarkClientDeceased(name){ if(!name) return; var me=_deceasedOwner(); var n=name.trim().toLowerCase(); deceasedClients=deceasedClients.filter(function(e){return !(e.owner===me && e.name.trim().toLowerCase()===n);}); await saveDeceasedClients(); renderClients(); showToast('Status removed'); }
 async function loadCautiousList(){ const d=await storageGet('kat:cautiousList'); if(Array.isArray(d)) cautiousList=d; }
 async function saveCautiousList(){ await storageSet('kat:cautiousList',cautiousList); }
+async function saveClientOwners(){ try{ await storageSet('kat:clientOwners', clientOwners); }catch(e){} }
+async function loadClientOwners(){ try{ const d=await storageGet('kat:clientOwners'); if(d && typeof d==='object') clientOwners=d; }catch(e){} }
 
 function getCautiousMatches(name,phone){
   const n=(name||'').trim().toLowerCase(); if(!n) return [];
@@ -13901,15 +13966,168 @@ async function denyRelease(reqId){
 }
 
 // ── Morgan's dispatch counter (only shown when Morgan is logged in) ──
+
+// ╔═══════════════════════════════════════════════════════════════════════════╗
+// ║  KAT-MORGAN PAYMENT FEATURE  (self-contained — set KM_PAY_ENABLED=false to  ║
+// ║  hide everywhere, or delete this block + its 3 wire-in points to remove.)   ║
+// ║  Kat pays Morgan per ride Morgan SCHEDULED that has been COMPLETED (paid).  ║
+// ║  Rate is a flat $/ride OR a % of fare, editable by Kat only.                ║
+// ╚═══════════════════════════════════════════════════════════════════════════╝
+const KM_PAY_ENABLED = true;
+let kmPaySettings = { mode:'flat', flat:5, pct:10 };
+let kmSettledRides = {};   // { rideId: true } — rides already paid for
+let kmPaymentLog = [];     // [{ at, amount, count }]
+async function saveKmData(){ try{ await storageSet('kat:kmPay', { settings:kmPaySettings, settled:kmSettledRides, log:kmPaymentLog }); }catch(e){} }
+async function loadKmData(){ try{ const d=await storageGet('kat:kmPay'); if(d){ if(d.settings) kmPaySettings=Object.assign({mode:'flat',flat:5,pct:10}, d.settings); if(d.settled) kmSettledRides=d.settled||{}; if(d.log) kmPaymentLog=d.log||[]; } }catch(e){} }
+
+function kmVisible(){ return KM_PAY_ENABLED && currentUser && (currentUser.name==='Kat' || currentUser.name==='Morgan'); }
+function kmIsKat(){ return !!(currentUser && currentUser.name==='Kat'); }
+function _kmRideDone(r){ return !!(r && r.status==='paid'); }   // "completed" = reached the Paid stage
+function kmOwedRides(){ return (rides||[]).filter(function(r){ return r && r.createdBy==='Morgan' && r.status!=='cancelled' && _kmRideDone(r) && !kmSettledRides[r.id]; }); }
+function kmRideValue(r){ if(kmPaySettings.mode==='pct') return (parseFloat(r.price)||0) * ((parseFloat(kmPaySettings.pct)||0)/100); return (parseFloat(kmPaySettings.flat)||0); }
+function kmOwedAmount(){ return Math.round(kmOwedRides().reduce(function(a,r){ return a+kmRideValue(r); },0)*100)/100; }
+function kmRateLabel(){ return kmPaySettings.mode==='pct' ? ((parseFloat(kmPaySettings.pct)||0)+'% of fare') : ('$'+(parseFloat(kmPaySettings.flat)||0)+'/ride'); }
+
+function kmPayVenmo(){
+  if(!kmIsKat()){ showToast('Only Kat can send this payment','error'); return; }
+  const amt=kmOwedAmount();
+  if(amt<=0){ showToast('Nothing owed right now'); return; }
+  const handle = (typeof driverVenmo!=='undefined' && (driverVenmo['Morgan Newton']||driverVenmo['Morgan']))||'';
+  if(!handle){ showToast('Morgan has no Venmo saved','error'); return; }
+  var _od=kmOwedRides().map(function(r){return r.date;}).filter(Boolean).sort(); var _kmNote=(_od.length)?('Payment for scheduling of '+_fmtNoteDate(_od[0])+' to '+_fmtNoteDate(_od[_od.length-1])):'NWDA ride scheduling'; const url=(typeof venmoPayUrl==='function') ? venmoPayUrl(handle, amt, _kmNote) : '';
+  if(url) window.open(url,'_blank'); else showToast('Could not build Venmo link','error');
+}
+function kmMarkPaid(){
+  if(!kmIsKat()){ showToast('Only Kat can mark this paid','error'); return; }
+  const owed=kmOwedRides(); const amt=kmOwedAmount();
+  if(!owed.length){ showToast('Nothing owed right now'); return; }
+  if(!confirm('Mark $'+amt.toFixed(2)+' as paid to Morgan for '+owed.length+' ride'+(owed.length>1?'s':'')+'? This resets the amount owed and notifies Morgan.')) return;
+  owed.forEach(function(r){ kmSettledRides[r.id]=true; });
+  kmPaymentLog.push({ at:Date.now(), amount:amt, count:owed.length });
+  saveKmData();
+  try{ addNotification('Morgan Newton', {}, 'km_paid', 'Kat paid you $'+amt.toFixed(2)+' for '+owed.length+' scheduled ride'+(owed.length>1?'s':'')+' \u2713'); saveNotifs(); }catch(e){}
+  showToast('\u2713 Marked paid \u2014 $'+amt.toFixed(2)+' to Morgan');
+  renderKmPayCard(); try{ renderDashIncome(); }catch(e){} try{ renderIncome(); }catch(e){}
+}
+function kmSaveSettings(){
+  if(!kmIsKat()){ showToast('Only Kat can change the rate','error'); return; }
+  const mode=(document.getElementById('km-mode')||{}).value||'flat';
+  const flat=parseFloat((document.getElementById('km-flat')||{}).value)||0;
+  const pct=parseFloat((document.getElementById('km-pct')||{}).value)||0;
+  kmPaySettings={ mode:mode, flat:flat, pct:pct }; saveKmData();
+  showToast('\u2713 Rate updated: '+kmRateLabel());
+  renderKmPayCard();
+}
+function kmToggleSettings(){ const p=document.getElementById('km-settings-panel'); if(p) p.style.display = p.style.display==='none'?'block':'none'; }
+
+function renderKmPayCard(){ _renderKmInto('dash-km-pay', false); _renderKmInto('income-km-pay', true); }
+function _renderKmInto(boxId, compact){
+  const box=document.getElementById(boxId); if(!box) return;
+  if(!kmVisible()){ box.innerHTML=''; return; }
+  const owed=kmOwedRides(); const amt=kmOwedAmount(); const isKat=kmIsKat();
+  const cnt=owed.length;
+  const title = isKat ? 'Owed to Morgan (scheduling)' : 'Kat owes you (scheduling)';
+  let h='<div style="background:linear-gradient(135deg,#0f766e,#0d9488);color:#fff;border-radius:16px;padding:1.15rem 1.25rem;margin-bottom:1.5rem;box-shadow:0 8px 22px rgba(13,148,136,.28);">';
+  h+='<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;">';
+  h+='<div><div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;opacity:.85;">\uD83E\uDD1D '+title+'</div>';
+  h+='<div style="font-size:2rem;font-weight:800;line-height:1.1;margin-top:.15rem;">$'+amt.toFixed(2)+'</div>';
+  h+='<div style="font-size:.8rem;opacity:.9;">'+cnt+' completed ride'+(cnt===1?'':'s')+' \u00b7 '+kmRateLabel()+'</div></div>';
+  h+='</div>';
+  h+='<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.9rem;">';
+  if(isKat){
+    h+='<button onclick="kmPayVenmo()" style="flex:1;min-width:120px;padding:.6rem;background:#fff;color:#0d9488;border:none;border-radius:9px;font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">\uD83D\uDCB8 Pay via Venmo</button>';
+    h+='<button onclick="kmMarkPaid()" style="flex:1;min-width:120px;padding:.6rem;background:rgba(255,255,255,.18);color:#fff;border:1.5px solid rgba(255,255,255,.5);border-radius:9px;font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">\u2713 Mark paid</button>';
+  }
+  h+='<button onclick="kmViewDetails()" style="flex:1;min-width:120px;padding:.6rem;background:rgba(255,255,255,.18);color:#fff;border:1.5px solid rgba(255,255,255,.5);border-radius:9px;font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">View details \u2192</button>';
+  if(isKat && !compact) h+='<button onclick="kmToggleSettings()" title="Rate settings" style="padding:.6rem .7rem;background:rgba(255,255,255,.18);color:#fff;border:1.5px solid rgba(255,255,255,.5);border-radius:9px;font-size:.85rem;cursor:pointer;">\u2699</button>';
+  h+='</div>';
+  if(isKat && !compact){
+    h+='<div id="km-settings-panel" style="display:none;margin-top:.8rem;background:rgba(255,255,255,.12);border-radius:10px;padding:.8rem;">';
+    h+='<div style="font-size:.72rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;opacity:.85;margin-bottom:.5rem;">How Kat pays Morgan</div>';
+    h+='<select id="km-mode" onchange="kmModeChanged()" style="width:100%;padding:.45rem;border-radius:7px;border:none;font-size:.85rem;margin-bottom:.5rem;">';
+    h+='<option value="flat"'+(kmPaySettings.mode==='flat'?' selected':'')+'>Flat amount per ride</option>';
+    h+='<option value="pct"'+(kmPaySettings.mode==='pct'?' selected':'')+'>Percentage of fare</option></select>';
+    h+='<div id="km-flat-wrap" style="display:'+(kmPaySettings.mode==='flat'?'flex':'none')+';align-items:center;gap:.4rem;margin-bottom:.5rem;"><span style="font-size:.9rem;">$</span><input id="km-flat" type="number" step="0.5" value="'+(kmPaySettings.flat)+'" style="flex:1;padding:.45rem;border-radius:7px;border:none;font-size:.85rem;"><span style="font-size:.82rem;opacity:.9;">per ride</span></div>';
+    h+='<div id="km-pct-wrap" style="display:'+(kmPaySettings.mode==='pct'?'flex':'none')+';align-items:center;gap:.4rem;margin-bottom:.5rem;"><input id="km-pct" type="number" step="1" value="'+(kmPaySettings.pct)+'" style="flex:1;padding:.45rem;border-radius:7px;border:none;font-size:.85rem;"><span style="font-size:.82rem;opacity:.9;">% of fare</span></div>';
+    h+='<button onclick="kmSaveSettings()" style="width:100%;padding:.5rem;background:#fff;color:#0d9488;border:none;border-radius:8px;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;">Save rate</button>';
+    h+='</div>';
+  }
+  h+='</div>';
+  box.innerHTML=h;
+}
+function kmModeChanged(){ const m=(document.getElementById('km-mode')||{}).value; const fw=document.getElementById('km-flat-wrap'); const pw=document.getElementById('km-pct-wrap'); if(fw) fw.style.display=(m==='flat')?'flex':'none'; if(pw) pw.style.display=(m==='pct')?'flex':'none'; }
+
+// ── View details: rides Morgan scheduled (completed), filterable by custom range ──
+function kmViewDetails(){
+  if(!kmVisible()) return;
+  const today=toDateStr(new Date());
+  const monthStart=today.slice(0,7)+'-01';
+  const ov=document.createElement('div'); ov.id='km-report-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:16000;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:640px;width:100%;max-height:90vh;overflow:auto;padding:1.35rem;box-shadow:0 24px 60px rgba(0,0,0,.4);">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem;"><div style="font-size:1.1rem;font-weight:800;color:#0f172a;">\uD83E\uDD1D Morgan\u2019s scheduled rides</div><button onclick="document.getElementById(\'km-report-overlay\').remove()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button></div>'
+    +'<div style="display:flex;gap:.5rem;align-items:end;flex-wrap:wrap;margin-bottom:.8rem;">'
+    +'<div><div style="font-size:.7rem;color:#64748b;margin-bottom:.2rem;">From</div><input id="km-from" type="date" value="'+monthStart+'" onchange="kmRenderReport()" style="padding:.4rem;border:1.5px solid #e2e8f0;border-radius:7px;font-size:.85rem;"></div>'
+    +'<div><div style="font-size:.7rem;color:#64748b;margin-bottom:.2rem;">To</div><input id="km-to" type="date" value="'+today+'" onchange="kmRenderReport()" style="padding:.4rem;border:1.5px solid #e2e8f0;border-radius:7px;font-size:.85rem;"></div>'
+    +'<div style="font-size:.72rem;color:#64748b;padding-bottom:.5rem;">Rate: '+kmRateLabel()+'</div>'
+    +'</div><div id="km-report-body"></div></div>';
+  document.body.appendChild(ov);
+  kmRenderReport();
+}
+function kmRenderReport(){
+  const body=document.getElementById('km-report-body'); if(!body) return;
+  const from=(document.getElementById('km-from')||{}).value||'';
+  const to=(document.getElementById('km-to')||{}).value||'';
+  const rows=(rides||[]).filter(function(r){ return r && r.createdBy==='Morgan' && r.status!=='cancelled' && _kmRideDone(r) && (!from||r.date>=from) && (!to||r.date<=to); })
+    .sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
+  let total=0, paidCount=0, unpaidTotal=0;
+  let h='<table style="width:100%;border-collapse:collapse;font-size:.82rem;"><thead><tr style="background:#0f172a;color:#fbbf24;">'
+    +'<th style="padding:.4rem .5rem;text-align:left;">Date</th><th style="padding:.4rem .5rem;text-align:left;">Client</th><th style="padding:.4rem .5rem;text-align:right;">Fare</th><th style="padding:.4rem .5rem;text-align:right;">Pay</th><th style="padding:.4rem .5rem;text-align:center;">Paid?</th></tr></thead><tbody>';
+  rows.forEach(function(r,i){ const v=kmRideValue(r); total+=v; const settled=!!kmSettledRides[r.id]; if(settled) paidCount++; else unpaidTotal+=v;
+    h+='<tr style="border-bottom:1px solid #eef2f7;'+(i%2?'background:#f8fafc;':'')+'"><td style="padding:.4rem .5rem;">'+fmtDateShort(r.date)+'</td><td style="padding:.4rem .5rem;">'+escHtml(r.client||'')+'</td><td style="padding:.4rem .5rem;text-align:right;color:#64748b;">$'+(parseFloat(r.price)||0).toFixed(2)+'</td><td style="padding:.4rem .5rem;text-align:right;font-weight:600;">$'+v.toFixed(2)+'</td><td style="padding:.4rem .5rem;text-align:center;">'+(settled?'\u2713':'\u2014')+'</td></tr>';
+  });
+  if(!rows.length) h+='<tr><td colspan="5" style="padding:1rem;text-align:center;color:#94a3b8;">No completed rides in this range.</td></tr>';
+  h+='</tbody></table>';
+  h+='<div style="display:flex;justify-content:space-between;margin-top:.8rem;padding-top:.6rem;border-top:2px solid #0d9488;font-weight:700;color:#0f172a;"><span>'+rows.length+' rides \u00b7 '+paidCount+' paid</span><span>Total $'+total.toFixed(2)+' \u00b7 Unpaid $'+unpaidTotal.toFixed(2)+'</span></div>';
+  body.innerHTML=h;
+}
+
+function maybeShowKmWalkthrough(){
+  try{
+    if(!kmVisible()) return;
+    var flagKey='nwda_kmwalk_'+currentUser.name;
+    if(localStorage.getItem(flagKey)==='1') return;
+    var isKat=kmIsKat();
+    var ov=document.createElement('div'); ov.id='km-walk-overlay';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:16500;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+    ov.innerHTML='<div style="background:#fff;border-radius:18px;max-width:440px;width:100%;padding:1.6rem;box-shadow:0 24px 60px rgba(0,0,0,.45);">'
+      +'<div style="font-size:2rem;text-align:center;margin-bottom:.3rem;">\uD83E\uDD1D</div>'
+      +'<div style="font-size:1.15rem;font-weight:800;color:#0f172a;text-align:center;margin-bottom:.7rem;">Kat \u2013 Morgan payments</div>'
+      +'<div style="font-size:.9rem;color:#475569;line-height:1.55;">'
+      +(isKat
+        ? 'You now have a teal card on your <b>Dashboard</b> and <b>Income</b> page showing what you owe Morgan for the rides she scheduled that are completed. You can:<br><br>\u2022 <b>Pay via Venmo</b> in one tap<br>\u2022 <b>Mark paid</b> \u2014 alerts Morgan and resets the total to $0<br>\u2022 Set the rate with the \u2699 gear \u2014 a flat amount per ride <b>or</b> a percentage of the fare<br>\u2022 <b>View details</b> for a date-range report'
+        : 'You now have a teal card on your <b>Dashboard</b> and <b>Income</b> page showing what Kat owes you for the rides you scheduled that are completed. When Kat pays you, you get a notification and the total resets. Tap <b>View details</b> anytime for a date-range breakdown.')
+      +'</div>'
+      +'<button onclick="_dismissKmWalk()" style="width:100%;margin-top:1.2rem;padding:.75rem;background:#0d9488;color:#fff;border:none;border-radius:10px;font-family:inherit;font-size:.95rem;font-weight:700;cursor:pointer;">Got it</button>'
+      +'</div>';
+    document.body.appendChild(ov);
+  }catch(e){}
+}
+function _dismissKmWalk(){ try{ localStorage.setItem('nwda_kmwalk_'+currentUser.name,'1'); }catch(e){} var ov=document.getElementById('km-walk-overlay'); if(ov) ov.remove(); }
+
+// ── END KAT-MORGAN PAYMENT FEATURE ──
+
 function renderMorganCounter(){
   const box=document.getElementById('dash-morgan-counter'); if(!box) return;
   if(!currentUser||currentUser.name!=='Morgan'){ box.innerHTML=''; return; }
   const todayStr=toDateStr(new Date());
   const weekStart=toDateStr(addDays(new Date(),-new Date().getDay()));
+  const weekEnd=toDateStr(addDays(new Date(),6-new Date().getDay()));
   const monthStr=toDateStr(new Date()).slice(0,7);
   const myRides=rides.filter(function(r){ return r.createdBy==='Morgan'&&r.status!=='cancelled'; });
   const todayCount=myRides.filter(function(r){ return r.date===todayStr; }).length;
-  const weekCount=myRides.filter(function(r){ return r.date>=weekStart; }).length;
+  const weekCount=myRides.filter(function(r){ return r.date>=weekStart && r.date<=weekEnd; }).length;
   const monthCount=myRides.filter(function(r){ return r.date.startsWith(monthStr); }).length;
   box.innerHTML='<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">Rides Created by Me</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.6rem;">'
@@ -14765,7 +14983,7 @@ function renderFinderFees(dName, start, end){
     if(!inRange(r)) return;
     // A ride whose client is themselves a driver never generates a finder's fee.
     if(clientIsDriver(r.client)) return;
-    const owner  = feeOwnerFor(r.createdBy) || getClientOwner(r.client);
+    const owner  = getClientOwner(r.client) || feeOwnerFor(r.createdBy);
     const driver = r.driver || null;
     if(!owner || !driver || owner===driver) return;
     const fare = parseFloat(r.price)||0;
@@ -15691,6 +15909,10 @@ function showAuthScreen(){
 // Admin can grant/revoke subscriptions from the access control panel
 
 function enterApp(){
+  // The notification panel lives inside the sticky header, whose z-index creates a
+  // stacking context that trapped the panel BELOW page content (open but invisible).
+  // Re-parent it to <body> so its z-index applies page-wide and it renders on top.
+  try{ var _np=document.getElementById('notif-panel'); if(_np && _np.parentNode!==document.body){ document.body.appendChild(_np); } }catch(_e){}
   _notifFirstLoad = true; // re-seed on login so existing notifications don't all re-pop
   // Multi-account safety: immediately remove this device from any OTHER driver's
   // push tokens so you never get pushes for an account you previously tested.
@@ -15765,7 +15987,7 @@ function enterApp(){
   if(('Notification' in window) && Notification.permission==='granted') registerFcmToken();
   renderAccountPage();
   loadAdminRemovalRequests();
-  initPresence();
+  initPresence(); try{ setTimeout(function(){ if(typeof maybeShowKmWalkthrough==='function') maybeShowKmWalkthrough(); }, 900); }catch(e){}
 }
 
 // ═══════════════════════════════════════════
@@ -15880,9 +16102,69 @@ function clientStoreDriver(){
   return me;
 }
 
+
+// ── New-client ownership prompt (for proxy dispatchers, e.g. Morgan) ──────────
+// When a proxy like Morgan books a brand-new client, she chooses whether it's the
+// owner's client (Kat's) or her own. That sets the client's fee owner + the ride's
+// default driver. Existing clients are never prompted.
+function _isNewClient(name){
+  try{
+    if(!name) return false;
+    const key=name.toLowerCase().trim();
+    if(clientOwners && clientOwners[key]) return false;
+    for(const login in importedClients){
+      const arr=importedClients[login]||[];
+      if(arr.some(c=>c && c.name && c.name.toLowerCase().trim()===key)) return false;
+    }
+    if((rides||[]).some(r=>r && r.client && r.client.toLowerCase().trim()===key)) return false;
+    return true;
+  }catch(e){ return false; }
+}
+function _maybePromptClientOwner(clientName){
+  try{
+    if(!clientName || !currentUser) return false;
+    if(!PROXY_MAP[currentUser.name]) return false;      // only proxy dispatchers
+    if(!_isNewClient(clientName)) return false;          // only genuinely new clients
+    _showClientOwnerPrompt(clientName);
+    return true;
+  }catch(e){ return false; }
+}
+function _showClientOwnerPrompt(clientName){
+  window._pendingOwnerClient = clientName;
+  const ownerName = PROXY_MAP[currentUser.name] || 'Kathleen Herringdine';
+  const meName = getMyDriverName() || '';
+  const ov=document.createElement('div'); ov.id='client-owner-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:16000;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:400px;width:100%;padding:1.5rem;box-shadow:0 24px 60px rgba(0,0,0,.4);">'
+    +'<div style="font-size:1.05rem;font-weight:800;color:#0f172a;margin-bottom:.5rem;">New client</div>'
+    +'<div style="font-size:.9rem;color:#64748b;margin-bottom:1.15rem;line-height:1.5;"><b>'+escHtml(clientName)+'</b> isn\u2019t on anyone\u2019s client list yet. Whose client is this?</div>'
+    +'<div style="display:flex;flex-direction:column;gap:.6rem;">'
+    +'<button onclick="_resolveClientOwner(\'owner\')" style="padding:.8rem;border:1.5px solid var(--accent,#7c3aed);background:var(--accent,#7c3aed);color:#fff;border-radius:10px;font-family:inherit;font-size:.95rem;font-weight:700;cursor:pointer;">'+escHtml((ownerName||'').split(' ')[0])+'\u2019s client</button>'
+    +'<button onclick="_resolveClientOwner(\'me\')" style="padding:.8rem;border:1.5px solid var(--accent,#7c3aed);background:none;color:var(--accent,#7c3aed);border-radius:10px;font-family:inherit;font-size:.95rem;font-weight:700;cursor:pointer;">My client ('+escHtml((meName||'').split(' ')[0])+')</button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+}
+function _resolveClientOwner(which){
+  const clientName=window._pendingOwnerClient;
+  var ov=document.getElementById('client-owner-overlay'); if(ov) ov.remove();
+  window._pendingOwnerClient=null;
+  if(!clientName){ return; }
+  const owner = which==='me' ? (getMyDriverName()||'') : (PROXY_MAP[currentUser.name]||'Kathleen Herringdine');
+  try{
+    const key=clientName.toLowerCase().trim();
+    clientOwners[key]=owner;
+    saveClientOwners();
+    const dd=document.getElementById('qa-driver');
+    if(dd){ dd.value=owner; try{ if(typeof qaDriverChanged==='function') qaDriverChanged(); }catch(e){} }
+  }catch(e){}
+  window._qaOwnerResolved=true;
+  try{ saveQuickAddRide(); }catch(e){}
+}
+
 async function upsertClientFromRide(ride){
   if(!ride || !ride.client) return;
-  const driver = clientStoreDriver();
+  var driver;
+  try{ var _k=ride.client.trim().toLowerCase(); var _own=(clientOwners&&clientOwners[_k])||null; driver = _own ? (Object.keys(USER_DRIVER_MAP).find(function(k){return USER_DRIVER_MAP[k]===_own;})||clientStoreDriver()) : clientStoreDriver(); }catch(e){ driver=clientStoreDriver(); }
   if(!driver) return;
   if(!importedClients[driver]) importedClients[driver]=[];
   const key = ride.client.trim().toLowerCase();
