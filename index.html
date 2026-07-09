@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090325">
+<meta name="version" content="202606090326">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -10840,10 +10840,18 @@ function renderDashFees(){
       if(driver===dName&&!settled){ const k=owner; (iOwe[k]=iOwe[k]||{fee:0,rides:[]}); iOwe[k].fee+=fee; iOwe[k].rides.push({id:r.id,client:r.client,date:r.date,fee:fee}); }
     }
   });
-  // Previous unpaid legs to settle — ONLY for rides the current user drove the latest leg of (proxy-aware via dName)
-  var _prevPay={};
-  (rides||[]).forEach(function(r){ if(!r||r.status==='cancelled') return; var _pv=(typeof previousUnpaidAPRide==='function')?previousUnpaidAPRide(r):null; if(!_pv) return; var _cs=(dName && r.driver===dName); if(!_cs) return; if(!_pv.driver||_pv.driver===dName) return; _prevPay[_pv.id]={prev:_pv, driver:_pv.driver, fare:parseFloat(_pv.price||0)}; });
-  var _prevList=Object.keys(_prevPay).map(function(k){return _prevPay[k];});
+  // Rides YOU drove that aren't marked paid yet (past/completed) — so you can mark them paid. Proxy-aware via dName.
+  var _prevList=[];
+  (rides||[]).forEach(function(r){
+    if(!r||r.status==='cancelled') return;
+    if(r.status==='paid') return;
+    if(!r.driver || r.driver!==dName) return;
+    if(!(parseFloat(r.price||0)>0)) return;
+    var _earned=(r.status==='completed')||(r.date && r.date < today);
+    if(!_earned) return;
+    _prevList.push({prev:r, driver:r.driver, fare:parseFloat(r.price||0)});
+  });
+  _prevList.sort(function(a,b){ return (b.prev.date||'').localeCompare(a.prev.date||''); });
   const hasOwed=Object.keys(owedToMe).length, hasOwe=Object.keys(iOwe).length;
   if(!hasOwed&&!hasOwe&&!_prevList.length){ box.innerHTML=''; return; }
 
@@ -10917,12 +10925,12 @@ function renderDashFees(){
   html+='<div style="padding:.5rem .85rem;font-size:.72rem;color:var(--mid);">View full breakdown in <span onclick="nav(\'income\')" style="color:var(--accent);cursor:pointer;text-decoration:underline;">Income</span></div>'
     +'</div>';
   if(_prevList.length){
-    html+='<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin:.9rem 0 .6rem;">Previous Rides \u2014 To Be Paid</div>'
+    html+='<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin:.9rem 0 .6rem;">Your Rides \u2014 Not Marked Paid</div>'
       +'<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:12px;overflow:hidden;">';
     _prevList.forEach(function(p){
       html+='<div onclick="openRideModal(\''+p.prev.id+'\')" style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.6rem .85rem;border-bottom:1px solid var(--light);cursor:pointer;">'
-        +'<div style="font-size:.82rem;"><b>'+escHtml((p.driver||'').split(' ')[0])+'</b> owed <b>$'+p.fare.toFixed(2)+'</b><div style="font-size:.72rem;color:var(--mid);">'+escHtml(p.prev.client||'')+' \u00b7 '+_fmtNoteDate(p.prev.date)+' \u00b7 tap for details</div></div>'
-        +'<button onclick="event.stopPropagation(); payPrevRideVenmo(\''+p.prev.id+'\')" style="background:#3d95ce;color:#fff;border:none;border-radius:8px;padding:.45rem .8rem;font-family:inherit;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap;">\uD83D\uDCB8 Pay</button>'
+        +'<div style="font-size:.82rem;"><b>'+escHtml(p.prev.client||'Ride')+'</b> \u00b7 $'+p.fare.toFixed(2)+'<div style="font-size:.72rem;color:var(--mid);">'+_fmtNoteDate(p.prev.date)+' \u00b7 '+_tripTypeLabel(p.prev.type)+' \u00b7 tap for details</div></div>'
+        +'<button onclick="event.stopPropagation(); toggleRidePaid(\''+p.prev.id+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:.45rem .8rem;font-family:inherit;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap;">\u2713 Mark paid</button>'
         +'</div>';
     });
     html+='</div>';
