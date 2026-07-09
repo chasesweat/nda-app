@@ -41,7 +41,7 @@ self.addEventListener('fetch', function (e) {
     (req.headers.get('accept') || '').indexOf('text/html') !== -1;
 
   if (isHTML) {
-    // NETWORK-FIRST for the app itself → newest deploy wins; cache is only an offline fallback.
+    // NETWORK-FIRST for the app itself -> newest deploy wins; cache is only an offline fallback.
     e.respondWith(
       fetch(req)
         .then(function (res) {
