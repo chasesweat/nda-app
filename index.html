@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090373">
+<meta name="version" content="202606090374">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -9787,6 +9787,7 @@ function resetQuickAddForm(){
   var ms=document.getElementById('qa-mileage-status'); if(ms) ms.textContent='';
   // Drop any per-client saved-address picker injected under the address fields.
   Array.prototype.forEach.call(document.querySelectorAll('[id^="_addr-dropdown-"]'), function(n){ n.remove(); });
+  _autofilledVals={};
   // Reset surcharge state (fuel re-defaults on the next time the modal is opened).
   qaAddonState={ premium:false, holiday:false, christmas:false, late:false, traffic:false, fuel:false };
   _qaTouched={ premium:false, traffic:false, holiday:false, christmas:false, fuel:false };
@@ -16720,62 +16721,95 @@ function _afterAutofillAddr(prefix){
     else if(prefix==='edit'){ if(typeof _editDebounceMileage==='function') _editDebounceMileage(); }
   }catch(e){}
 }
+// Find a client's phone/email by name across ALL rides + imported records. Used as an
+// autofill fallback when the scoped client record has no contact info (e.g. the number is
+// on a ride another driver created, or only saved under this client's name elsewhere).
+function _anyClientPhone(name){
+  var key=(name||'').trim().toLowerCase(); if(!key) return '';
+  var list=(typeof rides!=='undefined'&&rides)?rides:[];
+  for(var i=0;i<list.length;i++){ var r=list[i]; if(!r||(r.client||'').trim().toLowerCase()!==key) continue;
+    var p=_extractPhone(r.phone); if(p) return p;
+    var p2=_extractPhone(r.email); if(p2) return p2;
+    var ep=(r.extraPhones||'').split(/[,;]/); for(var j=0;j<ep.length;j++){ var pe=_extractPhone(ep[j]); if(pe) return pe; } }
+  try{ for(var login in importedClients){ var arr=importedClients[login]||[]; if(!Array.isArray(arr)) arr=Object.values(arr);
+    for(var k=0;k<arr.length;k++){ var c=arr[k]; if(!c||(c.name||'').trim().toLowerCase()!==key) continue;
+      var cp=_extractPhone(c.phone); if(cp) return cp;
+      var phs=c.phones||[]; for(var m=0;m<phs.length;m++){ var pm=_extractPhone(phs[m]&&phs[m].number); if(pm) return pm; } } } }catch(e){}
+  return '';
+}
+function _anyClientEmail(name){
+  var key=(name||'').trim().toLowerCase(); if(!key) return '';
+  var list=(typeof rides!=='undefined'&&rides)?rides:[];
+  for(var i=0;i<list.length;i++){ var r=list[i]; if(!r||(r.client||'').trim().toLowerCase()!==key) continue;
+    var e=(r.email||'').trim(); if(e && e.indexOf('@')!==-1) return e; }
+  try{ for(var login in importedClients){ var arr=importedClients[login]||[]; if(!Array.isArray(arr)) arr=Object.values(arr);
+    for(var k=0;k<arr.length;k++){ var c=arr[k]; if(!c||(c.name||'').trim().toLowerCase()!==key) continue;
+      var em=(c.email||'').trim(); if(em && em.indexOf('@')!==-1) return em;
+      var ems=c.emails||[]; for(var m=0;m<ems.length;m++){ if(ems[m] && String(ems[m]).indexOf('@')!==-1) return ems[m]; } } } }catch(e){}
+  return '';
+}
+// Remembers what autofill last put in each field, so switching clients can safely replace an
+// auto-filled value while never clobbering something the user typed by hand.
+let _autofilledVals = {};
 function maybeAutofillClient(prefix){
   const nameEl=document.getElementById(prefix+'-client'); if(!nameEl) return;
   const val=(nameEl.value||'').trim().toLowerCase(); if(!val) return;
   let db; try{ db=buildClientDB(clientLookupScope()); }catch(e){ return; }
   const c=db[val]; if(!c) return;
-  const fill=(id,v)=>{ const el=document.getElementById(id); if(el && !el.value && v) el.value=v; };
-  // Phone + email, guarded against legacy records that stored a phone number in the email
-  // slot. A value with no "@" that parses as a phone is NOT an email — recover it into the
-  // phone field (if that's still empty) and keep it out of the email box.
+  // Smart fill: set a field when it's empty OR still holds the value autofill put there last
+  // time (so picking a different client refreshes it) — but never overwrite what the user
+  // typed. If the newly-picked client has no value for a field we previously filled, clear it.
+  const fill=(id,v)=>{
+    const el=document.getElementById(id); if(!el) return;
+    const cur=el.value||''; const last=_autofilledVals[id]||'';
+    if(v && (cur===''||cur===last)){ el.value=v; _autofilledVals[id]=v; }
+    else if(!v && cur!==''&&cur===last){ el.value=''; _autofilledVals[id]=''; }
+  };
+  // Phone + email. Source from the scoped client record first; if empty, fall back to a global
+  // scan by client name so it still fills. A phone misfiled into the email slot is recovered
+  // into the phone field and kept out of the email box.
   let _phoneVal=_extractPhone(c.phone);
   let _emailVal=(c.email||'').trim();
   if(_emailVal && _emailVal.indexOf('@')===-1){
     const _rec=_extractPhone(_emailVal);
-    if(_rec && !_phoneVal) _phoneVal=_rec;   // salvage a misfiled phone into the phone field
-    _emailVal='';                            // never drop a non-email into the email box
+    if(_rec && !_phoneVal) _phoneVal=_rec;
+    _emailVal='';
   }
+  if(!_phoneVal) _phoneVal=_anyClientPhone(nameEl.value);
+  if(!_emailVal){ const _fe=_anyClientEmail(nameEl.value); if(_fe && _fe.indexOf('@')!==-1) _emailVal=_fe; }
   fill(prefix+'-phone', _phoneVal);
   fill(prefix+'-email', _emailVal);
   const extras=(c.phones||[]).slice(1).map(p=>p.number).filter(Boolean);
-  if(extras.length){ const ex=document.getElementById(prefix+'-extra-phones'); if(ex && !ex.value) ex.value=extras.join(', '); }
+  fill(prefix+'-extra-phones', extras.length?extras.join(', '):'');
   const _clientKey2=(nameEl.value||'').trim().toLowerCase();
   const _savedAddrs=getClientAddresses(_clientKey2);
-  // If the saved record has an address sitting in its phone field, recover it here so
-  // it lands in the address field instead of being lost.
   const _phoneAsAddr=(c.phone && !_extractPhone(c.phone)) ? c.phone : '';
   const _defaultAddr=getClientDefaultAddress(_clientKey2)||c.address||_phoneAsAddr||'';
-  if(_defaultAddr){
+  {
     const type2=(document.getElementById(prefix+'-type')||{}).value||'';
     const homeId2=(prefix==='qa')?'qa-home':(prefix==='edit'?'edit-home':'q-dropoff');
     const addrFieldId=(type2==='AP PICK UP')?homeId2:(prefix+'-pickup');
     const addrEl=document.getElementById(addrFieldId);
-    if(addrEl && !addrEl.value){
-      if(hasIncomeAccess() && _savedAddrs.length > 1 && prefix==='qa'){
-        addrEl.value=_defaultAddr;
-        const pickerId='_addr-dropdown-'+addrFieldId;
-        let picker=document.getElementById(pickerId);
-        if(picker) picker.remove();
-        picker=document.createElement('select');
-        picker.id=pickerId;
-        picker.style.cssText='width:100%;margin-top:.3rem;padding:.5rem .7rem;border:1.5px solid #7c3aed;border-radius:8px;font-size:.88rem;font-weight:700;color:#1a0830;background:#fff;cursor:pointer;';
-        _savedAddrs.forEach(function(a){
-          const opt=document.createElement('option');
-          opt.value=a.address;opt.textContent=a.label+(a.isDefault?' (default)':'');
-          if(a.address===_defaultAddr) opt.selected=true;
-          picker.appendChild(opt);
-        });
-        picker.onchange=function(){
-          addrEl.value=this.value;
-          addrEl.dispatchEvent(new Event('input',{bubbles:true}));
-          _afterAutofillAddr(prefix);
-        };
-        if(addrEl.parentNode) addrEl.parentNode.insertBefore(picker,addrEl.nextSibling);
-      } else {
-        addrEl.value=_defaultAddr;
-        addrEl.dispatchEvent(new Event('input',{bubbles:true}));
-        _afterAutofillAddr(prefix);
+    const pickerId='_addr-dropdown-'+addrFieldId;
+    const _oldPicker=document.getElementById(pickerId); if(_oldPicker) _oldPicker.remove(); // drop a stale picker when switching clients
+    if(addrEl){
+      const _canReplace = addrEl.value===''||addrEl.value===(_autofilledVals[addrFieldId]||'');
+      if(_canReplace){
+        if(_defaultAddr && hasIncomeAccess() && _savedAddrs.length>1 && prefix==='qa'){
+          addrEl.value=_defaultAddr; _autofilledVals[addrFieldId]=_defaultAddr;
+          const picker=document.createElement('select');
+          picker.id=pickerId;
+          picker.style.cssText='width:100%;margin-top:.3rem;padding:.5rem .7rem;border:1.5px solid #7c3aed;border-radius:8px;font-size:.88rem;font-weight:700;color:#1a0830;background:#fff;cursor:pointer;';
+          _savedAddrs.forEach(function(a){ const opt=document.createElement('option'); opt.value=a.address; opt.textContent=a.label+(a.isDefault?' (default)':''); if(a.address===_defaultAddr) opt.selected=true; picker.appendChild(opt); });
+          picker.onchange=function(){ addrEl.value=this.value; _autofilledVals[addrFieldId]=this.value; addrEl.dispatchEvent(new Event('input',{bubbles:true})); _afterAutofillAddr(prefix); };
+          if(addrEl.parentNode) addrEl.parentNode.insertBefore(picker,addrEl.nextSibling);
+          addrEl.dispatchEvent(new Event('input',{bubbles:true})); _afterAutofillAddr(prefix);
+        } else if(_defaultAddr){
+          addrEl.value=_defaultAddr; _autofilledVals[addrFieldId]=_defaultAddr;
+          addrEl.dispatchEvent(new Event('input',{bubbles:true})); _afterAutofillAddr(prefix);
+        } else if(addrEl.value!==''&&addrEl.value===(_autofilledVals[addrFieldId]||'')){
+          addrEl.value=''; _autofilledVals[addrFieldId]=''; addrEl.dispatchEvent(new Event('input',{bubbles:true})); _afterAutofillAddr(prefix);
+        }
       }
     }
   }
