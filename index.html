@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090372">
+<meta name="version" content="202606090373">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -16520,7 +16520,6 @@ function addPhoneUnique(arr, number, label){
 }
 function addEmailUnique(arr, email){
   const e=(email||'').trim(); if(!e) return false;
-  if(e.indexOf('@')===-1 && _looksLikePhone(e)) return false; // a phone number is not an email
   if(arr.some(x=>x.toLowerCase()===e.toLowerCase())) return false;
   arr.push(e); return true;
 }
@@ -16578,6 +16577,17 @@ function buildClientDB(forDriver){
   });
   Object.values(db).forEach(c=>{
     c.drivers=[...c.drivers];
+    // Legacy repair: a phone number saved into the email slot is not an email. Move it into
+    // the phone list so it autofills the Phone field and is usable for texts, and keep the
+    // Email field clean. (Fixes clients whose only number was stored under email.)
+    if(Array.isArray(c.emails) && c.emails.length){
+      const _realEmails=[];
+      c.emails.forEach(function(x){
+        if(x && String(x).indexOf('@')===-1 && _looksLikePhone(x)) addPhoneUnique(c.phones, x, '');
+        else _realEmails.push(x);
+      });
+      c.emails=_realEmails;
+    }
     c.phone = c.phones[0] ? c.phones[0].number : '';
     c.email = c.emails[0] || '';
   });
