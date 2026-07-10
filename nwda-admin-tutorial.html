@@ -223,6 +223,9 @@ body{
 .atopic-b ul{margin:.3rem 0 0;padding-left:1.1rem;}
 .atopic-b li{margin-bottom:.5rem;}
 .atopic-b strong{color:#fff;}
+
+@keyframes hintPulse{0%,100%{opacity:.6;}50%{opacity:1;}}
+#play-hint.hide{display:none;}
 </style>
 </head>
 <body>
@@ -1159,7 +1162,8 @@ body{
   </div>
 </div>
 
-<!-- NAV BAR -->
+<div id="play-hint" style="text-align:center;font-size:.82rem;font-weight:800;color:var(--gold);padding:.45rem .6rem .1rem;animation:hintPulse 1.6s ease-in-out infinite;">&#128071; Tap &#128266; <b>Play</b> to hear this slide read aloud</div>
+  <!-- NAV BAR -->
 <div class="nav-bar">
   <button class="btn-prev" onclick="prevSlide()">&#8592; Back</button>
   <button class="btn-s" onclick="openScript()">&#128220; Script</button>
@@ -1258,7 +1262,7 @@ function jumpToAdminTopic(id){ try{ var el=document.getElementById(id); if(!el) 
 function toggleAdminTopic(el){ try{ var b=el.querySelector('.atopic-b'); var x=el.querySelector('.atopic-x'); var open=(b.style.display==='block'); b.style.display=open?'none':'block'; if(x) x.textContent=open?'+':'\u2212'; }catch(e){} }
 function init(){
   slides=document.querySelectorAll('.slide');
-  cur=0; audioBlobs={}; curAudio=null; ttsRunning=false; ttsSentences=[]; ttsIdx=0;
+  cur=0; audioBlobs={}; try{ if(localStorage.getItem('nwda_tut_played')){ var _ph=document.getElementById('play-hint'); if(_ph)_ph.classList.add('hide'); } }catch(e){} curAudio=null; ttsRunning=false; ttsSentences=[]; ttsIdx=0;
   // Apply admin/driver UI
   var u=document.getElementById('hdr-user'); if(u) u.textContent=loggedInName;
   var at=document.getElementById('admin-tools'); if(at) at.style.display=isAdmin?'':'none';
@@ -1268,8 +1272,8 @@ function init(){
   // Show first slide
   goToSlide(0);
   // Load audio from Firebase (for everyone)
-  if(typeof fbLoadAllAudio==='function') fbLoadAllAudio();
-  if(typeof fbLoadAllVideos==='function') fbLoadAllVideos();
+  /* fbLoadAllAudio disabled: tutorial now uses bundled audio/ mp3 files, not Firebase */
+  /* fbLoadAllVideos disabled: not used with bundled tutorial */
 }
 
 function goToSlide(n){
@@ -1283,11 +1287,7 @@ function goToSlide(n){
   var pf=document.getElementById('progress');
   if(pf) pf.style.width=((cur+1)/TOTAL*100)+'%';
   window.scrollTo(0,0);
-  if(audioBlobs&&audioBlobs[cur]){
-    setTimeout(function(){ playBlob(cur); }, 300);
-  } else if(slides&&slides[cur]&&slides[cur].dataset.narrate){
-    setTimeout(function(){ toggleAudio(); }, 400);
-  }
+  // Audio plays on tap (browsers block autoplay of recorded audio), so no auto-start here.
   renderVideoForSlide(cur);
 }
 function nextSlide(){if(cur<TOTAL-1)goToSlide(cur+1);}
@@ -1308,10 +1308,11 @@ function stopAudio(){
   setAudBtn(false);
 }
 function setAudBtn(on){var b=document.getElementById('aud-btn');if(b){b.classList.toggle('playing',on);b.textContent=on?'\u23F9 Stop':'\uD83D\uDD0A Play';}}
+function _hidePlayHint(){ try{ var h=document.getElementById('play-hint'); if(h) h.classList.add('hide'); localStorage.setItem('nwda_tut_played','1'); }catch(e){} }
 function toggleAudio(){
   if(curAudio||ttsRunning){stopAudio();return;}
   var _au=(slides&&slides[cur])?slides[cur].dataset.audio:'';
-  if(_au){ try{ curAudio=new Audio(_au); curAudio.onended=function(){stopAudio();}; curAudio.onerror=function(){ curAudio=null; setAudBtn(false); }; setAudBtn(true); var _p=curAudio.play(); if(_p&&_p.catch)_p.catch(function(){ curAudio=null; setAudBtn(false); }); }catch(e){ curAudio=null; setAudBtn(false); } return; }
+  if(_au){ try{ curAudio=new Audio(_au); curAudio.onended=function(){stopAudio();}; curAudio.onerror=function(){ curAudio=null; setAudBtn(false); }; setAudBtn(true); _hidePlayHint(); var _p=curAudio.play(); if(_p&&_p.catch)_p.catch(function(){ curAudio=null; setAudBtn(false); }); }catch(e){ curAudio=null; setAudBtn(false); } return; }
   if(audioBlobs&&audioBlobs[cur]){playBlob(cur);return;}
   if(!('speechSynthesis' in window)) return;
   var raw=slides&&slides[cur]?slides[cur].dataset.narrate:'';
