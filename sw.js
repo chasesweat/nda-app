@@ -3,7 +3,10 @@
 // old version after I upload" problem), with an offline cache fallback. Assets are cached
 // stale-while-revalidate. Push notifications are handled separately by firebase-messaging-sw.js.
 
-const CACHE = 'nwda-cache-v3';
+// IMPORTANT: bump this version string on EVERY deploy. Changing sw.js's bytes is what makes
+// the browser reinstall the worker, wipe the old cache, and pull the newest app. (Paired with
+// app build 202606090382.)
+const CACHE = 'nwda-cache-v4';
 
 // Take over immediately on install.
 self.addEventListener('install', function (e) {
