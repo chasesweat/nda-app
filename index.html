@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090374">
+<meta name="version" content="202606090378">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -802,6 +802,7 @@ input,select,textarea{font-size:16px;}
         <button id="cautious-list-btn" onclick="toggleCautiousList()" style="background:none;border:1.5px solid #fbbf24;border-radius:8px;padding:.5rem .9rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;color:#92400e;">⚠️ Cautious List</button>
         <button onclick="openAddClientModal()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:.5rem .9rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">+ Add Client</button>
         <button onclick="document.getElementById('client-csv-input').click()" style="background:#16a34a;color:#fff;border:none;border-radius:8px;padding:.5rem .9rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">⬆ Import CSV</button>
+        <button onclick="repairImportedClients()" title="Re-check already-imported clients and move any misfiled phone/email/address into the right field" style="background:none;border:1.5px solid #16a34a;border-radius:8px;padding:.5rem .9rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;color:#16a34a;">&#x1F527; Fix imported</button>
         <button onclick="exportClientsToCSV()" style="background:none;border:1.5px solid var(--light);border-radius:8px;padding:.5rem .9rem;font-family:'DM Sans',sans-serif;font-size:.82rem;cursor:pointer;color:var(--black);">⬇ Export</button>
       </div>
     </div>
@@ -2600,6 +2601,10 @@ function fuelLabel(){ return 'Fuel surcharge ('+fuelPct()+'%)'; }
 // Each getter returns the saved value or falls back to the hardcoded default.
 function surcharge(k){ var m=globalSettings&&globalSettings.surcharges; var v=m&&parseFloat(m[k]); return (isFinite(v)&&v>=0)?v:ADDONS_FLAT[k]; }
 function mileageRate(){ var v=parseFloat(globalSettings&&globalSettings.mileageRate); return (isFinite(v)&&v>0)?v:RATE_PER_MILE; }
+// Included mileage for airport (AP) rides: the base fare covers this many miles; past that
+// (plus a 2-mile GPS grace) an overage is charged per mile. Admin-editable, default 50.
+function includedMiles(){ var v=parseFloat(globalSettings&&globalSettings.includedMiles); return (isFinite(v)&&v>0)?v:50; }
+function mileageTrigger(){ return includedMiles()+2; } // overage only applies once miles exceed this
 function waitRate(){ var v=parseFloat(globalSettings&&globalSettings.waitRate); return (isFinite(v)&&v>0)?v:WAIT_RATE; }
 function pickupFee(){ var v=parseFloat(globalSettings&&globalSettings.pickupFee); return (isFinite(v)&&v>=0)?v:10; }
 function extraStopFee(){ var v=parseFloat(globalSettings&&globalSettings.extraStopFee); return (isFinite(v)&&v>=0)?v:10; }
@@ -2769,14 +2774,14 @@ function calcQuote() {
 
   // ── AP ROUND TRIP — two separate leg breakdowns ──
   if(apRtType){
-    const overMiles = miles > 52 ? miles - 50 : 0;
+    const overMiles = miles > mileageTrigger() ? miles - includedMiles() : 0;
     const overage   = overMiles * mileageRate();
 
     // Outbound leg (AP Run) — uses the dropoff date/time + surcharges selected
     const leg1Lines = [];
-    leg1Lines.push({label:`Base rate (${vehicle}) — incl. 50 mi`, val:base});
-    if(miles > 0 && miles <= 52) leg1Lines.push({label:`Mileage (${miles} mi — within radius)`, val:0, note:'No overage'});
-    if(overage > 0) leg1Lines.push({label:'Mileage overage', val:overage, note:`(${miles} − 50) = ${overMiles} mi × $${mileageRate().toFixed(2)}`});
+    leg1Lines.push({label:`Base rate (${vehicle}) — incl. ${includedMiles()} mi`, val:base});
+    if(miles > 0 && miles <= mileageTrigger()) leg1Lines.push({label:`Mileage (${miles} mi — within radius)`, val:0, note:'No overage'});
+    if(overage > 0) leg1Lines.push({label:'Mileage overage', val:overage, note:`(${miles} − ${includedMiles()}) = ${overMiles} mi × $${mileageRate().toFixed(2)}`});
     const surcharges = getSurchargeLines();
     surcharges.forEach(s=>leg1Lines.push(s));
     const leg1Sub = base + overage + sumLines(surcharges);
@@ -2787,9 +2792,9 @@ function calcQuote() {
     // Return leg (AP Pick Up) — may have different surcharges depending on return date/time
     // Uses return date/time fields for auto-detection hint
     const leg2Lines = [];
-    leg2Lines.push({label:`Base rate (${vehicle}) — incl. 50 mi`, val:base});
-    if(miles > 0 && miles <= 52) leg2Lines.push({label:`Mileage (${miles} mi — within radius)`, val:0, note:'No overage'});
-    if(overage > 0) leg2Lines.push({label:'Mileage overage', val:overage, note:`(${miles} − 50) = ${overMiles} mi × $${mileageRate().toFixed(2)}`});
+    leg2Lines.push({label:`Base rate (${vehicle}) — incl. ${includedMiles()} mi`, val:base});
+    if(miles > 0 && miles <= mileageTrigger()) leg2Lines.push({label:`Mileage (${miles} mi — within radius)`, val:0, note:'No overage'});
+    if(overage > 0) leg2Lines.push({label:'Mileage overage', val:overage, note:`(${miles} − ${includedMiles()}) = ${overMiles} mi × $${mileageRate().toFixed(2)}`});
     // Return leg surcharges — check return date/time separately
     const rtDateEl = document.getElementById('q-rt-date');
     const rtTimeEl = document.getElementById('q-rt-time');
@@ -2856,12 +2861,12 @@ function calcQuote() {
       ? {label:`Medical transport (${medHours}h × $${waitRate()}/hr)`, val:medBase}
       : {label:'Medical transport', val:0, note:'Enter hours above'});
   } else {
-    const overMiles = apType && miles > 52 ? miles - 50 : 0;
+    const overMiles = apType && miles > mileageTrigger() ? miles - includedMiles() : 0;
     const overage   = overMiles * mileageRate();
     tripTotal = base + overage;
-    lines.push({label:`Base rate (${vehicle}) — includes up to 50 mi`, val:base});
-    if(apType && miles > 0 && miles <= 52) lines.push({label:`Mileage (${miles} mi — within free radius)`, val:0, note:'No overage — within 52 mi grace buffer'});
-    if(overage > 0) lines.push({label:'Mileage overage', val:overage, note:`(${miles} mi − 50) = ${overMiles} mi × $${mileageRate().toFixed(2)}/mi`});
+    lines.push({label:`Base rate (${vehicle}) — includes up to ${includedMiles()} mi`, val:base});
+    if(apType && miles > 0 && miles <= mileageTrigger()) lines.push({label:`Mileage (${miles} mi — within free radius)`, val:0, note:'No overage — within '+mileageTrigger()+' mi grace buffer'});
+    if(overage > 0) lines.push({label:'Mileage overage', val:overage, note:`(${miles} mi − ${includedMiles()}) = ${overMiles} mi × $${mileageRate().toFixed(2)}/mi`});
 
   }
 
@@ -3372,11 +3377,11 @@ function updateMilesDisplay(){
   const noteEl = document.getElementById('miles-overage-note');
   if(!noteEl) return;
   const apType = type==='AP RUN'||type==='AP PICK UP'||type==='AP ROUND TRIP';
-  if(apType && miles > 52){
-    const over = miles - 50;
-    noteEl.textContent = `${over.toFixed(1)} mi over 50 → +$${(over*mileageRate()).toFixed(2)} overage`;
-  } else if(apType && miles > 0 && miles <= 52){
-    noteEl.textContent = `✓ Within 50 mi radius`;
+  if(apType && miles > mileageTrigger()){
+    const over = miles - includedMiles();
+    noteEl.textContent = `${over.toFixed(1)} mi over ${includedMiles()} → +$${(over*mileageRate()).toFixed(2)} overage`;
+  } else if(apType && miles > 0 && miles <= mileageTrigger()){
+    noteEl.textContent = `✓ Within ${includedMiles()} mi radius`;
   } else {
     noteEl.textContent = '';
   }
@@ -5669,12 +5674,12 @@ function buildRideBreakdown(r){
   const isRT = /ROUND TRIP/i.test(r.type||'') || !!r.rt;
   const legs = isRT ? 2 : 1;
 
-  if(base>0) lines.push({label:'Base rate ('+vehicle+', incl. 50 mi)'+(legs>1?' \u00d7'+legs:''), val: base*legs});
+  if(base>0) lines.push({label:'Base rate ('+vehicle+', incl. '+includedMiles()+' mi)'+(legs>1?' \u00d7'+legs:''), val: base*legs});
 
-  // Mileage overage (AP rides charge over 50 mi once >52)
+  // Mileage overage (AP rides charge over the included miles, once past the 2-mile grace)
   const miles = parseFloat(r.miles||0)||0;
-  if(isAP && miles>52){
-    const over = miles - 50;
+  if(isAP && miles>mileageTrigger()){
+    const over = miles - includedMiles();
     const overFee = over * mileageRate();
     lines.push({label:'Mileage overage ('+over+' mi \u00d7 $'+(mileageRate().toFixed(2))+')'+(legs>1?' \u00d7'+legs:''), val: overFee*legs});
   }
@@ -7774,7 +7779,7 @@ function buildFeeMathHTML(r){
   const veh  = r.vehicle || 'Sedan';
   const base = BASE[veh] || 105;
   const on   = v => v==='Y' || v===true;
-  const rows = [{label:`Base rate (${veh}, incl. 50 mi)`, val:base, add:false}];
+  const rows = [{label:`Base rate (${veh}, incl. ${includedMiles()} mi)`, val:base, add:false}];
   let sub = base;
   const flat = [['premium',30,'Premium hours'],['holiday',30,'Holiday'],['christmas',35,'Christmas'],['late',20,'Late notice'],['traffic',15,'Traffic']];
   flat.forEach(([k,amt,lbl])=>{
@@ -7787,7 +7792,7 @@ function buildFeeMathHTML(r){
   if(wait>0){ const v=wait*waitRate(); rows.push({label:`Wait time (${wait}h \u00d7 $${waitRate()})`, val:v, add:true}); sub+=v; }
   const miles = parseFloat(r.miles)||0;
   const apType = r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP';
-  if(apType && miles>52){ const over=miles-50; const v=over*mileageRate(); rows.push({label:`Mileage (${over} mi over 50 \u00d7 $${mileageRate().toFixed(2)})`, val:v, add:true}); sub+=v; }
+  if(apType && miles>mileageTrigger()){ const over=miles-includedMiles(); const v=over*mileageRate(); rows.push({label:`Mileage (${over} mi over ${includedMiles()} \u00d7 $${mileageRate().toFixed(2)})`, val:v, add:true}); sub+=v; }
   if(on(r.fuel)){ const v=sub*fuelRate(); rows.push({label:fuelLabel(), val:v, add:true}); sub+=v; }
   const price = parseFloat(r.price)||0;
   const diff  = Math.round((price - sub)*100)/100;
@@ -7834,7 +7839,7 @@ function openFeeEditor(id){
       </div>
       ${(r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP') ? `<label style="font-size:.74rem;color:var(--mid);">Trip miles (for the fare)
           <input id="fee-edit-miles" type="number" min="0" step="0.1" value="${parseFloat(r.miles)||0}" inputmode="decimal" oninput="_feeEditSetMiles(this.value)" style="width:100%;margin-top:.2rem;padding:.4rem .5rem;border:1.5px solid var(--light);border-radius:7px;font-family:'DM Sans',sans-serif;box-sizing:border-box;" />
-          <span style="font-size:.66rem;color:var(--mid);">Miles the client is charged for. First 50 included; a 2-mile buffer means overage starts past 52 mi. (Separate from your logged driving miles.)</span>
+          <span style="font-size:.66rem;color:var(--mid);">Miles the client is charged for. First ${includedMiles()} included; a 2-mile buffer means overage starts past ${mileageTrigger()} mi. (Separate from your logged driving miles.)</span>
         </label>` : ''}
       <div style="display:flex;gap:.5rem;">
         <label style="flex:1;font-size:.74rem;color:var(--mid);">Extra stops ($10 ea)
@@ -7891,12 +7896,12 @@ function recalcFeeEdit(setAmount){
   const veh=_feeEdit.vehicle||'Sedan';
   const base=(typeof BASE!=='undefined'?(BASE[veh]||105):105);
   let sub=base;
-  // Mileage overage: only the miles OVER 50 are charged at $2.50 (AP rides).
+  // Mileage overage: only the miles OVER the included radius are charged (AP rides).
   const apType = _feeEdit.type==='AP RUN'||_feeEdit.type==='AP PICK UP'||_feeEdit.type==='AP ROUND TRIP';
   const miles = parseFloat(_feeEdit.miles)||0;
   const rate = mileageRate();
   let overage = 0;
-  if(apType && miles>52){ overage = (miles-50)*rate; sub += overage; }
+  if(apType && miles>mileageTrigger()){ overage = (miles-includedMiles())*rate; sub += overage; }
   let sub2=sub; // base + mileage overage, before flat surcharges (for fuel base)
   const flat={premium:30,holiday:30,christmas:35,late:20,traffic:15};
   Object.keys(flat).forEach(k=>{ if(_feeEdit.state[k]){ if(k==='holiday'&&_feeEdit.state.christmas) return; sub+=surcharge(k); } });
@@ -7956,8 +7961,8 @@ function buildFeeBreakdown(r){
   if(r.fuel==='Y'||r.fuel===true) parts.push(`+ ${fuelPct()}% fuel`);
   const miles = parseFloat(r.miles)||0;
   const apType = r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP';
-  if(apType && miles > 52){
-    const over = miles - 50;
+  if(apType && miles > mileageTrigger()){
+    const over = miles - includedMiles();
     parts.push(`+${(over*mileageRate()).toFixed(2)} mileage`);
   }
   return parts.length > 1 ? `(${parts.join(' ')})` : `(${parts[0]})`;
@@ -11631,7 +11636,7 @@ function computeExpectedPrice(ride){
   const isTraffic=dow>=0&&isTrafficTime(dow,mins);
   let sub=base;
   const _apType = ride.type==='AP RUN'||ride.type==='AP PICK UP'||ride.type==='AP ROUND TRIP';
-  if(_apType && miles>52) sub+=(miles-50)*RATE;
+  if(_apType && miles>mileageTrigger()) sub+=(miles-includedMiles())*RATE;
   if(isPremium) sub+=surcharge('premium');
   if(isHoliday) sub+=surcharge('holiday');
   if(isChristmas) sub+=surcharge('christmas');
@@ -11760,6 +11765,7 @@ function buildAdvancedPricingHTML(){
       +'</div></div>';
   }
   var trip=fld('adv-mileage','Per-mile rate',mileageRate(),'$','/mi')
+    +fld('adv-included','Base incl. miles (AP)',includedMiles(),'','mi')
     +fld('adv-pickup','Per-pickup fee',pickupFee(),'$','')
     +fld('adv-wait','Wait time',waitRate(),'$','/hr')
     +fld('adv-xstop','Extra stop',extraStopFee(),'$','');
@@ -11786,15 +11792,17 @@ function buildAdvancedPricingHTML(){
 async function saveAdvancedPricing(){
   if(typeof isAdmin==='function' && !isAdmin()){ showToast('Admins only','error'); return; }
   function num(id,min){ var el=document.getElementById(id); if(!el) return null; var x=parseFloat(el.value); return (isFinite(x)&&x>=(min||0))?x:null; }
-  var oldMR=mileageRate(), oldPF=pickupFee(), oldWR=waitRate(), oldXS=extraStopFee();
+  var oldMR=mileageRate(), oldPF=pickupFee(), oldWR=waitRate(), oldXS=extraStopFee(), oldIM=includedMiles();
   var oldSur={premium:surcharge('premium'),holiday:surcharge('holiday'),christmas:surcharge('christmas'),late:surcharge('late'),traffic:surcharge('traffic')};
   var mr=num('adv-mileage',0.01), pf=num('adv-pickup',0), wr=num('adv-wait',0), xs=num('adv-xstop',0);
+  var im=num('adv-included',1);
   var nSur={};
   ['premium','holiday','christmas','late','traffic'].forEach(function(k){ nSur[k]=num('adv-'+k,0); });
   var DEFSUR={premium:30,holiday:30,christmas:35,late:20,traffic:15};
   function eff(n,fb){ return n!=null?n:fb; }
   var changes=[];
   if(eff(mr,2.5)!==oldMR) changes.push({label:'Per-mile rate',from:oldMR,to:eff(mr,2.5)});
+  if(eff(im,50)!==oldIM) changes.push({label:'Included miles (AP)',from:oldIM,to:eff(im,50)});
   if(eff(pf,10)!==oldPF) changes.push({label:'Per-pickup fee',from:oldPF,to:eff(pf,10)});
   if(eff(wr,60)!==oldWR) changes.push({label:'Wait time (/hr)',from:oldWR,to:eff(wr,60)});
   if(eff(xs,10)!==oldXS) changes.push({label:'Extra stop',from:oldXS,to:eff(xs,10)});
@@ -11805,6 +11813,7 @@ async function saveAdvancedPricing(){
   });
   if(!_confirmRateChanges(changes)) return;
   if(mr!=null) globalSettings.mileageRate=mr; else delete globalSettings.mileageRate;
+  if(im!=null) globalSettings.includedMiles=im; else delete globalSettings.includedMiles;
   if(pf!=null) globalSettings.pickupFee=pf; else delete globalSettings.pickupFee;
   if(wr!=null) globalSettings.waitRate=wr; else delete globalSettings.waitRate;
   if(xs!=null) globalSettings.extraStopFee=xs; else delete globalSettings.extraStopFee;
@@ -14150,7 +14159,7 @@ function openClientModal(name){
   var back=document.createElement('div');
   back.id='client-edit-back';
   back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:12000;display:flex;align-items:center;justify-content:center;padding:1rem;';
-  back.addEventListener('click',function(e){ if(e.target===back) back.remove(); });
+  // Intentionally NO click-outside-to-close: the edit box stays open until Save or Cancel.
   back.innerHTML=
     '<div style="background:var(--white);border-radius:16px;max-width:380px;width:100%;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.4);max-height:90vh;overflow:auto;">'
     +'<div style="font-size:1rem;font-weight:700;color:var(--black);margin-bottom:.2rem;">\u270F\uFE0F Edit Client</div>'
@@ -14158,7 +14167,7 @@ function openClientModal(name){
     +'<input id="ec-name" type="text" value="'+escAttr(c.name||'')+'" style="width:100%;padding:.35rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.86rem;font-weight:700;box-sizing:border-box;margin-bottom:.4rem;" />'
     +'<div style="font-size:.68rem;color:var(--mid);margin:0 0 .7rem;">Renaming also corrects the name on your own rides, and merges duplicates that share a name. Private to you.</div>'
     +'<label style="font-size:.7rem;color:var(--mid);display:block;margin-bottom:2px;">Phone</label>'
-    +'<input id="ec-phone" type="text" value="'+escAttr(c.phone||'')+'" style="width:100%;padding:.35rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;margin-bottom:.5rem;" />'
+    +'<input id="ec-phone" type="text" value="'+escAttr(c.phone||'')+'" onblur="this.value=formatPhoneUS(this.value)" style="width:100%;padding:.35rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;margin-bottom:.5rem;" />'
     +'<label style="font-size:.7rem;color:var(--mid);display:block;margin-bottom:2px;">Email</label>'
     +'<input id="ec-email" type="email" value="'+escAttr(c.email||'')+'" style="width:100%;padding:.35rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;margin-bottom:.5rem;" />'
     +'<label style="font-size:.7rem;color:var(--mid);display:block;margin-bottom:2px;">Address</label>'
@@ -14173,6 +14182,7 @@ function openClientModal(name){
     +'<button onclick="document.getElementById(\'client-edit-back\').remove()" style="flex:1;padding:.6rem;background:none;border:1.5px solid #ddd;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:600;font-size:.88rem;cursor:pointer;color:#666;">Cancel</button>'
     +'</div></div>';
   document.body.appendChild(back);
+  back.addEventListener('keydown',function(e){ if(e.key==='Enter' && e.target && e.target.id!=='ec-notes'){ e.preventDefault(); submitEditClient(c.name||name); } });
   setTimeout(function(){ var el=document.getElementById('ec-phone'); if(el) el.focus(); },100);
 }
 async function submitEditClient(oldName){
@@ -15714,13 +15724,13 @@ function _auditBaseBreakdown(r){
     out.mileageAmount = miles*RPM;
     out.serviceFee = 10;
   } else {
-    // AP types: base rate includes 50 mi, overage beyond 50 (52 grace)
+    // AP types: base rate includes the configured miles; overage beyond that (2-mile grace)
     var base = baseRates[r.vehicle]||0;
-    out.baseLabel = (r.vehicle||'?')+' base (incl 50 mi)';
+    out.baseLabel = (r.vehicle||'?')+' base (incl '+includedMiles()+' mi)';
     out.baseAmount = base;
-    if(miles>52){
-      out.mileageLabel = 'Overage '+(miles-50)+' mi × $'+RPM.toFixed(2);
-      out.mileageAmount = (miles-50)*RPM;
+    if(miles>mileageTrigger()){
+      out.mileageLabel = 'Overage '+(miles-includedMiles())+' mi × $'+RPM.toFixed(2);
+      out.mileageAmount = (miles-includedMiles())*RPM;
     }
   }
   return out;
@@ -16495,6 +16505,34 @@ function enterApp(){
 let importedClients = {};
 async function loadImportedClients(){ const d=await storageGet('kat:importedClients'); if(d) importedClients=d; }
 async function saveImportedClients(){ await storageSet('kat:importedClients', importedClients); }
+// One-time repair pass for client lists imported before smart field-detection existed.
+// Re-routes misfiled values (an address in the phone slot, a phone in the email slot) and
+// reformats phone numbers — without needing to re-import. Notes are left completely untouched.
+async function repairImportedClients(){
+  var driver=clientStoreDriver();
+  if(!driver){ showToast('Please sign in first','error'); return; }
+  var arr=importedClients[driver];
+  if(!Array.isArray(arr)||!arr.length){ showToast('No imported clients to scan'); return; }
+  var fixed=0;
+  arr.forEach(function(c){
+    if(!c) return;
+    // Notes are left completely untouched — we only correct the phone/email/address slots.
+    var sig=JSON.stringify([c.phone||'',c.email||'',c.address||'']);
+    var phone=String(c.phone||'').trim(), email=String(c.email||'').trim(),
+        address=String(c.address||'').trim();
+    // address sitting in the phone slot -> move to address
+    if(phone && !_looksLikePhone(phone) && !_extractPhone(phone) && _looksLikeAddress(phone) && !address){ address=phone; phone=''; }
+    // phone sitting in the email slot -> move to phone
+    if(email && email.indexOf('@')===-1 && _looksLikePhone(email)){ if(!phone) phone=email; email=''; }
+    if(phone) phone=formatPhoneUS(phone);
+    c.phone=phone; c.phones=phone?[{label:'',number:phone}]:[];
+    c.email=email; c.emails=email?[email]:[];
+    c.address=address;
+    if(JSON.stringify([c.phone,c.email,c.address])!==sig) fixed++;
+  });
+  if(fixed){ await saveImportedClients(); renderClients(); }
+  showToast(fixed ? ('\u2713 Fixed '+fixed+' imported client'+(fixed===1?'':'s')) : 'Imported clients already look good \u2014 nothing to fix');
+}
 
 // ═══════════════════════════════════════════
 // CLIENT CONTACTS — multiple phones (labeled) + emails, shared by rides & directory
@@ -16917,15 +16955,14 @@ function renderClients(){
     // Avatar color = the CLIENT OWNER's color (whoever the client belongs to),
     // resolved proxy-aware. Falls back to first driver's color, then grey.
     var _ownerName = (typeof getClientOwner==='function') ? getClientOwner(c.name) : null;
-    var bg = _ownerName ? driverColor(_ownerName)
-           : (c.drivers[0] ? driverColor(c.drivers[0]) : '#888888');
+    // Every avatar uses YOUR assigned color (this is your directory) rather than each
+    // client owner's color.
+    var bg = viewAs ? driverColor(viewAs)
+           : (myDriver ? driverColor(myDriver) : (c.drivers[0] ? driverColor(c.drivers[0]) : '#888888'));
     var ini=c.name.split(' ').map(function(n){return n[0]||'';}).join('').slice(0,2).toUpperCase();
     var badges='';
     if(admin && viewAs){
-      var ownsIt=c.rides.some(function(r){return USER_DRIVER_MAP[r.createdBy]===viewAs||r.createdBy===viewAs;});
-      var drivesIt=c.drivers.includes(viewAs);
-      var roleClean=ownsIt&&drivesIt?'Your client · you drive':ownsIt?'Your client':drivesIt?'Assigned to you':'';
-      badges=roleClean?'<span style="font-size:.72rem;padding:2px 8px;border-radius:10px;background:var(--black);color:#fff;border:1px solid var(--black);font-weight:600;">'+roleClean+'</span>':'';
+      badges=''; // owner preference: no "your client / you drive" badge on your own list
     } else if(admin){
       badges=c.drivers.map(function(d){return '<span style="font-size:.72rem;padding:2px 7px;border-radius:10px;background:'+driverColor(d)+'22;color:'+driverColor(d)+';border:1px solid '+driverColor(d)+'55;">'+d.split(' ')[0]+'</span>';}).join(' ');
     }
@@ -17115,6 +17152,34 @@ async function submitAddClient(){
   renderClients(); showToast('\u2713 Client added');
 }
 
+// Smart client-import helpers: classify each cell by CONTENT so data lands in the right field
+// no matter the column order, and parse CSV lines that quote commas (addresses often do).
+function _looksLikeAddress(v){
+  v=String(v==null?'':v).trim(); if(!v||v.indexOf('@')!==-1) return false;
+  if(/\b(st|street|rd|road|ln|lane|dr|drive|ave|avenue|way|ct|court|blvd|boulevard|cir|circle|ter|terrace|pkwy|parkway|hwy|highway|trl|trail|pl|place|apt|suite|ste|unit)\b/i.test(v) && /\d/.test(v)) return true;
+  if(/\b\d{5}(-\d{4})?\b/.test(v)) return true;                 // has a ZIP
+  if(/,\s*[A-Za-z]{2}\b/.test(v) && /\d/.test(v)) return true;  // "City, GA" with a number
+  return false;
+}
+function _classifyContactCell(v){
+  v=String(v==null?'':v).trim();
+  if(!v) return {type:'empty',v:''};
+  if(v.indexOf('@')!==-1 && /\S+@\S+\.\S+/.test(v)) return {type:'email',v:v};
+  if(_looksLikePhone(v)) return {type:'phone',v:v};
+  if(_looksLikeAddress(v)) return {type:'address',v:v};
+  return {type:'other',v:v};
+}
+function _parseCSVLine(line){
+  var out=[], cur='', inQ=false;
+  for(var i=0;i<line.length;i++){
+    var ch=line[i];
+    if(ch==='"'){ if(inQ && line[i+1]==='"'){ cur+='"'; i++; } else inQ=!inQ; }
+    else if(ch===',' && !inQ){ out.push(cur); cur=''; }
+    else cur+=ch;
+  }
+  out.push(cur);
+  return out.map(function(s){ return s.replace(/^["']|["']$/g,'').trim(); });
+}
 function importClientsFromFile(input){
   const file=input.files[0]; if(!file) return;
   input.value='';
@@ -17141,34 +17206,68 @@ function importClientsFromFile(input){
   const reader=new FileReader();
   reader.onload=function(e){
     const rows=(e.target.result||'').split(/\r?\n/).filter(function(l){ return l.trim(); })
-      .map(function(line){ return line.split(',').map(function(c){ return c.replace(/^["']|["']$/g,'').trim(); }); });
+      .map(function(line){ return _parseCSVLine(line); });
     _importClientRows(rows, driver);
   };
   reader.readAsText(file);
 }
 async function _importClientRows(rows, driver){
   if(!rows || !rows.length){ showToast('File appears empty','error'); return; }
-  // Skip a header row if the first row looks like column titles
-  const first=(rows[0]||[]).join(' ').toLowerCase();
-  const dataRows=/name|phone|email/.test(first)?rows.slice(1):rows;
+  // Detect a header row and, if present, which column holds the NAME. Everything else is
+  // routed by its content (email / phone / address), so column order doesn't matter.
+  var header=(rows[0]||[]).map(function(c){ return String(c||'').toLowerCase().trim(); });
+  var looksHeader=/name|phone|email|address|client/.test(header.join(' '));
+  var nameIdx=0;
+  if(looksHeader){ var ni=header.findIndex(function(h){ return /name|client/.test(h) && !/user|file/.test(h); }); if(ni>=0) nameIdx=ni; }
+  var dataRows=looksHeader?rows.slice(1):rows;
   if(!importedClients[driver]) importedClients[driver]=[];
-  let added=0, skipped=0;
+  var added=0, updated=0;
   dataRows.forEach(function(cols){
-    const name=(cols[0]||'').trim(); if(!name) return;
-    const key=name.toLowerCase();
-    if(importedClients[driver].find(function(c){ return c.name&&c.name.toLowerCase()===key; })){ skipped++; return; }
-    importedClients[driver].push({
-      name:name,
-      phone:(cols[1]||'').trim(),
-      email:(cols[2]||'').trim(),
-      notes:(cols[3]||'').trim(),
-      source:'imported', addedAt:new Date().toISOString()
+    if(!cols || !cols.length) return;
+    var usedNameIdx=nameIdx;
+    var name=String(cols[nameIdx]||'').trim();
+    if(!name || _classifyContactCell(name).type!=='other'){
+      usedNameIdx=-1;
+      for(var i=0;i<cols.length;i++){ var t0=_classifyContactCell(cols[i]); if(t0.type==='other' && t0.v){ name=t0.v; usedNameIdx=i; break; } }
+    }
+    if(!name) return;
+    var phone='', email='', address='', extra=[], notesParts=[];
+    cols.forEach(function(cell,idx){
+      if(idx===usedNameIdx) return;
+      var t=_classifyContactCell(cell);
+      if(t.type==='email'){ if(!email) email=t.v; else notesParts.push(t.v); }
+      else if(t.type==='phone'){ var f=formatPhoneUS(t.v); if(!phone) phone=f; else extra.push(f); }
+      else if(t.type==='address'){ if(!address) address=t.v; else notesParts.push(t.v); }
+      else if(t.type==='other'){ notesParts.push(t.v); }
     });
-    added++;
+    var key=name.toLowerCase();
+    var rec=importedClients[driver].find(function(c){ return c.name && c.name.toLowerCase()===key; });
+    if(rec){
+      // Merge: fill/overwrite only with non-empty detected values — this repairs earlier
+      // imports (e.g. an email that had landed in notes, or an unformatted phone).
+      if(phone){ rec.phone=phone; rec.phones=[{label:'',number:phone}]; }
+      if(email){ rec.email=email; rec.emails=[email]; }
+      if(address) rec.address=address;
+      if(extra.length) rec.extraPhones=extra.join(', ');
+      if(notesParts.length) rec.notes=notesParts.join(' \u00b7 ');
+      updated++;
+    } else {
+      importedClients[driver].push({
+        name:name,
+        phone:phone, phones:phone?[{label:'',number:phone}]:[],
+        email:email, emails:email?[email]:[],
+        address:address,
+        extraPhones:extra.join(', '),
+        notes:notesParts.join(' \u00b7 '),
+        source:'imported', addedAt:new Date().toISOString()
+      });
+      added++;
+    }
   });
   await saveImportedClients();
   renderClients();
-  showToast(added+' client'+(added===1?'':'s')+' imported'+(skipped?' ('+skipped+' skipped \u2014 already exist)':''));
+  var parts=[]; if(added) parts.push(added+' added'); if(updated) parts.push(updated+' updated');
+  showToast('Client import complete'+(parts.length?' \u2014 '+parts.join(', '):' \u2014 nothing to import'));
 }
 
 function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
