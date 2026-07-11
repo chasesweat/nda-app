@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090382">
+<meta name="version" content="202606090384">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1086,7 +1086,7 @@ input,select,textarea{font-size:16px;}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:.5rem;">
       <h2 id="rm-title" style="margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Ride Details</h2>
       <button onclick="closeRideModal()" style="background:none;border:none;font-size:1.6rem;line-height:1;color:var(--mid);cursor:pointer;padding:0 .25rem;flex-shrink:0;" aria-label="Close">&times;</button>
-      <div style="display:flex;gap:.5rem;">
+      <div style="display:flex;gap:.5rem;align-items:center;">
         <button id="rm-edit-btn" class="btn-secondary" onclick="toggleEditMode(true)" style="font-size:.8rem;padding:.4rem .9rem;">✏️ Edit</button>
         <button id="rm-save-btn" class="btn-primary" onclick="saveRideEdits()" style="display:none;width:auto;padding:.4rem .9rem;font-size:.8rem;">Save Changes</button>
         <button id="rm-cancel-btn" class="btn-secondary" onclick="toggleEditMode(false)" style="display:none;font-size:.8rem;padding:.4rem .9rem;">Cancel</button>
@@ -4753,7 +4753,7 @@ async function toggleConfirmSent(id){
     r.confirmSentBy=currentUser?.name||'';
     r.confirmSentAt=Date.now();
     // Auto-advance the ride trail to Confirmed (only from Scheduled — never downgrade a paid ride).
-    if(r.status==='scheduled' || !r.status){ r.status='confirmed'; }
+    if(r.status==='scheduled' || !r.status){ r.status='confirmed'; r.driverChangedPending=false; }
     // Gentle fade before the card re-renders as its collapsed thumbnail
     const card=document.getElementById('conf-card-'+id);
     if(card){
@@ -4905,6 +4905,12 @@ function buildConfirmationText(r){
     message += '\n\nNote: XXL booking — 2 vehicles required.\n'
       +'  Vehicle 1: '+(r.vehicle||'?')+' ('+d1name+') — $'+price1+'\n'
       +'  Vehicle 2: '+(r.vehicle2||'?')+' ('+d2name+') — $'+(r.price2||0);
+  }
+  if(r.driverChangedPending){
+    var _cn=((r.client||'there').split(' ')[0])||'there';
+    var _dt=fmtDate(r.date), _tm=fmtTime12(r.time)||'the scheduled time';
+    var _nd=((r.driver||'').trim())||'your new driver';
+    message = 'Hi '+_cn+', there\u2019s been a quick update to your ride/delivery on '+_dt+' at '+_tm+'. Your new driver is '+_nd+', who I\u2019ve added to this chat.\n\n' + message;
   }
   return { message, instructions };
 }
@@ -5256,6 +5262,7 @@ function closeDayModal(){document.getElementById('day-modal').classList.remove('
 // RIDE DETAIL MODAL
 // ═══════════════════════════════════════════
 function toggleDispatchTools(){ var e=document.getElementById('rm-dispatch'); if(e) e.classList.toggle('open'); }
+function _openDriverChange(){ var e=document.getElementById('rm-dispatch'); if(e) e.classList.add('open'); var s=document.getElementById('rm-driver-select'); if(s){ try{ s.scrollIntoView({behavior:'smooth',block:'center'}); }catch(_e){} setTimeout(function(){ try{ s.focus(); }catch(_e){} },300); } }
 function openRideModal(id){
   activeRideId=id;
   const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
@@ -5557,6 +5564,7 @@ function renderRideView(r){
       </div>
       ${(r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')?`<button onclick="sendArrivalText(${r.id})" style="margin-top:.5rem;width:100%;display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.6rem;background:#1d4ed8;border:none;border-radius:8px;color:#fff;font-weight:800;font-size:.88rem;cursor:pointer;font-family:'DM Sans',sans-serif;">\u2708\uFE0F Send arrival text to ${escHtml((r.client||'client').split(' ')[0])}</button>`:''}
       ${r.confirmSent?`<div onclick="_unmarkConfirmFromRide(${r.id})" style="margin-top:.45rem;display:inline-flex;align-items:center;gap:.45rem;background:#ecfdf3;border:1.5px solid #86efac;border-radius:8px;padding:.35rem .7rem;cursor:pointer;" title="Tap to unmark"><span style="color:#16a34a;font-weight:900;">&#10003;</span><span style="font-size:.78rem;font-weight:700;color:#15803d;">Confirmation text sent</span><span style="font-size:.68rem;color:#4d7c5f;">&middot; tap to unmark</span></div>`:''}
+      ${(typeof canAssignOnRide==='function'&&canAssignOnRide(r))?`<div style="margin-top:.5rem;"><button onclick="_openDriverChange()" style="display:inline-flex;align-items:center;gap:.4rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;padding:.4rem .8rem;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;">&#128260; Change driver</button></div>`:''}
     </div>
     ${_pairedRideForBtn?`<div class="detail-row" style="grid-column:1/-1;margin-top:.25rem;"><button onclick="openRideModal(${_pairedRideForBtn.id})" style="width:100%;padding:.6rem;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">${_pairedRideForBtn.type==='AP PICK UP'?'\u2708\ufe0f View return leg \u2192':'\u2708\ufe0f View outbound leg \u2192'}</button></div>`:''}
     ${shareOfferingsBtn}
@@ -10648,6 +10656,11 @@ async function assignDriver(){
   r.driver=newDriver;
   if(newDriver&&newDriver!==oldDriver) addNotification(newDriver, r, 'assigned');
   if(newDriver!==oldDriver) touchRide(r, newDriver ? 'assigned to '+newDriver.split(' ')[0] : 'unassigned');
+  var _wasConfirmed=(r.confirmSent||r.status==='confirmed');
+  if(newDriver!==oldDriver && _wasConfirmed){
+    r.confirmSent=false; if(r.status==='confirmed') r.status='scheduled'; r.driverChangedPending=true;
+    touchRide(r, 'driver changed \u2014 confirmation reset to Scheduled');
+  }
   await saveRides();
   await saveNotifs();
   // Verify save worked by reading back
@@ -10661,6 +10674,13 @@ async function assignDriver(){
     await saveRides();
   }
   openRideModal(activeRideId); renderRides(); refreshDash(); renderCal(); updateNotifBadge();
+  if(newDriver!==oldDriver){
+    // Rebuild the confirmation so its text + driver card reflect the NEW driver.
+    if(newDriver){ try{ if(typeof warmDriverCardImage==='function') warmDriverCardImage(newDriver); }catch(e){} }
+    try{ if(typeof renderConfirmations==='function') renderConfirmations(); }catch(e){}
+    try{ if(typeof renderDashConfirmations==='function') renderDashConfirmations(); }catch(e){}
+  }
+  if(newDriver!==oldDriver && _wasConfirmed){ showToast('Driver changed \u2014 ride set back to Scheduled. Re-send the confirmation to notify the client.'); }
 }
 
 async function deleteRide(id){
