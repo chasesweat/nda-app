@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090378">
+<meta name="version" content="202606090379">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -812,7 +812,7 @@ input,select,textarea{font-size:16px;}
       <div id="cautious-list-body" style="max-height:280px;overflow-y:auto;"></div>
       <button onclick="openAddCautiousModal('','')" style="margin-top:.6rem;padding:.4rem .85rem;background:#d97706;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">+ Flag a Client</button>
     </div>
-    <input type="text" id="client-search" placeholder="Search by name or phone…" oninput="renderClients()" style="width:100%;padding:.55rem .85rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;margin-bottom:1rem;" />
+    <input type="text" id="client-search" placeholder="Search your clients — name, phone, email, address…" oninput="renderClients()" style="width:100%;padding:.55rem .85rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;margin-bottom:1rem;" />
     <div id="client-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.75rem;margin-bottom:1.25rem;"></div>
     <div style="display:flex;justify-content:flex-end;margin-bottom:.6rem;"><button id="client-select-btn" onclick="toggleClientSelectMode()" style="padding:.4rem .85rem;background:none;border:1.5px solid var(--light);color:var(--mid);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Select</button></div>
     <div id="client-delete-bar" style="display:none;align-items:center;justify-content:space-between;gap:.6rem;background:#fef2f2;border:1.5px solid #fecaca;border-radius:10px;padding:.6rem .85rem;margin-bottom:.8rem;">
@@ -16904,7 +16904,15 @@ function renderClients(){
   const db = buildClientDB(viewAs);
   const q  = (document.getElementById('client-search')?.value||'').toLowerCase().trim();
   let baseClients = Object.values(db);
-  if(q) baseClients=baseClients.filter(c=>c.name.toLowerCase().includes(q)||(c.phone&&c.phone.includes(q)));
+  if(q) baseClients=baseClients.filter(function(c){
+    // Search this driver's OWN list only (db is already scoped to viewAs) across every field.
+    var hay=[
+      c.name||'', c.phone||'', c.email||'', c.address||'', c.notes||'',
+      (c.phones||[]).map(function(p){return (p&&p.number)||'';}).join(' '),
+      (c.emails||[]).join(' ')
+    ].join(' ').toLowerCase();
+    return hay.indexOf(q)>=0;
+  });
   baseClients.sort((a,b)=>a.name.localeCompare(b.name));
   const allDB = buildClientDB(null);
   const multiCount = Object.values(allDB).filter(c=>c.drivers.length>1).length;
