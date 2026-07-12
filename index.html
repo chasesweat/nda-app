@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090407">
+<meta name="version" content="202606090408">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2082,16 +2082,22 @@ async function initApp() {
         Object.keys(_po).forEach(function(k){ if(_po[k]) DRIVER_PHOTOS[k]=_po[k]; });
       }
     }catch(e){ console.warn('photo overrides load', e); }
-    await loadPasswords();
-    await loadSubscriptions();
-    await loadImportedClients();
-    await loadClientRequests(); await loadClientReqDriver(); try{_mtTryRecover();}catch(e){} try{_rtTryRecover();}catch(e){} await loadClientUnlock(); try{_dmLoadPersistent();}catch(e){} try{_geoLoadPersistent();}catch(e){}
+    // Local (non-Firebase) session recovery is cheap — run it immediately. The six Firebase
+    // loads that used to sit here (passwords, subscriptions, imported clients, client requests,
+    // client-req driver, client unlock) are independent, so they now join the parallel batch below.
+    try{_mtTryRecover();}catch(e){} try{_rtTryRecover();}catch(e){} try{_dmLoadPersistent();}catch(e){} try{_geoLoadPersistent();}catch(e){}
   // Independent data loads run in PARALLEL — each fills its own global with no
   // cross-dependencies, so order among them doesn't matter. This replaces ~11 sequential
   // Firebase round-trips with one batch (major boot speedup). loadBiometricCreds writes
   // back, so it stays sequential after the batch. The driver-photo chain, the client-request
   // recovery cluster, and the proxy migration all keep their original order (above/below).
   await Promise.all([
+    loadPasswords(),
+    loadSubscriptions(),
+    loadImportedClients(),
+    loadClientRequests(),
+    loadClientReqDriver(),
+    loadClientUnlock(),
     loadCautiousList(),
     loadClientOwners(),
     loadKmData(),
