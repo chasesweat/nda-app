@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090411">
+<meta name="version" content="202606090415">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -945,9 +945,9 @@ input,select,textarea{font-size:16px;}
       </div>
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
         <button onclick="openOutsideRideModal()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">+ Outside Ride</button>
-        <button onclick="generateYearEndPL()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">📊 Year-End P&amp;L</button>
-        <button id="rides-report-btn" onclick="generateRidesReport()" style="display:none;background:#0891b2;color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;margin-right:.4rem;">&#128200; Rides Report</button><button id="pricing-audit-btn" onclick="generatePricingAudit()" style="display:none;background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;margin-right:.4rem;">&#128203; Pricing Audit</button>
-         <button onclick="exportIncomeCSV()" style="background:#16a34a;color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">⬇ Export CSV</button>
+        <button onclick="generateYearEndPL()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">📊 Year-End P&amp;L</button>
+        <button id="rides-report-btn" onclick="generateRidesReport()" style="display:none;background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">&#128200; Rides Report</button><button id="pricing-audit-btn" onclick="generatePricingAudit()" style="display:none;background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">&#128203; Pricing Audit</button>
+         <button onclick="exportIncomeCSV()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">⬇ Export CSV</button>
         <button onclick="loadRideHistory()" title="Load archived older rides into view" style="background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">🗄 Load history</button>
         <button id="archive-rides-btn" onclick="archiveOldRides()" title="Move old rides out of the live app to keep it fast (admin)" style="display:none;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">📦 Archive old</button>
       </div>
@@ -1956,6 +1956,7 @@ function setupRealtimeListeners(){
         if(document.getElementById('page-myrides').classList.contains('active')){ renderMyCal(); if(myTab==='confirm') renderConfirmations(); }
         if(document.getElementById('page-income').classList.contains('active')) renderIncome();
       }
+      try{ _cacheSnapshotWriteDebounced(); }catch(e){}
     }
   });
   // Listen for comment changes
@@ -2050,9 +2051,128 @@ let nextId = 100;
 // ═══════════════════════════════════════════
 // INIT — load from shared storage
 // ═══════════════════════════════════════════
-async function initApp() {
+// ============================================================================
+// INSTANT-PAINT CACHE LAYER (build 415)
+// Warm opens hydrate the dashboard from a local snapshot and become interactive
+// in ~1s, while fresh Firebase data loads in the background and re-renders on top.
+// The cache is NEVER the source of truth: Firebase always refreshes over it, and
+// stale-sensitive actions await the first refresh (window._dataFresh) before running.
+// ============================================================================
+const _NDA_CACHE_KEY = 'nda-cache-v1';
+window._dataFresh = true;                 // true = globals reflect a completed load
+window._dataFreshPromise = Promise.resolve();
+let _cacheWriteTimer = null;
+function _appBuildTag(){ try{ var m=document.querySelector('meta[name="version"]'); return (m&&m.content)||''; }catch(e){ return ''; } }
+// Clone JSON while dropping big base64 image blobs (localStorage is ~5MB: store text, not images).
+function _cacheStripImages(obj){
+  try{
+    return JSON.parse(JSON.stringify(obj, function(k,v){
+      if(k==='imageData'||k==='receiptImage'||k==='photo'||k==='img'||k==='image'||k==='logo'||k==='cardImage'||k==='dataUrl'||k==='signature') return undefined;
+      if(typeof v==='string' && v.length>1500 && v.slice(0,11)==='data:image/') return undefined;
+      return v;
+    }));
+  }catch(e){ return null; }
+}
+function _cacheSnapshotWrite(){
+  try{
+    var data = {
+      rides: rides, comments: comments, notifications: notifications,
+      DRIVER_PROFILES: DRIVER_PROFILES, driverColors: driverColors, driverColorVault: driverColorVault,
+      clientAddressOverrides: clientAddressOverrides, importedClients: importedClients, clientOwners: clientOwners,
+      globalSettings: globalSettings, driverSettings: driverSettings, feePayments: feePayments,
+      receipts: receipts, driverExpenses: driverExpenses, outsideRides: outsideRides,
+      addedDrivers: (Array.isArray(window._addedDriversRaw)?window._addedDriversRaw:[])
+    };
+    var slim = _cacheStripImages(data);
+    if(!slim) return;
+    var json = JSON.stringify({ v:_appBuildTag(), savedAt:new Date().toISOString(), data:slim });
+    if(json.length > 4600000) return;     // still too big after stripping images: skip this cycle
+    localStorage.setItem(_NDA_CACHE_KEY, json);
+  }catch(e){ /* quota / serialization: never crash boot over the cache */ }
+}
+function _cacheSnapshotWriteDebounced(){
+  if(!window._dataFresh) return;          // don't overwrite a good cache with a mid-load state
+  try{ if(_cacheWriteTimer) clearTimeout(_cacheWriteTimer); _cacheWriteTimer=setTimeout(function(){ _cacheWriteTimer=null; try{ _cacheSnapshotWrite(); }catch(e){} }, 4000); }catch(e){}
+}
+function _cacheSnapshotRead(){
+  try{
+    var json = localStorage.getItem(_NDA_CACHE_KEY);
+    if(!json) return null;
+    var snap = JSON.parse(json);
+    if(!snap || !snap.data) return null;
+    if(snap.v !== _appBuildTag()) return null;   // new deploy: discard the old-shape snapshot
+    return snap;
+  }catch(e){ return null; }
+}
+function _cacheHydrateGlobals(d){
+  if(!d) return;
+  if(Array.isArray(d.rides)) rides = d.rides;
+  if(d.comments && typeof d.comments==='object') comments = d.comments;
+  if(d.notifications && typeof d.notifications==='object') notifications = d.notifications;
+  if(d.DRIVER_PROFILES && typeof d.DRIVER_PROFILES==='object') Object.assign(DRIVER_PROFILES, d.DRIVER_PROFILES);
+  if(d.driverColors && typeof d.driverColors==='object') driverColors = Object.assign({}, driverColors, d.driverColors);
+  if(d.driverColorVault && typeof d.driverColorVault==='object') driverColorVault = d.driverColorVault;
+  if(d.clientAddressOverrides && typeof d.clientAddressOverrides==='object') clientAddressOverrides = d.clientAddressOverrides;
+  if(d.importedClients && typeof d.importedClients==='object') importedClients = d.importedClients;
+  if(d.clientOwners && typeof d.clientOwners==='object') clientOwners = d.clientOwners;
+  if(d.globalSettings && typeof d.globalSettings==='object') globalSettings = d.globalSettings;
+  if(d.driverSettings && typeof d.driverSettings==='object') driverSettings = d.driverSettings;
+  if(d.feePayments && typeof d.feePayments==='object') feePayments = d.feePayments;
+  if(d.receipts && typeof d.receipts==='object') receipts = d.receipts;
+  if(d.driverExpenses && typeof d.driverExpenses==='object') driverExpenses = d.driverExpenses;
+  if(d.outsideRides && typeof d.outsideRides==='object') outsideRides = d.outsideRides;
+  // Re-merge admin-added drivers so filters/dropdowns AND added-driver auto-login work on
+  // the very first paint (photos are excluded from the snapshot and fill in on refresh).
+  if(Array.isArray(d.addedDrivers)){
+    d.addedDrivers.forEach(function(rec){
+      if(!rec || !rec.driverName) return;
+      var dn=rec.driverName;
+      if(typeof DRIVERS!=='undefined' && DRIVERS.indexOf(dn)<0) DRIVERS.push(dn);
+      if(!DRIVER_PROFILES[dn]) DRIVER_PROFILES[dn]=rec.profile||{phone:'',email:'',vehicle:'',notes:''};
+      else if(rec.profile) Object.assign(DRIVER_PROFILES[dn], rec.profile);
+      if(rec.color && !driverColors[dn]) driverColors[dn]=rec.color;
+      if(rec.login && typeof USER_DRIVER_MAP!=='undefined'){
+        USER_DRIVER_MAP[rec.login]=dn;
+        if(typeof USERS!=='undefined' && !USERS.some(function(u){return u.name===rec.login;})){
+          USERS.push({ name:rec.login, initials:(dn.split(' ').map(function(n){return n[0];}).join('').slice(0,2).toUpperCase()), password:rec.password||'welcome2026', role:'driver', disabled:false });
+        }
+      }
+    });
+  }
+  // Keep nextId ahead of any cached ride id so rides created before the refresh stay unique.
+  try{ var mx=0; (rides||[]).forEach(function(r){ var n=Number(r&&r.id); if(isFinite(n)&&n>mx) mx=n; }); nextId=Math.max(mx, Date.now())+1; }catch(e){}
+}
+// After the background refresh, re-render live views WITHOUT resetting scroll (so a reading
+// user is never yanked to the top). Dashboard always refreshes; the active page re-renders too.
+function _cacheRerenderAfterRefresh(){
+  try{
+    if(!currentUser) return;
+    try{ var ds=driverSettings[currentUser.name]||{}; window._showCombinedIncome=ds.combineEnabled===true; }catch(e){}
+    var R=function(f){ try{ if(typeof window[f]==='function') window[f](); }catch(e){} };
+    R('populateDriverFilter'); R('buildCalTabs'); R('refreshDash'); R('renderRides');
+    R('renderCal'); R('renderMyCal'); R('renderConfirmations');
+    R('updateNotifBadge'); R('updateChatBadge');
+    try{
+      var act=document.querySelector('.page.active');
+      var pid=(act&&act.id&&act.id.indexOf('page-')===0)?act.id.slice(5):'';
+      if(pid==='clients') R('renderClients');
+      else if(pid==='documents') R('renderDocuments');
+      else if(pid==='income'){ R('renderIncome'); R('renderExpensesView'); }
+      else if(pid==='costcalc') R('renderCostCalc');
+    }catch(e){}
+  }catch(e){ console.warn('post-refresh rerender failed', e); }
+}
+// Stale-sensitive actions (mark paid, send confirmation, finder fees, change driver, combo
+// link) await the first background refresh before touching money/status, so a cached view
+// can never cause a double-pay or double-send. In the common (already-fresh) case this is free.
+async function _ensureFresh(){
+  if(window._dataFresh) return;
+  try{ if(typeof showToast==='function') showToast('Syncing latest data...'); }catch(e){}
+  try{ await window._dataFreshPromise; }catch(e){}
+}
+
+async function _loadAppData() {
   try {
-    await initFirebase();
     const [storedRides, storedComments, storedNotifs, storedColors] = await Promise.all([
       storageGet('kat:rides'),
       storageGet('kat:comments'),
@@ -2063,25 +2183,22 @@ async function initApp() {
     comments     = storedComments || {};
     notifications= storedNotifs   || {};
     if(storedColors) driverColors = storedColors;
-    try{ var _cvBoot=await storageGet('kat:driverColorVault'); if(_cvBoot && typeof _cvBoot==='object') driverColorVault=_cvBoot; }catch(e){}
-    await loadDriverExtras();
-    const storedProfiles = await storageGet('kat:driverProfiles');
-    if(storedProfiles) Object.assign(DRIVER_PROFILES, storedProfiles);
-    // Saved client address overrides were WRITTEN but never loaded — restore them.
-    // Legacy writes were JSON.stringify'd strings; handle both shapes.
-    try{
-      const _cao=await storageGet('kat:clientAddresses');
-      if(_cao) clientAddressOverrides = (typeof _cao==='string') ? JSON.parse(_cao) : _cao;
-    }catch(e){ console.warn('clientAddresses load', e); }
-    await loadAddedDrivers();
-    // Edited driver card photos (built-in or added drivers) — applied last so an edit
-    // always wins over the bundled/added photo.
-    try{
-      const _po=await storageGet('kat:driverPhotoOverrides');
-      if(_po && typeof DRIVER_PHOTOS!=='undefined'){
-        Object.keys(_po).forEach(function(k){ if(_po[k]) DRIVER_PHOTOS[k]=_po[k]; });
-      }
-    }catch(e){ console.warn('photo overrides load', e); }
+    // Preamble loads run in PARALLEL. The profiles -> added-drivers -> photo-override ORDER
+    // matters (an edited photo must win), so those three stay one chain; the rest run alongside.
+    await Promise.all([
+      (async()=>{ try{ var _cvBoot=await storageGet('kat:driverColorVault'); if(_cvBoot && typeof _cvBoot==='object') driverColorVault=_cvBoot; }catch(e){} })(),
+      loadDriverExtras(),
+      (async()=>{ try{ const _cao=await storageGet('kat:clientAddresses'); if(_cao) clientAddressOverrides = (typeof _cao==='string') ? JSON.parse(_cao) : _cao; }catch(e){ console.warn('clientAddresses load', e); } })(),
+      (async()=>{
+        const storedProfiles = await storageGet('kat:driverProfiles');
+        if(storedProfiles) Object.assign(DRIVER_PROFILES, storedProfiles);
+        await loadAddedDrivers();
+        try{
+          const _po=await storageGet('kat:driverPhotoOverrides');
+          if(_po && typeof DRIVER_PHOTOS!=='undefined'){ Object.keys(_po).forEach(function(k){ if(_po[k]) DRIVER_PHOTOS[k]=_po[k]; }); }
+        }catch(e){ console.warn('photo overrides load', e); }
+      })(),
+    ]);
     // Local (non-Firebase) session recovery is cheap — run it immediately. The six Firebase
     // loads that used to sit here (passwords, subscriptions, imported clients, client requests,
     // client-req driver, client unlock) are independent, so they now join the parallel batch below.
@@ -2175,12 +2292,17 @@ async function initApp() {
     }
     setupRealtimeListeners();
   } catch(err){
-    console.error('initApp error:', err);
+    console.error('initApp load error:', err);
     // Still try to show the app with defaults
     rides = rides.length ? rides : SEED_RIDES;
   }
-  // Decide where to land BEFORE hiding the loading screen, so the login screen
-  // never flashes for users with a saved session.
+}
+
+// Reveal the app once data is available: auto-login from a saved session (no login-screen
+// flash), else show the auth screen. Idempotent + shared by the cold and instant-paint paths.
+function _revealAfterLoad(){
+  if(window._nwdaRevealed) return window._nwdaRevealedApp;
+  window._nwdaRevealed = true;
   let autoLoggedIn = false;
   try{
     const savedName = localStorage.getItem('nda-session');
@@ -2190,10 +2312,47 @@ async function initApp() {
       else localStorage.removeItem('nda-session');
     }
   }catch(e){}
-  document.getElementById('loading-screen').style.display = 'none';
-  if(!autoLoggedIn){
-    document.getElementById('auth-screen').style.display = 'flex';
-  }
+  try{ document.getElementById('loading-screen').style.display = 'none'; }catch(e){}
+  if(!autoLoggedIn){ try{ document.getElementById('auth-screen').style.display = 'flex'; }catch(e){} }
+  window._nwdaRevealedApp = autoLoggedIn;
+  return autoLoggedIn;
+}
+
+async function initApp() {
+  // Firebase SDK is already loaded via <script> tags, so this is mostly the anonymous-auth
+  // round-trip. enterApp()'s Firebase side-effects need fbDB, so we wait for it before
+  // painting, but only briefly, so a slow/hung auth can't hold the whole app hostage.
+  const fbReady = initFirebase();
+
+  // Instant paint from a local snapshot (every open after the first successful load).
+  try{
+    const snap = _cacheSnapshotRead();
+    if(snap && snap.data){
+      _cacheHydrateGlobals(snap.data);
+      await Promise.race([ fbReady, new Promise(function(r){ setTimeout(r, 1800); }) ]);
+      window._dataFresh = false;
+      window._dataFreshPromise = new Promise(function(res){ window._dataFreshResolve = res; });
+      try{ _revealAfterLoad(); }catch(e){ console.warn('reveal (cache) failed', e); }
+      // Background refresh: load fresh Firebase data without blocking, then re-render on top.
+      fbReady.then(_loadAppData).then(function(){
+        window._dataFresh = true;
+        try{ if(window._dataFreshResolve) window._dataFreshResolve(); }catch(e){}
+        try{ if(currentUser) _cacheRerenderAfterRefresh(); }catch(e){}
+        try{ _cacheSnapshotWrite(); }catch(e){}
+      }).catch(function(err){
+        console.error('background refresh failed', err);
+        window._dataFresh = true; try{ if(window._dataFreshResolve) window._dataFreshResolve(); }catch(e){}
+      });
+      return;
+    }
+  }catch(e){ console.warn('instant-paint skipped:', e); }
+
+  // Cold path: first-ever open / no valid snapshot -> normal blocking load.
+  await fbReady;
+  await _loadAppData();
+  window._dataFresh = true;
+  _revealAfterLoad();
+  try{ _cacheSnapshotWrite(); }catch(e){}
 }
 
 // ── Tutorial banner shown on login ──
@@ -2497,7 +2656,7 @@ const TIP_DATA={
   cal:{icon:'📅',title:'Calendar',text:'Tap any ride to edit, cancel, duplicate, or post it to the Offerings channel. Assigning a driver lives under 🛠 Dispatch tools inside the ride. Use the search box at the top to find any ride by client name, phone, driver, or type. After a confirmation is sent, tap \ud83d\udd04 Change driver to swap drivers \u2014 the ride returns to Scheduled and the confirmation rebuilds with an update message and the new driver\u2019s card. When you have a drop-off and a pickup on the same trip, tap \u201cAdd another ride\u201d on the end-location prompt to link them \u2014 the app builds one combined map route through both, splits the miles between the two rides, and prompts a tip for each. In the Start Ride map hand-off you can reorder the stops by hand or tap Optimize to auto-order them by what is closest.'},
   myrides:{icon:'📋',title:'My Rides & Confirmations',text:'The To Confirm tab shows tomorrow\'s rides needing a day-before text.'},
   clients:{icon:'👥',title:'Client List',text:'Your client list is 100% private — no other driver or admin can see it. Clients are added automatically when you book rides, or use Import CSV to bring in a spreadsheet (any column order — it sorts names, phones, emails, and addresses into the right fields). The search box matches name, phone, email, address, and notes. The “Clean up” button fixes misfiled contact info and strips leftover ride labels (like “2XL … 1 of 2”) from names, merging duplicates. Tap Select to remove several at once.'},
-  income:{icon:'💰',title:'Income & Receipts',text:'Track gross fares, expenses, and net take-home here — costs show in red, everything you keep in green. Tips are captured right when you mark a ride paid \u2014 and you can tap any ride here to open it and use \u2018Edit miles & tip\u2019 to fix or add them later. Use the receipt scanner to auto-fill amounts. (Admins get a Rides Report button for rides-per-month, year over year.) Receipts itemize fare, tip and total, use the client owner’s branding (logo, business name, and invoice number), and send as a branded PDF through your phone’s share sheet — and you can log a tip paid by a different method than the fare.'},
+  income:{icon:'💰',title:'Income & Receipts',text:'Track gross fares, expenses, and net take-home here — costs show in red, everything you keep in green. Tips are captured right when you mark a ride paid \u2014 and you can tap any ride here to open it and use \u2018Edit miles & tip\u2019 to fix or add them later. Use the receipt scanner to auto-fill amounts. (Admins get a Rides Report button for rides-per-month, year over year.) Receipts itemize fare, tip and total, use the client owner’s branding (logo, business name, and invoice number), and send as a branded PDF through your phone’s share sheet — and you can log a tip paid by a different method than the fare. Marked a ride paid by mistake? Open it (or use the paid chip) and tap Mark unpaid — it clears the payment, reopens the 15% fee, and the ride returns to “Rides to wrap up” on your dashboard.'},
   flights:{icon:'✈️',title:'Flights & Traffic',text:'Search any flight number for live tracking. Today\'s and tomorrow\'s airport rides are listed automatically with tracking links.'},
   chat:{icon:'💬',title:'Team Chat',text:'Offerings: post rides needing coverage — teammates volunteer, then the ride\'s owner assigns whoever they pick, and the card marks itself covered. Updates: share traffic without buzzing phones. You can delete your own messages anywhere; admins can delete any message in the group channels. Delete a whole DM from its header.'},
   team:{icon:'🚘',title:'Team & Driver Cards',text:'Team driver cards live here — tap Share Card or Download to send yours. No card yet, or adding a vehicle? Tap Edit / generate driver card to build one from a photo of you plus your vehicle. Each vehicle keeps its own card, and the confirmation sender picks which to send. Admins can also Edit driver, change a card\'s color, and add drivers.'},
@@ -4755,6 +4914,7 @@ function renderConfirmations(){
 
 async function _unmarkConfirmFromRide(id){ await toggleConfirmSent(id); try{ openRideModal(id); }catch(e){} }
 async function toggleConfirmSent(id){
+  await _ensureFresh();
   const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id)));
   if(!r) return;
   const wasConfirmed=r.confirmSent;
@@ -5418,7 +5578,7 @@ function renderRideView(r){
 
   document.getElementById('rm-detail-grid').innerHTML=`${rideReqDriverTag(r)}
     ${r.status==='cancelled'?`<div style="grid-column:1/-1;background:#fdecea;border:1.5px solid #e6a8a0;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#b03a2e;font-weight:700;font-size:.9rem;">🚫 CANCELLED${r.cancelledBy?' · by '+escHtml(String(r.cancelledBy)):''} — tap “Reactivate Ride” below to restore.</div>`:''}
-    ${r.status==='paid'?`<div style="grid-column:1/-1;background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#16a34a;font-weight:700;font-size:.9rem;">✅ CLIENT PAID${r.paidBy?' · marked by '+escHtml(String(r.paidBy)):''}${r.payment?' · <span style="font-weight:600;">'+escHtml(String(r.payment))+'</span>':''}<div style="margin-top:.4rem;font-weight:600;font-size:.78rem;"><button onclick="openPaymentModal(${r.id})" style="background:none;border:none;color:#16a34a;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;margin-right:.8rem;">Edit payment</button>${(typeof hasIncomeAccess==='function'&&hasIncomeAccess())?`<button onclick="shareReceiptDocument(${r.id})" style="background:none;border:none;color:#16a34a;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;">🧾 Send receipt (PDF)</button>`:`<button onclick="showIncomeOrUpgrade(null)" style="background:none;border:none;color:#7c3aed;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;">🔒 Receipts</button>`}</div></div>`:''}
+    ${r.status==='paid'?`<div style="grid-column:1/-1;background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#16a34a;font-weight:700;font-size:.9rem;">✅ CLIENT PAID${r.paidBy?' · marked by '+escHtml(String(r.paidBy)):''}${r.payment?' · <span style="font-weight:600;">'+escHtml(String(r.payment))+'</span>':''}<div style="margin-top:.4rem;font-weight:600;font-size:.78rem;"><button onclick="openPaymentModal(${r.id})" style="background:none;border:none;color:#16a34a;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;margin-right:.8rem;">Edit payment</button><button onclick="markRideUnpaid(${r.id})" style="background:none;border:none;color:#dc2626;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;margin-right:.8rem;">Mark unpaid</button>${(typeof hasIncomeAccess==='function'&&hasIncomeAccess())?`<button onclick="shareReceiptDocument(${r.id})" style="background:none;border:none;color:#16a34a;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;">🧾 Send receipt (PDF)</button>`:`<button onclick="showIncomeOrUpgrade(null)" style="background:none;border:none;color:#7c3aed;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;">🔒 Receipts</button>`}</div></div>`:''}
     ${(()=>{
       // Unpaid-carryover: on an AP ride whose client has a prior completed-but-
       // unpaid AP ride, warn (owner + assigned driver) and show a total-owed
@@ -6058,6 +6218,7 @@ function closePaymentModal(){
 
 function _payTipSplitToggle(){ var c=document.getElementById('pay-tip-split'); var m=document.getElementById('pay-tip-method'); if(m){ m.style.display=(c&&c.checked)?'block':'none'; if(c&&c.checked&&!m.value&&typeof _paySelectedMethod!=='undefined'&&_paySelectedMethod&&_paySelectedMethod!=='Other') m.value=_paySelectedMethod; } }
 async function savePaymentAndMaybeReceipt(){
+  await _ensureFresh();
   const r = rides.find(x=>x&&(x.id===_payRideId||String(x.id)===String(_payRideId)));
   if(!r){ closePaymentModal(); return; }
   // Resolve the payment method (Other => the free-text value)
@@ -6134,6 +6295,30 @@ function _payShowReceiptFallback(text){
   catch(e){ showToast('Receipt: '+text.slice(0,60)+'…'); }
 }
 
+async function markRideUnpaid(id){
+  const r=rides.find(function(x){return x&&(x.id===id||String(x.id)===String(id));}); if(!r) return;
+  if(!confirm('Mark this ride as UNPAID? This clears the recorded payment method and reopens both the fare and its 15% client fee as unpaid \u2014 the ride returns to your dashboard \u201cRides to wrap up.\u201d')) return;
+  try{ await setRideStatus(r.id, r.confirmSent?'confirmed':'scheduled'); }catch(e){}
+  delete r.payment; delete r.paidBy; delete r.paidAt; delete r.tipPayment;
+  try{ await saveRides(); }catch(e){}
+  // Also revert the 15% finder fee for this ride (owner is paid by the covering driver).
+  try{
+    var _own=(typeof feeOwnerFor==='function'?feeOwnerFor(r.createdBy):null)||(typeof getClientOwner==='function'?getClientOwner(r.client):null);
+    var _drv=r.driver;
+    if(_own && _drv && _own!==_drv && typeof feePayments!=='undefined'){
+      var _k=_own+':recv:'+_drv; var fp=feePayments[_k];
+      if(fp){
+        if(fp.paidRides){ var _i=fp.paidRides.indexOf(r.id); if(_i>=0) fp.paidRides.splice(_i,1); }
+        if(fp.pendingRides){ var _j=fp.pendingRides.indexOf(r.id); if(_j>=0) fp.pendingRides.splice(_j,1); }
+        if(!fp.paidRides||!fp.paidRides.length){ delete fp.paid; delete fp.paidAt; delete fp.legacyPaidThrough; }
+        try{ await saveFeePayments(); }catch(e){}
+      }
+    }
+  }catch(e){}
+  try{ refreshDash(); }catch(e){} try{ if(typeof renderDashFees==='function') renderDashFees(); }catch(e){} try{ if(typeof renderIncome==='function') renderIncome(); }catch(e){}
+  try{ openRideModal(r.id); }catch(e){}
+  showToast('Marked unpaid \u2014 fare and 15% fee reopened');
+}
 async function setRideStatus(id, status){
   // Self-heal duplicate ids before acting, so we only ever change the one ride.
   if(_ridesMatchingId(id).length>1){ await _repairDuplicateIds(); }
@@ -6797,7 +6982,8 @@ function _srtAddRide(){
     +'</div>';
   document.body.appendChild(pk);
 }
-function _srtLinkRide(secondId){
+async function _srtLinkRide(secondId){
+  await _ensureFresh();
   var p=document.getElementById('srt-addride-overlay'); if(p) p.remove();
   var r1=rides.find(function(x){return x&&x.id===window._srtId;});
   var r2=rides.find(function(x){return x&&x.id===secondId;});
@@ -10879,6 +11065,7 @@ async function confirmDuplicate(){
 }
 
 async function assignDriver(){
+  await _ensureFresh();
   const r=rides.find(x=>x.id===activeRideId); if(!r) return;
   if(!canAssignOnRide(r)){ showToast('You can only assign drivers to rides you created.','error'); return; }
   const newDriver=document.getElementById('rm-driver-select').value;
@@ -11182,6 +11369,7 @@ function _feePreserveLegacy(key){
 }
 // Mark ONE ride's fee paid — never the whole pair.
 async function markFeeRidePaid(owner, driver, rideId){
+  await _ensureFresh();
   const key=owner+':recv:'+driver;
   if(!feePayments[key]) feePayments[key]={};
   _feePreserveLegacy(key);
@@ -11197,6 +11385,7 @@ async function markFeeRidePaid(owner, driver, rideId){
 }
 function _feeRidePending(fp, rideId){ return !!(fp && fp.pendingRides && fp.pendingRides.indexOf(rideId)>=0); }
 async function _feeUndoRide(owner, driver, rideId){
+  await _ensureFresh();
   const key=owner+':recv:'+driver; const fp=feePayments[key]; if(!fp) return;
   if(fp.pendingRides){ const i=fp.pendingRides.indexOf(rideId); if(i>=0) fp.pendingRides.splice(i,1); }
   if(fp.paidRides){ const j=fp.paidRides.indexOf(rideId); if(j>=0) fp.paidRides.splice(j,1); }
@@ -11207,6 +11396,7 @@ async function _feeUndoRide(owner, driver, rideId){
 // Venmo "pay" only marks the fee as SENT (pending). It stays on the card until the
 // recipient taps \u2713 Received, so nothing disappears before the other side confirms.
 async function venmoAutoMarkRide(owner, payer, rideId){
+  await _ensureFresh();
   const key=owner+':recv:'+payer;
   if(!feePayments[key]) feePayments[key]={};
   const rr=(rides||[]).find(function(x){return x&&(x.id===rideId||String(x.id)===String(rideId));});
@@ -11245,6 +11435,7 @@ function venmoPayUrl(handle, amount, note){
   return 'https://venmo.com/?txn=pay&audience=private&recipients='+encodeURIComponent(u)+'&amount='+amt+'&note='+n;
 }
 async function unwaiveDashFee(owner, driver){
+  await _ensureFresh();
   const key=owner+':recv:'+driver;
   if(!feePayments[key]) return;
   delete feePayments[key].waived;
@@ -11286,6 +11477,7 @@ function waiveDashFee(owner, driver){
   document.body.appendChild(ov);
 }
 async function applyWaiveScope(scope){
+  await _ensureFresh();
   const owner=window._wfOwner, driver=window._wfDriver;
   const ov=document.getElementById('waive-scope-overlay'); if(ov) ov.remove();
   const key=owner+':recv:'+driver;
@@ -11605,6 +11797,7 @@ async function loadDriverExtras(){
 // the in-memory tables at boot (DRIVERS, USERS, USER_DRIVER_MAP, profiles, photo, login).
 async function loadAddedDrivers(){
   const added = await storageGet('kat:addedDrivers');
+  try{ window._addedDriversRaw = Array.isArray(added) ? added : []; }catch(e){}
   if(!Array.isArray(added)) return;
   added.forEach(function(rec){
     if(!rec || !rec.driverName) return;
