@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090398">
+<meta name="version" content="202606090407">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -543,6 +543,7 @@ input,select,textarea{font-size:16px;}
     <div id="dash-fees" style="margin-bottom:1.5rem;"></div>
     <!-- Action blocks: confirmations to send, then rides to wrap up, then upcoming -->
     <div id="dash-arrivals" style="margin-bottom:1.5rem;"></div>
+    <div id="dash-gps-bar" style="margin-bottom:1rem;display:none;"></div>
     <div id="dash-confirmations" style="margin-bottom:1.5rem;"></div>
     <div id="dash-needs-attention" style="margin-bottom:1.5rem;"></div>
     <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.75rem;" id="dash-upcoming-label">Your upcoming rides</div>
@@ -1087,7 +1088,7 @@ input,select,textarea{font-size:16px;}
       <h2 id="rm-title" style="margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Ride Details</h2>
       <button onclick="closeRideModal()" style="background:none;border:none;font-size:1.6rem;line-height:1;color:var(--mid);cursor:pointer;padding:0 .25rem;flex-shrink:0;" aria-label="Close">&times;</button>
       <div style="display:flex;gap:.5rem;align-items:center;">
-        <button id="rm-edit-btn" class="btn-secondary" onclick="toggleEditMode(true)" style="font-size:.8rem;padding:.4rem .9rem;">✏️ Edit</button>
+        <button id="rm-edit-btn" class="btn-secondary" onclick="toggleEditMode(true)" style="font-size:.8rem;padding:.4rem .9rem;display:inline-flex;align-items:center;justify-content:center;gap:.3rem;line-height:1;">✏️ Edit</button>
         <button id="rm-save-btn" class="btn-primary" onclick="saveRideEdits()" style="display:none;width:auto;padding:.4rem .9rem;font-size:.8rem;">Save Changes</button>
         <button id="rm-cancel-btn" class="btn-secondary" onclick="toggleEditMode(false)" style="display:none;font-size:.8rem;padding:.4rem .9rem;">Cancel</button>
       </div>
@@ -1095,9 +1096,9 @@ input,select,textarea{font-size:16px;}
     <!-- VIEW MODE — ride facts first, driver actions next, dispatch tools folded below -->
     <div id="rm-view-mode">
       <div class="detail-grid" id="rm-detail-grid"></div>
+      <div id="rm-interest"></div>
       <div id="mt-wrap"></div>
       <div id="rm-share-loc-btn"></div>
-      <div id="rm-interest"></div>
       <div class="rm-expander" id="rm-dispatch">
         <button type="button" class="rm-exp-head" onclick="toggleDispatchTools()">
           <span>&#128736; Dispatch tools</span>
@@ -1249,7 +1250,7 @@ input,select,textarea{font-size:16px;}
       <div class="form-group" id="pay-tip-section" style="display:none;">
         <label for="pay-tip">💵 Tip received (optional)</label>
         <div style="display:flex;align-items:center;gap:.4rem;margin-top:.3rem;"><span style="font-size:1rem;color:var(--mid);">$</span>
-        <input type="number" id="pay-tip" min="0" step="0.01" placeholder="0.00" inputmode="decimal" style="flex:1;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;box-sizing:border-box;" /></div>
+        <input type="number" id="pay-tip" min="0" step="0.01" placeholder="0.00" inputmode="decimal" style="flex:1;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;box-sizing:border-box;" /></div><label style="display:flex;align-items:center;gap:.5rem;margin-top:.6rem;font-size:.78rem;cursor:pointer;"><input type="checkbox" id="pay-tip-split" onchange="_payTipSplitToggle()" style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;">Tip paid by a different method than the fare</label><input type="text" id="pay-tip-method" placeholder="e.g. Cash" style="display:none;margin-top:.4rem;width:100%;padding:.45rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;box-sizing:border-box;" />
         <div style="font-size:.68rem;color:var(--mid);margin-top:.3rem;">Saved straight to your income — no need to go enter it separately.</div>
       </div>
       <div style="border-top:1.5px solid var(--light);margin:1rem 0 .8rem;"></div>
@@ -4651,14 +4652,15 @@ function renderConfirmations(){
         +_termKeys0.map(function(k){ return '<option value="'+escHtml(k)+'"'+(_preKey0===k?' selected':'')+'>Pickup instructions ('+escHtml(k)+')</option>'; }).join('');
       const _isApPickup0=(r.type==='AP PICK UP'||r.type==='AP ROUND TRIP');
       const chkRow=function(key,label,fn,defOn,disabled,subNote){
-        return '<div style="display:flex;gap:.4rem;align-items:stretch;">'
-          +'<label style="display:flex;align-items:center;padding:0 .1rem;cursor:pointer;" title="Include in Send everything">'
+        return '<div style="display:flex;flex-direction:column;gap:.2rem;min-width:0;">'
+          +'<div style="display:flex;gap:.4rem;align-items:center;">'
+          +'<label style="display:flex;align-items:center;padding:0 .1rem;cursor:pointer;flex-shrink:0;" title="Include in Send everything">'
           +'<input type="checkbox" id="cchk-'+pid+'-'+key+'"'+(defOn?' checked':'')+(disabled?' disabled':'')+' style="width:17px;height:17px;accent-color:#16a34a;cursor:pointer;">'
           +'</label>'
-          +'<div style="flex:1;display:flex;flex-direction:column;gap:.2rem;min-width:0;">'
-          +btnRow(key,label,fn)
-          +(subNote||'')
-          +'</div></div>';
+          +'<div style="flex:1;min-width:0;">'+btnRow(key,label,fn)+'</div>'
+          +'</div>'
+          +(subNote?('<div style="padding-left:calc(17px + .5rem);">'+subNote+'</div>'):'')
+          +'</div>';
       };
       const _instSel0=_hasAnyInstr0
         ?'<select id="cinst-'+pid+'" onchange="_setConfInstKey('+pid+',this.value)" style="width:100%;padding:.35rem .5rem;border:1px solid var(--light);border-radius:7px;font-size:.76rem;font-family:\'DM Sans\',sans-serif;color:var(--black);background:var(--white);box-sizing:border-box;">'+_instOpts0+'</select>'
@@ -5410,7 +5412,7 @@ function renderRideView(r){
 
   document.getElementById('rm-detail-grid').innerHTML=`${rideReqDriverTag(r)}
     ${r.status==='cancelled'?`<div style="grid-column:1/-1;background:#fdecea;border:1.5px solid #e6a8a0;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#b03a2e;font-weight:700;font-size:.9rem;">🚫 CANCELLED${r.cancelledBy?' · by '+escHtml(String(r.cancelledBy)):''} — tap “Reactivate Ride” below to restore.</div>`:''}
-    ${r.status==='paid'?`<div style="grid-column:1/-1;background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#16a34a;font-weight:700;font-size:.9rem;">✅ CLIENT PAID${r.paidBy?' · marked by '+escHtml(String(r.paidBy)):''}${r.payment?' · <span style="font-weight:600;">'+escHtml(String(r.payment))+'</span>':''}<div style="margin-top:.4rem;font-weight:600;font-size:.78rem;"><button onclick="openPaymentModal(${r.id})" style="background:none;border:none;color:#16a34a;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;margin-right:.8rem;">Edit payment</button>${(typeof hasIncomeAccess==='function'&&hasIncomeAccess())?`<button onclick="sendReceiptToClient(${r.id})" style="background:none;border:none;color:#16a34a;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;margin-right:.8rem;">🧾 Text receipt</button><button onclick="downloadReceiptDocument(${r.id})" style="background:none;border:none;color:#16a34a;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;">⬇ Download receipt</button>`:`<button onclick="showIncomeOrUpgrade(null)" style="background:none;border:none;color:#7c3aed;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;">🔒 Receipts</button>`}</div></div>`:''}
+    ${r.status==='paid'?`<div style="grid-column:1/-1;background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#16a34a;font-weight:700;font-size:.9rem;">✅ CLIENT PAID${r.paidBy?' · marked by '+escHtml(String(r.paidBy)):''}${r.payment?' · <span style="font-weight:600;">'+escHtml(String(r.payment))+'</span>':''}<div style="margin-top:.4rem;font-weight:600;font-size:.78rem;"><button onclick="openPaymentModal(${r.id})" style="background:none;border:none;color:#16a34a;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;margin-right:.8rem;">Edit payment</button>${(typeof hasIncomeAccess==='function'&&hasIncomeAccess())?`<button onclick="shareReceiptDocument(${r.id})" style="background:none;border:none;color:#16a34a;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;">🧾 Send receipt (PDF)</button>`:`<button onclick="showIncomeOrUpgrade(null)" style="background:none;border:none;color:#7c3aed;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;">🔒 Receipts</button>`}</div></div>`:''}
     ${(()=>{
       // Unpaid-carryover: on an AP ride whose client has a prior completed-but-
       // unpaid AP ride, warn (owner + assigned driver) and show a total-owed
@@ -5749,9 +5751,19 @@ function buildRideBreakdown(r){
 
 // A stable receipt number for a ride: NWDA-<rideid>-<YYYYMMDD>. Deterministic so
 // re-sending the same ride yields the same number (no duplicate-submission worries).
+function _bizPrefix(r){
+  var driver=((r&&r.driver)||'').trim();
+  var prof=(typeof DRIVER_PROFILES!=='undefined'&&DRIVER_PROFILES[driver])?DRIVER_PROFILES[driver]:{};
+  var ownerName=(typeof getClientOwner==='function')?getClientOwner(r&&r.client):null;
+  var ownerProf=(ownerName&&typeof DRIVER_PROFILES!=='undefined'&&DRIVER_PROFILES[ownerName])?DRIVER_PROFILES[ownerName]:{};
+  var biz=((ownerProf.businessName||'').trim())||((prof.businessName||'').trim())||'';
+  if(!biz) return 'NWDA';
+  var initials=biz.replace(/[^A-Za-z0-9 ]/g,'').split(/\s+/).filter(Boolean).map(function(w){return w[0];}).join('').toUpperCase().slice(0,5);
+  return initials||'NWDA';
+}
 function _receiptNumber(r){
   const d = (r.date||'').replace(/-/g,'') || 'NA';
-  return 'NWDA-'+(r.id!=null?r.id:'X')+'-'+d;
+  return _bizPrefix(r)+'-'+(r.id!=null?r.id:'X')+'-'+d;
 }
 
 // Format a YYYY-MM-DD date as a readable "Month D, YYYY" for the receipt.
@@ -5776,6 +5788,10 @@ function buildReceiptText(r){
   // Service provider (vendor): the driver's name + phone, under the NWDA org.
   const driver = (r.driver||'').trim();
   const driverPhone = (typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[driver] && DRIVER_PROFILES[driver].phone) ? DRIVER_PROFILES[driver].phone : '';
+  const _rprof = (typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[driver]) ? DRIVER_PROFILES[driver] : {};
+  const _ownerName = (typeof getClientOwner==='function') ? getClientOwner(r.client) : null;
+  const _ownerProf = (_ownerName && typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[_ownerName]) ? DRIVER_PROFILES[_ownerName] : {};
+  const orgName = ((_ownerProf.businessName||'').trim()) || ((_rprof.businessName||'').trim()) || 'Northwest Drivers Association (NWDA)';
   const rn = _receiptNumber(r);
   const dateStr = _receiptDate(r.date);
 
@@ -5790,7 +5806,7 @@ function buildReceiptText(r){
   const amt = bd.total;
 
   const L = [];
-  L.push('NORTHWEST DRIVERS ASSOCIATION (NWDA)');
+  L.push(orgName);
   L.push('Transportation Service Receipt');
   L.push('');
   L.push('Receipt #: '+rn);
@@ -5802,11 +5818,16 @@ function buildReceiptText(r){
        + ' at Hartsfield-Jackson International Airport, Atlanta, GA.');
   L.push('');
   L.push('Charges:'+ (itemized || '\n  Transportation service'));
-  if(amt>0) L.push('');
-  if(amt>0) L.push('TOTAL PAID: $'+amt.toFixed(2));
-  if(r.payment) L.push('Payment method: '+r.payment+'  (PAID)');
+  const _tip = parseFloat(r.tip)||0;
+  const _tipVia = r.tipPayment||r.payment||'';
+  if(amt>0||_tip>0){
+    L.push('');
+    L.push('Fare: $'+amt.toFixed(2)+(r.payment?' (paid via '+r.payment+')':''));
+    if(_tip>0) L.push('Tip: $'+_tip.toFixed(2)+(_tipVia?' (paid via '+_tipVia+')':''));
+    L.push('TOTAL: $'+(amt+_tip).toFixed(2));
+  }
   L.push('');
-  L.push('Thank you for riding with NWDA!');
+  L.push('Thank you for riding with '+orgName+'!');
   return L.join('\n');
 }
 
@@ -5831,9 +5852,11 @@ function buildReceiptHTML(r){
   const dateStr = _receiptDate(r.date);
   const bd = buildRideBreakdown(r);
   const amt = bd.total;
+  const _rtip = parseFloat(r.tip)||0;
+  const _rtipVia = r.tipPayment||r.payment||'';
 
   // Header identity: business name if set, else NWDA; driver always shown as provider.
-  const orgName = bizName || 'Northwest Drivers Association (NWDA)';
+  const orgName = ((_ownerProf.businessName||'').trim()) || bizName || 'Northwest Drivers Association (NWDA)';
   // Receipt logo: the driver's uploaded business logo, or the app's standard logo if they haven't set one.
   const appLogo = (document.querySelector('img[alt="NWDA Logo"]')||{}).src || '';
   const shownLogo = logo || appLogo;
@@ -5878,10 +5901,13 @@ function buildReceiptHTML(r){
     + '</div>'
     // Total
     + '<div style="padding:10px 30px 24px;">'
-    +   (amt>0?'<div style="display:flex;justify-content:space-between;align-items:center;border-top:2px solid #2d1b57;padding-top:12px;margin-top:6px;">'
+    +   ((_rtip>0)?'<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:14px;color:#333;"><span>Fare</span><span>$'+amt.toFixed(2)+'</span></div>':'')
+    +   ((_rtip>0)?'<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:14px;color:#333;"><span>Tip</span><span>$'+_rtip.toFixed(2)+'</span></div>':'')
+    +   ((amt>0||_rtip>0)?'<div style="display:flex;justify-content:space-between;align-items:center;border-top:2px solid #2d1b57;padding-top:12px;margin-top:6px;">'
     +     '<div style="font-size:16px;font-weight:800;color:#1a1a1a;">TOTAL PAID</div>'
-    +     '<div style="font-size:20px;font-weight:800;color:#2d1b57;">$'+amt.toFixed(2)+'</div></div>':'')
-    +   (r.payment?'<div style="margin-top:8px;font-size:13px;color:#2e7d32;font-weight:600;">\u2713 Paid via '+esc(r.payment)+'</div>':'')
+    +     '<div style="font-size:20px;font-weight:800;color:#2d1b57;">$'+(amt+_rtip).toFixed(2)+'</div></div>':'')
+    +   (r.payment?'<div style="margin-top:8px;font-size:13px;color:#2e7d32;font-weight:600;">\u2713 Fare paid via '+esc(r.payment)+'</div>':'')
+    +   ((_rtip>0 && _rtipVia && _rtipVia!==r.payment)?'<div style="margin-top:3px;font-size:13px;color:#2e7d32;font-weight:600;">\u2713 Tip paid via '+esc(_rtipVia)+'</div>':'')
     + '</div>'
     // Footer
     + '<div style="background:#faf9fc;padding:16px 30px;border-top:1px solid #eee;font-size:12px;color:#999;text-align:center;">'
@@ -5916,6 +5942,25 @@ function downloadReceiptDocument(id){
     setTimeout(()=>URL.revokeObjectURL(url), 4000);
     showToast('\uD83D\uDCC4 Receipt downloaded \u2014 open it to Save as PDF');
   }catch(e){ console.error(e); showToast('Download failed','error'); }
+}
+// Share the branded receipt via the phone's native share sheet (Messages, email, AirDrop…),
+// falling back to a download when file-sharing isn't supported (e.g. desktop browsers).
+async function shareReceiptDocument(id){
+  if(!_receiptAccessOrUpgrade()) return;
+  const r = rides.find(x=>x&&(x.id===id||String(x.id)===String(id)));
+  if(!r){ return; }
+  const html = buildReceiptHTML(r);
+  const safe = (r.client||'client').replace(/[^a-z0-9]+/gi,'_').replace(/^_+|_+$/g,'');
+  const fname = 'Receipt_'+safe+'_'+(r.date||'').replace(/-/g,'')+'.html';
+  try{
+    const file = new File([html], fname, {type:'text/html'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      await navigator.share({ files:[file], title:'Transportation Receipt', text:'Your transportation service receipt \u2014 open to view or Save as PDF.' });
+      return;
+    }
+  }catch(e){ if(e && e.name==='AbortError') return; }
+  // Fallback: download the document instead
+  downloadReceiptDocument(id);
 }
 
 function openPaymentModal(id){
@@ -6005,6 +6050,7 @@ function closePaymentModal(){
   _payRideId = null; _paySelectedMethod='';
 }
 
+function _payTipSplitToggle(){ var c=document.getElementById('pay-tip-split'); var m=document.getElementById('pay-tip-method'); if(m){ m.style.display=(c&&c.checked)?'block':'none'; if(c&&c.checked&&!m.value&&typeof _paySelectedMethod!=='undefined'&&_paySelectedMethod&&_paySelectedMethod!=='Other') m.value=_paySelectedMethod; } }
 async function savePaymentAndMaybeReceipt(){
   const r = rides.find(x=>x&&(x.id===_payRideId||String(x.id)===String(_payRideId)));
   if(!r){ closePaymentModal(); return; }
@@ -6015,6 +6061,7 @@ async function savePaymentAndMaybeReceipt(){
     method = t || 'Other';
   }
   if(method){ r.payment = method; touchRide(r,'set payment method'); }
+  try{ var _sp=document.getElementById('pay-tip-split'); var _sm=(document.getElementById('pay-tip-method')||{}).value||''; if(_sp&&_sp.checked&&_sm.trim()){ r.tipPayment=_sm.trim(); } else { delete r.tipPayment; } }catch(e){}
   // Capture tip entered at mark-paid (income/tip-tracking users)
   var _tipEl = document.getElementById('pay-tip');
   if(_tipEl && document.getElementById('pay-tip-section')?.style.display!=='none'){
@@ -6040,7 +6087,7 @@ async function savePaymentAndMaybeReceipt(){
   // Refresh the open ride card so the payment method shows
   try{ if(document.getElementById('ride-modal')?.classList.contains('show')) renderRideView(r); }catch(e){}
   closePaymentModal();
-  if(wantReceipt){ sendReceiptToClient(r.id); }
+  if(wantReceipt){ shareReceiptDocument(r.id); }
   else { showToast('Payment saved'+(method?': '+method:'')); }
 }
 
@@ -6593,7 +6640,7 @@ function openStartRide(rideId){
     +'<button onclick="_closeNavModal()" style="background:none;border:none;font-size:1.4rem;color:#94a3b8;cursor:pointer;">&times;</button>'
     +'</div>'
     // Home address option
-    +'<button onclick="_closeNavModal();_openStartRideWithHome(window._srtId,window._srtHome)" '
+    +'<button onclick="_closeNavModal();_askReturnDest(window._srtId,window._srtHome)" '
     +'style="display:flex;align-items:center;gap:.75rem;width:100%;padding:.75rem .9rem;'
     +'background:#f5f3ff;border:1.5px solid #c4b5fd;border-radius:8px;cursor:pointer;'
     +'font-family:inherit;text-align:left;margin-bottom:.5rem;">'
@@ -6654,6 +6701,7 @@ function _openStartRideFromCurrent(rideId){
 
 // Starting from current location: ask where the route should END —
 // home, back to this same spot, or a typed address.
+function _rideDropAddr(id){ var r=rides.find(function(x){return x&&x.id===id;}); if(!r) return ''; var t=r.type||''; var term=(typeof terminalToAddress==='function')?terminalToAddress(r.terminal):''; if((t==='AP RUN'||t==='AP ROUND TRIP')&&term) return term; return (r.home||r.dropoff||'').trim(); }
 function _askReturnDest(rideId, locStr){
   var home=_rtGetHome();
   window._srtId=rideId; window._srtLoc=locStr; window._srtHome=home;
@@ -6706,7 +6754,7 @@ function _askReturnDest(rideId, locStr){
     +'</div>'
     +'<span style="margin-left:auto;color:#ea580c;font-size:.85rem;flex-shrink:0;">&#8594;</span>'
     +'</button>'
-    +'<button onclick="_srtAddRide()" style="width:100%;display:flex;align-items:center;gap:.7rem;padding:.8rem;margin-bottom:.5rem;background:#f5f3ff;border:1.5px solid #ddd6fe;border-radius:11px;cursor:pointer;text-align:left;">'
+    +((typeof _rideDropAddr==='function'&&_rideDropAddr(rideId))?'<button onclick="_closeNavModal();_openStartRideWithHome(window._srtId,window._srtLoc,_rideDropAddr(window._srtId))" style="width:100%;display:flex;align-items:center;gap:.7rem;padding:.8rem;margin-bottom:.5rem;background:#fffbeb;border:1.5px solid #fde68a;border-radius:11px;cursor:pointer;text-align:left;"><span style="font-size:1.1rem;">\ud83c\udfc1</span><div><div style="font-size:.88rem;font-weight:700;color:#0f172a;">End at the drop-off</div><div style="font-size:.72rem;color:#64748b;">Route ends where you drop the client \u2014 no return leg</div></div><span style="margin-left:auto;color:#d97706;font-size:.85rem;flex-shrink:0;">&#8594;</span></button>':'')+'<button onclick="_srtAddRide()" style="width:100%;display:flex;align-items:center;gap:.7rem;padding:.8rem;margin-bottom:.5rem;background:#f5f3ff;border:1.5px solid #ddd6fe;border-radius:11px;cursor:pointer;text-align:left;">'
     +'<span style="font-size:1.1rem;">\u2795</span>'
     +'<div><div style="font-size:.88rem;font-weight:700;color:#0f172a;">Add another ride to this trip</div><div style="font-size:.72rem;color:#64748b;">Drop-off + pickup \u2014 miles split, tip each</div></div>'
     +'<span style="margin-left:auto;color:#7c3aed;font-size:.85rem;flex-shrink:0;">&#8594;</span>'
@@ -6761,14 +6809,54 @@ function _srtGoOther(){
   _openStartRideWithHome(window._srtId, window._srtLoc, v);
 }
 
+function _navStopListHtml(){
+  var stops=window._navStops||[]; var isIosLeg=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  function _legUrl(s){ return isIosLeg?'https://maps.apple.com/?daddr='+_navEnc(s):'https://waze.com/ul?q='+_navEnc(s)+'&navigate=yes'; }
+  var html=stops.map(function(s,i){
+    var isEnd=(i===0||i===stops.length-1), isMid=(i>0&&i<stops.length-1);
+    var ctrls=isMid
+      ? '<button onclick="_navMoveStop('+i+',-1)" '+(i>1?'':'disabled ')+'style="padding:0 6px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;cursor:pointer;font-size:.8rem;color:#64748b;'+(i>1?'':'opacity:.3;')+'">&#8593;</button>'
+        +'<button onclick="_navMoveStop('+i+',1)" '+(i<stops.length-2?'':'disabled ')+'style="padding:0 6px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;cursor:pointer;font-size:.8rem;color:#64748b;'+(i<stops.length-2?'':'opacity:.3;')+'">&#8595;</button>'
+      : '';
+    return '<div style="display:flex;align-items:center;gap:5px;margin-bottom:3px;">'
+      +'<div style="width:10px;height:10px;border-radius:50%;background:'+(isEnd?'#7c3aed':'#e2e8f0')+';flex-shrink:0;'+(isMid?'border:2px solid #94a3b8;':'')+'"></div>'
+      +'<span style="font-size:.74rem;color:#334155;flex:1;min-width:0;">'+escHtml(s)+'</span>'
+      +ctrls
+      +(i>0?'<button onclick="window.open(&#39;'+_legUrl(s).replace(/'/g,'&#39;')+'&#39;,&#39;_blank&#39;)" title="Navigate to this stop" style="flex-shrink:0;padding:2px 6px;border-radius:8px;border:1px solid #c4b5fd;background:#f5f3ff;color:#7c3aed;font-size:.64rem;font-weight:700;cursor:pointer;">&#10148;</button>':'')
+      +'</div>';
+  }).join('');
+  html+='<div style="font-size:.62rem;color:#94a3b8;margin-top:5px;">First &amp; last stay fixed. Use &#8593;&#8595; to reorder, or Optimize. &#10148; = navigate one stop.</div>';
+  return html;
+}
+function _navGoogleUrl(){ return 'https://www.google.com/maps/dir/'+(window._navStops||[]).map(_navEnc).join('/'); }
+function _navSyncGm(){ var b=document.getElementById('nav-gm-btn'); if(b) b.setAttribute('onclick', "window.open('"+_navGoogleUrl().replace(/'/g,"\\'")+"','_blank');_closeNavModal();"); }
+function _navMoveStop(i,dir){ var s=window._navStops; if(!s) return; var j=i+dir; if(i<=0||i>=s.length-1||j<=0||j>=s.length-1) return; var t=s[i]; s[i]=s[j]; s[j]=t; var el=document.getElementById('nav-stop-list'); if(el) el.innerHTML=_navStopListHtml(); _navSyncGm(); }
+function _navOptimize(){
+  var s=window._navStops; if(!s||s.length<4){ showToast('Nothing to optimize'); return; }
+  showToast('Optimizing route\u2026'); var addrs=s.slice(), coords=new Array(addrs.length), done=0;
+  addrs.forEach(function(a,idx){ geocodeAddress(a,function(ll){ coords[idx]=ll; done++; if(done===addrs.length) _fin(); }); });
+  function _fin(){
+    var start=coords[0], midIdx=[]; for(var k=1;k<addrs.length-1;k++) midIdx.push(k);
+    if(!start || midIdx.some(function(k){return !coords[k];})){ showToast('Couldn\u2019t look up every address \u2014 reorder by hand'); return; }
+    var ordered=[], remaining=midIdx.slice(), cur=start;
+    while(remaining.length){ var best=0,bd=Infinity; for(var m=0;m<remaining.length;m++){ var d=_haversineMiles(cur,coords[remaining[m]]); if(d<bd){bd=d;best=m;} } var pk=remaining.splice(best,1)[0]; ordered.push(addrs[pk]); cur=coords[pk]; }
+    window._navStops=[addrs[0]].concat(ordered).concat([addrs[addrs.length-1]]);
+    var el=document.getElementById('nav-stop-list'); if(el) el.innerHTML=_navStopListHtml(); _navSyncGm();
+    showToast('\u2713 Route optimized \u2014 fine-tune with \u2191\u2193 if needed');
+  }
+}
 function _openStartRideWithHome(rideId, startAddr, endAddr){
   var r=rides.find(function(x){return x.id===rideId;});
   if(!r){ showToast('Ride not found'); return; }
   var _link=(r.linkedRide!=null)?rides.find(function(x){return x&&x.id===r.linkedRide;}):null;
+  // Start Ride also begins GPS mileage tracking (this is what surfaces the Pause / Stop
+  // controls in the ride's mileage bar). A linked ride joins the same tracking session.
+  try{ if(typeof mtStart==='function'){ mtStart(rideId); if(_link) mtStart(_link.id); } }catch(e){}
   var urls=_buildRouteUrlsFrom(r, startAddr, endAddr, _link);
   var isIos=/iphone|ipad|ipod/i.test(navigator.userAgent);
 
   var stops=urls.stops;
+  window._navStops=stops.slice();
   // Per-stop "go here" links for single-destination apps (Apple Maps / Waze):
   // tap any stop to navigate just that leg from wherever you are now.
   var isIosLeg=/iphone|ipad|ipod/i.test(navigator.userAgent);
@@ -6809,14 +6897,15 @@ function _openStartRideWithHome(rideId, startAddr, endAddr){
 
     // Route preview
     +'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:.75rem;margin-bottom:.85rem;">'
-    +stopsHtml
+    +'<div id="nav-stop-list">'+_navStopListHtml()+'</div>'
+    +((window._navStops&&window._navStops.length>3)?'<button onclick="_navOptimize()" style="width:100%;margin-top:.55rem;padding:.5rem;border:1.5px solid #7c3aed;border-radius:8px;background:#f5f3ff;color:#7c3aed;font-family:inherit;font-size:.78rem;font-weight:700;cursor:pointer;">\ud83e\ude84 Optimize stop order (nearest first)</button>':'')
     +'</div>'
 
     // Nav app buttons
     +'<div style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.45rem;">Open in navigation app</div>'
     +'<div style="display:flex;flex-direction:column;gap:.4rem;margin-bottom:.85rem;">'
 
-    +'<button onclick="window.open(\''+urls.gm.replace(/'/g,"\\'")+'\',' +"'_blank'); _closeNavModal();\""
+    +'<button id="nav-gm-btn" onclick="window.open(\''+urls.gm.replace(/'/g,"\\'")+'\',' +"'_blank'); _closeNavModal();\""
     +' style="display:flex;align-items:center;gap:.75rem;padding:.65rem .85rem;background:#fff;border:1.5px solid #e2e8f0;'
     +'border-radius:8px;cursor:pointer;font-family:inherit;text-align:left;">'
     +'<span style="width:32px;height:32px;border-radius:8px;background:#4285f4;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;">&#127757;</span>'
@@ -7513,6 +7602,7 @@ function _locBtn(label,style,onclick){
 
 
 function _mtUpdateBar(){
+  try{ if(typeof renderDashGpsBar==='function') renderDashGpsBar(); }catch(e){}
   var bar=document.getElementById('mt-bar');if(!bar)return;
   var ml=document.getElementById('mt-miles');
   if(ml)ml.textContent=_mtFmt(_mtAccum)+' mi total';
@@ -7752,7 +7842,7 @@ function mtBarHtml(rid){
         +'<button onclick="mtStop()" style="padding:.42rem .85rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;border:none;background:#dc2626;color:#fff;">&#9209; Stop &amp; Save</button>'
       : '<button onclick="openStartRide('+rid+')" style="padding:.42rem .9rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;border:none;background:#7c3aed;color:#fff;">&#128663; Start Ride</button>'
         +'<button onclick="openLogMiles('+rid+')" style="padding:.42rem .75rem;border-radius:8px;font-family:inherit;font-size:.77rem;font-weight:700;cursor:pointer;border:1.5px solid #7c3aed;background:#fff;color:#7c3aed;">&#128205; '+(hasMiles?'Edit Miles':'Log Miles')+'</button>'
-        +'<button onclick="mtStart('+rid+')" style="padding:.42rem .6rem;border-radius:8px;font-family:inherit;font-size:.72rem;font-weight:600;cursor:pointer;border:1px solid #d1d5db;background:#fff;color:#94a3b8;">GPS</button>'
+        +'<button onclick="mtStart('+rid+')" style="padding:.42rem .6rem;border-radius:8px;font-family:inherit;font-size:.72rem;font-weight:600;cursor:pointer;border:1.5px solid #7c3aed;background:#fff;color:#7c3aed;" title="Track miles by GPS only \u2014 no map handoff. Use when you just want mileage logged.">&#128225; GPS</button>'
     )
     +'</div></div>';
 }
@@ -10908,6 +10998,7 @@ function renderRides(){
 // DASHBOARD
 // ═══════════════════════════════════════════
 function refreshDash(){
+  try{ if(typeof renderDashGpsBar==='function') renderDashGpsBar(); }catch(e){}
   if(!document.getElementById('upcoming-list')) return;
   const now=new Date(), todayStr=toDateStr(now);
   document.getElementById('dash-date').textContent=now.toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
@@ -10977,6 +11068,26 @@ function renderDashNeedsAttention(){
 
 // Tomorrow's rides you SCHEDULED that still need a confirmation text — a simple list + link to My Rides.
 
+function renderDashGpsBar(){
+  var el=document.getElementById('dash-gps-bar'); if(!el) return;
+  var tracking=!!_mtWatchId && _mtRideIds.length>0;
+  var paused=!_mtWatchId && _mtManualPause && _mtRideIds.length>0;
+  if(!tracking && !paused){ el.style.display='none'; el.innerHTML=''; return; }
+  el.style.display='block';
+  var mi=(typeof _mtFmt==='function')?_mtFmt(_mtAccum):(_mtAccum||0);
+  var n=_mtRideIds.length;
+  var head = tracking
+    ? '<span style="display:inline-flex;align-items:center;gap:.4rem;font-size:.9rem;font-weight:800;color:#16a34a;"><span style="width:9px;height:9px;border-radius:50%;background:#16a34a;animation:mt-pulse .9s ease-in-out infinite;"></span>GPS tracking active</span>'
+    : '<span style="font-size:.9rem;font-weight:800;color:#b45309;">\u23F8 Tracking paused</span>';
+  var btns = tracking
+    ? '<button onclick="mtPause()" style="flex:1;padding:.6rem;border:none;border-radius:8px;background:#f59e0b;color:#fff;font-weight:800;font-family:inherit;font-size:.85rem;cursor:pointer;">\u23F8 Pause</button>'
+      +'<button onclick="mtStop()" style="flex:1;padding:.6rem;border:none;border-radius:8px;background:#dc2626;color:#fff;font-weight:800;font-family:inherit;font-size:.85rem;cursor:pointer;">\u23F9 Stop &amp; Save</button>'
+    : '<button onclick="mtResume()" style="flex:1;padding:.6rem;border:none;border-radius:8px;background:#16a34a;color:#fff;font-weight:800;font-family:inherit;font-size:.85rem;cursor:pointer;">\u25B6 Resume</button>'
+      +'<button onclick="mtStop()" style="flex:1;padding:.6rem;border:none;border-radius:8px;background:#dc2626;color:#fff;font-weight:800;font-family:inherit;font-size:.85rem;cursor:pointer;">\u23F9 Stop &amp; Save</button>';
+  el.innerHTML='<div style="border:1.5px solid '+(tracking?'#86efac':'#fcd34d')+';background:'+(tracking?'#f0fdf4':'#fffbeb')+';border-radius:12px;padding:.85rem 1rem;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.6rem;">'+head+'<span style="font-size:.82rem;font-weight:700;color:#334155;">'+mi+' mi'+(n>1?(' \u00b7 '+n+' rides'):'')+'</span></div>'
+    +'<div style="display:flex;gap:.5rem;margin-top:.65rem;">'+btns+'</div></div>';
+}
 function renderDashConfirmations(){
   const box = document.getElementById('dash-confirmations');
   if(!box) return;
@@ -11104,7 +11215,9 @@ function venmoPayUrl(handle, amount, note){
   if(!u) return '';
   const amt=(Math.round((parseFloat(amount)||0)*100)/100).toFixed(2);
   const n=encodeURIComponent(note||'NWDA client fee');
-  return 'https://venmo.com/'+encodeURIComponent(u)+'?txn=pay&amount='+amt+'&note='+n;
+  // Single-recipient pay link. The old venmo.com/<user> PATH form opens the profile and can
+  // trigger Venmo's bill-split UI; the recipients= PARAM form goes straight to a 1-person payment.
+  return 'https://venmo.com/?txn=pay&audience=private&recipients='+encodeURIComponent(u)+'&amount='+amt+'&note='+n;
 }
 async function unwaiveDashFee(owner, driver){
   const key=owner+':recv:'+driver;
