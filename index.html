@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090427">
+<meta name="version" content="202606090428">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -11808,10 +11808,11 @@ function renderDashIncome(){
   const costPerMile = calcCostPerMile(dName);
   let vehicleCost = 0, feeCost = 0;
   monthRides.forEach(r=>{
-    // Outside rides are logged cash income — no tracked vehicle cost or finder fee (matches the Income page).
-    if(r._outside) return;
+    // Vehicle cost covers every mile driven, including outside rides (matches the Income page).
     const miles = parseFloat(r.drivenMiles||r.miles||0);
     vehicleCost += miles * costPerMile;
+    // Outside rides owe no 15% finder fee.
+    if(r._outside) return;
     // 15% owed only when driving someone else's client, and never when the
     // client is themselves a driver in the group.
     const fare = parseFloat(r.price||0);
@@ -14371,7 +14372,10 @@ function renderIncome(){
 
   // Vehicle costs — computed from driver profile so they show even without the Trip Profit calculator
   const myDrivenRides  = (personalView && dName) ? filtered.filter(r=>r.driver===dName&&!r._outside) : [];
-  const totalMiles     = myDrivenRides.reduce((s,r)=>s+(parseFloat(r.drivenMiles||r.miles||0)),0);
+  // Vehicle cost covers every mile driven, INCLUDING outside rides — the outside-ride
+  // entry form promises gas & maintenance are deducted from the miles, so honor that here.
+  const myMilesRides   = (personalView && dName) ? filtered.filter(r=>r.driver===dName) : [];
+  const totalMiles     = myMilesRides.reduce((s,r)=>s+(parseFloat(r.drivenMiles||r.miles||0)),0);
   // Miles for the summary card: driver's own driven miles in personal view, or
   // the total across every filtered ride when an admin views all drivers.
   const cardMiles = personalView ? totalMiles
@@ -14461,20 +14465,7 @@ function renderIncome(){
             </tr>
           </tfoot>
         </table>
-      </div>
-      ${getMyOutsideRides().length ? `
-        <div style="margin-top:1rem;background:var(--surface);border:1.5px solid var(--light);border-radius:12px;padding:1rem;">
-          <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">Your outside rides</div>
-          ${getMyOutsideRides().map(o=>`
-            <div style="display:flex;align-items:center;gap:.6rem;padding:.45rem 0;border-bottom:1px solid var(--light);">
-              <div style="flex:1;">
-                <div style="font-weight:600;font-size:.85rem;color:var(--black);">${(o.client||'Outside ride').replace(/</g,'&lt;')}</div>
-                <div style="font-size:.72rem;color:var(--mid);">${fmtDateShort(o.date)}${o.time?' · '+o.time:''}${o.miles?' · '+o.miles+' mi':''}${o.notes?' · '+(o.notes||'').replace(/</g,'&lt;'):''}</div>
-              </div>
-              <div style="font-weight:700;color:var(--green);font-size:.85rem;">$${parseFloat(o.price||0).toFixed(2)}</div>
-              <button onclick="deleteOutsideRide('${o.id}')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1rem;padding:.2rem;" title="Delete">&#128465;</button>
-            </div>`).join('')}
-        </div>` : ''}`;
+      </div>`;
     return;
   }
 
@@ -14569,7 +14560,8 @@ async function renderIncomeTripProfit(dName, start, end, proratedExp){
 // ─── MY FARES — rides the driver personally drove, with per-ride tip entry ───
 function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm, maintCpm, totalMiles){
   const box=document.getElementById('income-my-fares'); if(!box) return;
-  const myRides=allFiltered.filter(r=>r.driver===dName && !r._outside);
+  // Include the driver's outside rides in this one list (shown with no color dot to mark them).
+  const myRides=allFiltered.filter(r=>r.driver===dName);
   if(!myRides.length){ box.innerHTML=''; return; }
 
   gasCpm   = gasCpm    || 0;
@@ -14579,6 +14571,52 @@ function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm,
 
   const rows=myRides.map((r,i)=>{
     const fare  = parseFloat(r.price||0);
+    if(r._outside){
+      // Outside ride: cash income logged by hand — no color dot and no 15% fee, but gas &
+      // maintenance ARE deducted from the miles (exactly as the entry form promises).
+      const omiles = parseFloat(r.miles||0);
+      const ogas   = omiles * gasCpm;
+      const omaint = omiles * maintCpm;
+      const ogross = fare;   // outside rides carry no tip
+      const ocost  = ogas + omaint;
+      const onet   = ogross - ocost;
+      totFares+=fare; totCost+=ocost; totGross+=ogross; totNet+=onet;
+      const oid = String(r.id).replace(/'/g,"\\'");
+      return `<div class="fare-item" data-row-id="${r.id}" data-fare="${fare.toFixed(2)}" data-cost="${ocost.toFixed(2)}" style="border:1.5px solid var(--light);border-radius:10px;margin-bottom:.5rem;overflow:hidden;background:var(--white);">
+        <div onclick="_toggleFareItem(this)" style="display:flex;align-items:center;gap:.6rem;padding:.6rem .75rem;cursor:pointer;">
+          <span title="Outside ride" style="width:9px;height:9px;border-radius:50%;border:1.5px solid var(--light);background:transparent;flex-shrink:0;"></span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:600;font-size:.9rem;color:var(--black);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(r.client||'Outside ride')}</div>
+            <div style="font-size:.72rem;color:var(--mid);">${fmtDateShort(r.date)} · <span style="font-style:italic;">outside</span>${omiles>0?' · '+omiles+' mi':''}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0;">
+            <div style="font-size:.58rem;color:var(--mid);text-transform:uppercase;letter-spacing:.5px;">Net</div>
+            <span class="row-net" style="font-weight:700;font-size:1rem;color:${onet>=0?'var(--green)':'#dc2626'};">$${onet.toFixed(2)}</span>
+          </div>
+          <span class="fare-chev" style="color:var(--mid);font-size:.8rem;flex-shrink:0;transition:transform .15s;">&#9656;</span>
+        </div>
+        <div class="fare-details" style="display:none;padding:.15rem .75rem .7rem;border-top:1px solid var(--light);">
+          <div style="display:flex;justify-content:space-between;padding:.4rem 0;font-size:.85rem;">
+            <span style="color:var(--mid);">Gross <span style="font-size:.7rem;">(outside fare)</span></span>
+            <span style="font-weight:700;color:var(--green);">$${ogross.toFixed(2)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:.3rem 0;font-size:.82rem;">
+            <span style="color:var(--mid);">Miles</span><span>${omiles>0?omiles+' mi':'—'}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:.3rem 0;font-size:.82rem;color:#dc2626;">
+            <span>Vehicle cost <span style="font-size:.7rem;">(gas + maint)</span></span><span>−$${ocost.toFixed(2)}</span>
+          </div>
+          ${r.notes?`<div style="display:flex;justify-content:space-between;padding:.3rem 0;font-size:.82rem;gap:1rem;"><span style="color:var(--mid);">Notes</span><span style="text-align:right;">${escHtml(r.notes)}</span></div>`:''}
+          <div style="display:flex;justify-content:space-between;padding:.45rem 0 0;margin-top:.3rem;border-top:1.5px solid var(--light);font-size:.9rem;">
+            <span style="font-weight:700;">Net</span><span class="row-net" style="font-weight:700;color:${onet>=0?'var(--green)':'#dc2626'};">$${onet.toFixed(2)}</span>
+          </div>
+          <div style="font-size:.72rem;color:var(--mid);padding:.4rem 0 .15rem;line-height:1.4;">Outside ride — cash income with no 15% fee. Gas &amp; maintenance are deducted from the miles.</div>
+          <div style="display:flex;justify-content:flex-end;">
+            <button onclick="event.stopPropagation();deleteOutsideRide('${oid}')" style="padding:.35rem .7rem;border:1.5px solid #dc2626;background:#fff;color:#dc2626;border-radius:7px;font-family:inherit;font-size:.75rem;font-weight:700;cursor:pointer;">&#128465; Delete outside ride</button>
+          </div>
+        </div>
+      </div>`;
+    }
     const tip   = parseFloat(r.tip||0);
     // Cost is based on the miles the driver actually drove (drivenMiles) when
     // they've logged them; otherwise fall back to the quoted trip miles.
