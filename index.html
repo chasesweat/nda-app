@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090416">
+<meta name="version" content="202606090420">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -455,6 +455,9 @@ input,select,textarea{font-size:16px;}
   <div onclick="closeMenu(); promptInstall();" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">📲 Install app</div>
   <div onclick="closeMenu(); openMergeRequestModal();" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🔗 Request Profile Merge</div>
   <div onclick="closeMenu();logout();" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;display:flex;align-items:center;gap:.75rem;">↩ Sign out</div>
+  <div style="padding:.85rem 1.1rem;font-size:.72rem;color:#8b7bb8;border-top:1px solid #2d1460;display:flex;align-items:center;justify-content:space-between;">
+    <span>Northwest Drivers App</span><span id="menu-build-tag" style="font-weight:700;color:#c4b5fd;">v—</span>
+  </div>
 </div>
 
 <div id="loading-screen" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#ffffff;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0;margin:0;">
@@ -7158,7 +7161,7 @@ function openLogMiles(rideId){
     +'<div style="font-size:.75rem;color:#64748b;margin-top:2px;">'+escHtml(r.client||'')+'</div></div>'
     +'<button onclick="_closeLogMiles()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button>'
     +'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin-bottom:.75rem;">'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin-bottom:.75rem;align-items:end;">'
     +'<div><label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">MILES DRIVEN</label>'
     +'<div style="font-size:.66rem;color:#94a3b8;margin-bottom:4px;">Total from Waze / Apple / Google Maps</div>'
     +'<input id="lm-miles" type="number" min="0" step="0.1" value="'+(r.drivenMiles||r.miles||'')+'" placeholder="e.g. 41" '
@@ -7213,6 +7216,10 @@ async function _saveLogMiles(rideId){
   _closeLogMiles();
   // Refresh the mileage bar in the open ride modal
   var w=document.getElementById('mt-wrap'); if(w)w.innerHTML=mtBarHtml(rideId);
+  // Reflect the freshly logged miles/tip everywhere right away — otherwise the income
+  // sheet keeps showing the old (quoted) miles until you navigate away and back.
+  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+  try{ if(typeof renderIncome==='function' && document.getElementById('page-income') && document.getElementById('page-income').classList.contains('active')) renderIncome(); }catch(e){}
   showToast('\uD83D\uDCCD '+mi+' mi saved'+(tip?' + $'+tip+' tip':''));
   if(_doPayNext && typeof openPaymentModal==='function'){ setTimeout(function(){ try{ openPaymentModal(rideId); }catch(e){} }, 180); }
 }
@@ -13764,7 +13771,9 @@ function getMyOutsideRidesAsRides(){
   return getMyOutsideRides().map(o=>({
     id:o.id, date:o.date, time:o.time||'', client:o.client||'Outside ride',
     type:o.type||'OUTSIDE', price:o.price, miles:o.miles||0, driver:dName, notes:o.notes||'',
-    _outside:true,
+    // Outside rides are logged AFTER they happen, so they're already earned — mark them
+    // completed so they count in the income sheet immediately, even when dated today.
+    status:'completed', _outside:true,
   }));
 }
 
@@ -14258,8 +14267,18 @@ function renderIncome(){
   const totalGasCost   = personalView ? totalMiles * gasCpm   : 0;
   const totalMaintCost = personalView ? totalMiles * maintCpm : 0;
   const totalVehicleCost = totalGasCost + totalMaintCost;
+  // 15% finder fees the driver owes on OTHER people's clients — computed the same way as the
+  // My Fares table, so every "Net Take-Home" on this page agrees.
+  let totalFinderFees = 0;
+  if(personalView && dName){
+    myDrivenRides.forEach(r=>{
+      const fare = parseFloat(r.price||0);
+      const owner = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
+      if(owner && owner!==dName) totalFinderFees += fare*clientFeeRate();
+    });
+  }
   const netAfterVehicle  = totalEarnings - totalVehicleCost;
-  const netTakeHome    = totalEarnings + totalTips - totalVehicleCost - proratedExp;
+  const netTakeHome    = totalEarnings + totalTips - totalVehicleCost - totalFinderFees - proratedExp;
 
   // Summary cards — show gas & maintenance prominently so they're never hidden below the fold
   // Consistent green for money made; costs shown as positive RED and labeled "… Cost".
@@ -14269,6 +14288,7 @@ function renderIncome(){
     ...(totalTips>0?[{label:'Tips',val:`$${totalTips.toFixed(2)}`,color:GREEN}]:[]),
     ...(personalView&&totalGasCost>0?[{label:`Gas Cost (${gasCpm.toFixed(3)}/mi)`,val:`$${totalGasCost.toFixed(2)}`,color:REDCOST}]:[]),
     ...(personalView&&totalMaintCost>0?[{label:`Maintenance Cost ($${maintCpm.toFixed(2)}/mi)`,val:`$${totalMaintCost.toFixed(2)}`,color:REDCOST}]:[]),
+    ...(personalView&&totalFinderFees>0?[{label:'Finder Fees (15%)',val:`$${totalFinderFees.toFixed(2)}`,color:REDCOST}]:[]),
     {label:'Rides',        val:rideCount,                       color:GREEN},
     {label:'Avg per Ride', val:`$${avgPerRide.toFixed(2)}`,     color:GREEN},
     {label:'Miles Driven', val:`${cardMiles.toFixed(1)} mi`,   color:GREEN},
@@ -14276,7 +14296,7 @@ function renderIncome(){
   if(personalView && monthlyExp > 0){
     cards.push({label:`Expenses Cost (${incomeTab==='weekly'?'~week':incomeTab==='monthly'?'month':'period'})`, val:`$${proratedExp.toFixed(2)}`, color:REDCOST});
   }
-  if(personalView && (totalVehicleCost > 0 || monthlyExp > 0)){
+  if(personalView && (totalVehicleCost > 0 || monthlyExp > 0 || totalFinderFees > 0)){
     cards.push({label:'Net Take-Home', val: netTakeHome>=0?`$${netTakeHome.toFixed(2)}`:`−$${Math.abs(netTakeHome).toFixed(2)}`, color: netTakeHome>=0?GREEN:REDCOST, highlight:true});
   }
 
@@ -14296,6 +14316,48 @@ function renderIncome(){
   if(ffBox){ ffBox.innerHTML=''; if(personalView && dName) renderFinderFees(dName, start, end); }
   if(!filtered.length){
     document.getElementById('income-ride-list').innerHTML='<p style="color:var(--mid);text-align:center;padding:2rem;">No rides in this period.</p>';
+    return;
+  }
+
+  if(personalView){
+    // "My Fares" above already lists every ride, so don't repeat the ride rows here — show
+    // only the bottom-line tally. This is the ONE authoritative Net Take-Home for the period,
+    // and it agrees with the summary card: gross + tips − vehicle − finder fees − expenses.
+    const _tl=(lbl,val,neg)=>`<tr><td style="padding:.5rem .75rem;color:${neg?'#dc2626':'var(--black)'};">${lbl}</td><td style="padding:.5rem .75rem;text-align:right;font-weight:600;color:${neg?'#dc2626':'var(--black)'};">${neg?'−':''}$${Math.abs(val).toFixed(2)}</td></tr>`;
+    const _expRows = (proratedExp>0?expenseItems:[]).map(e=>`<tr><td style="padding:.2rem .75rem .2rem 1.6rem;font-size:.78rem;color:#dc2626;">&#8627; ${escHtml(e.label||'Expense')}</td><td style="padding:.2rem .75rem;text-align:right;font-size:.78rem;color:#dc2626;">−$${(e.amount*(proratedExp/monthlyExp||1)).toFixed(2)}</td></tr>`).join('');
+    document.getElementById('income-ride-list').innerHTML=`
+      <div style="background:var(--white);border:1.5px solid var(--light);border-radius:12px;padding:1rem;">
+        <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">Bottom line${label?' · '+label:''}</div>
+        <table style="width:100%;border-collapse:collapse;font-size:.9rem;">
+          <tbody>
+            ${_tl('Gross fares',totalEarnings,false)}
+            ${totalTips>0?_tl('Tips',totalTips,false):''}
+            ${totalVehicleCost>0?_tl('Vehicle cost (gas + maintenance)',totalVehicleCost,true):''}
+            ${totalFinderFees>0?_tl('Finder fees (15%)',totalFinderFees,true):''}
+            ${proratedExp>0?_tl('Monthly expenses (pro-rated)',proratedExp,true):''}
+            ${_expRows}
+          </tbody>
+          <tfoot>
+            <tr style="border-top:2px solid var(--green);background:#f0fdf4;">
+              <td style="padding:.7rem .75rem;font-weight:700;color:var(--green);">NET TAKE-HOME</td>
+              <td style="padding:.7rem .75rem;text-align:right;font-weight:800;font-size:1.15rem;color:${netTakeHome>=0?'var(--green)':'#dc2626'};">${netTakeHome>=0?'$'+netTakeHome.toFixed(2):'−$'+Math.abs(netTakeHome).toFixed(2)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      ${getMyOutsideRides().length ? `
+        <div style="margin-top:1rem;background:var(--surface);border:1.5px solid var(--light);border-radius:12px;padding:1rem;">
+          <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">Your outside rides</div>
+          ${getMyOutsideRides().map(o=>`
+            <div style="display:flex;align-items:center;gap:.6rem;padding:.45rem 0;border-bottom:1px solid var(--light);">
+              <div style="flex:1;">
+                <div style="font-weight:600;font-size:.85rem;color:var(--black);">${(o.client||'Outside ride').replace(/</g,'&lt;')}</div>
+                <div style="font-size:.72rem;color:var(--mid);">${fmtDateShort(o.date)}${o.time?' · '+o.time:''}${o.miles?' · '+o.miles+' mi':''}${o.notes?' · '+(o.notes||'').replace(/</g,'&lt;'):''}</div>
+              </div>
+              <div style="font-weight:700;color:var(--green);font-size:.85rem;">$${parseFloat(o.price||0).toFixed(2)}</div>
+              <button onclick="deleteOutsideRide('${o.id}')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1rem;padding:.2rem;" title="Delete">&#128465;</button>
+            </div>`).join('')}
+        </div>` : ''}`;
     return;
   }
 
@@ -14421,56 +14483,59 @@ function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm,
     totFares+=fare; totTips+=tip; totCost+=cost; totGross+=gross; totNet+=net;
     const bg   = i%2===0?'var(--white)':'var(--surface)';
     const rc   = rideColor(r);
-    const badge= r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP'?'badge-ap':r.type==='ROUND TRIP'?'badge-rt':'badge-pt';
-    return `<tr style="background:${bg};border-bottom:.5px solid var(--light);" data-row-id="${r.id}" data-fare="${fare.toFixed(2)}" data-cost="${cost.toFixed(2)}">
-      <td style="padding:.5rem .6rem;">
-        <div style="font-size:.7rem;color:var(--mid);">${fmtDateShort(r.date)}</div>
-        <div style="font-weight:600;font-size:.85rem;color:var(--black);display:flex;align-items:center;gap:.3rem;">
-          <span style="width:7px;height:7px;border-radius:50%;background:${rc};flex-shrink:0;display:inline-block;"></span>${escHtml(r.client||'—')}
+    const typeLabel = r.type==='AP RUN'?'AP Run':r.type==='AP PICK UP'?'AP Pick Up':r.type==='AP ROUND TRIP'?'AP Round Trip':r.type==='ROUND TRIP'?'Round Trip':r.type==='ONE WAY'?'One Way':r.type;
+    return `<div class="fare-item" data-row-id="${r.id}" data-fare="${fare.toFixed(2)}" data-cost="${cost.toFixed(2)}" style="border:1.5px solid var(--light);border-radius:10px;margin-bottom:.5rem;overflow:hidden;background:var(--white);">
+      <div onclick="_toggleFareItem(this)" style="display:flex;align-items:center;gap:.6rem;padding:.6rem .75rem;cursor:pointer;">
+        <span style="width:9px;height:9px;border-radius:50%;background:${rc};flex-shrink:0;"></span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:600;font-size:.9rem;color:var(--black);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(r.client||'—')}</div>
+          <div style="font-size:.72rem;color:var(--mid);">${fmtDateShort(r.date)} · ${typeLabel}</div>
         </div>
-        <span class="badge ${badge}" style="font-size:.58rem;">${r.type==='AP RUN'?'RUN':r.type==='AP PICK UP'?'PU':r.type==='AP ROUND TRIP'?'RT':r.type==='ROUND TRIP'?'RT':r.type==='ONE WAY'?'OW':r.type.split(' ')[0]}</span>
-      </td>
-      <td style="padding:.5rem .6rem;text-align:right;vertical-align:top;">
-        <div class="row-gross" style="font-weight:700;font-size:.9rem;color:var(--green);">$${gross.toFixed(2)}</div>
-        <div style="font-size:.68rem;color:var(--mid);">fare $${fare.toFixed(2)}</div>
-        <div style="display:flex;align-items:center;justify-content:flex-end;gap:.2rem;margin-top:3px;">
-          <span style="font-size:.65rem;color:var(--mid);">+tip $</span>
-          <input type="number" min="0" step="0.01" value="${tip||''}" placeholder="0"
-            class="income-tip-input" data-ride-id="${r.id}"
-            oninput="updateFareTipTotal(this)"
-            onblur="persistRideTip(${r.id},this.value)"
-            style="width:55px;padding:.2rem .3rem;border:1.5px solid var(--light);border-radius:5px;font-family:'DM Sans',sans-serif;font-size:.78rem;text-align:right;" />
+        <div style="text-align:right;flex-shrink:0;">
+          <div style="font-size:.58rem;color:var(--mid);text-transform:uppercase;letter-spacing:.5px;">Net</div>
+          <span class="row-net" style="font-weight:700;font-size:1rem;color:${net>=0?'var(--green)':'#dc2626'};">$${net.toFixed(2)}</span>
         </div>
-      </td>
-      <td style="padding:.5rem .6rem;text-align:right;vertical-align:top;">
-        <div style="font-weight:700;color:#dc2626;font-size:.9rem;">${cost>0?'$'+cost.toFixed(2):'—'}</div>
-      </td>
-      <td style="padding:.5rem .6rem;text-align:right;vertical-align:top;">
-        <span class="row-net" style="font-weight:700;font-size:.95rem;color:${net>=0?'var(--green)':'#dc2626'};">$${net.toFixed(2)}</span>
-      </td>
-    </tr>`;
+        <span class="fare-chev" style="color:var(--mid);font-size:.8rem;flex-shrink:0;transition:transform .15s;">&#9656;</span>
+      </div>
+      <div class="fare-details" style="display:none;padding:.15rem .75rem .7rem;border-top:1px solid var(--light);">
+        <div style="display:flex;justify-content:space-between;padding:.4rem 0;font-size:.85rem;">
+          <span style="color:var(--mid);">Gross <span style="font-size:.7rem;">(fare + tip)</span></span>
+          <span class="row-gross" style="font-weight:700;color:var(--green);">$${gross.toFixed(2)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;font-size:.82rem;">
+          <span style="color:var(--mid);">Fare</span><span>$${fare.toFixed(2)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;font-size:.82rem;">
+          <span style="color:var(--mid);">Tip</span>
+          <span style="display:flex;align-items:center;gap:.15rem;">$<input type="number" min="0" step="0.01" value="${tip||''}" placeholder="0" class="income-tip-input" data-ride-id="${r.id}" oninput="updateFareTipTotal(this)" onblur="persistRideTip(${r.id},this.value)" onclick="event.stopPropagation()" style="width:64px;padding:.2rem .3rem;border:1.5px solid var(--light);border-radius:5px;font-family:'DM Sans',sans-serif;font-size:.82rem;text-align:right;" /></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;font-size:.82rem;">
+          <span style="color:var(--mid);">Miles driven</span>
+          <span style="display:flex;align-items:center;gap:.5rem;">${miles>0?miles+' mi':'<em style="color:var(--mid);">not logged</em>'}<button onclick="event.stopPropagation();openLogMiles(${r.id})" style="padding:.25rem .6rem;border:1.5px solid #7c3aed;background:#fff;color:#7c3aed;border-radius:7px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">&#128205; ${miles>0?'Edit':'Log'}</button></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:.3rem 0;font-size:.82rem;color:#dc2626;">
+          <span>Vehicle cost <span style="font-size:.7rem;">(gas + maint)</span></span><span>−$${(gas+maint).toFixed(2)}</span>
+        </div>
+        ${fee>0?`<div style="display:flex;justify-content:space-between;padding:.3rem 0;font-size:.82rem;color:#dc2626;"><span>Finder fee (15%)</span><span>−$${fee.toFixed(2)}</span></div>`:''}
+        <div style="display:flex;justify-content:space-between;padding:.45rem 0 0;margin-top:.3rem;border-top:1.5px solid var(--light);font-size:.9rem;">
+          <span style="font-weight:700;">Net</span><span class="row-net" style="font-weight:700;color:${net>=0?'var(--green)':'#dc2626'};">$${net.toFixed(2)}</span>
+        </div>
+      </div>
+    </div>`;
   }).join('');
 
   box.innerHTML='<div style="background:var(--white);border:1.5px solid var(--light);border-radius:12px;padding:1rem;margin-bottom:1.25rem;">'
-    +'<div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">My fares \u2014 rides I drove</div>'
-    +'<div style="overflow-x:auto;">'
-    +'<table style="width:100%;border-collapse:collapse;">'
-    +'<thead><tr style="background:var(--black);">'
-    +'<th style="padding:.45rem .6rem;text-align:left;font-size:.65rem;letter-spacing:1px;text-transform:uppercase;color:var(--gold);">Ride</th>'
-    +'<th style="padding:.45rem .6rem;text-align:right;font-size:.65rem;letter-spacing:1px;text-transform:uppercase;color:#4ade80;">Gross</th>'
-    +'<th style="padding:.45rem .6rem;text-align:right;font-size:.65rem;letter-spacing:1px;text-transform:uppercase;color:#f87171;">\u2212 Cost</th>'
-    +'<th style="padding:.45rem .6rem;text-align:right;font-size:.65rem;letter-spacing:1px;text-transform:uppercase;color:#4ade80;">Net</th>'
-    +'</tr></thead>'
-    +'<tbody>'+rows+'</tbody>'
-    +'<tfoot>'
-    +'<tr style="background:var(--black);">'
-    +'<td style="padding:.55rem .6rem;font-size:.75rem;font-weight:700;color:var(--gold);">TOTALS \u00b7 '+myRides.length+' ride'+(myRides.length!==1?'s':'')+'</td>'
-    +'<td style="padding:.55rem .6rem;text-align:right;font-weight:700;font-size:.92rem;color:#4ade80;" id="income-myfares-fares-total" data-val="'+totGross.toFixed(2)+'">$'+totGross.toFixed(2)+'</td>'
-    +'<td style="padding:.55rem .6rem;text-align:right;font-weight:700;font-size:.92rem;color:#f87171;">$'+totCost.toFixed(2)+'</td>'
-    +'<td style="padding:.55rem .6rem;text-align:right;font-weight:700;font-size:.92rem;color:'+(totNet>=0?'#4ade80':'#f87171')+';" id="income-myfares-grand-total">$'+totNet.toFixed(2)+'</td>'
-    +'</tr>'
-    +'</tfoot>'
-    +'</table>'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem;">'
+    +'<div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);">My fares \u2014 rides I drove</div>'
+    +'<div style="font-size:.66rem;color:var(--mid);">tap a ride for details</div>'
+    +'</div>'
+    +rows
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.6rem;background:var(--black);border-radius:10px;padding:.6rem .8rem;margin-top:.4rem;">'
+    +'<span style="font-size:.72rem;font-weight:700;color:var(--gold);text-transform:uppercase;letter-spacing:.5px;">Totals \u00b7 '+myRides.length+' ride'+(myRides.length!==1?'s':'')+'</span>'
+    +'<span style="text-align:right;">'
+    +'<span style="display:inline-block;margin-right:1rem;"><span style="font-size:.58rem;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;display:block;">Gross</span><span id="income-myfares-fares-total" data-val="'+totGross.toFixed(2)+'" style="font-weight:700;font-size:.92rem;color:#4ade80;">$'+totGross.toFixed(2)+'</span></span>'
+    +'<span style="display:inline-block;"><span style="font-size:.58rem;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;display:block;">Net</span><span id="income-myfares-grand-total" style="font-weight:700;font-size:.92rem;color:'+(totNet>=0?'#4ade80':'#f87171')+';">$'+totNet.toFixed(2)+'</span></span>'
+    +'</span>'
     +'</div>'
     +(totFares!==totGross?'<div style="font-size:.7rem;color:var(--mid);margin-top:.5rem;">* Client Fee applies to fare &amp; surcharges only — not to tips.</div>':'')
     +'</div>';
@@ -14479,27 +14544,40 @@ function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm,
 // Live-update the gross and net for a row when the driver types a tip, and refresh totals
 function updateFareTipTotal(changedInput){
   if(changedInput){
-    const tr=changedInput.closest('tr[data-row-id]');
-    if(tr){
+    const item=changedInput.closest('[data-row-id]');
+    if(item){
       const tip=parseFloat(changedInput.value)||0;
-      const fare=parseFloat(tr.dataset.fare)||0;
-      const cost=parseFloat(tr.dataset.cost)||0;
+      const fare=parseFloat(item.dataset.fare)||0;
+      const cost=parseFloat(item.dataset.cost)||0;
       const gross=fare+tip; const net=gross-cost;
-      const gEl=tr.querySelector('.row-gross'); if(gEl) gEl.textContent='$'+gross.toFixed(2);
-      const nEl=tr.querySelector('.row-net'); if(nEl){ nEl.textContent='$'+net.toFixed(2); nEl.style.color=net>=0?'var(--green)':'#dc2626'; }
+      item.querySelectorAll('.row-gross').forEach(el=>{ el.textContent='$'+gross.toFixed(2); });
+      item.querySelectorAll('.row-net').forEach(el=>{ el.textContent='$'+net.toFixed(2); el.style.color=net>=0?'var(--green)':'#dc2626'; });
     }
   }
   let totGross=0, totNet=0;
-  document.querySelectorAll('tr[data-row-id]').forEach(tr=>{
-    const fare=parseFloat(tr.dataset.fare)||0;
-    const cost=parseFloat(tr.dataset.cost)||0;
-    const tip=(tr.querySelector('.income-tip-input')?parseFloat(tr.querySelector('.income-tip-input').value)||0:0);
+  document.querySelectorAll('#income-my-fares [data-row-id]').forEach(item=>{
+    const fare=parseFloat(item.dataset.fare)||0;
+    const cost=parseFloat(item.dataset.cost)||0;
+    const ti=item.querySelector('.income-tip-input');
+    const tip=ti?parseFloat(ti.value)||0:0;
     totGross+=fare+tip; totNet+=fare+tip-cost;
   });
   const fEl=document.getElementById('income-myfares-fares-total');
   if(fEl){ fEl.textContent='$'+totGross.toFixed(2); fEl.dataset.val=totGross.toFixed(2); }
   const gEl=document.getElementById('income-myfares-grand-total');
   if(gEl){ gEl.textContent='$'+totNet.toFixed(2); gEl.style.color=totNet>=0?'#4ade80':'#f87171'; }
+}
+
+// Expand / collapse a My Fares ride card
+function _toggleFareItem(hdr){
+  try{
+    const item=hdr.closest('.fare-item'); if(!item) return;
+    const d=item.querySelector('.fare-details'); const chev=item.querySelector('.fare-chev');
+    if(!d) return;
+    const open=d.style.display!=='none';
+    d.style.display=open?'none':'block';
+    if(chev) chev.style.transform=open?'rotate(0deg)':'rotate(90deg)';
+  }catch(e){}
 }
 
 // Persist a tip to the ride record in Firebase
@@ -16965,6 +17043,7 @@ function showAuthScreen(){
 // Admin can grant/revoke subscriptions from the access control panel
 
 function enterApp(){
+  try{ var _bt=document.getElementById('menu-build-tag'); if(_bt){ var _v=(typeof _appBuildTag==='function'?_appBuildTag():'')||''; _bt.textContent=_v?('v'+_v.slice(-3)):'v?'; } }catch(e){}
   setTimeout(function(){ try{ _runAccessGate(0); }catch(e){} }, 800); // subscription/trial gate
   // The notification panel lives inside the sticky header, whose z-index creates a
   // stacking context that trapped the panel BELOW page content (open but invisible).
