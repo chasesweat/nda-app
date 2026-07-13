@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090422">
+<meta name="version" content="202606090423">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1965,6 +1965,17 @@ function setupRealtimeListeners(){
   // Listen for comment changes
   fbRef('nda/kat/comments').on('value', snap=>{
     if(snap.exists()) comments = snap.val()||{};
+  });
+  // Listen for finder-fee payment changes so marking paid / undo shows up live on the
+  // OTHER person's dashboard (e.g. an undo reappears as "owed" on the owner's page).
+  fbRef('nda/kat/feePayments').on('value', snap=>{
+    if(snap.exists()){
+      feePayments = snap.val()||{};
+      if(document.getElementById('app') && document.getElementById('app').style.display!=='none'){
+        try{ refreshDash(); }catch(e){}
+        try{ if(document.getElementById('page-income') && document.getElementById('page-income').classList.contains('active')) renderIncome(); }catch(e){}
+      }
+    }
   });
   // Listen for notification changes
   fbRef('nda/kat/notifications').on('value', snap=>{
@@ -5096,6 +5107,10 @@ function buildConfirmationText(r){
   return { message, instructions };
 }
 
+// A driver's chosen display name (e.g. "Kat" for Kathleen Herringdine) if they've set
+// one, otherwise their full name. Lets drivers control the name clients see in texts.
+function driverDisplayName(n){ return (n && DRIVER_PROFILES[n] && DRIVER_PROFILES[n].displayName) ? DRIVER_PROFILES[n].displayName : (n||''); }
+
 // Fill {placeholders} in a custom confirmation/instructions template
 function fillConfTemplate(tpl, r, sender, assigned){
   const map = {
@@ -5104,8 +5119,8 @@ function fillConfTemplate(tpl, r, sender, assigned){
     time:    fmtTime12(r.time),
     pickup:  r.pickup||'',
     dropoff: r.home||'',
-    driver:  assigned||'',
-    me:      (sender||'').split(' ')[0]||'',
+    driver:  driverDisplayName(assigned),
+    me:      (DRIVER_PROFILES[sender]&&DRIVER_PROFILES[sender].displayName) || (sender||'').split(' ')[0] || '',
     vehicle: r.vehicle||'',
     amount:  (r.price!==undefined && r.price!==null && r.price!=='') ? '$'+r.price : '',
     flight:  r.flight||'',
@@ -5272,14 +5287,15 @@ function confirmationRecipients(r){
 function buildDriverVCard(driverName){
   const prof = DRIVER_PROFILES[driverName] || {};
   const phone = (prof.phone||'').replace(/[^0-9+]/g,'');
-  const parts = (driverName||'').trim().split(' ');
+  const _dn = driverDisplayName(driverName);
+  const parts = (_dn||'').trim().split(' ');
   const first = parts[0]||'';
   const last  = parts.slice(1).join(' ')||'';
   const vehicle = [prof.vehicleYear, prof.vehicle].filter(Boolean).join(' ');
   const lines = [
     'BEGIN:VCARD',
     'VERSION:3.0',
-    'FN:'+driverName,
+    'FN:'+_dn,
     'N:'+last+';'+first+';;;',
     phone   ? 'TEL;TYPE=CELL:'+phone             : null,
     'ORG:NWDA Transportation',
@@ -13149,6 +13165,11 @@ function buildMemberCard(d, opts){
       <!-- body -->
       <div class="member-card-body">
         <div class="member-card-field"><span class="member-card-lbl">Phone</span><span class="member-card-val">${prof.phone||'—'}</span></div>
+        ${canEdit?`<div style="margin-bottom:.45rem;">
+          <div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Display name</div>
+          <input class="prof-fld" type="text" id="prof-displayname-${dk}" value="${escAttr(prof.displayName||'')}" placeholder="${escAttr((d||'').split(' ')[0])} \u2014 or a nickname" />
+          <div style="font-size:.66rem;color:var(--mid);margin-top:3px;line-height:1.4;">The name clients see in your confirmation texts and contact card \u2014 e.g. if you go by a nickname (Kathleen &rarr; Kat) or your name changed. Leave blank to use your full name.</div>
+        </div>`:(prof.displayName?`<div class="member-card-field"><span class="member-card-lbl">Goes by</span><span class="member-card-val">${escHtml(prof.displayName)}</span></div>`:'')}
         ${editField('Email',prof.email,'prof-email','email@example.com')}
         ${editField('Vehicle Year',prof.vehicleYear,'prof-vehicleyear','e.g. 2022')}
         ${editField('Vehicle Make/Model',prof.vehicle,'prof-vehicle','e.g. Toyota Camry')}
@@ -13332,6 +13353,7 @@ async function saveDriverProfile(driverName){
     vehicleYear: getVal('prof-vehicleyear'),
     vehicle:     getVal('prof-vehicle'),
     notes:       getVal('prof-notes'),
+    displayName: (document.getElementById('prof-displayname-'+dk)?.value||'').trim(),
     gasPrice:    parseFloat(document.getElementById('prof-gasprice-'+dk)?.value)||DRIVER_PROFILES[driverName]?.gasPrice||0,
     mpg:         parseFloat(document.getElementById('prof-mpg-'+dk)?.value)||DRIVER_PROFILES[driverName]?.mpg||0,
     maintRate:   parseFloat(document.getElementById('prof-maintrate-'+dk)?.value)||DRIVER_PROFILES[driverName]?.maintRate||0,
