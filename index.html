@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090423">
+<meta name="version" content="202606090426">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -5802,14 +5802,31 @@ function buildRideLifecycle(r){
         <span style="color:var(--mid);font-size:.84rem;">Client pays full fare</span>
         <span style="font-weight:700;color:var(--green);">$${fare.toFixed(2)}</span></div>`;
   } else {
-    // Client pays the driver the full fare; the driver handles the 15% 15% Client Fee
+    // Client pays the driver the full fare; the driver handles the 15% Client Fee.
     const fee = fare*clientFeeRate();
+    const _fk = owner+':recv:'+driver;
+    const _fp = (typeof feePayments!=='undefined' && feePayments[_fk]) || {};
+    const _settled = (typeof feeSettledForRide==='function') ? feeSettledForRide(_fp, r) : false;
+    const _pending = (typeof _feeRidePending==='function') ? _feeRidePending(_fp, r.id) : false;
+    const _canFee = (typeof isAdmin==='function' && isAdmin()) || (typeof getMyDriverName==='function' && getMyDriverName()===driver);
+    const _oA=String(owner).replace(/'/g,"\\'"), _dA=String(driver).replace(/'/g,"\\'"), _idA=_feeIdArg(r.id);
+    const _chip = _settled
+      ? '<span style="font-size:.7rem;font-weight:700;color:var(--green);margin-left:.4rem;">\u2713 Paid</span>'
+      : (_pending ? '<span style="font-size:.7rem;font-weight:700;color:#b45309;margin-left:.4rem;">\u23F3 Sent</span>'
+                  : '<span style="font-size:.7rem;font-weight:700;color:var(--gold);margin-left:.4rem;">Owed</span>');
+    let _feeAction = '';
+    if(_canFee){
+      _feeAction = (_settled || _pending)
+        ? '<button onclick="_feeUndoFromRide(\''+_oA+'\',\''+_dA+'\','+_idA+')" style="margin-top:.55rem;width:100%;padding:.5rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;font-weight:600;cursor:pointer;">\u21a9 Reset this fee (mark unpaid)</button>'
+        : '<button onclick="_feeMarkPaidFromRide(\''+_oA+'\',\''+_dA+'\','+_idA+')" style="margin-top:.55rem;width:100%;padding:.5rem;background:#16a34a;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;font-weight:700;cursor:pointer;">\u2713 Mark 15% fee paid</button>';
+    }
     payHtml = `<div style="display:flex;justify-content:space-between;padding:.3rem 0;">
         <span style="color:var(--mid);font-size:.84rem;">Client pays full fare</span>
         <span style="font-weight:600;color:var(--black);">$${fare.toFixed(2)}</span></div>
-      <div style="display:flex;justify-content:space-between;padding:.3rem 0;border-top:1px solid var(--light);">
-        <span style="color:var(--mid);font-size:.84rem;">${clientFeePct()}% Client Fee</span>
-        <span style="font-weight:700;color:var(--gold);">$${fee.toFixed(2)}</span></div>`;
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;border-top:1px solid var(--light);">
+        <span style="color:var(--mid);font-size:.84rem;">${clientFeePct()}% Client Fee${_chip}</span>
+        <span style="font-weight:700;color:var(--gold);">$${fee.toFixed(2)}</span></div>
+      ${_feeAction}`;
   }
 
   return `<div class="detail-row" style="grid-column:1/-1;">
@@ -11417,6 +11434,15 @@ async function _feeUndoRide(owner, driver, rideId){
   await saveFeePayments(); try{ renderDashFees(); }catch(e){}
   showToast('\u21a9 Undone \u2014 that fee is owed again');
 }
+// Reset / mark the 15% fee from the OPEN ride card, then refresh the card so its status updates.
+async function _feeUndoFromRide(owner, driver, rideId){
+  try{ await _feeUndoRide(owner, driver, rideId); }catch(e){}
+  try{ if(typeof openRideModal==='function' && activeRideId!=null) openRideModal(activeRideId); }catch(e){}
+}
+async function _feeMarkPaidFromRide(owner, driver, rideId){
+  try{ await markFeeRidePaid(owner, driver, rideId); }catch(e){}
+  try{ if(typeof openRideModal==='function' && activeRideId!=null) openRideModal(activeRideId); }catch(e){}
+}
 // Venmo "pay" only marks the fee as SENT (pending). It stays on the card until the
 // recipient taps \u2713 Received, so nothing disappears before the other side confirms.
 async function venmoAutoMarkRide(owner, payer, rideId){
@@ -11731,21 +11757,22 @@ function renderDashFees(){
     });
     html+='</div>';
   }
-  // Recently marked paid (last 2 days, as payer) — recover an accidental/pending mark.
+  // Today's rides that were marked paid (as payer) — a same-day quick undo. An item drops
+  // off at midnight of the RIDE'S day; to undo an older one, use the ride card's "Reset this fee".
   try{
     var _recent=[];
     Object.keys(feePayments||{}).forEach(function(k){
       var m=k.match(/^(.*):recv:(.*)$/); if(!m) return;
       var _own=m[1], _pyr=m[2]; if(_pyr!==dName) return;
       var fp=feePayments[k];
-      if(!(fp.paidAt && (Date.now()-new Date(fp.paidAt).getTime()) < 2*864e5)) return;
       (fp.paidRides||[]).forEach(function(rid){
         var rr=(rides||[]).find(function(x){return x&&x.id===rid;}); if(!rr) return;
+        if(rr.date!==today) return;   // only rides dated today — clears at midnight of the ride day
         _recent.push({owner:_own, rid:rid, label:(rr.client||'Ride')+(rr.date?' \u00b7 '+rr.date.slice(5).replace('-','/'):'')});
       });
     });
     if(_recent.length){
-      html+='<div style="font-size:.72rem;font-weight:600;color:var(--mid);padding:.45rem .85rem;border-top:1px solid var(--light);border-bottom:1px solid var(--light);">Recently marked paid \u2014 tap to undo</div>';
+      html+='<div style="font-size:.72rem;font-weight:600;color:var(--mid);padding:.45rem .85rem;border-top:1px solid var(--light);border-bottom:1px solid var(--light);">Today\u2019s rides marked paid \u2014 tap to undo</div>';
       _recent.slice(-8).forEach(function(it){
         html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.35rem .85rem;border-bottom:1px solid var(--light);gap:.6rem;"><div style="font-size:.74rem;color:var(--mid);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+escHtml(it.label)+'</div><button onclick="_feeUndoRide(\''+escAttr(it.owner)+'\',\''+escAttr(dName)+'\','+_feeIdArg(it.rid)+')" style="flex-shrink:0;padding:.24rem .55rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.68rem;font-weight:600;cursor:pointer;">\u21a9 Undo</button></div>';
       });
@@ -11781,6 +11808,8 @@ function renderDashIncome(){
   const costPerMile = calcCostPerMile(dName);
   let vehicleCost = 0, feeCost = 0;
   monthRides.forEach(r=>{
+    // Outside rides are logged cash income — no tracked vehicle cost or finder fee (matches the Income page).
+    if(r._outside) return;
     const miles = parseFloat(r.drivenMiles||r.miles||0);
     vehicleCost += miles * costPerMile;
     // 15% owed only when driving someone else's client, and never when the
@@ -11790,7 +11819,9 @@ function renderDashIncome(){
     if(owner && owner!==dName) feeCost += fare*clientFeeRate();
   });
   const monthlyExp=getMonthlyExpenseTotal();
-  const tips=monthRides.reduce((_s,r)=>_s+parseFloat(r.tip||0),0); const net=gross + tips - vehicleCost - monthlyExp;
+  const tips=monthRides.reduce((_s,r)=>_s+parseFloat(r.tip||0),0);
+  // Net take-home mirrors the Income page: gross + tips − vehicle cost − 15% finder fees − monthly expenses.
+  const net=gross + tips - vehicleCost - feeCost - monthlyExp;
   const monthName=now.toLocaleDateString('en-US',{month:'long',year:'numeric'});
   const card=(label,val,color)=>`<div style="background:var(--surface);border-radius:10px;padding:.9rem;text-align:center;border:1.5px solid var(--light);">
       <div style="font-size:.66rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.3rem;">${label}</div>
@@ -14616,13 +14647,6 @@ function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm,
     +'<div style="font-size:.66rem;color:var(--mid);">tap a ride for details</div>'
     +'</div>'
     +rows
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.6rem;background:var(--black);border-radius:10px;padding:.6rem .8rem;margin-top:.4rem;">'
-    +'<span style="font-size:.72rem;font-weight:700;color:var(--gold);text-transform:uppercase;letter-spacing:.5px;">Totals \u00b7 '+myRides.length+' ride'+(myRides.length!==1?'s':'')+'</span>'
-    +'<span style="text-align:right;">'
-    +'<span style="display:inline-block;margin-right:1rem;"><span style="font-size:.58rem;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;display:block;">Gross</span><span id="income-myfares-fares-total" data-val="'+totGross.toFixed(2)+'" style="font-weight:700;font-size:.92rem;color:#4ade80;">$'+totGross.toFixed(2)+'</span></span>'
-    +'<span style="display:inline-block;"><span style="font-size:.58rem;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;display:block;">Net</span><span id="income-myfares-grand-total" style="font-weight:700;font-size:.92rem;color:'+(totNet>=0?'#4ade80':'#f87171')+';">$'+totNet.toFixed(2)+'</span></span>'
-    +'</span>'
-    +'</div>'
     +(totFares!==totGross?'<div style="font-size:.7rem;color:var(--mid);margin-top:.5rem;">* Client Fee applies to fare &amp; surcharges only — not to tips.</div>':'')
     +'</div>';
 }
@@ -14671,6 +14695,9 @@ async function persistRideTip(rideId,val){
   const r=rides.find(x=>x.id===rideId); if(!r) return;
   r.tip=parseFloat(val)||0;
   try{ await saveRides(); }catch(e){ console.warn('tip save failed',e); }
+  // Keep the Bottom Line (the single total) and dashboard in sync with the new tip.
+  try{ if(typeof renderIncome==='function' && document.getElementById('page-income') && document.getElementById('page-income').classList.contains('active')) renderIncome(); }catch(e){}
+  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
 }
 
 // ── 15% FEE PAYMENT TRACKING ──────────────────────────────────────────────
