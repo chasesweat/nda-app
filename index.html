@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090420">
+<meta name="version" content="202606090422">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2202,6 +2202,7 @@ async function _loadAppData() {
         }catch(e){ console.warn('photo overrides load', e); }
       })(),
     ]);
+    try{ await _migrateVenmoHandles(); }catch(e){ console.warn('venmo migration', e); }
     // Local (non-Firebase) session recovery is cheap — run it immediately. The six Firebase
     // loads that used to sit here (passwords, subscriptions, imported clients, client requests,
     // client-req driver, client unlock) are independent, so they now join the parallel batch below.
@@ -11801,6 +11802,32 @@ async function loadDriverExtras(){
   if(v) driverVenmo = v;
 }
 
+// ── ONE-TIME VENMO CLEANUP (build 421) ────────────────────────────────────
+// Venmo pay links are case-sensitive. Some saved handles were lowercase and split
+// the payment. This runs ONCE (guarded by a persisted flag): fix Kathleen's handle
+// to the exact case, keep Chase's and Morgan's (already correct), and clear everyone
+// else's so they re-enter it with the right capitalization (prompted by the field note).
+async function _migrateVenmoHandles(){
+  try{
+    var done = await storageGet('kat:venmoFix421');
+    if(done) return;                    // already applied — never touch handles again
+    if(!driverVenmo || typeof driverVenmo!=='object'){ driverVenmo = driverVenmo || {}; }
+    Object.keys(driverVenmo).forEach(function(k){
+      var lk = (k||'').toLowerCase();
+      if(lk.indexOf('herringdine')>=0 || lk.indexOf('kathleen')>=0){
+        driverVenmo[k] = 'Kathleen-Herringdine';          // exact case
+      } else if(lk.indexOf('chase')>=0 || lk.indexOf('sweat')>=0 ||
+                lk.indexOf('morgan')>=0 || lk.indexOf('newton')>=0){
+        /* keep Chase's and Morgan's exactly as-is */
+      } else {
+        driverVenmo[k] = '';                              // clear — must be re-entered
+      }
+    });
+    await storageSet('kat:driverVenmo', driverVenmo);
+    await storageSet('kat:venmoFix421', true);
+  }catch(e){ console.warn('venmo migration failed', e); }
+}
+
 // ── ADMIN-ADDED DRIVERS ──────────────────────────────────────────────────
 // Drivers added through the UI live in one persisted list and get merged into all
 // the in-memory tables at boot (DRIVERS, USERS, USER_DRIVER_MAP, profiles, photo, login).
@@ -13269,7 +13296,9 @@ function buildMemberCard(d, opts){
         ${venmo?('<button onclick="shareDriverVenmo(\''+d+'\')" style="width:100%;margin-top:.4rem;padding:.45rem;background:#3d95ce;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">↗ Share Venmo link</button>'):''}
         ${canEdit?('<div style="display:flex;gap:.4rem;align-items:center;margin-top:.5rem;">'
           +'<input type="text" id="venmo-'+dk+'" value="'+venmo+'" placeholder="@venmohandle" style="flex:1;padding:.35rem .65rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
+          +'<button type="button" onclick="_venmoTestField(\'venmo-'+dk+'\')" style="flex-shrink:0;padding:.35rem .65rem;background:none;border:1.5px solid #3d95ce;color:#3d95ce;border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;">Test \u2197</button>'
           +'</div>'
+          +'<div style="font-size:.68rem;color:var(--mid);margin-top:.3rem;line-height:1.45;">\u26A0\uFE0F Enter your Venmo username <b>exactly as it is spelled on your Venmo profile \u2014 uppercase letters and all</b>. Capitalization matters: <b>Kathleen-Herringdine</b> works, but <b>kathleen-herringdine</b> splits the payment. Tap <b>Test</b> to open Venmo and confirm it goes to <b>one</b> person before saving.</div>'
           +'<button onclick="saveDriverProfile(\''+d+'\')" style="width:100%;margin-top:.6rem;padding:.5rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:600;font-size:.82rem;cursor:pointer;">Save My Info</button>')
         :''}
       </div>
@@ -13316,7 +13345,15 @@ async function saveDriverProfile(driverName){
     logo:         DRIVER_PROFILES[driverName]?.logo||'',
   };
   const venmoEl=document.getElementById('venmo-'+dk);
-  if(venmoEl) driverVenmo[driverName]=venmoToHandle(venmoEl.value.trim());
+  if(venmoEl){
+    var _vchk=_venmoValidate(venmoEl.value);
+    if(_vchk.ok){
+      driverVenmo[driverName]=_vchk.handle;   // exact case preserved — Venmo pay links are case-sensitive
+      if(_vchk.warn) showToast('Saved \u2014 but \u201c'+_vchk.handle+'\u201d looks like a name. If Venmo splits the payment, use the exact @username from your profile (Test it first).','error');
+    } else {
+      showToast(_vchk.reason,'error');   // a name/invalid value — don't overwrite the good handle with garbage
+    }
+  }
   // Per-part "Send everything" toggles — unchecked = leave that part out of the bundle
   var _spEl=function(part){ return document.getElementById('sendpart-'+part+'-'+dk); };
   if(_spEl('message')){
@@ -13583,6 +13620,33 @@ function venmoToHandle(v){
   var m=h.match(/venmo\.com\/(?:u\/)?([^\/?#]+)/i);
   if(m) h=m[1];
   h=h.replace(/^@/,''); var _u2=h.match(/[A-Za-z0-9_-]+/); return _u2?_u2[0]:'';
+}
+// Validate a Venmo value the user typed. A real username has NO spaces and usually
+// includes a last name or digits (e.g. Chase-Sweat-7). A bare display name like
+// "Chase Sweat" makes Venmo run a search and add a phantom second recipient — the
+// double-payment bug. Returns {ok, handle, warn?, reason?}.
+function _venmoValidate(raw){
+  var v=String(raw||'').trim();
+  if(!v) return {ok:true, handle:''};
+  var m=v.match(/venmo\.com\/(?:u\/)?([^\/?#]+)/i); if(m) v=m[1];
+  v=v.replace(/^@/,'').trim();
+  if(/\s/.test(v) || !/^[A-Za-z0-9_-]{1,30}$/.test(v)){
+    return {ok:false, reason:'That looks like a name. Enter the exact Venmo USERNAME (no spaces) \u2014 the @handle shown under the name in the Venmo app, e.g. Chase-Sweat-7.'};
+  }
+  // A single plain word (no digit, hyphen, or underscore) is probably a first name.
+  var looksLikeName = /^[A-Za-z]{3,}$/.test(v);
+  return {ok:true, handle:v, warn:looksLikeName};
+}
+// Open the real pay link for whatever is typed in a Venmo field, so the user can SEE
+// whether it resolves to one person (catches wrong capitalization / typos before it's
+// ever used to pay). Uses a $1 note that says not to send.
+function _venmoTestField(inputId){
+  var el=document.getElementById(inputId); if(!el) return;
+  var chk=_venmoValidate(el.value);
+  if(!chk.ok){ showToast(chk.reason,'error'); return; }
+  if(!chk.handle){ showToast('Enter a Venmo username first','error'); return; }
+  var url=venmoPayUrl(chk.handle, 1, 'NWDA test \u2014 do not send');
+  if(url){ showToast('Opening Venmo \u2014 check it shows ONE person, then just close it (don\u2019t send).'); window.open(url,'_blank'); }
 }
 function driverVenmoUrl(fullName){
   const h = driverVenmoHandle(fullName);
