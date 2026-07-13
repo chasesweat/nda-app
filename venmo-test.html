@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Venmo Link Tester (diagnostic)</title>
+<style>
+  :root{ --pur:#2d1460; --pur2:#4c1d95; --accent:#7c3aed; --gold:#c99b3f; --light:#e5e0f0; --mid:#6b7280; --red:#dc2626; --green:#16a34a; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#f6f4fb; color:#1a1230; line-height:1.5; padding:1rem; }
+  .wrap{ max-width:560px; margin:0 auto; }
+  h1{ font-size:1.25rem; margin:.25rem 0 .1rem; }
+  .sub{ font-size:.82rem; color:var(--mid); margin-bottom:1rem; }
+  .banner{ background:#fff7ed; border:1.5px solid #fdba74; border-radius:12px; padding:.75rem .9rem; font-size:.82rem; color:#9a3412; margin-bottom:1.1rem; }
+  label{ display:block; font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--mid); margin:.65rem 0 .25rem; }
+  input{ width:100%; padding:.6rem .7rem; border:1.5px solid var(--light); border-radius:10px; font-size:1rem; font-family:inherit; }
+  .hint{ font-size:.74rem; color:var(--mid); margin-top:.3rem; }
+  .card{ background:#fff; border:1.5px solid var(--light); border-radius:14px; padding:1rem; margin-bottom:1rem; box-shadow:0 2px 8px rgba(45,20,96,.04); }
+  .clean{ background:#f5f3ff; border:1.5px solid #ddd6fe; border-radius:10px; padding:.6rem .8rem; font-size:.85rem; margin-bottom:1rem; }
+  .clean b{ color:var(--accent); }
+  .fmt-name{ font-weight:800; font-size:.95rem; }
+  .fmt-desc{ font-size:.76rem; color:var(--mid); margin:.15rem 0 .6rem; }
+  .url{ background:#0f172a; color:#e2e8f0; border-radius:8px; padding:.55rem .65rem; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.72rem; word-break:break-all; margin-bottom:.6rem; }
+  .row{ display:flex; gap:.5rem; }
+  button{ flex:1; padding:.6rem; border:none; border-radius:9px; font-family:inherit; font-size:.85rem; font-weight:700; cursor:pointer; }
+  .open{ background:var(--accent); color:#fff; }
+  .copy{ background:#eef2ff; color:var(--accent); border:1.5px solid #c7d2fe; }
+  .tag-now{ display:inline-block; font-size:.62rem; font-weight:800; text-transform:uppercase; letter-spacing:.5px; background:var(--gold); color:#fff; padding:.1rem .45rem; border-radius:20px; vertical-align:middle; margin-left:.4rem; }
+  .foot{ font-size:.76rem; color:var(--mid); text-align:center; margin:1.25rem 0 .5rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🧪 Venmo Link Tester</h1>
+  <div class="sub">Diagnostic tool — pay yourself and watch whether Venmo splits it.</div>
+
+  <div class="banner">
+    <b>Safe &amp; removable.</b> This page is completely separate from your app — it can't touch your rides, drivers, or data. When you're done, just delete this one file. Nothing else changes.
+  </div>
+
+  <label for="handle">Venmo handle to test</label>
+  <input id="handle" type="text" placeholder="e.g. Chase-Sweat-7  (your OWN Venmo)" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <div class="hint">Try it <b>twice</b>: once with your <b>exact @username</b> (from your Venmo profile), and once with just your <b>name</b> (e.g. "Chase Sweat"). If the name splits and the username doesn't, that confirms the cause.</div>
+
+  <label for="amount">Amount</label>
+  <input id="amount" type="number" value="18.00" step="0.01" min="0">
+
+  <label for="note">Note</label>
+  <input id="note" type="text" value="AP Run Test 7/12/2026">
+
+  <div class="clean" id="cleanBox">The app trims your handle to: <b id="cleanVal">—</b></div>
+
+  <div id="links"></div>
+
+  <div class="foot">Copy any link and send it back so it can be checked exactly.<br>Delete <code>venmo-test.html</code> when you're finished.</div>
+</div>
+
+<script>
+// EXACT same handle-cleaning the app uses in venmoPayUrl(), so this reproduces your app precisely.
+function cleanHandle(handle){
+  var _raw = String(handle||'').trim();
+  var _um = _raw.match(/venmo\.com\/(?:u\/)?([^\/?#]+)/i); if(_um) _raw = _um[1];
+  _raw = _raw.replace(/^@/,'');
+  var _uu = _raw.match(/[A-Za-z0-9_-]+/);
+  return _uu ? _uu[0] : '';
+}
+
+var FORMATS = [
+  { name:'Path form', now:true,
+    desc:"What your app builds right now (venmo.com/<name>).",
+    build:function(u,a,n){ return 'https://venmo.com/'+encodeURIComponent(u)+'?txn=pay&amount='+a+'&note='+n; } },
+  { name:'Profile /u/ form', now:false,
+    desc:"Same, but via the canonical profile path.",
+    build:function(u,a,n){ return 'https://venmo.com/u/'+encodeURIComponent(u)+'?txn=pay&amount='+a+'&note='+n; } },
+  { name:'App deep link', now:false,
+    desc:"Opens the Venmo app directly (only works if Venmo is installed).",
+    build:function(u,a,n){ return 'venmo://paycharge?txn=pay&recipients='+encodeURIComponent(u)+'&amount='+a+'&note='+n; } },
+  { name:'Old web recipients form', now:false,
+    desc:"The multi-recipient compose link — expected to split. Here to confirm.",
+    build:function(u,a,n){ return 'https://venmo.com/?txn=pay&audience=private&recipients='+encodeURIComponent(u)+'&amount='+a+'&note='+n; } }
+];
+
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function render(){
+  var raw = document.getElementById('handle').value;
+  var u = cleanHandle(raw);
+  var amt = (Math.round((parseFloat(document.getElementById('amount').value)||0)*100)/100).toFixed(2);
+  var note = encodeURIComponent(document.getElementById('note').value || 'NWDA client fee');
+
+  document.getElementById('cleanVal').textContent = u || '(nothing usable — enter a handle)';
+
+  var html = '';
+  if(u){
+    FORMATS.forEach(function(f, i){
+      var url = f.build(u, amt, note);
+      html += '<div class="card">'
+        + '<div class="fmt-name">'+esc(f.name)+(f.now?'<span class="tag-now">your app now</span>':'')+'</div>'
+        + '<div class="fmt-desc">'+esc(f.desc)+'</div>'
+        + '<div class="url" id="url'+i+'">'+esc(url)+'</div>'
+        + '<div class="row">'
+        + '<button class="open" onclick="openUrl('+i+')">Open in Venmo →</button>'
+        + '<button class="copy" onclick="copyUrl('+i+', this)">Copy link</button>'
+        + '</div></div>';
+    });
+  }
+  document.getElementById('links').innerHTML = html;
+  window._urls = u ? FORMATS.map(function(f){ return f.build(u, amt, note); }) : [];
+}
+
+function openUrl(i){ if(window._urls && window._urls[i]) window.location.href = window._urls[i]; }
+function copyUrl(i, btn){
+  var t = (window._urls && window._urls[i]) || '';
+  function done(){ var o = btn.textContent; btn.textContent = 'Copied ✓'; setTimeout(function(){ btn.textContent = o; }, 1200); }
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(t).then(done, function(){ fallback(t); done(); }); }
+  else { fallback(t); done(); }
+}
+function fallback(t){ var ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} document.body.removeChild(ta); }
+
+['handle','amount','note'].forEach(function(id){ document.getElementById(id).addEventListener('input', render); });
+render();
+</script>
+</body>
+</html>
