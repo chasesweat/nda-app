@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090451">
+<meta name="version" content="202606090456">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1970,6 +1970,14 @@ function setupRealtimeListeners(){
   fbRef('nda/kat/comments').on('value', snap=>{
     if(snap.exists()) comments = snap.val()||{};
   });
+  // Listen for two-admin approval requests so a second admin sees them live.
+  fbRef('nda/kat/adminActions').on('value', snap=>{
+    if(snap.exists()){
+      var _v=snap.val(); adminActions=(_v&&typeof _v==='object')?_v:{};
+      try{ refreshDash(); }catch(e){}
+      try{ updateNotifBadge(); }catch(e){}
+    }
+  });
   // Listen for fee-waiver requests so the owner sees them (and drivers see the outcome) live.
   fbRef('nda/kat/feeWaiveRequests').on('value', snap=>{
     if(snap.exists()){
@@ -2234,6 +2242,7 @@ async function _loadAppData() {
     await Promise.all([
       (async()=>{ try{ var _sq=await storageGet('kat:savedQuotes'); if(Array.isArray(_sq)) savedQuotes=_sq; }catch(e){} })(),
       (async()=>{ try{ var _fwr=await storageGet('kat:feeWaiveRequests'); if(_fwr && typeof _fwr==='object') feeWaiveRequests=_fwr; }catch(e){} })(),
+      (async()=>{ try{ var _aa=await storageGet('kat:adminActions'); if(_aa && typeof _aa==='object') adminActions=_aa; }catch(e){} })(),
       (async()=>{ try{ var _cvBoot=await storageGet('kat:driverColorVault'); if(_cvBoot && typeof _cvBoot==='object') driverColorVault=_cvBoot; }catch(e){} })(),
       loadDriverExtras(),
       (async()=>{ try{ const _cao=await storageGet('kat:clientAddresses'); if(_cao) clientAddressOverrides = (typeof _cao==='string') ? JSON.parse(_cao) : _cao; }catch(e){ console.warn('clientAddresses load', e); } })(),
@@ -2709,7 +2718,7 @@ const TIP_DATA={
   flights:{icon:'✈️',title:'Flights & Traffic',text:'Search any flight number for live tracking. Today\'s and tomorrow\'s airport rides are listed automatically with tracking links.'},
   chat:{icon:'💬',title:'Team Chat',text:'Offerings: post rides needing coverage — teammates volunteer, then the ride\'s owner assigns whoever they pick, and the card marks itself covered. Updates: share traffic without buzzing phones. You can delete your own messages anywhere; admins can delete any message in the group channels. Delete a whole DM from its header.'},
   team:{icon:'🚘',title:'Team & Driver Cards',text:'Team driver cards live here — tap Share Card or Download to send yours. No card yet, or adding a vehicle? Tap Edit / generate driver card to build one from a photo of you plus your vehicle. Each vehicle keeps its own card, and the confirmation sender picks which to send. Admins can also Edit driver, change a card\'s color, and add drivers.'},
-  myprofile:{icon:'<svg viewBox="0 0 24 24" width="18" height="18" style="vertical-align:-3px" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="15" rx="2.2"/><circle cx="8" cy="10.2" r="2.1"/><path d="M5 15.4c.3-1.7 1.6-2.6 3-2.6s2.7.9 3 2.6"/><line x1="14" y1="9" x2="19" y2="9"/><line x1="14" y1="12.4" x2="19" y2="12.4"/></svg>',title:'Profile &amp; Settings',text:'My Info holds your card, your details, notes, and your Share/Download/Venmo buttons. The Account Settings tab holds everything you configure — receipt branding, payment methods, day-of selfie, your confirmation text, pickup instructions, and the scheduling / cancellation message (each with a default, a custom option, and a paste-an-example importer), the "send everything" bundle, auto-surcharges, and your availability. You can also set your alert & push-notification preferences there, and — if drivers cover your clients — waive their fees for a day, week, month, a specific month, a year, or until you change it. Days off can repeat weekly, monthly, or yearly, and one-time dates drop off after they pass. Admins also manage Access control and Pricing from tabs here (Advanced Pricing sets the per-mile rate, the base airport miles, the surcharge amounts, and the change &amp; cancellation fees — whose amounts flow straight into the scheduling message — and lets you create or delete your own custom surcharges, like a pet fee or extra luggage, which then appear as chips on the Quote and Add Ride forms). (Team Availability is on the Team page.) Dispatchers who also build their own client list can keep a second confirmation and pickup set that is used only for their own clients. You can also set a Display name (e.g. Kathleen \u2192 \u201cKat\u201d) \u2014 the name clients see in your confirmation texts and contact card; leave it blank to use your full name. When you add your Venmo, type your username exactly as it appears on your Venmo profile \u2014 capitalization matters \u2014 then tap Test to confirm it opens to just one person before saving.'},
+  myprofile:{icon:'<svg viewBox="0 0 24 24" width="18" height="18" style="vertical-align:-3px" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="15" rx="2.2"/><circle cx="8" cy="10.2" r="2.1"/><path d="M5 15.4c.3-1.7 1.6-2.6 3-2.6s2.7.9 3 2.6"/><line x1="14" y1="9" x2="19" y2="9"/><line x1="14" y1="12.4" x2="19" y2="12.4"/></svg>',title:'Profile &amp; Settings',text:'My Info holds your card, your details, notes, and your Share/Download/Venmo buttons. The Account Settings tab holds everything you configure — receipt branding, payment methods, day-of selfie, your confirmation text, pickup instructions, and the scheduling / cancellation message (each with a default, a custom option, and a paste-an-example importer), the "send everything" bundle, auto-surcharges, and your availability. You can also set your alert & push-notification preferences there, and — if drivers cover your clients — waive their fees for a day, week, month, a specific month, a year, or until you change it. Days off can repeat weekly, monthly, or yearly, and one-time dates drop off after they pass. Admins also manage Access control and Pricing from tabs here (Advanced Pricing sets the per-mile rate, the base airport miles, the surcharge amounts, and the change &amp; cancellation fees — whose amounts flow straight into the scheduling message — and lets you create or delete your own custom surcharges, like a pet fee or extra luggage, which then appear as chips on the Quote and Add Ride forms). Anything that touches money or access — every pricing change, the client-fee %, creating or deleting a surcharge, turning someone\u2019s access on or off, archiving rides, deleting someone else\u2019s ride, or clearing a cautious-list flag — now needs a <strong>second admin to approve</strong>: you\u2019ll see it under \u201cNeeds a second admin\u201d on the dashboard, and the person who asked can\u2019t approve their own request. Your own rides and live dispatch (cancelling a ride, assigning a driver, medical hours) stay instant, and waiving fees stays with the client\u2019s owner \u2014 you can only forgive fees owed to you. (Team Availability is on the Team page.) Dispatchers who also build their own client list can keep a second confirmation and pickup set that is used only for their own clients. You can also set a Display name (e.g. Kathleen \u2192 \u201cKat\u201d) \u2014 the name clients see in your confirmation texts and contact card; leave it blank to use your full name. When you add your Venmo, type your username exactly as it appears on your Venmo profile \u2014 capitalization matters \u2014 then tap Test to confirm it opens to just one person before saving.'},
 };
 let _shownTips=new Set();
 function showPageTip(pageId){
@@ -2766,26 +2775,8 @@ async function archiveOldRides(){
   const cutoff = _archiveCutoffStr();
   const toArchive = rides.filter(r=>r && r.date && r.date < cutoff);
   if(!toArchive.length){ showToast('No rides old enough to archive'); return; }
-  if(!confirm('Archive '+toArchive.length+' ride(s) dated before '+cutoff+'?\n\nThey will be moved out of the live app to keep it fast, but NOT deleted — you can view them anytime via "Load history".')) return;
-  try{
-    const existing = (await storageGet('kat:ridesArchive')) || [];
-    // De-dupe by id in case a ride was archived before
-    const archivedIds = new Set(existing.map(r=>r&&r.id));
-    const merged = existing.concat(toArchive.filter(r=>!archivedIds.has(r.id)));
-    await storageSet('kat:ridesArchive', merged);
-    // Remove archived rides from the live array
-    const keepIds = new Set(toArchive.map(r=>r.id));
-    rides = rides.filter(r=>!(r && r.date && r.date < cutoff && keepIds.has(r.id)));
-    await saveRides();
-    _archiveLoaded = false;
-    if(typeof renderCal==='function') renderCal();
-    if(typeof renderRides==='function') renderRides();
-    if(typeof refreshDash==='function') refreshDash();
-    showToast('Archived '+toArchive.length+' ride(s) ✓ — app stays fast, history preserved');
-  }catch(e){
-    console.error('archiveOldRides error:', e);
-    showToast('Could not archive rides','error');
-  }
+  if(!confirm('Archive '+toArchive.length+' ride(s) dated before '+cutoff+'?\n\nThey will be moved out of the live app to keep it fast, but NOT deleted — you can view them anytime via "Load history".'+(_twoAdminRequired()?'\n\nA second admin must approve before it takes effect.':''))) return;
+  await queueAdminAction('rides_archive', {cutoff:cutoff}, 'Archive '+toArchive.length+' ride(s) dated before '+cutoff);
 }
 
 // Load the archive and merge it into the live `rides` array so history is visible.
@@ -2920,12 +2911,8 @@ async function saveBaseRates(){
   const newHourly=hourlyEl?(parseFloat(hourlyEl.value)||150):oldHourly;
   if(newHourly!==oldHourly) changes.push({label:'Sprinter Van hourly',from:oldHourly,to:newHourly});
   if(!_confirmRateChanges(changes)) return;
-  vehicles.forEach(function(v){ if(rates[v]) BASE[v]=rates[v]; else if(v==='Sprinter Van') delete BASE[v]; });
-  globalSettings.baseRates=rates;
-  if(hourlyEl) globalSettings.sprintHourly=newHourly;
-  await saveGlobalSettings();
-  renderPricingTracker(); // refresh the panel
-  showToast('✓ Base rates saved');
+  await queueAdminAction('pricing_base', {rates:rates, hourly:(hourlyEl?newHourly:null)},
+    'Base vehicle rates \u2014 '+(changes.length?changes.map(function(c){return c.label+': '+c.from+' \u2192 '+c.to;}).join(', '):'no visible change'));
 }
 
 async function saveGlobalSettings(){
@@ -3043,7 +3030,7 @@ function calcQuote() {
     if(leg2Fuel>0) leg2Lines.push({label:fuelLabel(), val:leg2Fuel});
     const leg2Total = leg2Sub + leg2Fuel;
 
-    const grandTotal = Math.round((leg1Total + leg2Total)*100)/100;
+    const grandTotal = Math.round(leg1Total + leg2Total);   // whole dollars
 
     const renderLines = ls => ls.map(l=>`<div class="quote-line"><span style="color:#aaa">${l.label}${l.note?'<br><span style="font-size:.68rem;color:#555">'+l.note+'</span>':''}</span><span style="${l.val===0?'color:#555':''}">$${l.val.toFixed(2)}</span></div>`).join('');
 
@@ -3114,7 +3101,7 @@ function calcQuote() {
   if(addonState.fuel){ fuelFee=subtotal*fuelRate(); lines.push({label:fuelLabel(), val:fuelFee}); }
   // Round to the cent (never floor): the saved price must equal the computed breakdown exactly,
   // so "Manual adjustment" only ever appears when someone actually overrides the price.
-  const total = Math.round((subtotal + fuelFee)*100)/100;
+  const total = Math.round(subtotal + fuelFee);   // prices are whole dollars
   document.getElementById('quote-lines').innerHTML=lines.map(l=>`<div class="quote-line"><span style="color:#aaa">${l.label}${l.note?'<br><span style="font-size:.7rem;color:#666">'+l.note+'</span>':''}</span><span style="${l.val===0?'color:#666':''}">$${l.val.toFixed(2)}</span></div>`).join('');
   document.getElementById('quote-total').textContent=`$${total.toFixed(2)}`;
   return total;
@@ -4362,6 +4349,8 @@ function addNotification(driverName, ride, action, customMsg){
     sendPushToDriver(driverName, '👤 Your client was scheduled — NWDA', msg);
   } else if(action==='fee_waive_request'){
     sendPushToDriver(driverName, '⚖️ Fee waiver request — NWDA', msg);
+  } else if(action==='admin_approval'){
+    sendPushToDriver(driverName, '🔐 Needs your approval — NWDA', msg);
   }
 }
 
@@ -8564,6 +8553,13 @@ function buildFeeMathHTML(r){
   const apType = r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP';
   if(apType && miles>mileageTrigger()){ const over=miles-includedMiles(); const v=over*mileageRate(); rows.push({label:`Mileage (${over} mi over ${includedMiles()} \u00d7 $${mileageRate().toFixed(2)})`, val:v, add:true}); sub+=v; }
   if(on(r.fuel)){ const v=sub*fuelRate(); rows.push({label:fuelLabel(), val:v, add:true}); sub+=v; }
+  // Prices are whole dollars — show the rounding as its own line so the rows add up
+  // and it is never mislabelled as a "Manual adjustment".
+  const _exact = sub;
+  const _rounded = Math.round(_exact);
+  const _roundDelta = Math.round((_rounded - _exact)*100)/100;
+  if(Math.abs(_roundDelta) >= 0.01){ rows.push({label:'Rounded to nearest dollar', val:_roundDelta, add:true}); }
+  sub = _rounded;
   const price = parseFloat(r.price)||0;
   const diff  = Math.round((price - sub)*100)/100;
   if(Math.abs(diff) >= 0.01){
@@ -10641,13 +10637,13 @@ function recalcQa(){
   const qaMiles=parseFloat((document.getElementById('qa-miles-hidden')||{}).value)||0;
   const qaType=document.getElementById('qa-type')?document.getElementById('qa-type').value:'';
   if((qaType==='AP RUN'||qaType==='AP PICK UP'||qaType==='AP ROUND TRIP') && qaMiles>mileageTrigger()){ sub+=(qaMiles-includedMiles())*mileageRate(); }
-  let total=qaAddonState.fuel ? Math.round(sub*(1+fuelRate())*100)/100 : Math.round(sub*100)/100;
+  let total=qaAddonState.fuel ? Math.round(sub*(1+fuelRate())) : Math.round(sub);   // whole dollars
   const priceEl=document.getElementById('qa-price'); if(priceEl) priceEl.value=total;
   const note=document.getElementById('qa-price-note');
   const isXXL2=document.getElementById('qa-xxl')?.checked;
   const veh2b=isXXL2?(document.getElementById('qa-vehicle2')?.value||'Sedan'):'';
   const price2b=isXXL2?(parseFloat(document.getElementById('qa-price2')?.value)||(BASE[veh2b]||105)):0;
-  if(isXXL2){ const prEl=document.getElementById('qa-price'); if(prEl) prEl.value=Math.round((total+price2b)*100)/100; }
+  if(isXXL2){ const prEl=document.getElementById('qa-price'); if(prEl) prEl.value=Math.round(total+price2b); }
   if(note) note.textContent=isXXL2
     ?(veh+' $'+total.toFixed(0)+' + '+veh2b+' $'+price2b+' = $'+(total+price2b).toFixed(0))
     :((total>base || xs>0) ? `${veh} base $${base} + surcharges → $${total.toFixed(2)} (editable)` : `${veh} base $${base}`);
@@ -11576,6 +11572,14 @@ async function assignDriver(){
 async function deleteRide(id){
   const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id)));
   if(!canDeleteRide(r)){ showToast('You can only delete rides you created.','error'); return; }
+  // Your OWN ride: delete it right away. Using the admin override to delete someone
+  // ELSE'S ride needs a second admin (cancelling stays instant for live dispatch).
+  const _mine = r && r.createdBy === (currentUser&&currentUser.name);
+  if(!_mine){
+    if(!confirm('Delete '+((r&&r.client)||'this ride')+'?'+(_twoAdminRequired()?'\n\nThis is someone else\u2019s ride \u2014 a second admin must approve before it\u2019s deleted.':'\n\nThis is someone else\u2019s ride.')+'\n\n(To stop a ride right now, cancel it instead \u2014 that takes effect immediately.)')) return;
+    await queueAdminAction('ride_delete', {id:r.id}, 'Delete '+((r&&r.client)||'a ride')+((r&&r.date)?(' on '+fmtDateShort(r.date)):'')+' (created by '+((r&&r.createdBy)||'someone else')+')');
+    return;
+  }
   if(!confirm('Delete this ride?')) return;
   rides=rides.filter(r=>r.id!==id);
   await saveRides();
@@ -12171,13 +12175,14 @@ function renderDashFees(){
     });
   }catch(e){}
   var _waiveHtml=(typeof _renderFeeWaiveRequestsHTML==='function')?_renderFeeWaiveRequestsHTML(dName):'';
-  if(!hasOwed&&!hasOwe&&!_recent.length&&!_waiveHtml){ box.innerHTML=''; return; }
+  var _aaHtml=(typeof _renderAdminApprovalsHTML==='function')?_renderAdminApprovalsHTML():'';
+  if(!hasOwed&&!hasOwe&&!_recent.length&&!_waiveHtml&&!_aaHtml){ box.innerHTML=''; return; }
 
   function _rideLabel(ri){
     return escHtml(ri.client||'Ride')+(ri.date?' \u00b7 '+ri.date.slice(5).replace('-','/'):'')+' \u00b7 $'+ri.fee.toFixed(2);
   }
 
-  let html=_waiveHtml+'<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">Client Fees — To Be Paid</div>'
+  let html=_aaHtml+_waiveHtml+'<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">Client Fees — To Be Paid</div>'
     +'<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:12px;overflow:hidden;">';
 
   if(hasOwed){
@@ -12734,16 +12739,13 @@ function computeExpectedPrice(ride){
   if(xstop>0) sub+=xstop*extraStopFee();
   if(wait>0) sub+=wait*WAIT;
   if(ride.fuel==='Y') sub=sub*(1+fuelRate());
-  return Math.round(sub*100)/100;
+  return Math.round(sub);   // whole dollars
 }
 
 async function toggleGlobalFuel(){
   if(typeof isAdmin==='function' && !isAdmin()){ showToast('Only admins can change pricing','error'); return; }
-  globalSettings.fuelEnabled = globalSettings.fuelEnabled === false ? true : false;
-  await saveGlobalSettings();
-  renderPricingTracker();
-  renderAddons(); // update quote form chip if open
-  showToast('Fuel surcharge '+(globalSettings.fuelEnabled!==false?'enabled':'disabled')+'\u2713');
+  var _next = globalSettings.fuelEnabled === false ? true : false;
+  await queueAdminAction('pricing_fuelonoff', {enabled:_next}, 'Turn the fuel surcharge '+(_next?'ON':'OFF')+' company-wide');
 }
 async function saveFuelPct(){
   if(typeof isAdmin==='function' && !isAdmin()){ showToast('Only admins can change pricing','error'); return; }
@@ -12751,12 +12753,8 @@ async function saveFuelPct(){
   var v=parseFloat(el.value);
   if(!isFinite(v)||v<0||v>100){ showToast('Enter a percentage between 0 and 100','error'); return; }
   var oldV=fuelPct();
-  if(v!==oldV && !confirm('Change the fuel surcharge from '+oldV+'% to '+v+'%?\n\nThis affects future quotes only \u2014 already-scheduled rides keep their saved price.')) return;
-  globalSettings.fuelPct = v;
-  await saveGlobalSettings();
-  renderPricingTracker();
-  renderAddons(); // update quote form chip if open
-  showToast('\u2713 Fuel surcharge set to '+v+'%');
+  if(v!==oldV && !confirm('Change the fuel surcharge from '+oldV+'% to '+v+'%?\n\nThis affects future quotes only \u2014 already-scheduled rides keep their saved price.'+(_twoAdminRequired()?'\n\nA second admin must approve before it takes effect.':''))) return;
+  await queueAdminAction('pricing_fuelpct', {v:v}, 'Fuel surcharge: '+oldV+'% \u2192 '+v+'%');
 }
 async function saveClientFeePct(){
   if(typeof isAdmin==='function' && !isAdmin()){ showToast('Only admins can change pricing','error'); return; }
@@ -12764,11 +12762,8 @@ async function saveClientFeePct(){
   var v=parseFloat(el.value);
   if(!isFinite(v)||v<0||v>100){ showToast('Enter a percentage between 0 and 100','error'); return; }
   var oldV=clientFeePct();
-  if(v!==oldV && !confirm('Change the Client Fee from '+oldV+'% to '+v+'%?\n\nThis changes fee math across income, receipts & pay.')) return;
-  globalSettings.clientFeePct = v;
-  await saveGlobalSettings();
-  renderPricingTracker();
-  showToast('\u2713 Client Fee set to '+v+'%');
+  if(v!==oldV && !confirm('Change the Client Fee from '+oldV+'% to '+v+'%?\n\nThis changes fee math across income, receipts & pay.'+(_twoAdminRequired()?'\n\nA second admin must approve before it takes effect.':''))) return;
+  await queueAdminAction('pricing_clientfee', {v:v}, 'Client fee: '+oldV+'% \u2192 '+v+'%');
 }
 
 function buildSurchargeTriggersHTML(){
@@ -12805,18 +12800,16 @@ function buildSurchargeTriggersHTML(){
 }
 async function saveSurchargeTriggers(){
   if(typeof isAdmin==='function' && !isAdmin()){ showToast('Admins only','error'); return; }
-  var ps=document.getElementById('trg-premium-start'); if(ps&&ps.value) globalSettings.premiumStart=ps.value;
-  var pe=document.getElementById('trg-premium-end');   if(pe&&pe.value) globalSettings.premiumEnd=pe.value;
-  delete globalSettings.premiumBefore; delete globalSettings.premiumAfter;
+  var ps=document.getElementById('trg-premium-start');
+  var pe=document.getElementById('trg-premium-end');
   var days=[]; document.querySelectorAll('.trf-day').forEach(function(c){ if(c.checked) days.push(parseInt(c.getAttribute('data-day'),10)); });
-  globalSettings.trafficDays=days;
   var ams=document.getElementById('trg-am-start'), ame=document.getElementById('trg-am-end');
   var pms=document.getElementById('trg-pm-start'), pme=document.getElementById('trg-pm-end');
-  globalSettings.trafficAm={start:(ams&&ams.value)||'06:30', end:(ame&&ame.value)||'09:00'};
-  globalSettings.trafficPm={start:(pms&&pms.value)||'14:30', end:(pme&&pme.value)||'19:00'};
-  await saveGlobalSettings();
-  renderPricingTracker();
-  showToast('\u2713 Surcharge hours saved');
+  await queueAdminAction('surcharge_triggers', {
+    premiumStart:(ps&&ps.value)||null, premiumEnd:(pe&&pe.value)||null, trafficDays:days,
+    trafficAm:{start:(ams&&ams.value)||'06:30', end:(ame&&ame.value)||'09:00'},
+    trafficPm:{start:(pms&&pms.value)||'14:30', end:(pme&&pme.value)||'19:00'}
+  }, 'Change surcharge trigger hours & days');
 }
 async function addHolidayDate(tier){
   if(typeof isAdmin==='function' && !isAdmin()){ showToast('Admins only','error'); return; }
@@ -12902,22 +12895,15 @@ async function addCustomSurcharge(){
   var amt=parseFloat((document.getElementById('new-cs-amt')||{}).value);
   if(!lbl){ showToast('Enter a label','error'); return; }
   if(!isFinite(amt)||amt<0){ showToast('Enter a valid amount','error'); return; }
-  if(!Array.isArray(globalSettings.customSurcharges)) globalSettings.customSurcharges=[];
-  globalSettings.customSurcharges.push({ key:'cs_'+Date.now()+'_'+Math.floor(Math.random()*1000), label:lbl, amount:amt });
-  try{ await saveGlobalSettings(); }catch(e){}
-  var cont=document.getElementById('custom-surcharges-admin'); if(cont) cont.innerHTML=_customSurchargesAdminHTML();
-  try{ if(typeof renderAddons==='function') renderAddons(); }catch(e){}
-  try{ if(typeof renderQaAddons==='function') renderQaAddons(); }catch(e){}
-  showToast('\u2713 Surcharge added: '+lbl);
+  await queueAdminAction('surcharge_add', {key:'cs_'+Date.now()+'_'+Math.floor(Math.random()*1000), label:lbl, amount:amt},
+    'Add surcharge \u201c'+lbl+'\u201d (+$'+amt+')');
+  var _l=document.getElementById('new-cs-label'), _a=document.getElementById('new-cs-amt');
+  if(_l) _l.value=''; if(_a) _a.value='';
 }
 async function deleteCustomSurcharge(key){
   if(typeof isAdmin==='function' && !isAdmin()){ showToast('Admins only','error'); return; }
-  globalSettings.customSurcharges=(globalSettings.customSurcharges||[]).filter(function(c){return c.key!==key;});
-  try{ await saveGlobalSettings(); }catch(e){}
-  var cont=document.getElementById('custom-surcharges-admin'); if(cont) cont.innerHTML=_customSurchargesAdminHTML();
-  try{ if(typeof renderAddons==='function') renderAddons(); }catch(e){}
-  try{ if(typeof renderQaAddons==='function') renderQaAddons(); }catch(e){}
-  showToast('Surcharge deleted');
+  var _c=customSurchargeList().find(function(x){return x.key===key;});
+  await queueAdminAction('surcharge_delete', {key:key}, 'Delete surcharge \u201c'+((_c&&_c.label)||key)+'\u201d');
 }
 
 async function saveAdvancedPricing(){
@@ -12947,20 +12933,8 @@ async function saveAdvancedPricing(){
     if(nv!==oldSur[k]) changes.push({label:SLBL[k]+' surcharge',from:oldSur[k],to:nv});
   });
   if(!_confirmRateChanges(changes)) return;
-  if(mr!=null) globalSettings.mileageRate=mr; else delete globalSettings.mileageRate;
-  if(im!=null) globalSettings.includedMiles=im; else delete globalSettings.includedMiles;
-  if(cf!=null) globalSettings.changeFee=cf; else delete globalSettings.changeFee;
-  if(cp!=null) globalSettings.cancelFeePct=cp; else delete globalSettings.cancelFeePct;
-  if(pf!=null) globalSettings.pickupFee=pf; else delete globalSettings.pickupFee;
-  if(wr!=null) globalSettings.waitRate=wr; else delete globalSettings.waitRate;
-  if(xs!=null) globalSettings.extraStopFee=xs; else delete globalSettings.extraStopFee;
-  var sc={};
-  ['premium','holiday','christmas','late','traffic'].forEach(function(k){ if(nSur[k]!=null) sc[k]=nSur[k]; });
-  globalSettings.surcharges=sc;
-  await saveGlobalSettings();
-  renderPricingTracker();
-  if(typeof renderAddons==='function') renderAddons();
-  showToast('\u2713 Advanced pricing saved');
+  await queueAdminAction('pricing_advanced', {mr:mr,im:im,cf:cf,cp:cp,pf:pf,wr:wr,xs:xs,nSur:nSur},
+    'Advanced pricing \u2014 '+(changes.length?changes.map(function(c){return c.label+': '+c.from+' \u2192 '+c.to;}).join(', '):'no visible change'));
 }
 function renderPricingTracker(){
   const panel=document.getElementById('driver-panel-pricing');
@@ -13315,20 +13289,10 @@ async function toggleUserAccess(userName, el){
   if(userName==='Chase'){ if(el) el.checked=true; showToast("Chase's account can't be disabled — it controls subscription access",'error'); return; }
   const u = USERS.find(x=>x.name===userName);
   if(!u) return;
-  const wasEnabled = !u.disabled;
-  u.disabled = !el.checked;
-  await saveDisabled();
-  renderAccessControl();
-  showToast(`${userName} access ${u.disabled?'disabled':'enabled'}`);
-  // When a driver is removed (enabled → disabled), offer to email them their documentation
-  if(wasEnabled && u.disabled){
-    // App access is now off — but Square billing is separate. Remind Chase to cancel it there.
-    if(canGrantFreeAccess()){
-      setTimeout(function(){ alert('Reminder: ' + userName + '\u2019s app access is now off, but this does NOT stop their Square subscription.\n\nCancel it in your Square Dashboard \u2192 Subscriptions so they aren\u2019t charged again.'); }, 60);
-    }
-    const ok = confirm(`${userName} has been removed.\n\nEmail their documentation file (income + receipts) to them now so you don't have to restore access later?`);
-    if(ok) emailDriverDocOnRemoval(userName);
-  }
+  const want = !el.checked;                 // desired "disabled" state
+  if(el) el.checked = !u.disabled;          // revert the switch until a 2nd admin approves
+  await queueAdminAction('access_toggle', {userName:userName, disabled:want},
+    (want?'Disable':'Enable')+' app access for '+userName);
 }
 
 // ═══════════════════════════════════════════
@@ -15369,13 +15333,243 @@ async function submitCautiousFlag(){
   showToast('\u26a0\ufe0f Added to cautious list');
   renderCautiousList();
 }
+// ── TWO-ADMIN APPROVAL FRAMEWORK ────────────────────────────────────────────
+// Sensitive actions are queued instead of run. A SECOND, different admin must
+// approve before the action executes. Executors are registered by type so the
+// approved action replays exactly what the requester intended.
+let adminActions = {};   // { id: {id,type,payload,label,requester,approvals[],status,at} }
+async function saveAdminActions(){ try{ await storageSet('kat:adminActions', adminActions); }catch(e){} }
+const ADMIN_ACTION_EXEC = {};
+function registerAdminAction(type, fn){ ADMIN_ACTION_EXEC[type]=fn; }
+function _adminLogins(){ try{ return USERS.filter(function(u){ return u.role==='admin' && !u.disabled; }).map(function(u){ return u.name; }); }catch(e){ return []; } }
+function _isAdminLogin(n){ return _adminLogins().indexOf(n)>=0; }
+
+// Whether this action actually needs a second admin right now.
+function _twoAdminRequired(){
+  try{
+    var me=currentUser&&currentUser.name;
+    // Continuity: with a thin admin bench, the account that controls billing keeps working.
+    if(me==='Chase' && _adminLogins().length<3) return false;
+  }catch(e){}
+  return true;
+}
+// Queue a sensitive action for a second admin. Returns true if it was queued.
+async function queueAdminAction(type, payload, label){
+  var me=currentUser&&currentUser.name;
+  if(!me) return false;
+  if(!_twoAdminRequired()){
+    var _fn=ADMIN_ACTION_EXEC[type];
+    if(typeof _fn==='function'){
+      try{ await _fn(payload||{}); }
+      catch(e){ console.warn('action failed',e); showToast('Could not apply that change','error'); }
+    }
+    return false;
+  }
+  var id='aa_'+Date.now()+'_'+Math.floor(Math.random()*1000);
+  adminActions[id]={ id:id, type:type, payload:payload, label:label, requester:me,
+                     approvals:(_isAdminLogin(me)?[me]:[]), status:'pending', at:Date.now() };
+  await saveAdminActions();
+  var who=(typeof driverDisplayName==='function'?driverDisplayName(USER_DRIVER_MAP[me]||me):(USER_DRIVER_MAP[me]||me))||me;
+  _adminLogins().forEach(function(a){
+    if(a===me) return;
+    try{ addNotification(USER_DRIVER_MAP[a]||PROXY_MAP[a]||a, {id:id}, 'admin_approval', who+' needs a second admin to approve: '+label); }catch(e){}
+  });
+  try{ await saveNotifs(); updateNotifBadge(); }catch(e){}
+  try{ refreshDash(); }catch(e){}
+  showToast('\u23F3 Sent for approval \u2014 a second admin must approve');
+  return true;
+}
+async function approveAdminAction(id){
+  var req=adminActions[id]; if(!req||req.status!=='pending') return;
+  var me=currentUser&&currentUser.name;
+  if(!_isAdminLogin(me)){ showToast('Admins only','error'); return; }
+  if(req.approvals.indexOf(me)>=0){ showToast('You already approved this \u2014 another admin is needed'); return; }
+  req.approvals.push(me);
+  if(req.approvals.length < 2){
+    await saveAdminActions(); try{ refreshDash(); }catch(e){}
+    showToast('Approved '+req.approvals.length+'/2 \u2014 one more admin needed');
+    return;
+  }
+  req.status='approved'; req.approvedAt=Date.now();
+  await saveAdminActions();
+  var fn=ADMIN_ACTION_EXEC[req.type];
+  if(typeof fn==='function'){
+    try{ await fn(req.payload||{}); }
+    catch(e){ console.warn('admin action failed',e); showToast('Approved, but it failed to apply','error'); }
+  } else { showToast('Approved, but no handler for '+req.type,'error'); }
+  try{ addNotification(USER_DRIVER_MAP[req.requester]||req.requester, {id:id}, 'admin_approval', '\u2713 Approved: '+req.label); await saveNotifs(); }catch(e){}
+  try{ refreshDash(); updateNotifBadge(); }catch(e){}
+  showToast('\u2713 Approved \u2014 '+req.label);
+}
+async function denyAdminAction(id){
+  var req=adminActions[id]; if(!req||req.status!=='pending') return;
+  var me=currentUser&&currentUser.name;
+  if(!_isAdminLogin(me)){ showToast('Admins only','error'); return; }
+  req.status='denied'; req.deniedBy=me; req.resolvedAt=Date.now();
+  await saveAdminActions();
+  try{ addNotification(USER_DRIVER_MAP[req.requester]||req.requester, {id:id}, 'admin_approval', 'Declined: '+req.label); await saveNotifs(); }catch(e){}
+  try{ refreshDash(); updateNotifBadge(); }catch(e){}
+  showToast('Declined');
+}
+// Dashboard panel of pending 2-admin requests (shown to admins only).
+function _renderAdminApprovalsHTML(){
+  try{
+    var me=currentUser&&currentUser.name;
+    if(!_isAdminLogin(me)) return '';
+    var pend=Object.keys(adminActions||{}).map(function(k){return adminActions[k];})
+      .filter(function(r){ return r && r.status==='pending'; });
+    if(!pend.length) return '';
+    pend.sort(function(a,b){ return (a.at||0)-(b.at||0); });
+    var h='<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#7c3aed;margin:1rem 0 .5rem;">\uD83D\uDD10 Needs a second admin \u00b7 '+pend.length+'</div>'
+      +'<div style="background:#f6f2ff;border:1.5px solid #d9c9f5;border-radius:12px;overflow:hidden;">';
+    pend.forEach(function(r){
+      var mine=(r.requester===me), already=(r.approvals||[]).indexOf(me)>=0;
+      var who=(USER_DRIVER_MAP[r.requester]||r.requester);
+      h+='<div style="padding:.7rem .85rem;border-bottom:1px solid #d9c9f5;">'
+        +'<div style="font-size:.85rem;color:var(--black);line-height:1.4;"><b>'+escHtml(who)+'</b> \u2014 '+escHtml(r.label||r.type)+'</div>'
+        +'<div style="font-size:.72rem;color:var(--mid);margin-top:2px;">'+(r.approvals||[]).length+'/2 approved</div>';
+      if(mine || already){
+        h+='<div style="font-size:.74rem;color:#7c3aed;font-weight:600;margin-top:.4rem;">\u23F3 Waiting for another admin</div>';
+        if(mine) h+='<button onclick="denyAdminAction(\''+escAttr(r.id)+'\')" style="margin-top:.4rem;padding:.35rem .7rem;background:none;border:1.5px solid var(--light);color:var(--mid);border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;">Cancel request</button>';
+      } else {
+        h+='<div style="display:flex;gap:.5rem;margin-top:.55rem;">'
+          +'<button onclick="approveAdminAction(\''+escAttr(r.id)+'\')" style="flex:1;padding:.45rem;background:#16a34a;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;">\u2713 Approve</button>'
+          +'<button onclick="denyAdminAction(\''+escAttr(r.id)+'\')" style="flex:1;padding:.45rem;background:none;border:1.5px solid var(--light);color:var(--mid);border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;">Decline</button>'
+          +'</div>';
+      }
+      h+='</div>';
+    });
+    h+='</div>';
+    return h;
+  }catch(e){ return ''; }
+}
+// ── Registered actions: PRICING (all require a second admin) ──
+registerAdminAction('pricing_advanced', async function(p){
+  if(p.mr!=null) globalSettings.mileageRate=p.mr; else delete globalSettings.mileageRate;
+  if(p.im!=null) globalSettings.includedMiles=p.im; else delete globalSettings.includedMiles;
+  if(p.cf!=null) globalSettings.changeFee=p.cf; else delete globalSettings.changeFee;
+  if(p.cp!=null) globalSettings.cancelFeePct=p.cp; else delete globalSettings.cancelFeePct;
+  if(p.pf!=null) globalSettings.pickupFee=p.pf; else delete globalSettings.pickupFee;
+  if(p.wr!=null) globalSettings.waitRate=p.wr; else delete globalSettings.waitRate;
+  if(p.xs!=null) globalSettings.extraStopFee=p.xs; else delete globalSettings.extraStopFee;
+  var nSur=p.nSur||{}; var sc={};
+  ['premium','holiday','christmas','late','traffic'].forEach(function(k){ if(nSur[k]!=null) sc[k]=nSur[k]; });
+  globalSettings.surcharges=sc;
+  await saveGlobalSettings();
+  try{ renderPricingTracker(); }catch(e){}
+  try{ if(typeof renderAddons==='function') renderAddons(); }catch(e){}
+});
+registerAdminAction('pricing_base', async function(p){
+  var vehicles=['Sedan','SUV/Van','Premium','Sprinter Van'];
+  var rates=p.rates||{};
+  vehicles.forEach(function(v){ if(rates[v]) BASE[v]=rates[v]; else if(v==='Sprinter Van') delete BASE[v]; });
+  globalSettings.baseRates=rates;
+  if(p.hourly!=null) globalSettings.sprintHourly=p.hourly;
+  await saveGlobalSettings();
+  try{ renderPricingTracker(); }catch(e){}
+});
+registerAdminAction('pricing_clientfee', async function(p){
+  globalSettings.clientFeePct=p.v;
+  await saveGlobalSettings();
+  try{ renderPricingTracker(); }catch(e){}
+  try{ refreshDash(); }catch(e){}
+});
+registerAdminAction('pricing_fuelpct', async function(p){
+  globalSettings.fuelPct=p.v;
+  await saveGlobalSettings();
+  try{ renderPricingTracker(); }catch(e){}
+  try{ if(typeof renderAddons==='function') renderAddons(); }catch(e){}
+});
+registerAdminAction('pricing_fuelonoff', async function(p){
+  globalSettings.fuelEnabled=!!p.enabled;
+  await saveGlobalSettings();
+  try{ renderPricingTracker(); }catch(e){}
+  try{ if(typeof renderAddons==='function') renderAddons(); }catch(e){}
+});
+registerAdminAction('surcharge_add', async function(p){
+  if(!Array.isArray(globalSettings.customSurcharges)) globalSettings.customSurcharges=[];
+  globalSettings.customSurcharges.push({ key:p.key||('cs_'+Date.now()), label:p.label, amount:p.amount });
+  await saveGlobalSettings();
+  try{ var c=document.getElementById('custom-surcharges-admin'); if(c) c.innerHTML=_customSurchargesAdminHTML(); }catch(e){}
+  try{ if(typeof renderAddons==='function') renderAddons(); if(typeof renderQaAddons==='function') renderQaAddons(); }catch(e){}
+});
+registerAdminAction('surcharge_delete', async function(p){
+  globalSettings.customSurcharges=(globalSettings.customSurcharges||[]).filter(function(c){ return c.key!==p.key; });
+  await saveGlobalSettings();
+  try{ var c=document.getElementById('custom-surcharges-admin'); if(c) c.innerHTML=_customSurchargesAdminHTML(); }catch(e){}
+  try{ if(typeof renderAddons==='function') renderAddons(); if(typeof renderQaAddons==='function') renderQaAddons(); }catch(e){}
+});
+registerAdminAction('surcharge_triggers', async function(p){
+  if(p.premiumStart) globalSettings.premiumStart=p.premiumStart;
+  if(p.premiumEnd) globalSettings.premiumEnd=p.premiumEnd;
+  delete globalSettings.premiumBefore; delete globalSettings.premiumAfter;
+  globalSettings.trafficDays=p.trafficDays||[];
+  if(p.trafficAm) globalSettings.trafficAm=p.trafficAm;
+  if(p.trafficPm) globalSettings.trafficPm=p.trafficPm;
+  await saveGlobalSettings();
+  try{ renderPricingTracker(); }catch(e){}
+});
+
+// ── Registered actions: ACCESS & DRIVERS ──
+registerAdminAction('access_toggle', async function(p){
+  var u=USERS.find(function(x){ return x.name===p.userName; }); if(!u) return;
+  var wasEnabled=!u.disabled;
+  u.disabled=!!p.disabled;
+  await saveDisabled();
+  try{ renderAccessControl(); }catch(e){}
+  showToast(p.userName+' access '+(u.disabled?'disabled':'enabled'));
+  if(wasEnabled && u.disabled){
+    try{
+      if(canGrantFreeAccess()){
+        setTimeout(function(){ alert('Reminder: '+p.userName+'\u2019s app access is now off, but this does NOT stop their Square subscription.\n\nCancel it in your Square Dashboard \u2192 Subscriptions so they aren\u2019t charged again.'); }, 60);
+      }
+      if(confirm(p.userName+' has been removed.\n\nEmail their documentation file (income + receipts) to them now?')) emailDriverDocOnRemoval(p.userName);
+    }catch(e){}
+  }
+});
+
+// ── Registered actions: RIDES (non-dispatch) ──
+registerAdminAction('rides_archive', async function(p){
+  var cutoff=p.cutoff; if(!cutoff) return;
+  var toArchive=rides.filter(function(r){ return r && r.date && r.date < cutoff; });
+  if(!toArchive.length){ showToast('No rides old enough to archive'); return; }
+  try{
+    var existing=(await storageGet('kat:ridesArchive'))||[];
+    var archivedIds=new Set(existing.map(function(r){ return r&&r.id; }));
+    var merged=existing.concat(toArchive.filter(function(r){ return !archivedIds.has(r.id); }));
+    await storageSet('kat:ridesArchive', merged);
+    var keepIds=new Set(toArchive.map(function(r){ return r.id; }));
+    rides=rides.filter(function(r){ return !(r && r.date && r.date < cutoff && keepIds.has(r.id)); });
+    await saveRides();
+    _archiveLoaded=false;
+    try{ if(typeof renderCal==='function') renderCal(); }catch(e){}
+    try{ if(typeof renderRides==='function') renderRides(); }catch(e){}
+    try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+    showToast('Archived '+toArchive.length+' ride(s) \u2713');
+  }catch(e){ console.error('archive exec',e); showToast('Could not archive rides','error'); }
+});
+
+registerAdminAction('ride_delete', async function(p){
+  rides=rides.filter(function(r){ return !(r && (r.id===p.id || String(r.id)===String(p.id))); });
+  await saveRides();
+  try{ closeRideModal(); }catch(e){}
+  try{ renderRides(); refreshDash(); renderCal(); }catch(e){}
+  showToast('Ride deleted \u2713');
+});
+
+// ── Registered actions ──
+registerAdminAction('cautious_remove', async function(p){
+  cautiousList=(cautiousList||[]).filter(function(e){ return e.id!==p.id; });
+  await saveCautiousList(); try{ renderCautiousList(); }catch(e){}
+});
+
 async function removeCautiousEntry(id){
   const entry=cautiousList.find(e=>e.id===id); if(!entry) return;
   const me=getMyDriverName()||currentUser?.name;
   if(!isAdmin()&&entry.addedBy!==me){ showToast('Only the driver who flagged this or an admin can remove it','error'); return; }
-  if(!confirm('Remove this flag for '+entry.name+'?')) return;
-  cautiousList=cautiousList.filter(e=>e.id!==id);
-  await saveCautiousList(); renderCautiousList(); showToast('Flag removed');
+  if(!confirm('Remove this flag for '+entry.name+'?'+(_twoAdminRequired()?'\n\nThis needs a second admin to approve before it takes effect.':''))) return;
+  // Safety flags can't be pulled by one person — a second admin must approve.
+  await queueAdminAction('cautious_remove', {id:id}, 'Remove cautious flag for '+(entry.name||'a client'));
 }
 function renderCautiousList(){
   const box=document.getElementById('cautious-list-body'); if(!box) return;
