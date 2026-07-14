@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090445">
+<meta name="version" content="202606090450">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -680,7 +680,6 @@ input,select,textarea{font-size:16px;}
         </div>
       </div>
         <div class="form-group" style="margin-top:1rem;"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;background:#f3eeff;border:1px solid #d9c9f5;border-radius:8px;padding:.6rem .75rem;"><input type="checkbox" id="q-add-client" checked style="width:17px;height:17px;accent-color:var(--accent);"><span style="font-size:.82rem;font-weight:600;color:var(--black);">Add this client to my client list</span></label><div style="font-size:.68rem;color:var(--mid);margin-top:3px;padding-left:.2rem;">Uncheck for one-time or guest rides you don’t want saved.</div></div><button onclick="saveQuote()" class="btn-primary" style="width:100%;margin-top:1rem;padding:.85rem;">Save as ride</button>
-        <button onclick="saveAsQuote()" style="width:100%;margin-top:.5rem;padding:.7rem;background:none;border:1.5px solid var(--accent);border-radius:8px;color:var(--accent);font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">📋 Save as quote (schedule later)</button>
         <button onclick="textQuoteToClient()" style="width:100%;margin-top:.5rem;padding:.7rem;background:none;border:1.5px solid var(--gold);border-radius:8px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.88rem;cursor:pointer;">💬 Text quote to client</button>
         <button onclick="viewRouteOnMaps()" style="width:100%;margin-top:.5rem;padding:.7rem;background:#16a34a;border:1.5px solid #16a34a;border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">↗ View route in Google Maps</button>
         <div id="saved-quotes-wrap"></div>
@@ -2832,7 +2831,8 @@ function fuelRate(){ return fuelPct()/100; } function clientFeePct(){ var p=pars
 function fuelLabel(){ return 'Fuel surcharge ('+fuelPct()+'%)'; }
 // ── EDITABLE PRICE POINTS (admin-controlled, single source of truth) ──
 // Each getter returns the saved value or falls back to the hardcoded default.
-function surcharge(k){ var m=globalSettings&&globalSettings.surcharges; var v=m&&parseFloat(m[k]); return (isFinite(v)&&v>=0)?v:ADDONS_FLAT[k]; }
+function customSurchargeList(){ var a=(globalSettings&&globalSettings.customSurcharges)||[]; return Array.isArray(a)?a.filter(function(c){return c&&c.key&&c.label;}):[]; }
+function surcharge(k){ var m=globalSettings&&globalSettings.surcharges; var v=m&&parseFloat(m[k]); if(isFinite(v)&&v>=0) return v; if(ADDONS_FLAT[k]!=null) return ADDONS_FLAT[k]; var c=customSurchargeList().find(function(x){return x.key===k;}); return c?(parseFloat(c.amount)||0):0; }
 function mileageRate(){ var v=parseFloat(globalSettings&&globalSettings.mileageRate); return (isFinite(v)&&v>0)?v:RATE_PER_MILE; }
 // Included mileage for airport (AP) rides: the base fare covers this many miles; past that
 // (plus a 2-mile GPS grace) an overage is charged per mile. Admin-editable, default 50.
@@ -3001,6 +3001,7 @@ function calcQuote() {
         sl.push({label:lbls[k]+' surcharge', val:surcharge(k)});
       }
     });
+    customSurchargeList().forEach(function(c){ if(addonState[c.key]) sl.push({label:c.label+' surcharge', val:surcharge(c.key)}); });
     if(extraStops>0) sl.push({label:`Additional pickup${extraStops>1?'s':''} (${extraStops} × $${extraStopFee()})`, val:extraStops*extraStopFee()});
     if(waitFee>0) sl.push({label:`Wait time (${wait}h × $${waitRate()}/hr)`, val:waitFee});
     return sl;
@@ -3042,7 +3043,7 @@ function calcQuote() {
     if(leg2Fuel>0) leg2Lines.push({label:fuelLabel(), val:leg2Fuel});
     const leg2Total = leg2Sub + leg2Fuel;
 
-    const grandTotal = leg1Total + leg2Total;
+    const grandTotal = Math.round((leg1Total + leg2Total)*100)/100;
 
     const renderLines = ls => ls.map(l=>`<div class="quote-line"><span style="color:#aaa">${l.label}${l.note?'<br><span style="font-size:.68rem;color:#555">'+l.note+'</span>':''}</span><span style="${l.val===0?'color:#555':''}">$${l.val.toFixed(2)}</span></div>`).join('');
 
@@ -3111,7 +3112,9 @@ function calcQuote() {
   const subtotal = tripTotal + flatTotal;
   let fuelFee = 0;
   if(addonState.fuel){ fuelFee=subtotal*fuelRate(); lines.push({label:fuelLabel(), val:fuelFee}); }
-  const total = addonState.fuel ? Math.floor(subtotal + fuelFee) : subtotal + fuelFee;
+  // Round to the cent (never floor): the saved price must equal the computed breakdown exactly,
+  // so "Manual adjustment" only ever appears when someone actually overrides the price.
+  const total = Math.round((subtotal + fuelFee)*100)/100;
   document.getElementById('quote-lines').innerHTML=lines.map(l=>`<div class="quote-line"><span style="color:#aaa">${l.label}${l.note?'<br><span style="font-size:.7rem;color:#666">'+l.note+'</span>':''}</span><span style="${l.val===0?'color:#666':''}">$${l.val.toFixed(2)}</span></div>`).join('');
   document.getElementById('quote-total').textContent=`$${total.toFixed(2)}`;
   return total;
@@ -3144,6 +3147,7 @@ function getReturnLegSurcharges(dateVal, timeVal){
   else if(isHolidayDate(mmdd)) lines.push({label:'Holiday surcharge (return)', val:surcharge('holiday')});
   // Manual surcharges that apply to both legs
   if(addonState.late) lines.push({label:'Late notice (return)', val:surcharge('late')});
+  customSurchargeList().forEach(function(c){ if(addonState[c.key]) lines.push({label:c.label+' surcharge (return)', val:surcharge(c.key)}); });
   return lines;
 }
 
@@ -3762,6 +3766,26 @@ function setTripType(t, btn){
     }
   }
   if(typeof autoFillTerminalAddress==='function') autoFillTerminalAddress();
+  // Re-place the client's home into the correct field for the new type (Pickup for AP Run,
+  // Destination for AP Pick Up). Only moves autofilled/empty values, never a manual entry.
+  try{
+    var _ck=((document.getElementById('q-client')||{}).value||'').trim().toLowerCase();
+    if(_ck && (t==='AP RUN'||t==='AP PICK UP'||t==='AP ROUND TRIP')){
+      var _home=getClientDefaultAddress(_ck)||((buildClientDB(clientLookupScope())[_ck]||{}).address)||'';
+      if(_home){
+        var homeField=(t==='AP PICK UP')?'q-dropoff':'q-pickup';
+        var otherField=(t==='AP PICK UP')?'q-pickup':'q-dropoff';
+        var oel=document.getElementById(otherField);
+        if(oel && oel.value===_home){ oel.value=''; if(typeof _autofilledVals!=='undefined') _autofilledVals[otherField]=''; }
+        var hel=document.getElementById(homeField);
+        if(hel && (hel.value==='' || hel.value===(_autofilledVals&&_autofilledVals[homeField]) || hel.value===_home)){
+          hel.value=_home; if(typeof _autofilledVals!=='undefined') _autofilledVals[homeField]=_home;
+        }
+        if(typeof autoFillTerminalAddress==='function') autoFillTerminalAddress();
+      }
+    }
+    if(typeof debounceMileage==='function') debounceMileage();
+  }catch(e){}
   calcQuote();
 }
 function setVehicle(v, btn){
@@ -3814,7 +3838,7 @@ function renderAddons(){
     return `<div class="${cls}" onclick="toggleAddon('${k}')" ${title}>${k==='fuel'?('Fuel ('+fuelPct()+'%)'):ADDON_LABELS[k]}`
       +(disabled?' <span style="font-size:.65em;opacity:.6;">(off)</span>':'')
       +'</div>';
-  }).join('');
+  }).join('') + customSurchargeList().map(function(c){ return '<div class="addon-chip'+(addonState[c.key]?' on':'')+'" onclick="toggleAddon(\''+escAttr(c.key)+'\')">'+escHtml(c.label)+' +$'+(parseFloat(c.amount)||0)+'</div>'; }).join('');
 }
 // Auto-detect time-based surcharges (premium hours before 5am; traffic on weekday rush)
 function onTimeChange(){
@@ -3970,6 +3994,18 @@ function textQuoteToClient(){
     });
   }
   body+='\n\nTotal: '+total+'\n\nIf all of this is correct and acceptable, please let me know and I’ll get you scheduled. Thank you!';
+  // Auto-save this quote to Saved Quotes, marked as sent today (replaces the old "Save as quote" button).
+  try{
+    if(typeof _gatherQuoteRide==='function' && typeof savedQuotes!=='undefined'){
+      var _qc=client.toLowerCase(); var _qd=date;
+      var _ex=savedQuotes.find(function(q){ return q && (q.client||'').trim().toLowerCase()===_qc && q.date===_qd; });
+      if(_ex){ _ex.sentAt=Date.now(); }
+      else { var _q=_gatherQuoteRide(); _q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); _q.savedAt=Date.now(); _q.sentAt=Date.now(); savedQuotes.push(_q); }
+      if(typeof saveSavedQuotes==='function') saveSavedQuotes();
+      if(typeof renderSavedQuotes==='function') renderSavedQuotes();
+      showToast('\u2713 Quote saved & texted');
+    }
+  }catch(e){}
   const isiOS=/iPad|iPhone|iPod/.test(navigator.userAgent||'');
   const href='sms:'+phone+(isiOS?'&':'?')+'body='+encodeURIComponent(body);
   window.location.href=href;
@@ -4137,18 +4173,6 @@ function _notifyOwnerOfForeignSchedule(ride){
   }catch(e){}
 }
 
-// Save the current quote for later WITHOUT scheduling it.
-async function saveAsQuote(){
-  const client=document.getElementById('q-client').value.trim();
-  if(!client){ showToast('Please enter a client name','error'); return; }
-  const q=_gatherQuoteRide();
-  q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000);
-  q.savedAt=Date.now();
-  savedQuotes.push(q);
-  try{ await saveSavedQuotes(); }catch(e){ console.warn('save quote failed',e); }
-  showToast('\u2713 Quote saved \u2014 find it under Saved Quotes');
-  renderSavedQuotes();
-}
 
 function renderSavedQuotes(){
   const box=document.getElementById('saved-quotes-wrap'); if(!box) return;
@@ -8531,6 +8555,7 @@ function buildFeeMathHTML(r){
     if(k==='holiday' && on(r.christmas)) return; // Christmas replaces Holiday
     if(on(r[k])){ const a=surcharge(k); rows.push({label:lbl+' surcharge', val:a, add:true}); sub += a; }
   });
+  customSurchargeList().forEach(function(c){ if(on(r[c.key])){ var a=surcharge(c.key); rows.push({label:c.label+' surcharge', val:a, add:true}); sub+=a; } });
   const xstop = parseInt(r.xstop)||0;
   if(xstop>0){ const v=xstop*extraStopFee(); rows.push({label:`Extra stop${xstop>1?'s':''} (${xstop} \u00d7 $${extraStopFee()})`, val:v, add:true}); sub+=v; }
   const wait = parseFloat(r.wait)||0;
@@ -9103,6 +9128,7 @@ function nav(id){
       renderFlightsPage();
     } else if(id==='quote'){
       showPage('quote', null);
+      try{ clearQuoteForm(); }catch(e){}
       try{ renderSavedQuotes(); }catch(e){}
       try{ if(typeof updateTripFields==='function') updateTripFields(); }catch(e){}
     } else {
@@ -10576,7 +10602,7 @@ function onQaDateTimeChange(){
 function renderQaAddons(){
   const el=document.getElementById('qa-addons'); if(!el) return;
   const defs=[['premium','Premium +$'+surcharge('premium')],['holiday','Holiday +$'+surcharge('holiday')],['christmas','Christmas +$'+surcharge('christmas')],['late','Late notice +$'+surcharge('late')],['traffic','Traffic +$'+surcharge('traffic')],['fuel','Fuel +'+fuelPct()+'%']];
-  el.innerHTML=defs.map(d=>`<div class="addon-chip${qaAddonState[d[0]]?' on':''}" onclick="toggleQaAddon('${d[0]}')">${d[1]}</div>`).join('');
+  el.innerHTML=defs.map(d=>`<div class="addon-chip${qaAddonState[d[0]]?' on':''}" onclick="toggleQaAddon('${d[0]}')">${d[1]}</div>`).join('') + customSurchargeList().map(function(c){ return '<div class="addon-chip'+(qaAddonState[c.key]?' on':'')+'" onclick="toggleQaAddon(\''+escAttr(c.key)+'\')">'+escHtml(c.label)+' +$'+(parseFloat(c.amount)||0)+'</div>'; }).join('');
 }
 function toggleQaAddon(k){
   if(k==='fuel' && globalSettings.fuelEnabled===false){ showToast('Fuel surcharge is currently disabled by admin','error'); return; }
@@ -10607,6 +10633,7 @@ function recalcQa(){
   }
   let sub=base; const flat={premium:30,holiday:30,christmas:35,late:20,traffic:15};
   Object.keys(flat).forEach(k=>{ if(qaAddonState[k]){ if(k==='holiday'&&qaAddonState.christmas) return; sub+=surcharge(k); } });
+  customSurchargeList().forEach(function(c){ if(qaAddonState[c.key]) sub+=surcharge(c.key); });
   const xs=parseInt(document.getElementById('qa-xstop')?.value)||0; sub+=xs*extraStopFee();
   const wt=parseFloat(document.getElementById('qa-wait')?.value)||0; sub+=wt*waitRate();
   // Mileage overage for airport rides — miles beyond the included radius, added BEFORE fuel so
@@ -11220,7 +11247,7 @@ async function saveQuickAddRide(){
     terminal:document.getElementById('qa-terminal').value,
     notes:   document.getElementById('qa-notes').value.trim(),
     miles:parseFloat((document.getElementById('qa-miles-hidden')||{}).value)||0,pax:parseInt(document.getElementById('qa-pax')?.value)||1,checkedBags:parseInt(document.getElementById('qa-checked-bags')?.value)||0,carryOnBags:parseInt(document.getElementById('qa-carryon-bags')?.value)||0,rt:'',email:document.getElementById('qa-email')?document.getElementById('qa-email').value.trim():'',
-    holiday:qaAddonState.holiday?'Y':'N',christmas:qaAddonState.christmas?'Y':'N',late:qaAddonState.late?'Y':'N',premium:qaAddonState.premium?'Y':'N',fuel:qaAddonState.fuel?'Y':'N',xstop:parseInt(document.getElementById('qa-xstop')?.value)||0,xstopAddr:(document.getElementById('qa-xstop-addr')?.value||'').trim(),traffic:qaAddonState.traffic?'Y':'N',wait:parseFloat(document.getElementById('qa-wait')?.value)||0,
+    holiday:qaAddonState.holiday?'Y':'N',christmas:qaAddonState.christmas?'Y':'N',late:qaAddonState.late?'Y':'N',premium:qaAddonState.premium?'Y':'N',fuel:qaAddonState.fuel?'Y':'N',xstop:parseInt(document.getElementById('qa-xstop')?.value)||0,xstopAddr:(document.getElementById('qa-xstop-addr')?.value||'').trim(),traffic:qaAddonState.traffic?'Y':'N',...Object.fromEntries(customSurchargeList().map(function(c){return [c.key, qaAddonState[c.key]?'Y':'N'];})),wait:parseFloat(document.getElementById('qa-wait')?.value)||0,
     confirmed:false, createdBy:currentUser?.name||'',
     newClient: !!(document.getElementById('qa-new-client')?.checked),
   };
@@ -12703,6 +12730,7 @@ function computeExpectedPrice(ride){
   if(isChristmas) sub+=surcharge('christmas');
   if(ride.late==='Y') sub+=surcharge('late');
   if(isTraffic) sub+=surcharge('traffic');
+  customSurchargeList().forEach(function(c){ if(ride[c.key]==='Y') sub+=surcharge(c.key); });
   if(xstop>0) sub+=xstop*extraStopFee();
   if(wait>0) sub+=wait*WAIT;
   if(ride.fuel==='Y') sub=sub*(1+fuelRate());
@@ -12848,10 +12876,50 @@ function buildAdvancedPricingHTML(){
     +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.7rem;margin-bottom:1.1rem;">'+trip+'</div>'
     +'<div style="font-size:.66rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Surcharges</div>'
     +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:.7rem;margin-bottom:.6rem;">'+sur+'</div>'
+    +'<div id="custom-surcharges-admin" style="margin:.2rem 0 1rem;">'+_customSurchargesAdminHTML()+'</div>'
     +'<div style="font-size:.7rem;color:var(--mid);line-height:1.5;margin-bottom:1rem;background:#f6f2ff;border:1px solid #e5d9ff;border-radius:8px;padding:.5rem .65rem;">The upgrade charge for an SUV/Van or Premium ride on round trips &amp; one-ways is automatically the difference between that vehicle\u2019s base rate and the Sedan rate \u2014 adjust those in <strong>Base Vehicle Rates</strong> above.</div>'
     +'<button onclick="saveAdvancedPricing()" style="padding:.5rem 1.25rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:.88rem;cursor:pointer;font-family:\'DM Sans\',sans-serif;">Save Advanced Pricing</button>'
     +'</div></details>';
 }
+function _customSurchargesAdminHTML(){
+  var list=customSurchargeList();
+  var h='<div style="font-size:.66rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin:.4rem 0 .5rem;">Custom surcharges</div>';
+  if(list.length){
+    list.forEach(function(c){
+      h+='<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem;"><span style="flex:1;font-size:.82rem;color:var(--black);">'+escHtml(c.label)+' <span style="color:var(--gold);font-weight:700;">+$'+(parseFloat(c.amount)||0)+'</span></span>'
+        +'<button onclick="deleteCustomSurcharge(\''+escAttr(c.key)+'\')" style="padding:.25rem .55rem;background:none;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;font-size:.75rem;font-weight:700;cursor:pointer;">Delete</button></div>';
+    });
+  } else { h+='<div style="font-size:.74rem;color:var(--mid);margin-bottom:.4rem;">None yet \u2014 add one below (e.g. Pet fee, Extra luggage, Meet &amp; greet).</div>'; }
+  h+='<div style="display:flex;gap:.5rem;margin-top:.3rem;">'
+    +'<input id="new-cs-label" placeholder="Label (e.g. Pet fee)" style="flex:1;padding:.4rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;" />'
+    +'<input id="new-cs-amt" type="number" min="0" step="1" placeholder="$" style="width:72px;padding:.4rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;" />'
+    +'<button onclick="addCustomSurcharge()" style="padding:.4rem .7rem;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:.82rem;font-weight:700;cursor:pointer;white-space:nowrap;">+ Add</button></div>';
+  return h;
+}
+async function addCustomSurcharge(){
+  if(typeof isAdmin==='function' && !isAdmin()){ showToast('Admins only','error'); return; }
+  var lbl=((document.getElementById('new-cs-label')||{}).value||'').trim();
+  var amt=parseFloat((document.getElementById('new-cs-amt')||{}).value);
+  if(!lbl){ showToast('Enter a label','error'); return; }
+  if(!isFinite(amt)||amt<0){ showToast('Enter a valid amount','error'); return; }
+  if(!Array.isArray(globalSettings.customSurcharges)) globalSettings.customSurcharges=[];
+  globalSettings.customSurcharges.push({ key:'cs_'+Date.now()+'_'+Math.floor(Math.random()*1000), label:lbl, amount:amt });
+  try{ await saveGlobalSettings(); }catch(e){}
+  var cont=document.getElementById('custom-surcharges-admin'); if(cont) cont.innerHTML=_customSurchargesAdminHTML();
+  try{ if(typeof renderAddons==='function') renderAddons(); }catch(e){}
+  try{ if(typeof renderQaAddons==='function') renderQaAddons(); }catch(e){}
+  showToast('\u2713 Surcharge added: '+lbl);
+}
+async function deleteCustomSurcharge(key){
+  if(typeof isAdmin==='function' && !isAdmin()){ showToast('Admins only','error'); return; }
+  globalSettings.customSurcharges=(globalSettings.customSurcharges||[]).filter(function(c){return c.key!==key;});
+  try{ await saveGlobalSettings(); }catch(e){}
+  var cont=document.getElementById('custom-surcharges-admin'); if(cont) cont.innerHTML=_customSurchargesAdminHTML();
+  try{ if(typeof renderAddons==='function') renderAddons(); }catch(e){}
+  try{ if(typeof renderQaAddons==='function') renderQaAddons(); }catch(e){}
+  showToast('Surcharge deleted');
+}
+
 async function saveAdvancedPricing(){
   if(typeof isAdmin==='function' && !isAdmin()){ showToast('Admins only','error'); return; }
   function num(id,min){ var el=document.getElementById(id); if(!el) return null; var x=parseFloat(el.value); return (isFinite(x)&&x>=(min||0))?x:null; }
@@ -13763,27 +13831,27 @@ function buildMemberCard(d, opts){
           +'</div>'
           +'<div style="margin-top:.6rem;">'
           +'<div style="font-size:.68rem;color:var(--mid);margin-bottom:1px;font-weight:600;">Hours I can\u2019t drive</div>'
-          +'<div style="font-size:.63rem;color:var(--mid);margin-bottom:4px;line-height:1.4;">For a day job or other commitment. Pick the days, set the hours, and tap +. To <strong>change</strong> a block you already made, use the \u270f\uFE0F or \u00d7 next to it below \u2014 don\u2019t add a new one.</div>'
-          +'<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:.4rem;">'
+          +'<div style="font-size:.63rem;color:var(--mid);margin-bottom:4px;line-height:1.4;">Block off hours you can\u2019t drive \u2014 either every week on certain days, <strong>or on one specific date</strong>. To <strong>change</strong> a block you already made, use the \u270f\uFE0F or \u00d7 next to it below \u2014 don\u2019t add a new one.</div>'
+          +'<div style="font-size:.62rem;color:var(--mid);font-weight:700;margin-bottom:2px;">EVERY WEEK ON</div>'
+          +'<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:.45rem;">'
           + ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((w,wi)=>
             '<label style="display:flex;align-items:center;gap:2px;font-size:.65rem;cursor:pointer;">'
             +'<input type="checkbox" class="avail-hday-'+dk+'" value="'+wi+'" style="accent-color:var(--accent);"/>'+w+'</label>'
           ).join('')
           +'</div>'
+          +'<div style="display:flex;align-items:center;gap:.5rem;margin:.1rem 0 .45rem;"><div style="flex:1;height:1px;background:var(--light);"></div><span style="font-size:.6rem;font-weight:700;color:var(--mid);">OR</span><div style="flex:1;height:1px;background:var(--light);"></div></div>'
+          +'<div style="font-size:.62rem;color:var(--mid);font-weight:700;margin-bottom:2px;">JUST ONE DATE</div>'
+          +'<input type="date" id="avail-hdate-'+dk+'" title="Block these hours on a single date only" style="width:100%;padding:.45rem;border:1px solid var(--light);border-radius:6px;font-size:.85rem;box-sizing:border-box;margin-bottom:.55rem;"/>'
           +'<div style="font-size:.62rem;color:var(--mid);font-weight:700;margin-bottom:2px;">FROM (start)</div>'
           +'<input type="time" id="avail-hfrom-'+dk+'" aria-label="Start time" title="Start time (from)" style="padding:.45rem;border:1px solid var(--light);border-radius:6px;font-size:.9rem;box-sizing:border-box;width:100%;margin-bottom:.5rem;"/>'
           +'<div style="font-size:.62rem;color:var(--mid);font-weight:700;margin-bottom:2px;">TO (end)</div>'
           +'<input type="time" id="avail-hto-'+dk+'" aria-label="End time" title="End time (to)" style="padding:.45rem;border:1px solid var(--light);border-radius:6px;font-size:.9rem;box-sizing:border-box;width:100%;margin-bottom:.55rem;"/>'
           +'<button onclick="addUnavailHour(\''+d+'\')" style="width:100%;padding:.5rem .8rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;">Add</button>'
-          +'<div style="font-size:.62rem;color:var(--mid);margin-bottom:3px;">Or specific date:</div>'
-          +'<div style="display:flex;gap:.3rem;margin-bottom:.4rem;">'
-          +'<input type="date" id="avail-hdate-'+dk+'" style="flex:1;padding:.3rem;border:1px solid var(--light);border-radius:5px;font-size:.75rem;"/>'
-          +'</div>'
           +((prof.unavailHours||[]).length?
             '<div style="font-size:.65rem;color:var(--mid);margin-bottom:3px;font-weight:600;">Hours you\u2019ve set (\u270f\uFE0F to change, \u00d7 to remove):</div>'
             +(prof.unavailHours||[]).map(blk=>{
               const dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-              const label=blk.date?blk.date:(blk.days||[]).map(d2=>dayNames[d2]).join('/');
+              const label=blk.date?fmtDateShort(blk.date):(blk.days||[]).map(d2=>dayNames[d2]).join('/');
               return '<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:2px;">'
                 +'<span style="font-size:.72rem;color:var(--black);">'+label+' '+fmtTime12(blk.from)+'\u2013'+fmtTime12(blk.to)+'</span>'
                 +'<button onclick="openEditHourModal(\''+d+'\',\''+blk.id+'\')" style="padding:1px 4px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:.65rem;cursor:pointer;">\u270f\ufe0f</button>'
@@ -13967,8 +14035,11 @@ function addUnavailHour(driverName){
   else if(dayEls.length) blk.days=dayEls.map(e=>parseInt(e.value));
   else{showToast('Select at least one day or a specific date','error');return;}
   prof.unavailHours.push(blk);
+  // Clear the inputs so a leftover date doesn't silently override the next block you add.
+  if(fromEl) fromEl.value=''; if(toEl) toEl.value=''; if(dateEl) dateEl.value='';
+  dayEls.forEach(function(e){ e.checked=false; });
   persistDriverProfiles(); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
-  showToast('Time block added \u2713');
+  showToast(blk.date?('Blocked '+fmtDateShort(blk.date)+' \u2713'):'Time block added \u2713');
 }
 function removeUnavailHour(driverName,id){
   const prof=DRIVER_PROFILES[driverName]||{};
@@ -15509,27 +15580,20 @@ function checkClientConflict(){
   const statusEl=document.getElementById('q-client-status');
   if(!statusEl) return;
   if(!name){ statusEl.innerHTML=''; return; }
-  const allDB=buildClientDB(null);
-  const match=Object.values(allDB).find(function(c){ return c.name.toLowerCase()===name.toLowerCase(); });
   const myDriver=getMyDriverName();
-  if(!match){ statusEl.innerHTML=''; return; }
-  if(match.drivers.includes(myDriver)){
-    const wDiv=document.createElement('div');
-    wDiv.style.cssText='background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:.4rem .75rem;font-size:.78rem;color:#166534;margin-top:3px;';
-    const wA=document.createElement('a'); wA.href='#'; wA.textContent='View history';
-    wA.style.cssText='color:#166534;font-weight:600;';
-    wA.onclick=function(e){ openClientModal(name,e); return false; };
-    wDiv.appendChild(document.createTextNode('\u2713 Your client \u00b7 '+match.rides.length+' previous ride'+(match.rides.length!==1?'s':'')+' \u00b7 '));
-    wDiv.appendChild(wA); statusEl.innerHTML=''; statusEl.appendChild(wDiv);
-  } else if(match.drivers.length){
-    const wDiv2=document.createElement('div');
-    wDiv2.style.cssText='background:#fff5f5;border:1px solid #fca5a5;border-radius:6px;padding:.4rem .75rem;font-size:.78rem;color:#dc2626;margin-top:3px;';
-    const dNames=match.drivers.map(function(d){return d.split(' ')[0];}).join(', ');
-    wDiv2.textContent='\u26a0 Client of '+dNames+' \u00b7 ';
-    const wA2=document.createElement('a'); wA2.href='#'; wA2.textContent='View history';
-    wA2.style.cssText='color:#dc2626;font-weight:600;';
-    wA2.onclick=function(e){ openClientModal(name,e); return false; };
-    wDiv2.appendChild(wA2); statusEl.innerHTML=''; statusEl.appendChild(wDiv2);
+  const key=name.toLowerCase();
+  const owner=(typeof getClientOwner==='function')?getClientOwner(name):null;
+  // My own directory (proxy-aware) — for the ride count and to confirm the client is mine.
+  let mine=null; try{ mine=buildClientDB((currentUser&&PROXY_MAP[currentUser.name])||myDriver)[key]||null; }catch(e){}
+  const link=function(color){ return ' \u00b7 <a href="#" onclick="openClientModal(\''+escAttr(name)+'\');return false;" style="color:'+color+';font-weight:600;">View history</a>'; };
+  if(owner && owner!==myDriver && (!mine)){
+    // Genuinely another owner's client (I don't own them).
+    statusEl.innerHTML='<div style="background:#fff5f5;border:1px solid #fca5a5;border-radius:6px;padding:.4rem .75rem;font-size:.78rem;color:#dc2626;margin-top:3px;">\u26a0 Client of '+escHtml(owner.split(' ')[0])+link('#dc2626')+'</div>';
+  } else if(mine || (owner && owner===myDriver)){
+    const n=mine?mine.rides.length:0;
+    statusEl.innerHTML='<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:.4rem .75rem;font-size:.78rem;color:#166534;margin-top:3px;">\u2713 Your client'+(n?(' \u00b7 '+n+' previous ride'+(n!==1?'s':'')):'')+link('#166534')+'</div>';
+  } else {
+    statusEl.innerHTML='';
   }
 }
 
