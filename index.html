@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607152210">
+<meta name="version" content="202607152430">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1578,6 +1578,9 @@ input,select,textarea{font-size:16px;}
           <input type="text" id="qa-xstop-addr" placeholder="Extra stop address (separate several with ;)" />
         </div>
       </div>
+      <div class="form-group" id="qa-med-hours-group" style="display:none;"><label>Medical transport hours</label>
+        <input type="number" id="qa-med-hours" min="0" step="0.5" placeholder="e.g. 3" inputmode="decimal" oninput="recalcQa()" />
+      </div>
       <div class="form-group"><label>Wait time (hrs · $60/hr)</label>
         <input type="number" id="qa-wait" min="0" step="0.25" value="0" oninput="recalcQa()" />
       </div>
@@ -3004,6 +3007,44 @@ const HOLIDAY_DATES=['01-01','12-31','04-05','05-10','05-25','06-21','07-04','09
 const HOLIDAY_NAMES={'01-01':"New Year's Day",'12-31':"New Year's Eve",'04-05':'Easter','05-10':"Mother's Day",'05-25':'Memorial Day','06-21':"Father's Day",'07-04':'Independence Day','09-07':'Labor Day','11-25':'Prior Thanksgiving','11-26':'Thanksgiving','11-27':'Thanksgiving','11-28':'Thanksgiving','11-29':'Post-Thanksgiving','11-30':'Post-Thanksgiving Sunday','12-23':'Prior Christmas Eve','12-24':'Christmas Eve','12-25':'Christmas Day','12-26':'Post-Christmas'};
 const ALL_HOLIDAY_MMDD = [...CHRISTMAS_DATES, ...HOLIDAY_DATES];
 
+// ── SHARED TRIP MATH — single source of truth for the pre-surcharge fare ──
+// calcQuote() (Quote calculator) and recalcQa() (Add a Ride) BOTH call this, so the two
+// forms cannot drift apart again. Returns the trip total before surcharges/fuel, the leg
+// multiplier (an AP round trip bills BOTH legs), and each component so callers can label
+// their own breakdown lines. If you change pricing, change it HERE and nowhere else.
+function tripMath(type, vehicle, miles, medHours){
+  miles=parseFloat(miles)||0; medHours=parseFloat(medHours)||0;
+  const apType  = type==='AP RUN'||type==='AP PICK UP'||type==='AP ROUND TRIP';
+  const apRt    = type==='AP ROUND TRIP';
+  const rtType  = type==='ROUND TRIP';
+  const owType  = type==='ONE WAY';
+  const lcType  = type==='LOCAL';
+  const medType = type==='MEDICAL';
+  // Sprinter Van: its own flat airport rate, $150/hr otherwise.
+  const _sprintAP = BASE['Sprinter Van']||(globalSettings.baseRates&&globalSettings.baseRates['Sprinter Van'])||405;
+  const _sprintHr = globalSettings.sprintHourly||150;
+  const r = { type:type, vehicle:vehicle, miles:miles, medHours:medHours,
+              apType:apType, apRt:apRt, rtType:rtType, owType:owType, lcType:lcType, medType:medType,
+              legs: apRt?2:1, base:0, overMiles:0, overage:0,
+              mileageCharge:0, serviceFee:0, vehUp:0, medBase:0, tripTotal:0 };
+  // Local/one-way/round trip: priced on mileage, not a flat base.
+  if(rtType || owType || lcType){
+    const mult = rtType?2:1;
+    r.mileageCharge = miles*mult*mileageRate();
+    r.serviceFee    = pickupFee()*mult;
+    r.vehUp         = vehUpcharge(vehicle);
+    r.tripTotal     = r.mileageCharge + r.serviceFee + r.vehUp;
+    return r;
+  }
+  // Medical transport: billed hourly at the waiting-time rate.
+  if(medType){ r.medBase = medHours*waitRate(); r.tripTotal = r.medBase; return r; }
+  // Airport (and anything else): flat base + mileage overage past the included radius.
+  r.base      = vehicle==='Sprinter Van' ? (apType?_sprintAP:_sprintHr) : (BASE[vehicle]||0);
+  r.overMiles = apType && miles > mileageTrigger() ? miles - includedMiles() : 0;
+  r.overage   = r.overMiles * mileageRate();
+  r.tripTotal = r.base + r.overage;
+  return r;
+}
 function calcQuote() {
   if(!document.getElementById('q-miles')) return;
   const miles  = parseFloat(document.getElementById('q-miles').value)||0;
@@ -3106,38 +3147,25 @@ function calcQuote() {
   const lcType  = type==='LOCAL';
   const medType = type==='MEDICAL';
 
+  // Every number below comes from the shared pricing core so Add a Ride can't disagree.
+  const tm = tripMath(type, vehicle, miles, parseFloat(document.getElementById('q-med-hours')?.value)||0);
+  tripTotal = tm.tripTotal;
   if(rtType){
-    const rtMiles   = miles * 2;
-    const rtCharge  = rtMiles * mileageRate();
-    const rtService = pickupFee()*2;
-    const vehUp     = vehUpcharge(vehicle);
-    tripTotal = rtCharge + rtService + vehUp;
-    lines.push(miles>0?{label:'Round trip mileage', val:rtCharge, note:`${miles} mi × 2 = ${rtMiles} mi × $${mileageRate().toFixed(2)}/mi`}:{label:'Round trip mileage', val:0, note:'Enter miles above'});
-    lines.push({label:'Pickup/Drop-off fee', val:rtService});
-    if(vehUp>0) lines.push({label:`Vehicle upcharge (${vehicle})`, val:vehUp});
+    lines.push(miles>0?{label:'Round trip mileage', val:tm.mileageCharge, note:`${miles} mi × 2 = ${miles*2} mi × $${mileageRate().toFixed(2)}/mi`}:{label:'Round trip mileage', val:0, note:'Enter miles above'});
+    lines.push({label:'Pickup/Drop-off fee', val:tm.serviceFee});
+    if(tm.vehUp>0) lines.push({label:`Vehicle upcharge (${vehicle})`, val:tm.vehUp});
   } else if(owType || lcType){
-    const owCharge  = miles * mileageRate();
-    const owService = pickupFee();
-    const vehUp     = vehUpcharge(vehicle);
-    tripTotal = owCharge + owService + vehUp;
-    lines.push(miles>0?{label:'Mileage', val:owCharge, note:`${miles} mi × $${mileageRate().toFixed(2)}/mi`}:{label:'Mileage', val:0, note:'Enter miles above'});
-    lines.push({label:'Pickup/Drop-off fee', val:owService});
-    if(vehUp>0) lines.push({label:`Vehicle upcharge (${vehicle})`, val:vehUp});
+    lines.push(miles>0?{label:'Mileage', val:tm.mileageCharge, note:`${miles} mi × $${mileageRate().toFixed(2)}/mi`}:{label:'Mileage', val:0, note:'Enter miles above'});
+    lines.push({label:'Pickup/Drop-off fee', val:tm.serviceFee});
+    if(tm.vehUp>0) lines.push({label:`Vehicle upcharge (${vehicle})`, val:tm.vehUp});
   } else if(medType){
-    const medHours = parseFloat(document.getElementById('q-med-hours')?.value)||0;
-    const medBase  = medHours * waitRate();
-    tripTotal = medBase;
-    lines.push(medHours>0
-      ? {label:`Medical transport (${medHours}h × $${waitRate()}/hr)`, val:medBase}
+    lines.push(tm.medHours>0
+      ? {label:`Medical transport (${tm.medHours}h × $${waitRate()}/hr)`, val:tm.medBase}
       : {label:'Medical transport', val:0, note:'Enter hours above'});
   } else {
-    const overMiles = apType && miles > mileageTrigger() ? miles - includedMiles() : 0;
-    const overage   = overMiles * mileageRate();
-    tripTotal = base + overage;
-    lines.push({label:`Base rate (${vehicle}) — includes up to ${includedMiles()} mi`, val:base});
+    lines.push({label:`Base rate (${vehicle}) — includes up to ${includedMiles()} mi`, val:tm.base});
     if(apType && miles > 0 && miles <= mileageTrigger()) lines.push({label:`Mileage (${miles} mi — within free radius)`, val:0, note:'No overage — within '+mileageTrigger()+' mi grace buffer'});
-    if(overage > 0) lines.push({label:'Mileage overage', val:overage, note:`(${miles} mi − ${includedMiles()}) = ${overMiles} mi × $${mileageRate().toFixed(2)}/mi`});
-
+    if(tm.overage > 0) lines.push({label:'Mileage overage', val:tm.overage, note:`(${miles} mi − ${includedMiles()}) = ${tm.overMiles} mi × $${mileageRate().toFixed(2)}/mi`});
   }
 
   const surcharges = getSurchargeLines();
@@ -6556,8 +6584,14 @@ function buildRideBreakdown(r){
   const wait = parseFloat(r.wait||0)||0;
   if(wait>0){ const wr=waitRate(); lines.push({label:'Wait time ('+wait+'h \u00d7 $'+wr+'/hr)', val: wait*wr}); }
 
-  // Extra stops (xstop flag = at least one extra pickup at $10)
-  if(String(r.xstop)==='Y'){ lines.push({label:'Additional pickup', val: extraStopFee()}); }
+  // Extra stops — xstop is saved as a COUNT (0, 1, 2…), not a Y/N flag, so read it as a
+  // number and bill per stop. (The old String(r.xstop)==='Y' check never matched a number,
+  // so this line silently never appeared on receipts even when a ride had extra stops.)
+  // xstop is a count on current rides, but older saved rides used a 'Y'/'N' flag before this
+  // became a number — treat 'Y' as exactly 1 stop so those historical receipts don't drop
+  // the fee to $0.
+  const xstopCount = r.xstop==='Y' ? 1 : (parseInt(r.xstop)||0);
+  if(xstopCount>0){ lines.push({label:'Extra stop'+(xstopCount>1?'s':'')+' ('+xstopCount+' \u00d7 $'+extraStopFee()+')', val: xstopCount*extraStopFee()}); }
 
   // Fuel surcharge (8% of the subtotal so far) — flagged with fuel:'Y'
   if(String(r.fuel)==='Y'){
@@ -10843,7 +10877,7 @@ function closeQuickAddModal(){
 // before it calls closeQuickAddModal, so wiping the form here is safe on the save path too.
 function resetQuickAddForm(){
   ['qa-client','qa-phone','qa-email','qa-pickup','qa-home','qa-flight','qa-notes',
-   'qa-date','qa-time','qa-xstop-addr','qa-rt-flight'].forEach(function(id){
+   'qa-date','qa-time','qa-xstop-addr','qa-rt-flight','qa-med-hours'].forEach(function(id){
     var el=document.getElementById(id); if(el) el.value='';
   });
   var setV=function(id,v){ var el=document.getElementById(id); if(el) el.value=v; };
@@ -10921,23 +10955,26 @@ function recalcQa(){
     if(p2El&&!p2El.value){ p2El.value=base2; }
     if(p2note) p2note.textContent=veh2+' base $'+base2;
   }
-  const spBase=veh==='Sprinter Van'?(BASE['Sprinter Van']||globalSettings.baseRates?.['Sprinter Van']||405):0;
-  const base=(typeof BASE!=='undefined'?
-    (veh==='Sprinter Van'?spBase:(BASE[veh]||0)):0);
-  if(veh==='Sprinter Van'&&!base&&!spBase){
+  const qaType =document.getElementById('qa-type')?document.getElementById('qa-type').value:'';
+  const qaMiles=parseFloat((document.getElementById('qa-miles-hidden')||{}).value)||0;
+  const medHrs =parseFloat(document.getElementById('qa-med-hours')?.value)||0;
+  // Identical pricing core to the Quote calculator — see tripMath(). This handles the
+  // mileage-priced types (ONE WAY / ROUND TRIP / LOCAL), hourly medical transport, the
+  // Sprinter's airport-vs-hourly split, and the AP-round-trip leg multiplier, none of
+  // which this form used to account for.
+  const tm=tripMath(qaType, veh, qaMiles, medHrs);
+  const base=tm.base;
+  if(veh==='Sprinter Van' && !base && tm.apType){
     const pNote2=document.getElementById('qa-price-note');
-    if(pNote2) pNote2.textContent='⚠️ No Sprinter Van rate set — please contact Kat or Morgan for pricing';
+    if(pNote2) pNote2.textContent='\u26a0\ufe0f No Sprinter Van rate set \u2014 please contact Kat or Morgan for pricing';
   }
-  let sub=base; const flat={premium:30,holiday:30,christmas:35,late:20,traffic:15};
-  Object.keys(flat).forEach(k=>{ if(qaAddonState[k]){ if(k==='holiday'&&qaAddonState.christmas) return; sub+=surcharge(k); } });
-  customSurchargeList().forEach(function(c){ if(qaAddonState[c.key]) sub+=surcharge(c.key); });
+  // Fare and every flat surcharge bill PER LEG (an AP round trip has two).
+  let sub=tm.tripTotal*tm.legs;
+  Object.keys(ADDONS_FLAT).forEach(k=>{ if(qaAddonState[k]){ if(k==='holiday'&&qaAddonState.christmas) return; sub+=surcharge(k)*tm.legs; } });
+  customSurchargeList().forEach(function(c){ if(qaAddonState[c.key]) sub+=surcharge(c.key)*tm.legs; });
+  // Extra stops and wait time are charged once per booking, not per leg (matches the Quote).
   const xs=parseInt(document.getElementById('qa-xstop')?.value)||0; sub+=xs*extraStopFee();
   const wt=parseFloat(document.getElementById('qa-wait')?.value)||0; sub+=wt*waitRate();
-  // Mileage overage for airport rides — miles beyond the included radius, added BEFORE fuel so
-  // the Quick Add price matches the Quote calculator and the fee breakdown (no phantom "manual adjustment").
-  const qaMiles=parseFloat((document.getElementById('qa-miles-hidden')||{}).value)||0;
-  const qaType=document.getElementById('qa-type')?document.getElementById('qa-type').value:'';
-  if((qaType==='AP RUN'||qaType==='AP PICK UP'||qaType==='AP ROUND TRIP') && qaMiles>mileageTrigger()){ sub+=(qaMiles-includedMiles())*mileageRate(); }
   let total=qaAddonState.fuel ? Math.floor(sub*(1+fuelRate())) : Math.floor(sub);   // fare rounds DOWN
   const priceEl=document.getElementById('qa-price'); if(priceEl) priceEl.value=total;
   const note=document.getElementById('qa-price-note');
@@ -10945,9 +10982,10 @@ function recalcQa(){
   const veh2b=isXXL2?(document.getElementById('qa-vehicle2')?.value||'Sedan'):'';
   const price2b=isXXL2?(parseFloat(document.getElementById('qa-price2')?.value)||(BASE[veh2b]||105)):0;
   if(isXXL2){ const prEl=document.getElementById('qa-price'); if(prEl) prEl.value=Math.floor(total+price2b); }
+  const fare=tm.tripTotal*tm.legs;
   if(note) note.textContent=isXXL2
     ?(veh+' $'+total.toFixed(0)+' + '+veh2b+' $'+price2b+' = $'+(total+price2b).toFixed(0))
-    :((total>base || xs>0) ? `${veh} base $${base} + surcharges → $${total.toFixed(2)} (editable)` : `${veh} base $${base}`);
+    :((total>fare || xs>0) ? `${veh} fare $${fare.toFixed(2)}${tm.legs>1?' (2 legs)':''} + surcharges \u2192 $${total.toFixed(2)} (editable)` : `${veh} fare $${fare.toFixed(2)}${tm.legs>1?' (2 legs)':''}`);
 }
 // ── ONBOARDING / WELCOME SETUP ────────────────────────────────────────────
 var _ONB_PAYMENT_OPTIONS = ['Credit Card','Cash','Check','Venmo','Zelle','CashApp','Apple Pay'];
@@ -11557,7 +11595,7 @@ async function saveQuickAddRide(){
     terminal:document.getElementById('qa-terminal').value,
     notes:   document.getElementById('qa-notes').value.trim(),
     miles:parseFloat((document.getElementById('qa-miles-hidden')||{}).value)||0,pax:parseInt(document.getElementById('qa-pax')?.value)||1,checkedBags:parseInt(document.getElementById('qa-checked-bags')?.value)||0,carryOnBags:parseInt(document.getElementById('qa-carryon-bags')?.value)||0,rt:'',email:document.getElementById('qa-email')?document.getElementById('qa-email').value.trim():'',
-    holiday:qaAddonState.holiday?'Y':'N',christmas:qaAddonState.christmas?'Y':'N',late:qaAddonState.late?'Y':'N',premium:qaAddonState.premium?'Y':'N',fuel:qaAddonState.fuel?'Y':'N',xstop:parseInt(document.getElementById('qa-xstop')?.value)||0,xstopAddr:(document.getElementById('qa-xstop-addr')?.value||'').trim(),traffic:qaAddonState.traffic?'Y':'N',...Object.fromEntries(customSurchargeList().map(function(c){return [c.key, qaAddonState[c.key]?'Y':'N'];})),wait:parseFloat(document.getElementById('qa-wait')?.value)||0,
+    holiday:qaAddonState.holiday?'Y':'N',christmas:qaAddonState.christmas?'Y':'N',late:qaAddonState.late?'Y':'N',premium:qaAddonState.premium?'Y':'N',fuel:qaAddonState.fuel?'Y':'N',xstop:parseInt(document.getElementById('qa-xstop')?.value)||0,xstopAddr:(document.getElementById('qa-xstop-addr')?.value||'').trim(),traffic:qaAddonState.traffic?'Y':'N',...Object.fromEntries(customSurchargeList().map(function(c){return [c.key, qaAddonState[c.key]?'Y':'N'];})),wait:parseFloat(document.getElementById('qa-wait')?.value)||0,medHours:parseFloat(document.getElementById('qa-med-hours')?.value)||0,
     confirmed:false, createdBy:currentUser?.name||'',
     newClient: !!(document.getElementById('qa-new-client')?.checked),
   };
@@ -17900,8 +17938,9 @@ function _auditSurchargeLines(r){
   if(r.premium==='Y'){ lines.push({label:'Premium vehicle', amount:add.premium||30}); }
   if(r.late==='Y'){ lines.push({label:'Late night', amount:add.late||20}); }
   if(r.traffic==='Y'){ lines.push({label:'Traffic', amount:add.traffic||15}); }
-  if(r.fuel==='Y'){ lines.push({label:'Fuel surcharge', amount:15}); }
-  if(r.xstop==='Y'){ lines.push({label:'Extra stop', amount:15}); }
+  if(r.fuel==='Y'){ lines.push({label:'Fuel surcharge', amount:fuelPct()}); }
+  var auditXstop = r.xstop==='Y' ? 1 : (parseInt(r.xstop)||0);
+  if(auditXstop>0){ lines.push({label:'Extra stop'+(auditXstop>1?'s':''), amount:auditXstop*extraStopFee()}); }
   var waitVal = parseFloat(r.wait)||0;
   if(waitVal>0){
     var wr = (typeof WAIT_RATE!=='undefined')?WAIT_RATE:60;
@@ -21490,10 +21529,14 @@ function qaTypeChanged(){
   const t=document.getElementById('qa-type')?.value;
   const sec=document.getElementById('qa-rt-section');
   if(sec) sec.style.display=(t==='AP ROUND TRIP')?'block':'none';
+  // Medical transport is billed hourly, so it needs its own hours field (same as the Quote form).
+  const mhg=document.getElementById('qa-med-hours-group');
+  if(mhg) mhg.style.display=(t==='MEDICAL')?'block':'none';
   if(t!=='AP ROUND TRIP'){
     ['qa-leg-run','qa-leg-pickup'].forEach(id=>{ const el=document.getElementById(id); if(el) el.checked=false; });
   }
   qaCheckLegs();
+  recalcQa(); // the fare depends on the ride type now, so reprice on every type change
   try{ qaAutoFillTerminalAddress(); }catch(e){}
   try{ renderQaAddrPickers(); }catch(e){}
 }
