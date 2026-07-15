@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090501">
+<meta name="version" content="202606090503">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -200,7 +200,11 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
 /* Every footer button gets the same padding & full cell width \u2014 previously each button's
    own class (.btn-danger vs .btn-secondary) carried different padding, and a wrapping flex row
    just right-aligned whatever fit, which is what made the row look spliced together. */
-.modal-footer button{width:100%;box-sizing:border-box;padding:.65rem .5rem;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff;font-weight:800;border:none;}
+/* No nowrap/overflow-hidden/ellipsis here on purpose \u2014 that combination can fully hide
+   a label under font-rendering quirks on some devices, with nothing shown, not even "...".
+   Letting a label wrap to two lines in the rare case it doesn't fit guarantees it's always
+   readable, which matters more than a guaranteed single line. */
+.modal-footer button{width:100%;box-sizing:border-box;padding:.65rem .5rem;text-align:center;white-space:normal;line-height:1.25;color:#fff;font-weight:800;border:none;}
 .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem 1.5rem;margin-bottom:1.25rem;}
 .detail-row{padding:.4rem 0;border-bottom:1px solid var(--light);}
 .driver-select-row{display:flex;gap:.5rem;align-items:center;margin-bottom:1.25rem;}
@@ -18176,18 +18180,24 @@ async function setIrsMileageRate(periodFrom, rate){
 
 // Once a year, remind admins to enter the new IRS mileage rate. Fires only for the
 // current year, only for admins, and only once per year per device.
+// Nudges roughly twice a year (every ~6 months) \u2014 even for an already-saved rate,
+// since the IRS can and does change it mid-year (it did in July 2026), so \"saved once\"
+// doesn't mean \"correct forever.\" Wording differs depending on whether it's set yet.
 function checkIrsRateCurrent(){
   try{
     if(typeof hasIncomeAccess==='function' && !hasIncomeAccess()) return;
     var y=new Date().getFullYear();
     var info=irsRateInfo(y);
-    if(info.confirmed) return;
+    var now=Date.now();
     var k='nwda_irs_rate_nudge_'+y;
-    if(localStorage.getItem(k)) return;
-    localStorage.setItem(k,'1');
-    addNotification(getMyDriverName()||currentUser?.name, {year:y}, 'irs_rate',
-      'The '+y+' IRS mileage rate isn\u2019t set for you yet. Your Year-End P&L will use the '+info.basedOn
-      +' rate until you update it \u2014 set it on your Income page (no admin needed).');
+    var last=parseInt(localStorage.getItem(k)||'0',10);
+    var SIX_MONTHS=182*24*60*60*1000;
+    if(last && (now-last)<SIX_MONTHS) return;
+    localStorage.setItem(k, String(now));
+    var msg = info.confirmed
+      ? 'Quick check: is your '+y+' IRS mileage rate ($'+info.rate.toFixed(3)+'/mi) still correct? The IRS can change it mid-year \u2014 it did in July 2026. Update it on your Income page if it\u2019s changed.'
+      : 'The '+y+' IRS mileage rate isn\u2019t set for you yet. Your Year-End P&L will use the '+info.basedOn+' rate until you update it \u2014 set it on your Income page (no admin needed).';
+    addNotification(getMyDriverName()||currentUser?.name, {year:y}, 'irs_rate', msg);
     saveNotifs(); updateNotifBadge();
   }catch(e){}
 }
@@ -18221,30 +18231,58 @@ function _irsRatesAdminHTML(){
   var rows='';
   years.forEach(function(y){
     irsPeriodsFor(y).forEach(function(p){
-      var tag = p.source==='saved' ? 'yours'
-              : p.source==='builtin' ? 'IRS published'
-              : '\u26A0\uFE0F not confirmed \u2014 using '+p.basedOn;
-      var tagCol = p.confirmed ? 'var(--mid)' : '#b45309';
       var id = 'irs-rate-'+p.from;
-      rows += '<div style="display:flex;align-items:center;gap:.4rem;padding:.3rem 0;border-bottom:1px solid var(--light);flex-wrap:wrap;">'
-        +'<span style="font-weight:700;font-size:.78rem;color:var(--black);min-width:38px;">'+y+'</span>'
-        +'<span style="font-size:.7rem;color:var(--mid);min-width:88px;">'+escHtml(_fmtPeriod(p))+'</span>'
-        +'<span style="font-size:.72rem;color:var(--mid);">$</span>'
-        +'<input type="number" step="0.001" min="0" value="'+p.rate.toFixed(3)+'" id="'+id+'" '
-          +'style="width:70px;padding:.25rem .4rem;border:1px solid var(--light);border-radius:6px;font-size:.78rem;font-family:inherit;box-sizing:border-box;" />'
-        +'<span style="font-size:.72rem;color:var(--mid);">/mi</span>'
-        +'<button onclick="setIrsMileageRate(this.dataset.p, document.getElementById(this.dataset.i).value)" data-p="'+escAttr(p.from)+'" data-i="'+escAttr(id)+'" '
-          +'style="padding:.25rem .6rem;border-radius:6px;border:1px solid var(--gold);background:none;color:var(--gold);font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">Save</button>'
-        +'<span style="flex:1;text-align:right;font-size:.64rem;color:'+tagCol+';min-width:70px;">'+tag+'</span>'
-        +'</div>';
+      if(p.source==='saved'){
+        // Already confirmed \u2014 a compact read-only line instead of a permanent input
+        // box. Tap the pencil to change it; nothing to fill in if it's already right.
+        rows += '<div style="display:flex;align-items:center;gap:.5rem;padding:.35rem 0;border-bottom:1px solid var(--light);" id="irsrow-'+id+'">'
+          +'<span style="font-weight:700;font-size:.78rem;color:var(--black);min-width:38px;">'+y+'</span>'
+          +'<span style="font-size:.7rem;color:var(--mid);min-width:88px;">'+escHtml(_fmtPeriod(p))+'</span>'
+          +'<span style="flex:1;font-size:.78rem;font-weight:700;color:var(--black);">$'+p.rate.toFixed(3)+'/mi</span>'
+          +'<span style="font-size:.64rem;color:#16a34a;font-weight:700;">\u2713 yours</span>'
+          +'<button onclick="_irsToggleEdit(\''+id+'\')" title="Change this rate" style="background:none;border:none;color:var(--mid);cursor:pointer;font-size:.85rem;padding:2px 4px;">\u270F\uFE0F</button>'
+          +'</div>'
+          +'<div style="display:none;align-items:center;gap:.4rem;padding:.3rem 0;border-bottom:1px solid var(--light);flex-wrap:wrap;" id="irsedit-'+id+'">'
+          +'<span style="font-weight:700;font-size:.78rem;color:var(--black);min-width:38px;">'+y+'</span>'
+          +'<span style="font-size:.7rem;color:var(--mid);min-width:88px;">'+escHtml(_fmtPeriod(p))+'</span>'
+          +'<span style="font-size:.72rem;color:var(--mid);">$</span>'
+          +'<input type="number" step="0.001" min="0" value="'+p.rate.toFixed(3)+'" id="'+id+'" style="width:70px;padding:.25rem .4rem;border:1px solid var(--light);border-radius:6px;font-size:.78rem;font-family:inherit;box-sizing:border-box;" />'
+          +'<span style="font-size:.72rem;color:var(--mid);">/mi</span>'
+          +'<button onclick="setIrsMileageRate(this.dataset.p, document.getElementById(this.dataset.i).value); _irsToggleEdit(\''+id+'\');" data-p="'+escAttr(p.from)+'" data-i="'+escAttr(id)+'" style="padding:.25rem .6rem;border-radius:6px;border:1px solid var(--gold);background:none;color:var(--gold);font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">Save</button>'
+          +'<button onclick="_irsToggleEdit(\''+id+'\')" style="padding:.25rem .5rem;border-radius:6px;border:1px solid var(--light);background:none;color:var(--mid);font-family:inherit;font-size:.7rem;cursor:pointer;">Cancel</button>'
+          +'</div>';
+      } else {
+        // Not confirmed yet \u2014 this one stays prominent and editable, since it's the
+        // one that actually needs your attention.
+        var tag = p.source==='builtin' ? 'IRS published' : '\u26A0\uFE0F not confirmed \u2014 using '+p.basedOn;
+        var tagCol = p.confirmed ? 'var(--mid)' : '#b45309';
+        rows += '<div style="display:flex;align-items:center;gap:.4rem;padding:.3rem 0;border-bottom:1px solid var(--light);flex-wrap:wrap;">'
+          +'<span style="font-weight:700;font-size:.78rem;color:var(--black);min-width:38px;">'+y+'</span>'
+          +'<span style="font-size:.7rem;color:var(--mid);min-width:88px;">'+escHtml(_fmtPeriod(p))+'</span>'
+          +'<span style="font-size:.72rem;color:var(--mid);">$</span>'
+          +'<input type="number" step="0.001" min="0" value="'+p.rate.toFixed(3)+'" id="'+id+'" '
+            +'style="width:70px;padding:.25rem .4rem;border:1px solid var(--light);border-radius:6px;font-size:.78rem;font-family:inherit;box-sizing:border-box;" />'
+          +'<span style="font-size:.72rem;color:var(--mid);">/mi</span>'
+          +'<button onclick="setIrsMileageRate(this.dataset.p, document.getElementById(this.dataset.i).value)" data-p="'+escAttr(p.from)+'" data-i="'+escAttr(id)+'" '
+            +'style="padding:.25rem .6rem;border-radius:6px;border:1px solid var(--gold);background:none;color:var(--gold);font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">Save</button>'
+          +'<span style="flex:1;text-align:right;font-size:.64rem;color:'+tagCol+';min-width:70px;">'+tag+'</span>'
+          +'</div>';
+      }
     });
   });
   return '<div style="border:1px solid var(--light);border-radius:10px;padding:.75rem;margin:.2rem 0 1rem;background:var(--white);">'
     +'<div style="font-size:.78rem;font-weight:700;color:var(--black);margin-bottom:.2rem;">\uD83D\uDEE3\uFE0F IRS standard mileage rate \u2014 yours</div>'
-    +'<div style="font-size:.7rem;color:var(--mid);line-height:1.5;margin-bottom:.5rem;">Your Year-End P&amp;L applies the rate that was in force <strong>on the day of each trip</strong>. It\u2019s yours alone \u2014 no admin needed. The IRS sets it each January and can change it mid-year, so check it now and then. '
+    +'<div style="font-size:.7rem;color:var(--mid);line-height:1.5;margin-bottom:.5rem;">Your Year-End P&amp;L applies the rate that was in force <strong>on the day of each trip</strong>. It\u2019s yours alone \u2014 no admin needed. Saved rates are collapsed below \u2014 tap \u270F\uFE0F to change one. The IRS sets it each January and can change it mid-year, so check it now and then. '
     +'<a href="'+IRS_RATE_URL+'" target="_blank" rel="noopener" style="color:var(--gold);font-weight:700;">Look up the current rate \u2197</a></div>'
     +rows
     +'</div>';
+}
+function _irsToggleEdit(id){
+  var row=document.getElementById('irsrow-'+id), edit=document.getElementById('irsedit-'+id);
+  if(!row||!edit) return;
+  var opening = edit.style.display==='none';
+  row.style.display = opening?'none':'flex';
+  edit.style.display = opening?'flex':'none';
 }
 // ── Report rendering: one dataset, two outputs ─────────────────────────────
 // Reports are built as arrays of rows (the same arrays the .xlsx is made from), so the
@@ -18420,7 +18458,9 @@ function _plBrandHint(){
 
 async function generateYearEndPL(){
   if(!hasIncomeAccess()){ showIncomeOrUpgrade(null); return; }
-  if(typeof XLSX==='undefined'){ showToast('Spreadsheet library not loaded','error'); return; }
+  // Load the spreadsheet library up front instead of just checking whether it happens to
+  // already be loaded \u2014 on a fresh page it never was, so this used to fail every time.
+  try{ await loadXLSX(); }catch(e){ showToast('Could not load the spreadsheet library \u2014 check your connection and try again','error'); return; }
   const admin = isAdmin();
   const myName = getMyDriverName();
   // Privacy: everyone — including admins — only exports their OWN income. The
