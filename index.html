@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090464">
+<meta name="version" content="202606090477">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -958,6 +958,9 @@ input,select,textarea{font-size:16px;}
         <button id="archive-rides-btn" onclick="archiveOldRides()" title="Move old rides out of the live app to keep it fast (admin)" style="display:none;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">📦 Archive old</button>
       </div>
     </div>
+    <div id="pay-filter-bar" style="margin:.2rem 0 0;"></div>
+    <div id="pay-filter-bar" style="margin:.2rem 0 0;"></div>
+    <div id="irs-rate-box" style="margin:0 0 1rem;"></div>
     <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1rem;border-bottom:2px solid var(--light);padding-bottom:.75rem;">
       <button class="cal-tab" onclick="switchIncomeTab('weekly',this)">This Week</button>
       <button class="cal-tab active" onclick="switchIncomeTab('monthly',this)">This Month</button>
@@ -2244,6 +2247,8 @@ async function _loadAppData() {
       (async()=>{ try{ var _sq=await storageGet('kat:savedQuotes'); if(Array.isArray(_sq)) savedQuotes=_sq; }catch(e){} })(),
       (async()=>{ try{ var _fwr=await storageGet('kat:feeWaiveRequests'); if(_fwr && typeof _fwr==='object') feeWaiveRequests=_fwr; }catch(e){} })(),
       (async()=>{ try{ var _aa=await storageGet('kat:adminActions'); if(_aa && typeof _aa==='object') adminActions=_aa; }catch(e){} })(),
+      (async()=>{ try{ setTimeout(function(){ try{ checkSubExpiries(); }catch(e){} }, 4000); }catch(e){} })(),
+      (async()=>{ try{ setTimeout(function(){ try{ checkIrsRateCurrent(); }catch(e){} }, 5000); }catch(e){} })(),
       (async()=>{ try{ var _cvBoot=await storageGet('kat:driverColorVault'); if(_cvBoot && typeof _cvBoot==='object') driverColorVault=_cvBoot; }catch(e){} })(),
       loadDriverExtras(),
       (async()=>{ try{ const _cao=await storageGet('kat:clientAddresses'); if(_cao) clientAddressOverrides = (typeof _cao==='string') ? JSON.parse(_cao) : _cao; }catch(e){ console.warn('clientAddresses load', e); } })(),
@@ -2716,11 +2721,11 @@ const TIP_DATA={
   cal:{icon:'📅',title:'Calendar',text:'Tap any ride to edit, cancel, duplicate, or post it to the Offerings channel. Assigning a driver lives under 🛠 Dispatch tools inside the ride. Use the search box at the top to find any ride by client name, phone, driver, or type. After a confirmation is sent, tap \ud83d\udd04 Change driver to swap drivers \u2014 the ride returns to Scheduled and the confirmation rebuilds with an update message and the new driver\u2019s card. When you have a drop-off and a pickup on the same trip, tap \u201cAdd another ride\u201d on the end-location prompt to link them \u2014 the app builds one combined map route through both, splits the miles between the two rides, and prompts a tip for each. In the Start Ride map hand-off you can reorder the stops by hand or tap Optimize to auto-order them by what is closest.'},
   myrides:{icon:'📋',title:'My Rides & Confirmations',text:'The To Confirm tab shows tomorrow\'s rides needing a day-before text.'},
   clients:{icon:'👥',title:'Client List',text:'Your client list is 100% private — no other driver or admin can see it. Clients are added automatically when you book rides, or use Import CSV to bring in a spreadsheet (any column order — it sorts names, phones, emails, and addresses into the right fields). The search box matches name, phone, email, address, and notes. The “Clean up” button fixes misfiled contact info and strips leftover ride labels (like “2XL … 1 of 2”) from names, merging duplicates. Tap Select to remove several at once.'},
-  income:{icon:'💰',title:'Income & Receipts',text:'Track gross fares, expenses, and net take-home here — costs show in red, everything you keep in green. Tips are captured right when you mark a ride paid \u2014 and you can tap any ride here to open it and use \u2018Edit miles & tip\u2019 to fix or add them later. Use the receipt scanner to auto-fill amounts. Logged an <strong>outside ride</strong> wrong? Tap the \u270F\uFE0F next to it to correct the amount, miles or date \u2014 no need to delete and re-add. Remember an outside ride is the money you <em>kept</em> (after any fee the other provider took), so its fare and tip won\u2019t match a gross figure on paper. (Admins get a Rides Report button for rides-per-month, year over year.) Receipts itemize fare, tip and total, use the client owner’s branding (logo, business name, and invoice number), and send as a branded PDF through your phone’s share sheet — and you can log a tip paid by a different method than the fare. Marked a ride paid by mistake? Open it (or use the paid chip) and tap Mark unpaid — it clears the payment, reopens the 15% fee, and the ride returns to “Rides to wrap up” on your dashboard. Your fares show as a tap-to-open list, and the Bottom Line at the end is your single net take-home (gross + tips − vehicle cost − 15% client fees − monthly expenses) — the same number as your dashboard Net. Income counts a ride only once it\u2019s marked paid, so your totals reflect money you\u2019ve actually received. Every ride card also shows its 15% fee status (Owed / Sent / Paid); to undo an accidental fee mark anytime, open the ride and tap “Reset this fee.”'},
+  income:{icon:'💰',title:'Income & Receipts',text:'Use the <strong>Paid by</strong> chips at the top to see one payment type at a time \u2014 Credit Card, Cash, Venmo and so on. While a filter is on, every figure on the page is filtered and an amber banner says so; tap <strong>All</strong> for your real totals. The <strong>Year-End P&amp;L</strong> can be filtered the same way \u2014 handy for reconciling card income against a Square 1099-K. Leave the payment type blank and you get the complete <strong>Year-End P&amp;L</strong> \u2014 that\u2019s the one for taxes. Pick a payment type instead and you get a <strong>business report</strong>: all the same detail, filtered to that method, clearly marked as a management view rather than a tax document. When you log an <strong>outside ride</strong>, tap \u201c+ Add fare / tip / fee detail\u201d if you know the breakdown \u2014 enter the gross fare, the tip and the provider\u2019s cut and the app works out what you kept, so your P&amp;L splits fares from tips properly. Skip it and the amount you kept is just counted as fare. Your <strong>IRS mileage rate</strong> sits under the buttons \u2014 it\u2019s yours to set, no admin needed. Track gross fares, expenses, and net take-home here — costs show in red, everything you keep in green. Tips are captured right when you mark a ride paid \u2014 and you can tap any ride here to open it and use \u2018Edit miles & tip\u2019 to fix or add them later. Use the receipt scanner to auto-fill amounts. Logged an <strong>outside ride</strong> wrong? Tap the \u270F\uFE0F next to it to correct the amount, miles or date \u2014 no need to delete and re-add. Remember an outside ride is the money you <em>kept</em> (after any fee the other provider took), so its fare and tip won\u2019t match a gross figure on paper. (Admins get a Rides Report button for rides-per-month, year over year.) Receipts itemize fare, tip and total, use the client owner’s branding (logo, business name, and invoice number), and send as a branded PDF through your phone’s share sheet — and you can log a tip paid by a different method than the fare. Marked a ride paid by mistake? Open it (or use the paid chip) and tap Mark unpaid — it clears the payment, reopens the 15% fee, and the ride returns to “Rides to wrap up” on your dashboard. Your fares show as a tap-to-open list, and the Bottom Line at the end is your single net take-home (gross + tips − vehicle cost − 15% client fees − monthly expenses) — the same number as your dashboard Net. Income counts a ride only once it\u2019s marked paid, so your totals reflect money you\u2019ve actually received. Every ride card also shows its 15% fee status (Owed / Sent / Paid); to undo an accidental fee mark anytime, open the ride and tap “Reset this fee.”'},
   flights:{icon:'✈️',title:'Flights & Traffic',text:'Search any flight number for live tracking. Today\'s and tomorrow\'s airport rides are listed automatically with tracking links.'},
   chat:{icon:'💬',title:'Team Chat',text:'Offerings: post rides needing coverage — teammates volunteer, then the ride\'s owner assigns whoever they pick, and the card marks itself covered. Updates: share traffic without buzzing phones. You can delete your own messages anywhere; admins can delete any message in the group channels. Delete a whole DM from its header.'},
   team:{icon:'🚘',title:'Team & Driver Cards',text:'Team driver cards live here — tap Share Card or Download to send yours. No card yet, or adding a vehicle? Tap Edit / generate driver card to build one from a photo of you plus your vehicle. Each vehicle keeps its own card, and the confirmation sender picks which to send. Admins can also Edit driver, change a card\'s color, and add drivers.'},
-  myprofile:{icon:'<svg viewBox="0 0 24 24" width="18" height="18" style="vertical-align:-3px" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="15" rx="2.2"/><circle cx="8" cy="10.2" r="2.1"/><path d="M5 15.4c.3-1.7 1.6-2.6 3-2.6s2.7.9 3 2.6"/><line x1="14" y1="9" x2="19" y2="9"/><line x1="14" y1="12.4" x2="19" y2="12.4"/></svg>',title:'Profile &amp; Settings',text:'My Info holds your card, your details, notes, and your Share/Download/Venmo buttons. The Account Settings tab holds everything you configure — receipt branding, payment methods, day-of selfie, your confirmation text, pickup instructions, and the scheduling / cancellation message (each with a default, a custom option, and a paste-an-example importer), the "send everything" bundle, auto-surcharges, and your availability. You can also set your alert & push-notification preferences there, and — if drivers cover your clients — waive their fees for a day, week, month, a specific month, a year, or until you change it. Days off can repeat weekly, monthly, or yearly, and one-time dates drop off after they pass. Access control has one place for each job: <strong>Subscriptions &amp; payments</strong> at the top is where all subscription time is granted \u2014 confirm a reported payment, add +1mo/+3mo/+1yr, make someone free, or revoke access \u2014 while each person\u2019s own card below is for <em>them</em>: app access, admin role, calendar colour and password. Admins also manage Access control and Pricing from tabs here (Advanced Pricing sets the per-mile rate, the base airport miles, the surcharge amounts, and the change &amp; cancellation fees — whose amounts flow straight into the scheduling message — and lets you create or delete your own custom surcharges, like a pet fee or extra luggage, which then appear as chips on the Quote and Add Ride forms). All prices are rounded to the nearest whole dollar, and the breakdown shows that rounding on its own line — so “Manual adjustment” only ever appears when someone genuinely overrides a price. Anything that touches money or access — every pricing change, the client-fee %, creating or deleting a surcharge, turning someone\u2019s access on or off, archiving rides, deleting someone else\u2019s ride, or clearing a cautious-list flag — now needs a <strong>second admin to approve</strong>: you\u2019ll see it under \u201cNeeds a second admin\u201d on the dashboard, and the person who asked can\u2019t approve their own request. Your own rides and live dispatch (cancelling a ride, assigning a driver, medical hours) stay instant, and waiving fees stays with the client\u2019s owner \u2014 you can only forgive fees owed to you. (Team Availability is on the Team page.) Dispatchers who also build their own client list can keep a second confirmation and pickup set that is used only for their own clients. You can also set a Display name (e.g. Kathleen \u2192 \u201cKat\u201d) \u2014 the name clients see in your confirmation texts and contact card; leave it blank to use your full name. When you add your Venmo, type your username exactly as it appears on your Venmo profile \u2014 capitalization matters \u2014 then tap Test to confirm it opens to just one person before saving.'},
+  myprofile:{icon:'<svg viewBox="0 0 24 24" width="18" height="18" style="vertical-align:-3px" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="15" rx="2.2"/><circle cx="8" cy="10.2" r="2.1"/><path d="M5 15.4c.3-1.7 1.6-2.6 3-2.6s2.7.9 3 2.6"/><line x1="14" y1="9" x2="19" y2="9"/><line x1="14" y1="12.4" x2="19" y2="12.4"/></svg>',title:'Profile &amp; Settings',text:'My Info holds your card, your details, notes, and your Share/Download/Venmo buttons. The Account Settings tab holds everything you configure — receipt branding, payment methods, day-of selfie, your confirmation text, pickup instructions, and the scheduling / cancellation message (each with a default, a custom option, and a paste-an-example importer), the "send everything" bundle, auto-surcharges, and your availability. You can also set your alert & push-notification preferences there, and — if drivers cover your clients — waive their fees for a day, week, month, a specific month, a year, or until you change it. Days off can repeat weekly, monthly, or yearly, and one-time dates drop off after they pass. Access control is one card per person \u2014 everything about them in one place: subscription (confirm a reported payment, +1mo/+3mo/+1yr, make free, or revoke), app access, admin role, calendar colour and password. The <strong>driver colour code vault</strong> sits at the bottom: it holds each driver\u2019s official hex, and anyone showing \u201cnot saved\u201d just needs a tap of <strong>Save</strong> (or <strong>Save all</strong>) to lock their current colour in. Admins also manage Access control and Pricing from tabs here (Advanced Pricing sets the per-mile rate, the base airport miles, the surcharge amounts, and the change &amp; cancellation fees — whose amounts flow straight into the scheduling message — and lets you create or delete your own custom surcharges, like a pet fee or extra luggage, which then appear as chips on the Quote and Add Ride forms). All prices are rounded to the nearest whole dollar, and the breakdown shows that rounding on its own line — so “Manual adjustment” only ever appears when someone genuinely overrides a price. Anything that touches money or access — every pricing change, the client-fee %, creating or deleting a surcharge, turning someone\u2019s access on or off, archiving rides, deleting someone else\u2019s ride, or clearing a cautious-list flag — now needs a <strong>second admin to approve</strong>: you\u2019ll see it under \u201cNeeds a second admin\u201d on the dashboard, and the person who asked can\u2019t approve their own request. Your own rides and live dispatch (cancelling a ride, assigning a driver, medical hours) stay instant, and waiving fees stays with the client\u2019s owner \u2014 you can only forgive fees owed to you. (Team Availability is on the Team page.) Dispatchers who also build their own client list can keep a second confirmation and pickup set that is used only for their own clients. You can also set a Display name (e.g. Kathleen \u2192 \u201cKat\u201d) \u2014 the name clients see in your confirmation texts and contact card; leave it blank to use your full name. When you add your Venmo, type your username exactly as it appears on your Venmo profile \u2014 capitalization matters \u2014 then tap Test to confirm it opens to just one person before saving.'},
 };
 let _shownTips=new Set();
 function showPageTip(pageId){
@@ -4473,6 +4478,12 @@ function addNotification(driverName, ride, action, customMsg){
     sendPushToDriver(driverName, '⚖️ Fee waiver request — NWDA', msg);
   } else if(action==='admin_approval'){
     sendPushToDriver(driverName, '🔐 Needs your approval — NWDA', msg);
+  } else if(action==='driver_inactive'){
+    sendPushToDriver(driverName, '⚠️ Driver unavailable — NWDA', msg);
+  } else if(action==='sub_expired'){
+    sendPushToDriver(driverName, '💳 Subscription ended — NWDA', msg);
+  } else if(action==='irs_rate'){
+    sendPushToDriver(driverName, '🛣️ Update your mileage rate — NWDA', msg);
   }
 }
 
@@ -7144,7 +7155,12 @@ async function saveRideEdits(){
   var _prevReqNote=r.reqDriverNote||'';
   if(currentUser&&currentUser.name===r.createdBy){ var _rdv=document.getElementById('edit-reqdriver'); if(_rdv){ var _v=_rdv.value.trim(); if(_v) r.reqDriverNote=_v; else delete r.reqDriverNote; } }
   notifyRequestedDriver(r, _prevReqNote);
-  r.driver    = document.getElementById('edit-driver').value;
+  var _newDrv = document.getElementById('edit-driver').value;
+  if(_newDrv && _newDrv!==r.driver && !driverSubActive(_newDrv)){
+    showToast(_newDrv.split(' ')[0]+'\u2019s subscription isn\u2019t active \u2014 they can\u2019t be scheduled','error');
+    return;
+  }
+  r.driver    = _newDrv;
   touchRide(r, 'edited');
   // Notify new driver if changed
   if(r.driver && r.driver!==oldDriver) addNotification(r.driver, r, 'assigned');
@@ -11711,6 +11727,12 @@ async function assignDriver(){
   if(!canAssignOnRide(r)){ showToast('You can only assign drivers to rides you created.','error'); return; }
   const newDriver=document.getElementById('rm-driver-select').value;
   const oldDriver=r.driver;
+  // A driver with no live subscription can't take new work (they keep any ride already theirs).
+  if(newDriver && newDriver!==oldDriver && !driverSubActive(newDriver)){
+    showToast(newDriver.split(' ')[0]+'\u2019s subscription isn\u2019t active \u2014 they can\u2019t be scheduled','error');
+    document.getElementById('rm-driver-select').value = oldDriver||'';
+    return;
+  }
   r.driver=newDriver;
   if(newDriver&&newDriver!==oldDriver) addNotification(newDriver, r, 'assigned');
   if(newDriver!==oldDriver) touchRide(r, newDriver ? 'assigned to '+newDriver.split(' ')[0] : 'unassigned');
@@ -13271,55 +13293,8 @@ function renderPricingTracker(){
 }
 
 function _fmtSubDate(iso){ try{ return new Date(iso).toLocaleDateString(); }catch(e){ return ''; } }
-// Revoke all access for a user: clears a paid subscription AND any comped free access,
-// so "Revoke" means revoked no matter which way they were granted.
-async function revokeSubAccess(name){
-  if(!canGrantFreeAccess()){ showToast('Only Chase can remove subscription access','error'); return; }
-  var first=String(name).split(' ')[0];
-  if(!confirm('Remove '+first+'\u2019s subscription access?\n\nThis clears any paid time and any free (comped) access. They keep their login \u2014 use the App access switch below to turn the account off entirely.')) return;
-  var sub = subscriptions[name] = subscriptions[name]||{};
-  sub.comped = false;
-  await revokeUpgrade(name);          // clears upgraded / upgradeExpiresAt / incomeTrial + saves + re-renders
-  try{ await saveSubscriptions(); }catch(e){}
-  try{ renderAccessControl(); }catch(e){}
-  showToast(first+'\u2019s subscription access removed');
-}
 
-function renderPaymentsPanel(){
-  if(!(currentUser && currentUser.role==='admin')) return '';
-  var chase = canGrantFreeAccess();
-  var rows = USERS.filter(function(u){ return !u.disabled; }).map(function(u){
-    var st = appAccessState(u.name);
-    var sub = subscriptions[u.name] || {};
-    var badge, color, bg;
-    if(st.kind==='comped'){ badge='Free (comped)'; color='#2563eb'; bg='#eef2ff'; }
-    else if(st.kind==='subscribed'){ badge='Paid \u00b7 until '+_fmtSubDate(st.until); color='#15803d'; bg='#ecfdf3'; }
-    else if(st.kind==='trial'){ badge='Trial \u00b7 '+st.daysLeft+'d left'; color=(st.daysLeft<=5?'#b45309':'#15803d'); bg=(st.daysLeft<=5?'#fff7ed':'#ecfdf3'); }
-    else { badge='Unpaid \u2014 no access'; color='#dc2626'; bg='#fef2f2'; }
-    var pending = sub.paymentSubmitted ? '<span style="font-size:.66rem;color:#b45309;font-weight:700;margin-left:.4rem;">\uD83D\uDCB0 payment reported</span>' : '';
-    var actions = '';
-    if(chase){
-      actions = '<div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.4rem;">'
-        + '<button onclick="confirmSubPayment(this.dataset.u,1)" data-u="'+escHtml(u.name)+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #15803d;color:#fff;background:#15803d;cursor:pointer;font-weight:700;">Confirm payment (+1mo)</button>'
-        + '<button onclick="confirmSubPayment(this.dataset.u,3)" data-u="'+escHtml(u.name)+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #15803d;color:#15803d;background:none;cursor:pointer;">+3mo</button>'
-        + '<button onclick="confirmSubPayment(this.dataset.u,12)" data-u="'+escHtml(u.name)+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #15803d;color:#15803d;background:none;cursor:pointer;">+1yr</button>'
-        + '<button onclick="toggleComp(this.dataset.u)" data-u="'+escHtml(u.name)+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #2563eb;color:#2563eb;background:none;cursor:pointer;">'+(_isComped(u.name)?'Remove free':'Make free')+'</button>'
-        + (st.kind==='subscribed' || st.kind==='comped'
-            ? '<button onclick="revokeSubAccess(this.dataset.u)" data-u="'+escHtml(u.name)+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #dc2626;color:#dc2626;background:none;cursor:pointer;">Revoke</button>'
-            : '')
-        + '</div>';
-    }
-    return '<div style="border:1px solid var(--light);border-radius:9px;padding:.6rem .7rem;margin-bottom:.5rem;background:var(--white);">'
-      + '<div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap;">'
-      + '<span style="font-weight:700;font-size:.85rem;color:var(--black);">'+escHtml(u.name)+pending+'</span>'
-      + '<span style="font-size:.68rem;font-weight:700;color:'+color+';background:'+bg+';padding:2px 9px;border-radius:12px;white-space:nowrap;">'+badge+'</span>'
-      + '</div>' + actions + '</div>';
-  }).join('');
-  return '<div style="border:1px solid var(--light);border-radius:10px;padding:.85rem;margin-bottom:1rem;background:var(--surface);">'
-    + '<div style="font-size:.8rem;font-weight:700;color:var(--black);margin-bottom:.15rem;">\uD83D\uDCB3 Subscriptions &amp; payments</div>'
-    + '<div style="font-size:.72rem;color:var(--mid);line-height:1.5;margin-bottom:.7rem;">The one place subscriptions are managed \u2014 everyone\u2019s access at a glance. When a driver taps \u201cI\u2019ve submitted my payment,\u201d it shows \u201cpayment reported\u201d here \u2014 verify it in Square, then tap Confirm payment. \u201cMake free\u201d comps a driver; toggling it off on Kat/Chase/Morgan removes their free access.</div>'
-    + rows + '</div>';
-}
+
 async function toggleComp(name){
   if(!canGrantFreeAccess()){ showToast('Only Chase can change free access','error'); return; }
   var sub = subscriptions[name] = subscriptions[name]||{};
@@ -13336,6 +13311,139 @@ async function confirmSubPayment(name, months){
   await saveSubscriptions();
   try{ renderAccessControl(); }catch(e){}
 }
+// One person's subscription status + controls, rendered INSIDE their access-control card
+// so there is a single list of people rather than two. Mirrors the old payments panel.
+// Who needs to know a driver just went inactive? The OWNER of each client with a FUTURE
+// ride assigned to them — one alert per owner, listing the rides they need to reassign.
+function _futureRidesForDriver(dName){
+  var today=toDateStr(new Date());
+  return (rides||[]).filter(function(r){
+    return r && r.driver===dName && r.date && r.date>=today && r.status!=='cancelled';
+  });
+}
+async function _alertOwnersDriverInactive(dName){
+  var future=_futureRidesForDriver(dName);
+  if(!future.length) return 0;
+  var byOwner={};
+  future.forEach(function(r){
+    var owner=(typeof getClientOwner==='function' && getClientOwner(r.client))
+           || (typeof feeOwnerFor==='function' && feeOwnerFor(r.createdBy)) || '';
+    if(!owner) return;
+    (byOwner[owner]=byOwner[owner]||[]).push(r);
+  });
+  var first=String(dName).split(' ')[0];
+  var sent=0;
+  Object.keys(byOwner).forEach(function(owner){
+    var list=byOwner[owner];
+    var detail=list.slice(0,4).map(function(r){
+      return (r.client||'a client')+' on '+(typeof fmtDateShort==='function'?fmtDateShort(r.date):r.date);
+    }).join(', ');
+    if(list.length>4) detail += ' and '+(list.length-4)+' more';
+    var msg=first+' is no longer available on the app. You have '+list.length+' upcoming ride'
+      +(list.length===1?'':'s')+' with them ('+detail+') \u2014 please reassign.';
+    try{ addNotification(owner, list[0], 'driver_inactive', msg); sent++; }catch(e){}
+  });
+  try{ await saveNotifs(); updateNotifBadge(); }catch(e){}
+  return sent;
+}
+// Chase manually deactivates someone (after checking Square for a renewal).
+async function revokeSubAccess(name){
+  if(!canGrantFreeAccess()){ showToast('Only Chase can change subscription access','error'); return; }
+  var first=String(name).split(' ')[0];
+  var dName=USER_DRIVER_MAP[name]||'';
+  var future=dName?_futureRidesForDriver(dName):[];
+  var warn='Deactivate '+first+'\u2019s subscription?\n\nThey\u2019ll be greyed out and can\u2019t be scheduled until you reactivate them.';
+  if(future.length) warn+='\n\n'+future.length+' upcoming ride'+(future.length===1?'':'s')+' '+(future.length===1?'is':'are')+' already assigned to them \u2014 those stay put, and the client owners will be alerted to reassign.';
+  warn+='\n\nThey keep their login \u2014 use the App access switch to turn the account off entirely.';
+  if(!confirm(warn)) return;
+  var sub = subscriptions[name] = subscriptions[name]||{};
+  sub.deactivated = true;
+  sub.deactivatedAt = new Date().toISOString();
+  sub.deactivatedBy = (currentUser&&currentUser.name)||'';
+  sub.comped = false;
+  sub.upgraded = false;
+  try{ await saveSubscriptions(); }catch(e){}
+  var n = dName ? await _alertOwnersDriverInactive(dName) : 0;
+  try{ renderAccessControl(); }catch(e){}
+  showToast(first+' deactivated'+(n?(' \u2014 '+n+' client owner'+(n===1?'':'s')+' alerted'):''));
+}
+// Undo it — they paid up.
+async function reactivateSubAccess(name){
+  if(!canGrantFreeAccess()){ showToast('Only Chase can change subscription access','error'); return; }
+  var sub = subscriptions[name] = subscriptions[name]||{};
+  sub.deactivated = false;
+  delete sub.deactivatedAt; delete sub.deactivatedBy;
+  try{ await saveSubscriptions(); }catch(e){}
+  try{ renderAccessControl(); }catch(e){}
+  showToast(String(name).split(' ')[0]+' reactivated \u2014 they can be scheduled again');
+}
+// A subscription running out only ever NUDGES Chase. Fires once per expiry date.
+async function checkSubExpiries(){
+  if(!canGrantFreeAccess()) return;
+  var now=Date.now(), changed=false;
+  Object.keys(subscriptions||{}).forEach(function(login){
+    var sub=subscriptions[login]||{};
+    if(sub.deactivated===true) return;
+    if(!(sub.upgraded===true && sub.upgradeExpiresAt)) return;
+    var exp=new Date(sub.upgradeExpiresAt).getTime();
+    if(!(exp && exp<=now)) return;
+    if(sub.expiryAlertedFor===sub.upgradeExpiresAt) return;   // already nudged for this date
+    sub.expiryAlertedFor=sub.upgradeExpiresAt; changed=true;
+    var who=USER_DRIVER_MAP[login]||login;
+    try{
+      addNotification(USER_DRIVER_MAP['Chase']||'Chase', {login:login}, 'sub_expired',
+        String(who).split(' ')[0]+'\u2019s subscription ended '+_fmtSubDate(sub.upgradeExpiresAt)
+        +'. Check Square for a renewal \u2014 if they haven\u2019t paid, deactivate them in Access control.');
+    }catch(e){}
+  });
+  if(changed){ try{ await saveSubscriptions(); await saveNotifs(); updateNotifBadge(); }catch(e){} }
+}
+
+// Header for the single people list in Access control.
+function _subsIntroHTML(){
+  if(!(currentUser && currentUser.role==='admin')) return '';
+  return '<div style="border:1px solid var(--light);border-radius:10px;padding:.85rem;margin-bottom:1rem;background:var(--surface);">'
+    + '<div style="font-size:.8rem;font-weight:700;color:var(--black);margin-bottom:.15rem;">\uD83D\uDC65 People &amp; access</div>'
+    + '<div style="font-size:.72rem;color:var(--mid);line-height:1.5;">Everything for one person in one place \u2014 app access, admin role, calendar colour and password'+(canGrantFreeAccess()?', plus their subscription':'')+'.'
+    + (canGrantFreeAccess()
+        ? ' When someone taps \u201cI\u2019ve submitted my payment,\u201d a \uD83D\uDCB0 <strong>payment reported</strong> flag appears on their card \u2014 verify it in Square, then tap <strong>Confirm payment</strong>. '
+          + '\u201cMake free\u201d comps a driver; <strong>Revoke</strong> clears both paid time and free access. '
+          + 'A driver with no active subscription can\u2019t be scheduled \u2014 they show greyed out in the driver list until they\u2019re paid up.'
+        : '')
+    + '</div>'
+    + '</div>';
+}
+
+function _userSubBadgeHTML(u){
+  var st = appAccessState(u.name);
+  var sub = subscriptions[u.name] || {};
+  var badge, color, bg;
+  if(st.kind==='deactivated'){ badge='Deactivated \u2014 can\u2019t be scheduled'; color='#dc2626'; bg='#fef2f2'; }
+  else if(st.kind==='comped'){ badge='Free (comped)'; color='#2563eb'; bg='#eef2ff'; }
+  else if(st.kind==='subscribed'){ badge='Paid \u00b7 until '+_fmtSubDate(st.until); color='#15803d'; bg='#ecfdf3'; }
+  else if(st.kind==='lapsed'){ badge='Ended '+_fmtSubDate(st.until)+' \u2014 check Square'; color='#b45309'; bg='#fff7ed'; }
+  else if(st.kind==='lapsed_trial'){ badge='Trial ended \u2014 check Square'; color='#b45309'; bg='#fff7ed'; }
+  else if(st.kind==='trial'){ badge='Trial \u00b7 '+st.daysLeft+'d left'; color=(st.daysLeft<=5?'#b45309':'#15803d'); bg=(st.daysLeft<=5?'#fff7ed':'#ecfdf3'); }
+  else { badge='Active'; color='#15803d'; bg='#ecfdf3'; }
+  var pending = sub.paymentSubmitted ? '<span style="font-size:.66rem;color:#b45309;font-weight:700;margin-left:.4rem;white-space:nowrap;">\uD83D\uDCB0 payment reported</span>' : '';
+  return '<span style="font-size:.68rem;font-weight:700;color:'+color+';background:'+bg+';padding:2px 9px;border-radius:12px;white-space:nowrap;">'+badge+'</span>'+pending;
+}
+function _userSubActionsHTML(u){
+  if(!canGrantFreeAccess()) return '<div style="font-size:.66rem;color:var(--mid);">Only Chase can grant or remove subscription access</div>';
+  var st = appAccessState(u.name);
+  var n = escHtml(u.name);
+  var h = '<div style="display:flex;gap:.35rem;flex-wrap:wrap;">'
+    + '<button onclick="confirmSubPayment(this.dataset.u,1)" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #15803d;color:#fff;background:#15803d;font-family:inherit;font-weight:700;cursor:pointer;">Confirm payment (+1mo)</button>'
+    + '<button onclick="confirmSubPayment(this.dataset.u,3)" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #15803d;color:#15803d;background:none;font-family:inherit;cursor:pointer;">+3mo</button>'
+    + '<button onclick="confirmSubPayment(this.dataset.u,12)" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #15803d;color:#15803d;background:none;font-family:inherit;cursor:pointer;">+1yr</button>'
+    + '<button onclick="toggleComp(this.dataset.u)" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #2563eb;color:#2563eb;background:none;font-family:inherit;cursor:pointer;">'+(_isComped(u.name)?'Remove free':'Make free')+'</button>'
+    + (st.kind==='deactivated'
+        ? '<button onclick="reactivateSubAccess(this.dataset.u)" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #15803d;color:#15803d;background:none;font-family:inherit;font-weight:700;cursor:pointer;">Reactivate</button>'
+        : '<button onclick="revokeSubAccess(this.dataset.u)" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #dc2626;color:#dc2626;background:none;font-family:inherit;cursor:pointer;">Deactivate</button>')
+    + '</div>';
+  return h;
+}
+
 function renderAccessControl(){
   if(!(currentUser && currentUser.role==='admin')){
     document.getElementById('access-control-list').innerHTML='<p style="color:var(--mid);">Admins only.</p>';
@@ -13354,7 +13462,7 @@ function renderAccessControl(){
     + DRIVERS.map(function(nm){ var offs=_surchTypes.filter(function(t){ return driverAutoOffFor(nm,t[0]); }); var right = offs.length ? offs.map(function(t){ return '<span style="font-size:.66rem;font-weight:700;padding:.12rem .5rem;border-radius:20px;background:var(--light);color:var(--mid);margin:0 0 4px 4px;display:inline-block;">'+t[1]+'</span>'; }).join('') : '<span style="font-size:.72rem;color:#16a34a;font-weight:700;">All on</span>'; return '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem;padding:.45rem .1rem;border-bottom:1px solid var(--light);"><span style="font-size:.82rem;color:var(--black);font-weight:600;flex-shrink:0;padding-top:.15rem;">'+escHtml(nm)+'</span><span style="text-align:right;line-height:1.9;">'+right+'</span></div>'; }).join('')
     +'<div style="font-size:.66rem;color:var(--mid);margin-top:.5rem;">A pill means that surcharge’s <strong>auto-add is off</strong> for that driver.</div>'
     +'</div>';
-  list.innerHTML = renderPaymentsPanel() + _onbResetPanel + buildColorVaultPanel() + USERS.map(function(u){
+  list.innerHTML = _subsIntroHTML() + USERS.map(function(u){
     const dName  = USER_DRIVER_MAP[u.name]||'';
     const color  = dName ? driverColor(dName) : '#888888';
     const isMe   = u.name === currentUser.name;
@@ -13397,8 +13505,10 @@ function renderAccessControl(){
       +'</div>'
       +'<div style="padding-left:2.75rem;">'
       +'<div style="font-size:.7rem;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">App access: '+(active?'<span style=\'color:#22c55e;\'>ON</span>':'<span style=\'color:#dc2626;\'>OFF</span>')+'</div>'
-      // Subscriptions are managed ONLY in the "Subscriptions & payments" panel at the top of
-      // this tab — this card is for the person: app access, admin role, colour and password.
+      // Every admin can SEE status; only Chase can change it (buttons gated in _userSubActionsHTML).
+      +'<div style="font-size:.7rem;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin:.6rem 0 .35rem;">Subscription</div>'
+      +'<div style="margin-bottom:.4rem;">'+_userSubBadgeHTML(u)+'</div>'
+      +_userSubActionsHTML(u)
       + (dName
           ? '<div style="font-size:.7rem;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin:.6rem 0 .35rem;">Calendar color</div>'
             +'<div style="display:flex;align-items:center;gap:.5rem;">'
@@ -13411,7 +13521,7 @@ function renderAccessControl(){
       +'<div style="font-size:.66rem;color:var(--mid);margin-top:.25rem;">Set a new password if they\u2019re locked out — no current password needed.</div></div>'
       +'</div>'
       +'</div>';
-  }).join('') + _surchargeReport;
+  }).join('') + _onbResetPanel + _surchargeReport + buildColorVaultPanel();
 }
 
 
@@ -14096,13 +14206,38 @@ function isDriverAvailable(driverName, dateStr, timeStr){
   return true;
 }
 // Build assign-dropdown options, greying out drivers who are unavailable on the given date.
+// Login name for a driver's full name (reverse of USER_DRIVER_MAP).
+function _loginForDriver(dName){
+  if(!dName) return '';
+  try{
+    for(var k in USER_DRIVER_MAP){ if(USER_DRIVER_MAP[k]===dName) return k; }
+  }catch(e){}
+  return '';
+}
+// A driver can only be scheduled while their subscription is live (paid, comped or in trial).
+// Unknown/unlinked drivers are left schedulable — never block on missing data.
+function driverSubActive(dName){
+  var login=_loginForDriver(dName);
+  if(!login) return true;                        // no login linked → never block
+  try{
+    var u=USERS.find(function(x){ return x.name===login; });
+    if(u && u.disabled) return false;            // account switched off entirely
+    var sub=subscriptions[login]||{};
+    return sub.deactivated !== true;             // ONLY a manual deactivation blocks
+  }catch(e){ return true; }
+}
+
 function driverOptionsHTML(selected, dateStr){
   return `<option value="">Unassigned</option>` + DRIVERS.map(d=>{
+    const paid  = driverSubActive(d);
     const avail = isDriverAvailable(d, dateStr);
-    const label = avail ? d : d+' (unavailable)';
-    const style = avail ? '' : ' style="color:#aaa"';
+    // Unpaid outranks unavailable: they can't take work at all until they're paid up.
+    const label = !paid ? d+' (subscription inactive)' : (avail ? d : d+' (unavailable)');
+    const style = (!paid || !avail) ? ' style="color:#aaa"' : '';
     const sel = d===selected ? ' selected' : '';
-    return `<option value="${d}"${sel}${style}>${label}</option>`;
+    // Keep an already-assigned driver selectable so an existing ride never breaks.
+    const dis = (!paid && d!==selected) ? ' disabled' : '';
+    return `<option value="${d}"${sel}${style}${dis}>${label}</option>`;
   }).join('');
 }
 async function persistDriverProfiles(){ await storageSet('kat:driverProfiles', DRIVER_PROFILES); }
@@ -14579,6 +14714,24 @@ function openOutsideRideModal(editId){
       </div>
       <div class="form-group"><label>Type / label</label>
         <input type="text" id="or-type" placeholder="e.g. Airport, Point-to-point" value="${_ex?escAttr(_ex.type||'OUTSIDE'):'OUTSIDE'}" style="width:100%;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;" /></div>
+      <!-- OPTIONAL DETAIL — only fill in what you have -->
+      <div id="or-more-toggle" onclick="_orToggleMore()" style="cursor:pointer;font-size:.82rem;font-weight:700;color:var(--accent);margin:.2rem 0 .6rem;">+ Add fare / tip / fee detail (optional)</div>
+      <div id="or-more-block" style="display:none;border:1.5px solid var(--light);border-radius:10px;padding:.8rem;margin-bottom:.8rem;background:var(--surface);">
+        <div style="font-size:.7rem;color:var(--mid);line-height:1.45;margin-bottom:.6rem;">Fill these in if you know them and the app will split fares from tips properly on your P&amp;L. Leave them blank and the amount you kept is simply counted as fare.</div>
+        <div style="display:flex;gap:.6rem;">
+          <div class="form-group" style="flex:1;"><label>Gross fare ($)</label>
+            <input type="number" id="or-fare" min="0" step="0.01" placeholder="before fees" oninput="_orRecalcKept()" value="${_ex?(parseFloat(_ex.fare)||''):''}" style="width:100%;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:inherit;box-sizing:border-box;" /></div>
+          <div class="form-group" style="flex:1;"><label>Tip ($)</label>
+            <input type="number" id="or-tip" min="0" step="0.01" placeholder="0.00" oninput="_orRecalcKept()" value="${_ex?(parseFloat(_ex.tip)||''):''}" style="width:100%;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:inherit;box-sizing:border-box;" /></div>
+        </div>
+        <div style="display:flex;gap:.6rem;">
+          <div class="form-group" style="flex:1;"><label>Provider fee ($)</label>
+            <input type="number" id="or-pfee" min="0" step="0.01" placeholder="Uber/Lyft cut" oninput="_orRecalcKept()" value="${_ex?(parseFloat(_ex.providerFee)||''):''}" style="width:100%;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:inherit;box-sizing:border-box;" /></div>
+          <div class="form-group" style="flex:1;"><label>Paid by</label>
+            <select id="or-payment" style="width:100%;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:inherit;box-sizing:border-box;">${_orPayOptions(_ex?(_ex.payment||''):'')}</select></div>
+        </div>
+        <div id="or-kept-hint" style="font-size:.72rem;color:var(--accent);font-weight:600;"></div>
+      </div>
       <div class="form-group"><label>Notes (optional)</label>
         <input type="text" id="or-notes" placeholder="Anything to remember" value="${_ex?escAttr(_ex.notes||''):''}" style="width:100%;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;" /></div>
       <div style="color:var(--red);font-size:.82rem;min-height:1rem;margin-bottom:.5rem;" id="or-error"></div>
@@ -14587,10 +14740,41 @@ function openOutsideRideModal(editId){
         <button onclick="saveOutsideRide(${_isEdit?("'"+editId+"'"):'null'})" style="flex:2;padding:.7rem;background:#16a34a;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:600;cursor:pointer;">${_isEdit?'Save Changes':'Save Ride'}</button>
       </div>
     </div>`;
+  try{ if(_ex && ((parseFloat(_ex.fare)||0)>0 || (parseFloat(_ex.tip)||0)>0 || (parseFloat(_ex.providerFee)||0)>0 || (_ex.payment||''))){
+    setTimeout(function(){ try{ _orToggleMore(); }catch(e){} }, 0);
+  } }catch(e){}
   document.body.appendChild(modal);
 }
 
 function closeOutsideRideModal(){ const m=document.getElementById('outside-ride-modal'); if(m) m.remove(); }
+
+// Payment options for the outside-ride form (blank = not recorded).
+function _orPayOptions(sel){
+  var list=(typeof PAYMENT_METHODS!=='undefined')?PAYMENT_METHODS:[];
+  var h='<option value="">— not recorded —</option>';
+  list.forEach(function(p){ h+='<option value="'+escAttr(p)+'"'+(p===sel?' selected':'')+'>'+escHtml(p)+'</option>'; });
+  return h;
+}
+function _orToggleMore(){
+  var b=document.getElementById('or-more-block'), t=document.getElementById('or-more-toggle');
+  if(!b) return;
+  var open = b.style.display!=='none';
+  b.style.display = open ? 'none' : 'block';
+  if(t) t.textContent = open ? '+ Add fare / tip / fee detail (optional)' : '\u2212 Hide fare / tip / fee detail';
+  if(!open) _orRecalcKept();
+}
+// When the detail is filled in, the amount kept is derived: fare + tip - provider fee.
+function _orRecalcKept(){
+  var f=parseFloat((document.getElementById('or-fare')||{}).value)||0;
+  var t=parseFloat((document.getElementById('or-tip')||{}).value)||0;
+  var p=parseFloat((document.getElementById('or-pfee')||{}).value)||0;
+  var hint=document.getElementById('or-kept-hint');
+  var amt=document.getElementById('or-amount');
+  if(!(f>0 || t>0 || p>0)){ if(hint) hint.textContent=''; return; }
+  var kept=f+t-p;
+  if(amt) amt.value = (Math.round(kept*100)/100).toFixed(2);
+  if(hint) hint.textContent='Amount you kept = '+f.toFixed(2)+' fare + '+t.toFixed(2)+' tip \u2212 '+p.toFixed(2)+' fee = $'+kept.toFixed(2);
+}
 
 async function saveOutsideRide(editId){
   if(!hasIncomeAccess()){ showToast('Please log in to use this','error'); return; }
@@ -14603,6 +14787,11 @@ async function saveOutsideRide(editId){
   const time   = document.getElementById('or-time').value;
   const type   = document.getElementById('or-type').value.trim() || 'OUTSIDE';
   const notes  = document.getElementById('or-notes').value.trim();
+  // Optional detail — blank is fine; only what the driver actually knows.
+  const _gf    = parseFloat((document.getElementById('or-fare')||{}).value)||0;
+  const _tp    = parseFloat((document.getElementById('or-tip')||{}).value)||0;
+  const _pf    = parseFloat((document.getElementById('or-pfee')||{}).value)||0;
+  const _pm    = ((document.getElementById('or-payment')||{}).value||'').trim();
   const err    = document.getElementById('or-error');
   if(!date){ err.textContent='Please pick a date.'; return; }
   if(amount<=0){ err.textContent='Please enter an amount greater than 0.'; return; }
@@ -14614,6 +14803,7 @@ async function saveOutsideRide(editId){
     const _prev = outsideRides[dName][_i];
     outsideRides[dName][_i] = Object.assign({}, _prev, {
       date, time, client: client||'Outside ride', type, price:amount, miles, notes, editedAt:Date.now(),
+      fare:_gf, tip:_tp, providerFee:_pf, payment:_pm,
     });
     await saveOutsideRides();
     closeOutsideRideModal();
@@ -14624,6 +14814,7 @@ async function saveOutsideRide(editId){
   outsideRides[dName].push({
     id:'or_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
     date, time, client: client||'Outside ride', type, price:amount, miles, notes, ts:Date.now(),
+    fare:_gf, tip:_tp, providerFee:_pf, payment:_pm,
   });
   await saveOutsideRides();
   closeOutsideRideModal();
@@ -14815,18 +15006,26 @@ function _isComped(name){
   if(sub.comped === false) return false;    // Chase turned it OFF
   return FREE_ACCESS_USERS.includes(name);  // default: Kat, Chase, Morgan are free
 }
+// Everyone is treated as PAID by default. A subscription running out is a prompt for Chase
+// to check Square — never an automatic lockout. The ONLY thing that removes access is Chase
+// manually deactivating the person (sub.deactivated), so nobody vanishes from dispatch
+// because a date rolled over.
 function appAccessState(name){
   if(!name) return {access:false, kind:'none'};
   var sub = subscriptions[name] || {}; var now = Date.now();
+  if(sub.deactivated === true) return {access:false, kind:'deactivated', since:sub.deactivatedAt||''};
   if(_isComped(name)) return {access:true, kind:'comped'};
   if(sub.upgraded === true && new Date(sub.upgradeExpiresAt||0).getTime() > now)
     return {access:true, kind:'subscribed', until:sub.upgradeExpiresAt};
+  // Paid time has run out — still ACTIVE, but flagged so Chase can check for a renewal.
+  if(sub.upgraded === true && sub.upgradeExpiresAt)
+    return {access:true, kind:'lapsed', until:sub.upgradeExpiresAt};
   if(sub.trialStart){
     var ends = new Date(sub.trialStart).getTime() + FREE_TRIAL_DAYS*86400000;
     if(now < ends) return {access:true, kind:'trial', daysLeft:Math.max(0,Math.ceil((ends-now)/86400000)), ends:new Date(ends).toISOString()};
-    return {access:false, kind:'trial_expired'};
+    return {access:true, kind:'lapsed_trial'};   // trial over — still active until Chase says otherwise
   }
-  return {access:true, kind:'trial', daysLeft:FREE_TRIAL_DAYS}; // brand-new: full trial ahead
+  return {access:true, kind:'trial', daysLeft:FREE_TRIAL_DAYS};
 }
 function _ensureTrialStarted(name){
   if(!name || !_subsLoaded) return; // never write before real data has loaded
@@ -14916,7 +15115,65 @@ function getIncomeDateRange(){
   return {start:new Date(fromEl.value),end:new Date(toEl.value),label:`${fromEl.value} to ${toEl.value}`};
 }
 
+// ── Payment-type filter (Income tab) ────────────────────────────────────────
+// Empty array = every payment type. Otherwise the methods ticked, e.g. ['Credit Card','Venmo'].
+let incPayFilter = [];
+function _payTypesInUse(){
+  var seen={};
+  (rides||[]).forEach(function(r){ if(r&&r.payment) seen[r.payment]=1; if(r&&r.tipPayment) seen[r.tipPayment]=1; });
+  var known=(typeof PAYMENT_METHODS!=='undefined')?PAYMENT_METHODS:[];
+  var list=known.filter(function(p){ return seen[p]; });
+  Object.keys(seen).forEach(function(p){ if(list.indexOf(p)<0) list.push(p); });
+  return list;
+}
+// Does this ride count under the current filter? Outside rides have no card/cash method,
+// so they only appear on the unfiltered view.
+function _matchesPayFilter(r){
+  if(!incPayFilter || !incPayFilter.length) return true;   // nothing ticked = show all
+  if(!r) return false;
+  var m = (r.payment||'').trim();
+  if(!m) return false;                                     // no method recorded
+  return incPayFilter.indexOf(m)>=0;
+}
+// Tick / untick one method. Passing '' clears back to All.
+function setIncPayFilter(v){
+  if(!v){ incPayFilter = []; }
+  else {
+    var i = incPayFilter.indexOf(v);
+    if(i>=0) incPayFilter.splice(i,1); else incPayFilter.push(v);
+  }
+  try{ renderIncome(); }catch(e){}
+}
+function _payFilterBarHTML(){
+  var types=_payTypesInUse();
+  if(!types.length) return '';
+  var chip=function(label,val){
+    var on = val ? (incPayFilter.indexOf(val)>=0) : (incPayFilter.length===0);
+    return '<button onclick="setIncPayFilter(\''+String(val).replace(/'/g,"\\'")+'\')" '
+      +'style="padding:.3rem .7rem;border-radius:20px;border:1.5px solid '+(on?'var(--gold)':'var(--light)')+';'
+      +'background:'+(on?'var(--gold)':'none')+';color:'+(on?'#fff':'var(--mid)')+';'
+      +'font-family:inherit;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;">'+escHtml(label)+'</button>';
+  };
+  var h='<div style="display:flex;gap:.35rem;flex-wrap:wrap;align-items:center;margin-bottom:.6rem;">'
+    +'<span style="font-size:.68rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-right:.15rem;">Paid by</span>'
+    +chip('All','');
+  types.forEach(function(p){ h+=chip(p,p); });
+  h+='</div>';
+  if(incPayFilter.length){
+    h+='<div style="background:#fff7ed;border:1px solid #fcd34d;border-radius:8px;padding:.4rem .6rem;margin-bottom:.6rem;font-size:.72rem;color:#92400e;line-height:1.45;">'
+      +'Showing <strong>'+escHtml(incPayFilter.join(' + '))+'</strong> only \u2014 every figure below is filtered. Anything with no payment method recorded is hidden. Tap <strong>All</strong> for your real totals.'
+      +'</div>';
+  }
+  return h;
+}
+
 function renderIncome(){
+  try{ var _pfb=document.getElementById('pay-filter-bar'); if(_pfb) _pfb.innerHTML=_payFilterBarHTML(); }catch(e){}
+  // The driver's own IRS mileage rate lives with their income tools — no admin involved.
+  try{ var _irsBox=document.getElementById('irs-rate-box');
+       if(_irsBox) _irsBox.innerHTML = (typeof hasIncomeAccess!=='function' || hasIncomeAccess()) ? _irsRatesAdminHTML() : '';
+  }catch(e){}
+  try{ var _pfb=document.getElementById('pay-filter-bar'); if(_pfb) _pfb.innerHTML=_payFilterBarHTML(); }catch(e){}
   if(!document.getElementById('income-summary-cards')) return;
   if(!hasIncomeAccess()) return;
   try{ renderKmPayCard(); }catch(e){}
@@ -14980,6 +15237,7 @@ function renderIncome(){
     if(dName && r.driver!==dName && (!_incLinked||r.driver!==_incLinked)) return false;
     if(!r.date||r.price===0) return false;
     if(!_incEarned(r)) return false;
+    if(!_matchesPayFilter(r)) return false;
     if(start && end){
       const d=new Date(r.date+'T12:00:00');
       if(d<start||d>end) return false;
@@ -14992,6 +15250,7 @@ function renderIncome(){
     const outside = getMyOutsideRidesAsRides().filter(r=>{
       if(!r.date || parseFloat(r.price||0)===0) return false;
       if(!_incEarned(r)) return false;
+      if(!_matchesPayFilter(r)) return false;
       if(start && end){
         const d=new Date(r.date+'T12:00:00');
         if(d<start||d>end) return false;
@@ -17390,13 +17649,21 @@ function buildIncomeFooterRows(admin,totalVehicleCost,netAfterVehicle,dName,expe
   return rows;
 }
 
-function exportIncomeCSV(){
+async function exportIncomeCSV(){
   if(!hasIncomeAccess()){ showToast('Please log in to use this','error'); return; }
   const dName = isAdmin() ? null : getMyDriverName();
   const {start,end,label} = getIncomeDateRange();
+  // Same choice as the P&L: plain data, or a branded document. Honours the Paid by chips.
+  const _pick = await _plPickPayTypes({incomeMode:true});
+  if(_pick===null) return;
+  const _ipTypes = _pick.types||[];
+  const _ipFmt   = _pick.format||'xlsx';
+  const _ipLabel = _ipTypes.join(' + ');
+  const _ipMatch = r => !_ipTypes.length || _ipTypes.indexOf((r.payment||'').trim())>=0;
   let filtered = rides.filter(r=>{
     if(dName && r.driver!==dName) return false;
     if(!r.date) return false;
+    if(!_ipMatch(r)) return false;
     if(start && end){
       const d=new Date(r.date+'T12:00:00');
       if(d<start||d>end) return false;
@@ -17408,6 +17675,7 @@ function exportIncomeCSV(){
   if(!isAdmin()){
     const outside = getMyOutsideRidesAsRides().filter(r=>{
       if(!r.date) return false;
+      if(!_ipMatch(r)) return false;
       if(start && end){
         const d=new Date(r.date+'T12:00:00');
         if(d<start||d>end) return false;
@@ -17425,13 +17693,41 @@ function exportIncomeCSV(){
       r.price, r._outside?'':buildFeeBreakdown(r), r.notes||''
     ])
   ];
+  if(_ipFmt==='pdf'){
+    const _who = dName || getMyDriverName() || (currentUser&&currentUser.name) || '';
+    const _bp  = DRIVER_PROFILES[_who]||{};
+    const _tot = filtered.reduce((s,r)=>s+(parseFloat(r.price)||0),0);
+    const _tips= filtered.reduce((s,r)=>s+(parseFloat(r.tip)||0),0);
+    const _sum = [
+      ['INCOME'+(_ipTypes.length?(' \u2014 '+_ipLabel+' ONLY'):'')],
+      ['Period', label],
+      ['Rides', filtered.length],
+      ['Fares', Number(_tot.toFixed(2))],
+      ['Tips', Number(_tips.toFixed(2))],
+      ['Total', Number((_tot+_tips).toFixed(2))],
+    ];
+    const _doc = buildReportHTML({
+      brandName: (_bp.businessName||'').trim(),
+      logo: (_bp.logo||'').trim(),
+      title: 'Income Report'+(_ipTypes.length?(' \u2014 '+_ipLabel):''),
+      subtitle: (dName||'All drivers')+' \u00b7 '+label+' \u00b7 Generated '+new Date().toLocaleString(),
+      warning: _ipTypes.length
+        ? '<strong>Filtered to '+escHtml(_ipLabel)+' only.</strong> Rides paid another way are not shown. This is a working view, not a complete record of income.'
+        : '',
+      sheets: [ {name:'Summary', rows:_sum}, {name:'Rides', rows:rows} ],
+      footer: 'Generated by the NWDA app on '+new Date().toLocaleString()+'.'
+    });
+    openReportDocument(_doc, 'NDA_Income_'+(dName||'All').replace(/ /g,'_')+'_'+label.replace(/ /g,'_'));
+    showToast('Income report \u2014 tap Save as PDF');
+    return;
+  }
   const csv = rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob = new Blob([csv],{type:'text/csv'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `NDA_Income_${(dName||'All').replace(/ /g,'_')}_${label.replace(/ /g,'_')}.csv`;
+  a.download = `NDA_Income_${(dName||'All').replace(/ /g,'_')}_${label.replace(/ /g,'_')}${_ipTypes.length?('_'+_ipTypes.join('-').replace(/[^a-z0-9-]+/gi,'')):''}.csv`;
   a.click();
-  showToast('CSV exported ✓');
+  showToast(_ipTypes.length ? ('CSV exported ('+_ipLabel+') ✓') : 'CSV exported ✓');
 }
 
 // ── PRICING AUDIT REPORT (admin only) ─────────────────────────────────────
@@ -17710,6 +18006,326 @@ function loadXLSX(){
   });
   return _xlsxPromise;
 }
+// ── IRS business standard mileage rate ──────────────────────────────────────
+// The rate is normally set once a year, but the IRS can and does split a year mid-stream
+// when driving costs move sharply (2022, and again 2026). So rates are stored as DATED
+// PERIODS and applied per trip by the date it was driven — never one rate for a whole year.
+// Source: IRS Notice 2026-10 + Announcement 2026-11. Verify at IRS_RATE_URL.
+const IRS_RATE_URL = 'https://www.irs.gov/tax-professionals/standard-mileage-rates';
+const IRS_STD_MILEAGE_BUILTIN = {
+  2023: [{from:'2023-01-01', to:'2023-12-31', rate:0.655}],
+  2024: [{from:'2024-01-01', to:'2024-12-31', rate:0.67 }],
+  2025: [{from:'2025-01-01', to:'2025-12-31', rate:0.70 }],
+  // 2026 is a SPLIT year — the IRS raised the rate mid-year for fuel costs.
+  2026: [{from:'2026-01-01', to:'2026-06-30', rate:0.725},
+         {from:'2026-07-01', to:'2026-12-31', rate:0.76 }],
+};
+// Every period for a year, with any driver override applied on top.
+function irsPeriodsFor(year, dName){
+  year = parseInt(year,10);
+  var who = dName || (typeof getMyDriverName==='function' ? getMyDriverName() : '') || (currentUser&&currentUser.name);
+  var saved = ((DRIVER_PROFILES[who]||{}).irsRates)||{};
+  var base = IRS_STD_MILEAGE_BUILTIN[year];
+  var confirmed = !!base;
+  if(!base){
+    // No published rates on file for this year — carry the latest known period forward.
+    var yrs = Object.keys(IRS_STD_MILEAGE_BUILTIN).map(Number).sort(function(a,b){return a-b;});
+    var newest = yrs[yrs.length-1];
+    var last = IRS_STD_MILEAGE_BUILTIN[newest][IRS_STD_MILEAGE_BUILTIN[newest].length-1];
+    base = [{from:year+'-01-01', to:year+'-12-31', rate:last.rate, basedOn:newest}];
+  }
+  return base.map(function(p){
+    var ov = saved[p.from];
+    return {
+      from:p.from, to:p.to,
+      rate: (ov!=null && isFinite(parseFloat(ov)) && parseFloat(ov)>0) ? parseFloat(ov) : p.rate,
+      source: (ov!=null && isFinite(parseFloat(ov)) && parseFloat(ov)>0) ? 'saved' : (confirmed?'builtin':'estimate'),
+      confirmed: (ov!=null) ? true : confirmed,
+      basedOn: p.basedOn
+    };
+  });
+}
+// The rate that applies to a specific trip date.
+function irsRateForDate(dateStr, dName){
+  var y = parseInt(String(dateStr||'').slice(0,4),10) || new Date().getFullYear();
+  var ps = irsPeriodsFor(y, dName);
+  for(var i=0;i<ps.length;i++){
+    if(dateStr>=ps[i].from && dateStr<=ps[i].to) return ps[i];
+  }
+  return ps[ps.length-1];
+}
+// Back-compat summary for a whole year (used for labels, not for the maths).
+function irsRateInfo(year, dName){
+  var ps = irsPeriodsFor(year, dName);
+  return {
+    rate: ps[ps.length-1].rate,
+    periods: ps,
+    split: ps.length>1,
+    source: ps[ps.length-1].source,
+    confirmed: ps.every(function(p){ return p.confirmed; }),
+    basedOn: ps[ps.length-1].basedOn
+  };
+}
+function irsStdMileageRate(year, dName){ return irsRateInfo(year, dName).rate; }
+// Save a driver's own rate for ONE period (keyed by the period's start date).
+async function setIrsMileageRate(periodFrom, rate){
+  var r = parseFloat(rate);
+  if(!periodFrom || !isFinite(r) || r<=0 || r>5){ showToast('Enter a rate like 0.725','error'); return false; }
+  var who = (typeof getMyDriverName==='function' ? getMyDriverName() : '') || (currentUser&&currentUser.name);
+  if(!who){ showToast('Could not determine your profile','error'); return false; }
+  if(!DRIVER_PROFILES[who]) DRIVER_PROFILES[who]={};
+  if(!DRIVER_PROFILES[who].irsRates) DRIVER_PROFILES[who].irsRates={};
+  DRIVER_PROFILES[who].irsRates[periodFrom] = r;
+  try{ await storageSet('kat:driverProfiles', DRIVER_PROFILES); }catch(e){}
+  try{ var _b=document.getElementById('irs-rate-box'); if(_b) _b.innerHTML=_irsRatesAdminHTML(); }catch(e){}
+  showToast('\u2713 Rate from '+periodFrom+': $'+r.toFixed(3)+'/mi');
+  return true;
+}
+
+// Once a year, remind admins to enter the new IRS mileage rate. Fires only for the
+// current year, only for admins, and only once per year per device.
+function checkIrsRateCurrent(){
+  try{
+    if(typeof hasIncomeAccess==='function' && !hasIncomeAccess()) return;
+    var y=new Date().getFullYear();
+    var info=irsRateInfo(y);
+    if(info.confirmed) return;
+    var k='nwda_irs_rate_nudge_'+y;
+    if(localStorage.getItem(k)) return;
+    localStorage.setItem(k,'1');
+    addNotification(getMyDriverName()||currentUser?.name, {year:y}, 'irs_rate',
+      'The '+y+' IRS mileage rate isn\u2019t set for you yet. Your Year-End P&L will use the '+info.basedOn
+      +' rate until you update it \u2014 set it on your Income page (no admin needed).');
+    saveNotifs(); updateNotifBadge();
+  }catch(e){}
+}
+
+// Ask for the rate when we don't have a confirmed one for that year.
+async function ensureIrsRateFor(year){
+  var info = irsRateInfo(year);
+  if(info.confirmed) return info;
+  var msg = 'Your IRS mileage rate for '+year+' isn\u2019t set yet.\n\n'
+    + 'The IRS sets it each January \u2014 and occasionally changes it mid-year. There\u2019s no feed for an app to read it from, so it can\u2019t update itself.\n\n'
+    + 'Look it up here:\n' + IRS_RATE_URL + '\n\n'
+    + 'Enter the '+year+' BUSINESS rate in dollars per mile (e.g. 0.725).\n'
+    + 'Leave blank to use $'+info.rate.toFixed(3)+' from '+info.basedOn+' \u2014 the report will flag it as unconfirmed.';
+  var v = prompt(msg, '');
+  if(v && isFinite(parseFloat(v))){
+    var ok = await setIrsMileageRate(year+'-01-01', parseFloat(v));
+    if(ok) return irsRateInfo(year);
+  }
+  return info;
+}
+function _fmtPeriod(p){
+  var a=new Date(p.from+'T12:00:00'), b=new Date(p.to+'T12:00:00');
+  var o={month:'short', day:'numeric'};
+  var isFull = p.from.slice(5)==='01-01' && p.to.slice(5)==='12-31';
+  return isFull ? 'full year' : (a.toLocaleDateString('en-US',o)+' \u2013 '+b.toLocaleDateString('en-US',o));
+}
+// The driver's own rate table — one row per IRS rate PERIOD, so a split year shows both.
+function _irsRatesAdminHTML(){
+  var yrNow = new Date().getFullYear();
+  var years = [yrNow, yrNow-1, yrNow-2].filter(function(y,i,a){ return a.indexOf(y)===i; });
+  var rows='';
+  years.forEach(function(y){
+    irsPeriodsFor(y).forEach(function(p){
+      var tag = p.source==='saved' ? 'yours'
+              : p.source==='builtin' ? 'IRS published'
+              : '\u26A0\uFE0F not confirmed \u2014 using '+p.basedOn;
+      var tagCol = p.confirmed ? 'var(--mid)' : '#b45309';
+      var id = 'irs-rate-'+p.from;
+      rows += '<div style="display:flex;align-items:center;gap:.4rem;padding:.3rem 0;border-bottom:1px solid var(--light);flex-wrap:wrap;">'
+        +'<span style="font-weight:700;font-size:.78rem;color:var(--black);min-width:38px;">'+y+'</span>'
+        +'<span style="font-size:.7rem;color:var(--mid);min-width:88px;">'+escHtml(_fmtPeriod(p))+'</span>'
+        +'<span style="font-size:.72rem;color:var(--mid);">$</span>'
+        +'<input type="number" step="0.001" min="0" value="'+p.rate.toFixed(3)+'" id="'+id+'" '
+          +'style="width:70px;padding:.25rem .4rem;border:1px solid var(--light);border-radius:6px;font-size:.78rem;font-family:inherit;box-sizing:border-box;" />'
+        +'<span style="font-size:.72rem;color:var(--mid);">/mi</span>'
+        +'<button onclick="setIrsMileageRate(this.dataset.p, document.getElementById(this.dataset.i).value)" data-p="'+escAttr(p.from)+'" data-i="'+escAttr(id)+'" '
+          +'style="padding:.25rem .6rem;border-radius:6px;border:1px solid var(--gold);background:none;color:var(--gold);font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">Save</button>'
+        +'<span style="flex:1;text-align:right;font-size:.64rem;color:'+tagCol+';min-width:70px;">'+tag+'</span>'
+        +'</div>';
+    });
+  });
+  return '<div style="border:1px solid var(--light);border-radius:10px;padding:.75rem;margin:.2rem 0 1rem;background:var(--white);">'
+    +'<div style="font-size:.78rem;font-weight:700;color:var(--black);margin-bottom:.2rem;">\uD83D\uDEE3\uFE0F IRS standard mileage rate \u2014 yours</div>'
+    +'<div style="font-size:.7rem;color:var(--mid);line-height:1.5;margin-bottom:.5rem;">Your Year-End P&amp;L applies the rate that was in force <strong>on the day of each trip</strong>. It\u2019s yours alone \u2014 no admin needed. The IRS sets it each January and can change it mid-year, so check it now and then. '
+    +'<a href="'+IRS_RATE_URL+'" target="_blank" rel="noopener" style="color:var(--gold);font-weight:700;">Look up the current rate \u2197</a></div>'
+    +rows
+    +'</div>';
+}
+// ── Report rendering: one dataset, two outputs ─────────────────────────────
+// Reports are built as arrays of rows (the same arrays the .xlsx is made from), so the
+// exact same numbers can be written to a spreadsheet OR laid out as a branded document.
+// Excel = plain data for an accountant. PDF = branded, for handing over.
+function _reportSectionsToHTML(sheets){
+  var h='';
+  sheets.forEach(function(sh){
+    h+='<h2>'+escHtml(sh.name)+'</h2>';
+    var rows=sh.rows||[];
+    // A row of >=3 short cells that looks like a header starts a table; otherwise label/value.
+    h+='<table>';
+    rows.forEach(function(r){
+      if(!r || !r.length || (r.length===1 && !String(r[0]||'').trim())){ h+='<tr class="sp"><td colspan="4"></td></tr>'; return; }
+      var _f0=r[0]; if(_f0 && typeof _f0==='object' && _f0.v!==undefined) _f0=_f0.v;
+      var first=String(_f0==null?'':_f0);
+      var isHead = r.length===1 && first && first===first.toUpperCase() && /[A-Z]/.test(first);
+      if(isHead){ h+='<tr class="hd"><td colspan="4">'+escHtml(first)+'</td></tr>'; return; }
+      if(r.length===1){ h+='<tr><td colspan="4" class="nt">'+escHtml(first)+'</td></tr>'; return; }
+      var cells='';
+      for(var i=0;i<r.length && i<4;i++){
+        var v=r[i]==null?'':r[i];
+        if(v && typeof v==='object' && v.v!==undefined) v=v.v;   // formula cell -> its value
+        var num=(typeof v==='number');
+        cells+='<td class="'+(i===0?'lb':(num?'num':'tx'))+'">'+escHtml(String(v))+'</td>';
+      }
+      for(var k=r.length;k<4;k++) cells+='<td></td>';
+      h+='<tr'+(/^(TOTAL|NET|Gross|Total)/.test(first)?' class="tot"':'')+'>'+cells+'</tr>';
+    });
+    h+='</table>';
+  });
+  return h;
+}
+function buildReportHTML(opts){
+  var brandName=(opts.brandName||'').trim();
+  var logo=(opts.logo||'').trim();
+  var title=opts.title||'Report';
+  var sub=opts.subtitle||'';
+  var warn=opts.warning||'';
+  var head = brandName || logo
+    ? '<div class="brand">'+(logo?'<img src="'+escAttr(logo)+'" alt="logo" />':'')
+        +(brandName?'<div class="bn">'+escHtml(brandName)+'</div>':'')+'</div>'
+    : '';
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+    +'<title>'+escHtml(title)+'</title><style>'
+    +'body{font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;margin:0;padding:26px;max-width:900px;}'
+    +'.brand{text-align:center;margin-bottom:14px;}'
+    +'.brand img{max-height:78px;max-width:200px;object-fit:contain;margin-bottom:8px;}'
+    +'.bn{font-size:20px;font-weight:700;color:#1a0d2e;}'
+    +'h1{font-size:21px;margin:0 0 3px;color:#1a0d2e;text-align:center;}'
+    +'.sub{text-align:center;color:#666;font-size:13px;margin-bottom:16px;}'
+    +'.warn{background:#fff7ed;border:1.5px solid #fcd34d;color:#92400e;border-radius:9px;padding:10px 13px;font-size:13px;line-height:1.5;margin-bottom:16px;}'
+    +'h2{font-size:14px;margin:24px 0 7px;color:#1a0d2e;border-bottom:2px solid #e0dcd6;padding-bottom:4px;text-transform:uppercase;letter-spacing:.6px;}'
+    +'table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:4px;}'
+    +'td{padding:4px 6px;border-bottom:1px solid #f1efec;vertical-align:top;}'
+    +'td.lb{font-weight:600;width:36%;}td.num{text-align:right;width:16%;font-variant-numeric:tabular-nums;}'
+    +'td.tx{color:#555;font-size:11.5px;}td.nt{color:#666;font-size:11.5px;font-style:italic;}'
+    +'tr.hd td{background:#f5f3ff;font-weight:800;font-size:11.5px;letter-spacing:.7px;color:#2d1b57;border-bottom:1.5px solid #d9c9f5;padding:6px;}'
+    +'tr.tot td{font-weight:800;border-top:1.5px solid #ccc;}'
+    +'tr.sp td{border:none;height:7px;}'
+    +'.btn{text-align:center;margin:26px 0 6px;}'
+    +'.ft{margin-top:22px;font-size:10.5px;color:#999;text-align:center;line-height:1.5;}'
+    +'@media print{body{padding:0;} .btn{display:none;}}'
+    +'</style></head><body>'
+    +head
+    +'<h1>'+escHtml(title)+'</h1>'
+    +(sub?'<div class="sub">'+escHtml(sub)+'</div>':'')
+    +(warn?'<div class="warn">'+warn+'</div>':'')
+    +_reportSectionsToHTML(opts.sheets||[])
+    +'<div class="btn"><button onclick="window.print()" style="background:#2d1b57;color:#fff;border:none;border-radius:8px;padding:12px 28px;font-size:15px;font-weight:700;cursor:pointer;">\uD83D\uDCC4 Save as PDF / Print</button></div>'
+    +'<div class="ft">'+escHtml(opts.footer||'')+'</div>'
+    +'</body></html>';
+}
+function openReportDocument(html, fallbackName){
+  try{
+    var w=window.open('','_blank');
+    if(w && w.document){ w.document.open(); w.document.write(html); w.document.close(); return true; }
+  }catch(e){}
+  try{
+    var blob=new Blob([html],{type:'text/html'});
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download=(fallbackName||'report')+'.html';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ try{ URL.revokeObjectURL(a.href); }catch(e){} },4000);
+    showToast('\u2713 Downloaded \u2014 open it and tap Save as PDF');
+    return true;
+  }catch(e){}
+  showToast('Could not open the document','error');
+  return false;
+}
+
+// Payment-type picker for the Year-End report. Resolves to an array of methods:
+// [] = complete P&L (tax document); one or more = filtered BUSINESS report.
+function _plPickPayTypes(opts){
+  opts = opts||{};
+  var _inc = !!opts.incomeMode;
+  return new Promise(function(resolve){
+    var types=_payTypesInUse();
+    if(!types.length){ resolve({types:[], format:'xlsx'}); return; }
+    var m=document.createElement('div');
+    m.className='modal-overlay';
+    m.id='pl-pick-modal';
+    m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:1rem;';
+    var boxes=types.map(function(p,i){
+      return '<label style="display:flex;align-items:center;gap:.55rem;padding:.45rem .2rem;border-bottom:1px solid var(--light);cursor:pointer;font-size:.85rem;color:var(--black);">'
+        +'<input type="checkbox" class="pl-pt" value="'+escAttr(p)+'" style="width:17px;height:17px;accent-color:var(--gold);" />'
+        +escHtml(p)+'</label>';
+    }).join('');
+    m.innerHTML='<div style="background:var(--white);border-radius:14px;padding:1.1rem;max-width:420px;width:100%;max-height:86vh;overflow:auto;">'
+      +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">'+(_inc?'Income report':'Year-End report')+'</div>'
+      +'<div style="font-size:.76rem;color:var(--mid);line-height:1.5;margin-bottom:.8rem;">'
+        +(_inc
+          ? 'Tick nothing for <strong>every payment type</strong>. Tick one or more to report on just those.'
+          : 'Tick nothing for the <strong>complete Year-End P&amp;L</strong> \u2014 that\u2019s the one for taxes.<br>Tick one or more to get a <strong>business report</strong> of just those payment types \u2014 same detail, marked as a management view, not a tax document.')
+      +'</div>'
+      +boxes
+      +'<div style="display:flex;gap:.4rem;margin-top:.7rem;flex-wrap:wrap;">'
+      +'<button onclick="_plPickAll(true)" style="flex:1;padding:.4rem;border-radius:8px;border:1px solid var(--light);background:none;color:var(--mid);font-family:inherit;font-size:.74rem;font-weight:700;cursor:pointer;">Select all</button>'
+      +'<button onclick="_plPickAll(false)" style="flex:1;padding:.4rem;border-radius:8px;border:1px solid var(--light);background:none;color:var(--mid);font-family:inherit;font-size:.74rem;font-weight:700;cursor:pointer;">Clear</button>'
+      +'</div>'
+      +'<div style="font-size:.7rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin:.9rem 0 .35rem;">Format</div>'
+      +'<label style="display:flex;align-items:flex-start;gap:.55rem;padding:.4rem .2rem;cursor:pointer;">'
+        +'<input type="radio" name="pl-fmt" value="xlsx" checked style="margin-top:2px;width:16px;height:16px;accent-color:var(--gold);" />'
+        +'<span style="font-size:.82rem;color:var(--black);"><strong>'+(_inc?'CSV spreadsheet':'Excel spreadsheet')+'</strong><br><span style="font-size:.72rem;color:var(--mid);">Plain, unbranded, sortable \u2014 what an accountant wants.</span></span></label>'
+      +'<label style="display:flex;align-items:flex-start;gap:.55rem;padding:.4rem .2rem;cursor:pointer;">'
+        +'<input type="radio" name="pl-fmt" value="pdf" style="margin-top:2px;width:16px;height:16px;accent-color:var(--gold);" />'
+        +'<span style="font-size:.82rem;color:var(--black);"><strong>PDF document</strong><br><span style="font-size:.72rem;color:var(--mid);">'+(_plBrandHint())+'</span></span></label>'
+      +'<div id="pl-pick-hint" data-inc="'+(_inc?'1':'0')+'" style="font-size:.74rem;font-weight:700;color:var(--accent);margin:.6rem 0 .5rem;text-align:center;"></div>'
+      +'<div style="display:flex;gap:.5rem;">'
+      +'<button onclick="_plPickDone(null)" style="flex:1;padding:.6rem;border-radius:9px;border:1.5px solid var(--light);background:none;color:var(--mid);font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">Cancel</button>'
+      +'<button onclick="_plPickDone(true)" style="flex:2;padding:.6rem;border-radius:9px;border:none;background:var(--accent);color:#fff;font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">Generate</button>'
+      +'</div></div>';
+    document.body.appendChild(m);
+    window._plPickResolve=resolve;
+    m.querySelectorAll('.pl-pt').forEach(function(cb){ cb.onchange=_plPickHint; });
+    _plPickHint();
+  });
+}
+function _plPickHint(){
+  var sel=Array.prototype.slice.call(document.querySelectorAll('.pl-pt:checked')).map(function(c){ return c.value; });
+  var h=document.getElementById('pl-pick-hint'); if(!h) return;
+  var inc = h.dataset.inc==='1';
+  if(!sel.length){ h.style.color='var(--accent)'; h.textContent = inc ? 'All payment types' : 'Complete Year-End P&L — for taxes'; }
+  else { h.style.color='#b45309'; h.textContent = (inc?'Filtered: ':'Business report: ')+sel.join(' + ')+(inc?'':' — not for tax filing'); }
+}
+function _plPickAll(on){
+  document.querySelectorAll('.pl-pt').forEach(function(cb){ cb.checked=!!on; });
+  _plPickHint();
+}
+function _plPickDone(go){
+  var sel=null, fmt='xlsx';
+  if(go){
+    sel = Array.prototype.slice.call(document.querySelectorAll('.pl-pt:checked')).map(function(c){ return c.value; });
+    var f=document.querySelector('input[name="pl-fmt"]:checked');
+    fmt = f ? f.value : 'xlsx';
+  }
+  var m=document.getElementById('pl-pick-modal'); if(m) m.remove();
+  var r=window._plPickResolve; window._plPickResolve=null;
+  if(r) r(go ? {types:sel, format:fmt} : null);
+}
+// What the PDF option can actually brand with, for this driver.
+function _plBrandHint(){
+  try{
+    var who=(typeof getMyDriverName==='function'?getMyDriverName():'')||(currentUser&&currentUser.name);
+    var p=DRIVER_PROFILES[who]||{};
+    var bn=(p.businessName||'').trim(), lg=(p.logo||'').trim();
+    if(bn && lg) return 'Branded with your logo and business name.';
+    if(bn) return 'Branded with your business name. Add a logo in your profile to include it.';
+    if(lg) return 'Branded with your logo. Add a business name in your profile to include it.';
+    return 'No branding \u2014 add a business name or logo to your profile first.';
+  }catch(e){ return 'Printable document.'; }
+}
+
 async function generateYearEndPL(){
   if(!hasIncomeAccess()){ showIncomeOrUpgrade(null); return; }
   if(typeof XLSX==='undefined'){ showToast('Spreadsheet library not loaded','error'); return; }
@@ -17724,8 +18340,27 @@ async function generateYearEndPL(){
   const defYear = new Date().getFullYear();
   const year = parseInt(prompt('Year for the P&L / tax summary:', defYear)) || defYear;
   const ys = year+'-01-01', ye = year+'-12-31';
+  // Optional payment-type view. The unfiltered totals are always computed too, so a
+  // filtered report can state what the real gross income was.
+  const _picked = await _plPickPayTypes();
+  if(_picked===null) return;                 // cancelled
+  const _plPay = _picked.types || [];        // [] = complete P&L; otherwise business report
+  const _plFmt = _picked.format || 'xlsx';   // 'xlsx' = plain data | 'pdf' = branded document
+  const _plLabel = _plPay.join(' + ');
+  // Make sure we have an IRS mileage rate for this year before building the report.
+  const _rateInfo = await ensureIrsRateFor(year);
 
   const n = (x)=>Number((parseFloat(x)||0).toFixed(2));
+  // ── Live formulas ────────────────────────────────────────────────────────
+  // Summary figures are written as real formulas pointing at the Trips sheet, with the
+  // computed number cached alongside. Add a ride to Trips and every total re-adds itself;
+  // the accountant can also see where each figure comes from instead of taking it on faith.
+  // Trips columns: A date, B client, C purpose, D fare-paid-by, E tip-paid-by, F owner,
+  //                G miles, H fare, I tip, J fare+tip, K client fee, L maint, M gas, N profit
+  const _FR = 500;                                   // rows of headroom for added rides
+  const _rng = (c)=>'Trips!$'+c+'$2:$'+c+'$'+_FR;
+  const _f = (formula, val)=>({t:'n', f:formula, v:n(val)});
+  const _sum = (c, val)=>_f('SUM('+_rng(c)+')', val);
 
   // ── Data source: app-booked rides + outside rides (same as the Income page) ──
   // App-booked rides: money made = r.price; the 15% client fee applies when the
@@ -17734,7 +18369,11 @@ async function generateYearEndPL(){
   // so no 15% fee applies. Gas & maintenance are auto-deducted from the driver's
   // profile per-mile rates in both cases.
   const cpm = calcCostPerMile(dName);   // gas $/mi + maintenance $/mi from profile
-  const _earned = r => r.status!=='cancelled' && ((r.status==='completed'||r.status==='paid') || (r.date && r.date < toDateStr(new Date())));
+  // CASH BASIS: income is money actually RECEIVED. A past ride nobody has paid is a
+  // receivable, not income — it's reported separately below so nothing is hidden.
+  // This matches the Income page exactly, so the two can never disagree.
+  const _earned = r => r.status!=='cancelled' && r.status==='paid';
+  const _unpaid = r => r.status!=='cancelled' && r.status!=='paid' && r.date && r.date < toDateStr(new Date());
 
   // App-booked rides this year that this driver drove and earned on
   const appRides = rides.filter(r=>r.driver===dName && r.date && r.date>=ys && r.date<=ye && parseFloat(r.price||0)>0 && _earned(r));
@@ -17755,19 +18394,32 @@ async function generateYearEndPL(){
     const gas   = mi * (parseFloat((DRIVER_PROFILES[dName]||{}).mpg)? (parseFloat((DRIVER_PROFILES[dName]||{}).gasPrice||3.50)/parseFloat((DRIVER_PROFILES[dName]||{}).mpg)) : 0);
     const maint = mi * (parseFloat((DRIVER_PROFILES[dName]||{}).maintRate)||IRS_MAINTENANCE_RATE);
     const profit = fare + tip - fee - gas - maint;
-    allTrips.push({date:r.date, client:r.client||'', payment:r.payment||'', owner:owner||'', miles:mi, fare, tip, fee, maint, gas, profit, _src:'app'});
+    allTrips.push({date:r.date, client:r.client||'', purpose:(r.type||'Passenger transport'), payment:r.payment||'', tipPayment:(r.tipPayment||r.payment||''), owner:owner||'', miles:mi, fare, tip, fee, maint, gas, profit, _src:'app'});
   });
   outRides.forEach(o=>{
-    const fare = parseFloat(o.price||o.amount||0)||0;   // already net of provider fees
-    const tip  = parseFloat(o.tip)||0;
+    // Use the detail the driver logged if they have it, so fares and tips split properly.
+    // If they only logged "what I kept", that amount counts as fare (and any tip inside it
+    // can't be separated — the report says so).
+    const kept  = parseFloat(o.price||o.amount||0)||0;
+    const gross = parseFloat(o.fare)||0;
+    const tip   = parseFloat(o.tip)||0;
+    const pfee  = parseFloat(o.providerFee)||0;
+    const fare  = gross>0 ? gross : Math.max(0, kept - tip);
     const mi   = parseFloat(o.miles||0)||0;
     const gas   = mi * (parseFloat((DRIVER_PROFILES[dName]||{}).mpg)? (parseFloat((DRIVER_PROFILES[dName]||{}).gasPrice||3.50)/parseFloat((DRIVER_PROFILES[dName]||{}).mpg)) : 0);
     const maint = mi * (parseFloat((DRIVER_PROFILES[dName]||{}).maintRate)||IRS_MAINTENANCE_RATE);
-    const profit = fare + tip - gas - maint;   // no 15% fee on outside rides
-    allTrips.push({date:o.date, client:(o.client||'Outside ride')+' (outside)', payment:o.type||'OUTSIDE', owner:'', miles:mi, fare, tip, fee:0, maint, gas, profit, _src:'outside'});
+    const profit = fare + tip - pfee - gas - maint;   // no 15% client fee on outside rides
+    allTrips.push({date:o.date, client:(o.client||'Outside ride')+' (outside)', purpose:(o.type||'Outside ride'), payment:(o.payment||o.type||'OUTSIDE'), tipPayment:(o.payment||o.type||'OUTSIDE'), providerFee:pfee, owner:'', miles:mi, fare, tip, fee:0, maint, gas, profit, _src:'outside'});
   });
 
-  const trips = allTrips;  // used by the detail sheet below
+  // TRUE totals across every payment type — reported even on a filtered view so the
+  // document can never imply money that exists didn't.
+  const _allFares = allTrips.reduce((s,e)=>s+(parseFloat(e.fare)||0),0);
+  const _allTips  = allTrips.reduce((s,e)=>s+(parseFloat(e.tip)||0),0);
+  const _allCount = allTrips.length;
+  const trips = _plPay.length ? allTrips.filter(e=>_plPay.indexOf((e.payment||''))>=0) : allTrips;
+  const _excludedCount = _allCount - trips.length;
+  const _excludedMoney = (_allFares+_allTips) - trips.reduce((s,e)=>s+(parseFloat(e.fare)||0)+(parseFloat(e.tip)||0),0);
   const sum=(k)=>trips.reduce((s,e)=>s+(parseFloat(e[k])||0),0);
   const fares=sum('fare'), tips=sum('tip'), fees=sum('fee'), gas=sum('gas'), maint=sum('maint'), profit=sum('profit'), miles=sum('miles');
 
@@ -17786,34 +18438,191 @@ async function generateYearEndPL(){
   const totalTripCosts = fees+gas+maint;
   const netProfit = totalIncome - totalTripCosts - annualExp;
 
+  // ── Documented receipts for the year (actual money spent, with photos on file) ──
+  const _recAll = ((typeof receipts==='object' && receipts) ? (receipts[dName]||[]) : [])
+    .filter(function(x){ return x && x.date && x.date>=ys && x.date<=ye; });
+  const recByCat = {};
+  (typeof RECEIPT_CATEGORIES!=='undefined'?RECEIPT_CATEGORIES:['Fuel','Maintenance','Tolls','Parking','Other'])
+    .forEach(function(c){ recByCat[c]=0; });
+  _recAll.forEach(function(x){ var c=x.category||'Other'; recByCat[c]=(recByCat[c]||0)+(parseFloat(x.amount)||0); });
+  const recTotal = Object.keys(recByCat).reduce(function(s,k){ return s+recByCat[k]; },0);
+  // Tolls & parking are deductible under BOTH methods — the standard rate never covers them.
+  const tollsParking = (recByCat['Tolls']||0) + (recByCat['Parking']||0);
+  // Two ways to claim the vehicle. They are alternatives — never both.
+  // Apply the rate in force on the DAY OF EACH TRIP. In a split year (the IRS raised the
+  // 2026 rate on 1 July) one rate for the whole year would be wrong for half the miles.
+  const _stdByPeriod = {};
+  let stdMileageDeduction = 0;
+  trips.forEach(function(e){
+    const p = irsRateForDate(e.date, dName);
+    const mi = parseFloat(e.miles)||0;
+    stdMileageDeduction += mi * p.rate;
+    const k = p.from;
+    if(!_stdByPeriod[k]) _stdByPeriod[k] = {from:p.from, to:p.to, rate:p.rate, miles:0, amt:0, source:p.source, basedOn:p.basedOn};
+    _stdByPeriod[k].miles += mi;
+    _stdByPeriod[k].amt   += mi * p.rate;
+  });
+  const _stdPeriods = Object.keys(_stdByPeriod).sort().map(function(k){ return _stdByPeriod[k]; });
+  const stdRate = _rateInfo.rate;
+  const actualVehicleCost = gas + maint;
+
   // ---- Summary sheet ----
-  const S = [
-    ['NWDA / No Sweat Transportation'],
-    ['Year-End Profit & Loss / Tax Summary'],
+  // Branding comes from the driver's own profile. If they haven't set a business name,
+  // the report carries no branding at all rather than someone else's.
+  const _brandName = ((DRIVER_PROFILES[dName]||{}).businessName||'').trim();
+  const S = [];
+  if(_brandName) S.push([_brandName]);
+  S.push(...[
+    [_plPay.length ? 'BUSINESS REPORT \u2014 '+_plLabel+' only (NOT a tax document)' : 'Year-End Profit & Loss / Tax Summary'],
     ['Driver', dName],
     ['Year', year],
     ['Generated', new Date().toLocaleString()],
+  ]);
+  if(_plPay.length){
+    S.push([]);
+    S.push(['\uD83D\uDCC8 BUSINESS REPORT \u2014 DO NOT FILE FROM THIS']);
+    S.push(['What this is','A management view of '+_plLabel+' business only \u2014 same detail as the P&L, filtered to '+(_plPay.length===1?'one payment type':'the payment types you picked')+'. Useful for seeing how a payment method performs, or for reconciling card income against a Square 1099-K.']);
+    S.push(['What this is NOT','A tax document. For filing, run this report again and tick nothing \u2014 that produces the complete Year-End P&L.']);
+    S.push(['Showing', _plLabel+' payments only']);
+    S.push(['Excluded from every figure below', _excludedCount+' trip'+(_excludedCount===1?'':'s')+' worth '+n(_excludedMoney), 'Paid by other methods, plus outside rides.']);
+    S.push(['TRUE TOTAL INCOME (all payment types)', n(_allFares+_allTips), 'Fares '+n(_allFares)+' + tips '+n(_allTips)+' across all '+_allCount+' trips \u2014 this is the figure that belongs on a tax return.']);
+  }
+  S.push(...[
     [],
     ['INCOME'],
-    ['Gross fares (logged)', n(fares)],
-    ['Tips', n(tips)],
-    ['Total income', n(totalIncome)],
+    ['Fare income (before tips)', _sum('H', fares), (totalIncome? (Math.round(fares/totalIncome*1000)/10)+'% of income' : '')],
+    ['Tip income', _sum('I', tips), (totalIncome? (Math.round(tips/totalIncome*1000)/10)+'% of income' : '')],
+    ['Total income (fares + tips)', _sum('J', totalIncome)],
+    ['', '', 'The 15% client fee applies to fares only \u2014 never to tips.'],
     [],
     ['TRIP COSTS'],
-    ['Client Fees', n(fees)],
-    ['Gas', n(gas)],
-    ['Maintenance', n(maint)],
-    ['Total trip costs', n(totalTripCosts)],
+    ['Client Fees', _sum('K', fees)],
+    ['Gas', _sum('M', gas)],
+    ['Maintenance', _sum('L', maint)],
+    ['Total trip costs', _f('SUM('+_rng('K')+')+SUM('+_rng('L')+')+SUM('+_rng('M')+')', totalTripCosts)],
     [],
     ['EXPENSES (annualized = monthly x 12)'],
-  ];
+  ]);
   if(expItems.length){ expItems.forEach(it=>S.push([(it.name||'Expense'), n((parseFloat(it.amount)||0)*12)])); }
   S.push(['Total annual expenses', n(annualExp)]);
   S.push([]);
-  S.push(['NET PROFIT', n(netProfit)]);
+  S.push(['NET PROFIT', _f('SUM('+_rng('J')+')-SUM('+_rng('K')+')-SUM('+_rng('L')+')-SUM('+_rng('M')+')-'+n(annualExp), netProfit)]);
+  // ---- Income by payment type ----
+  // Fares count under the fare's method; tips under the TIP's method, which can differ
+  // (e.g. card fare, cash tip). Both columns therefore total to the same overall income.
   S.push([]);
-  S.push(['Trips logged', trips.length]);
-  S.push(['Total miles', n(miles)]);
+  S.push(['INCOME BY PAYMENT TYPE']);
+  S.push(['Payment type','Fares','Tips','Total','Trips']);
+  var _pt={};
+  trips.forEach(function(e){
+    var pf=(e.payment||'Unspecified').trim()||'Unspecified';
+    var pt=(e.tipPayment||e.payment||'Unspecified').trim()||'Unspecified';
+    (_pt[pf]=_pt[pf]||{f:0,t:0,c:0}).f += (parseFloat(e.fare)||0);
+    _pt[pf].c += 1;
+    (_pt[pt]=_pt[pt]||{f:0,t:0,c:0}).t += (parseFloat(e.tip)||0);
+  });
+  Object.keys(_pt).sort(function(a,b){ return (_pt[b].f+_pt[b].t)-(_pt[a].f+_pt[a].t); }).forEach(function(k){
+    var v=_pt[k];
+    var q = (k==='Unspecified') ? '""' : '"'+String(k).replace(/"/g,'""')+'"';
+    var ff = 'SUMIF('+_rng('D')+','+q+','+_rng('H')+')';
+    var ft = 'SUMIF('+_rng('E')+','+q+','+_rng('I')+')';
+    S.push([k, _f(ff, v.f), _f(ft, v.t), _f(ff+'+'+ft, v.f+v.t),
+            {t:'n', f:'COUNTIF('+_rng('D')+','+q+')', v:v.c}]);
+  });
+  S.push(['TOTAL', _sum('H', fares), _sum('I', tips), _sum('J', totalIncome),
+          {t:'n', f:'COUNTA('+_rng('A')+')', v:trips.length}]);
+  S.push(['', '', '', '', '']);
+  S.push(['Note','A tip can be paid a different way than the fare (e.g. card fare, cash tip), so tips are counted under the tip\u2019s own method.']);
+  S.push(['Note','Outside rides are logged as the money you kept, so any tip folded into that amount shows under Fares, not Tips.']);
+
+  // ═══ FOR YOUR ACCOUNTANT ═══
+  S.push([]);
+  S.push(['FOR YOUR ACCOUNTANT']);
+  S.push(['This is a summary built from the driver\u2019s own records in the NWDA app. It is not a tax form, and']);
+  S.push(['the figures below are not tax advice. Please review the notes \u2014 some numbers are ESTIMATES.']);
+  S.push([]);
+  S.push(['ACCOUNTING BASIS']);
+  S.push(['Basis','Cash','Only rides marked PAID are counted as income \u2014 money actually received in '+year+'.']);
+  var _owed = rides.filter(function(r){ return r.driver===dName && r.date && r.date>=ys && r.date<=ye && _unpaid(r); });
+  var _owedTotal = _owed.reduce(function(s,r){ return s+(parseFloat(r.price)||0)+(parseFloat(r.tip)||0); },0);
+  S.push(['Unpaid rides not counted', _owed.length, (_owed.length? 'Worth '+n(_owedTotal)+'. These are receivables \u2014 not income until paid. On an ACCRUAL basis your accountant may need to include them.' : 'None \u2014 every completed ride is paid.')]);
+  S.push([]);
+  S.push(['GROSS BUSINESS INCOME']);
+  S.push(['Fare income', _sum('H', fares)]);
+  S.push(['Tip income', _sum('I', tips), 'Tips are taxable income and are included here.']);
+  S.push(['Gross income', _sum('J', totalIncome), 'Total business receipts actually received \u2014 Schedule C Line 1.']);
+  S.push(['Note','If you receive a 1099-K or 1099-NEC (e.g. from Square for card payments), gross receipts should reconcile to it. The payment-type table above splits card vs cash to help.']);
+  S.push([]);
+  S.push(['VEHICLE & MILES (Schedule C Part IV asks for these)']);
+  var _vp = DRIVER_PROFILES[dName]||{};
+  S.push(['Vehicle', ((_vp.vehicleYear||'')+' '+(_vp.vehicle||'')).trim() || 'not set in profile']);
+  S.push(['Business miles on logged rides', _sum('G', miles), 'Sum of the miles on the '+trips.length+' paid trips listed in the Trips sheet.']);
+  S.push(['Total miles driven (all uses)', 'DRIVER TO SUPPLY', 'The app only knows logged rides. Schedule C asks for total miles for the year \u2014 take it from your odometer.']);
+  S.push(['Commuting miles', 'DRIVER TO SUPPLY', 'Commuting is not deductible.']);
+  S.push(['Other personal miles', 'DRIVER TO SUPPLY', 'Total minus business minus commuting.']);
+  S.push(['Date vehicle placed in service', 'DRIVER TO SUPPLY', 'Schedule C Part IV asks for this.']);
+  S.push(['Note','Miles here cover logged rides only. Miles driven between rides, or to and from a pickup, may also be business miles \u2014 ask your accountant.']);
+  S.push(['Note','The Trips sheet is your mileage record: date, client and miles per trip. The IRS expects a contemporaneous log with the business purpose of each trip.']);
+  S.push([]);
+  S.push(['WHERE THESE LIKELY GO ON SCHEDULE C', '', 'Suggested only \u2014 your accountant decides.']);
+  S.push(['Line 1  Gross receipts', _sum('J', totalIncome)]);
+  S.push(['Line 9  Car and truck expenses', '', 'Option A (standard mileage) OR Option B (actual) below \u2014 not both.']);
+  S.push(['Line 10 Commissions and fees', _sum('K', fees), 'The 15% client fee paid to the client owner.']);
+  S.push(['Line 15 Insurance', '', 'From your recurring expenses \u2014 only if using ACTUAL costs (Option B), pro-rated to business use.']);
+  S.push(['Line 16 Interest', '', 'Car LOAN interest only \u2014 not the whole payment. Your lender\u2019s year-end statement splits it.']);
+  S.push(['Line 20 Rent or lease (vehicles)', '', 'If the vehicle is LEASED rather than financed.']);
+  S.push(['Line 27 Other', n(tollsParking), 'Tolls and parking from your receipts \u2014 deductible under either option.']);
+  S.push([]);
+  S.push(['VEHICLE DEDUCTION \u2014 TWO OPTIONS (choose ONE, not both)']);
+  var _stdF = _stdPeriods.map(function(p){
+    return 'SUMPRODUCT(('+_rng('A')+'>="'+p.from+'")*('+_rng('A')+'<="'+p.to+'")*'+_rng('G')+')*'+p.rate;
+  }).join('+') || ('SUM('+_rng('G')+')*'+stdRate);
+  S.push(['Option A: IRS standard mileage', _f(_stdF, stdMileageDeduction), (_stdPeriods.length>1
+      ? 'The IRS changed the rate mid-year \u2014 each trip is valued at the rate in force on the day it was driven:'
+      : n(miles)+' mi \u00d7 $'+stdRate.toFixed(3)+'/mi ('+year+' business rate)')]);
+  if(_stdPeriods.length>1){
+    _stdPeriods.forEach(function(p){
+      S.push(['    '+p.from+' to '+p.to,
+              _f('SUMPRODUCT(('+_rng('A')+'>="'+p.from+'")*('+_rng('A')+'<="'+p.to+'")*'+_rng('G')+')*'+p.rate, p.amt),
+              n(p.miles)+' mi \u00d7 $'+p.rate.toFixed(3)+'/mi']);
+    });
+  }
+  S.push(['  Rate source', (_rateInfo.source==='saved' ? 'Entered by '+dName
+                          : _rateInfo.source==='builtin' ? 'IRS published rates for '+year
+                          : '\u26A0\uFE0F NOT CONFIRMED \u2014 the '+_rateInfo.basedOn+' rate reused for '+year),
+             (_rateInfo.confirmed ? 'Verify at '+IRS_RATE_URL : 'The '+year+' rate was never entered. Check '+IRS_RATE_URL+' and update it before filing.')]);
+  if(_stdPeriods.length>1) S.push(['  Note','Because the rate changed mid-year, your mileage records must show WHEN each trip was driven. The Trips sheet does.']);
+  S.push(['Option B: Actual vehicle costs', _f('SUM('+_rng('M')+')+SUM('+_rng('L')+')', actualVehicleCost), 'Gas '+n(gas)+' + maintenance '+n(maint)+' (ESTIMATED from per-mile rates, not receipts)']);
+  S.push(['Note','The standard mileage rate already includes fuel, maintenance, insurance, tyres and depreciation. If Option A is used, do NOT also deduct those.']);
+  S.push(['Note','Tolls and parking are NOT covered by the standard rate \u2014 they are deductible on top of either option.']);
+  S.push(['Note','The standard mileage rate must generally be chosen in the first year the vehicle is used for business. Leased vehicles must keep one method for the whole lease.']);
+  S.push([]);
+  S.push(['OTHER BUSINESS EXPENSES']);
+  S.push(['Client fees paid (15%)', n(fees), 'Commission paid to the client owner \u2014 deductible under either option.']);
+  S.push(['Tolls (receipts)', n(recByCat['Tolls']||0), 'Deductible on top of either option.']);
+  S.push(['Parking (receipts)', n(recByCat['Parking']||0), 'Deductible on top of either option.']);
+  S.push([]);
+  S.push(['DOCUMENTED RECEIPTS ON FILE', '', _recAll.length+' receipt'+(_recAll.length===1?'':'s')+' with photos in the app']);
+  Object.keys(recByCat).forEach(function(c){ S.push(['  '+c, n(recByCat[c])]); });
+  S.push(['Total receipts logged', n(recTotal), 'Actual money spent, with images attached in the app.']);
+  S.push(['Note','Receipts are the documented record. The gas/maintenance figures above are per-mile ESTIMATES and will not match these \u2014 your accountant should decide which to use.']);
+  S.push([]);
+  S.push(['RECURRING EXPENSES ENTERED BY THE DRIVER']);
+  S.push(['Note','These are ANNUALISED (current monthly amount \u00d7 12), not actual amounts paid. Confirm real figures before filing.']);
+  if(expItems.length){ expItems.forEach(function(it){ S.push(['  '+(it.name||'Expense'), n((parseFloat(it.amount)||0)*12), '$'+n(parseFloat(it.amount)||0)+'/mo \u00d7 12']); }); }
+  S.push(['Total (annualised)', n(annualExp)]);
+  S.push(['Note','A car LOAN payment is not itself deductible \u2014 only the interest, plus depreciation. A LEASE payment may be deductible. Split out principal vs interest with your accountant.']);
+  S.push(['Note','If the vehicle is also used personally, these costs must be pro-rated to the business-use percentage.']);
+  S.push(['Note','If the IRS standard mileage rate (Option A) is used, insurance and depreciation are already covered by it and should not be claimed again here.']);
+  S.push([]);
+  S.push(['Prepared', new Date().toLocaleString()]);
+  S.push(['Source','NWDA app \u2014 rides, outside rides, receipts and expenses entered by '+dName+'.']);
+  S.push(['Disclaimer', _plPay.length
+    ? 'BUSINESS REPORT \u2014 filtered to '+_plLabel+' only. Not for tax filing. Run again with nothing ticked for the complete P&L.'
+    : 'Generated by software, not by a tax professional. Verify every figure before filing.']);
+  S.push([]);
+  S.push(['Trips logged', {t:'n', f:'COUNTA('+_rng('A')+')', v:trips.length}]);
+  S.push(['Total miles', _sum('G', miles)]);
   S.push([]);
   S.push(['— Cross-check —']);
   S.push(['Booked rides on schedule', yrRides.length]);
@@ -17822,9 +18631,11 @@ async function generateYearEndPL(){
   if(!trips.length) S.push(['Note','No earned rides for this year yet — booked rides and outside rides will appear here automatically.']);
 
   // ---- Trips detail sheet ----
-  const T = [['Date','Client','Payment','Owner','Miles','Fare','Tip','Client Fee','Maintenance','Gas','Profit']];
+  const T = [['Date','Client','Business purpose','Fare paid by','Tip paid by','Owner','Miles','Fare','Tip','Fare + Tip','Client Fee','Maintenance (est)','Gas (est)','Profit']];
   trips.slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'')).forEach(e=>{
-    T.push([e.date||'', e.client||'', e.payment||'', e.owner||'', n(e.miles), n(e.fare), n(e.tip), n(e.fee), n(e.maint), n(e.gas), n(e.profit)]);
+    T.push([e.date||'', e.client||'', e.purpose||'Passenger transport', e.payment||'', (e.tip?(e.tipPayment||e.payment||''):''), e.owner||'',
+            n(e.miles), n(e.fare), n(e.tip), n((parseFloat(e.fare)||0)+(parseFloat(e.tip)||0)),
+            n(e.fee), n(e.maint), n(e.gas), n(e.profit)]);
   });
 
   // ---- Mileage-by-period sheet ────────────────────────────────────────────
@@ -17883,6 +18694,27 @@ async function generateYearEndPL(){
   M.push([]);
   M.push(['Note','Miles come from each ride\u2019s logged driven miles (or the trip distance if driven miles weren\u2019t entered).']);
 
+  // ── PDF: same numbers, branded document ──
+  if(_plFmt==='pdf'){
+    var _bp = DRIVER_PROFILES[dName]||{};
+    var _doc = buildReportHTML({
+      brandName: (_bp.businessName||'').trim(),
+      logo: (_bp.logo||'').trim(),
+      title: _plPay.length ? ('Business Report \u2014 '+_plLabel) : ('Year-End Profit & Loss \u2014 '+year),
+      subtitle: dName+' \u00b7 '+year+' \u00b7 Generated '+new Date().toLocaleString(),
+      warning: _plPay.length
+        ? '<strong>\uD83D\uDCC8 Business report \u2014 not a tax document.</strong> Filtered to <strong>'+escHtml(_plLabel)+'</strong> only. '
+          +escHtml(_excludedCount+' trip'+(_excludedCount===1?'':'s')+' worth '+n(_excludedMoney))+' are excluded from every figure below. '
+          +'True total income across all payment types was <strong>'+escHtml(n(_allFares+_allTips))+'</strong> \u2014 that is the figure that belongs on a tax return. '
+          +'For filing, run this again with nothing ticked.'
+        : 'This is a summary built from records in the NWDA app. It is <strong>not a tax form</strong> and it is not tax advice. Some figures are estimates \u2014 the notes say which. Please review before filing.',
+      sheets: [ {name:'Summary', rows:S}, {name:'Trips', rows:T}, {name:'Mileage by period', rows:M} ],
+      footer: 'Generated by the NWDA app on '+new Date().toLocaleString()+'. Not prepared by a tax professional \u2014 verify every figure before filing.'
+    });
+    openReportDocument(_doc, (_plPay.length?(year+'_BusinessReport'):(year+'_PL'))+'_'+(dName.split(' ')[0]));
+    showToast(_plPay.length ? ('Business report ('+_plLabel+') \u2014 tap Save as PDF') : 'Year-End P&L \u2014 tap Save as PDF');
+    return;
+  }
   try {
     await loadXLSX();
     const wb = XLSX.utils.book_new();
@@ -17892,8 +18724,9 @@ async function generateYearEndPL(){
     XLSX.utils.book_append_sheet(wb, ws1, 'P&L Summary');
     XLSX.utils.book_append_sheet(wb, ws2, 'Trips');
     XLSX.utils.book_append_sheet(wb, ws3, 'Mileage by Period');
-    XLSX.writeFile(wb, year+'_PL_'+(dName.split(' ')[0])+'.xlsx');
-    showToast('Year-End P&L downloaded ✓');
+    XLSX.writeFile(wb, _plPay.length ? (year+'_BusinessReport_'+_plPay.join('-').replace(/[^a-z0-9-]+/gi,'')+'_'+(dName.split(' ')[0])+'.xlsx')
+                                     : (year+'_PL_'+(dName.split(' ')[0])+'.xlsx'));
+    showToast(_plPay.length ? ('Business report ('+_plLabel+') downloaded — not for tax filing') : 'Year-End P&L downloaded ✓');
   } catch(err){
     console.error('P&L export error:', err);
     showToast('Could not generate P&L','error');
