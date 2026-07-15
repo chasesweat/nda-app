@@ -15,6 +15,12 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
+// Take over immediately on install/activate — without this, a fix to this file (like the
+// notification badge below) sits in "waiting" until every open tab is fully closed, which
+// for a PWA people keep open for days could mean the fix never actually takes effect.
+self.addEventListener('install', function (e) { self.skipWaiting(); });
+self.addEventListener('activate', function (e) { e.waitUntil(self.clients.claim()); });
+
 // Data-only messages arrive here when the app is backgrounded/closed.
 messaging.onBackgroundMessage(function (payload) {
   const d = payload.data || {};
@@ -22,7 +28,7 @@ messaging.onBackgroundMessage(function (payload) {
   self.registration.showNotification(n.title || d.title || 'Northwest Drivers', {
     body: n.body || d.body || '',
     icon: 'icon-192.png',
-    badge: 'icon-192.png',
+    badge: 'badge-monochrome.png',
     tag: 'nda-' + Date.now()
   });
 });
