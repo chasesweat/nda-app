@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090515">
+<meta name="version" content="202607152210">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -3847,26 +3847,49 @@ function setVehicle(v, btn){
   setActiveTog(btn);
   calcQuote();
 }
-function onDateChange(){
-  // Auto-flag surcharges from the chosen date, then recalc.
-  const dv=(document.getElementById('q-date')||{}).value;
+// ── SHARED AUTO-SURCHARGE EVALUATOR (quote form) ──
+// Re-runs EVERY auto rule against the CURRENT date + time. Both onDateChange and onTimeChange
+// call this, so the outcome no longer depends on which field the scheduler filled in first,
+// and editing the date re-checks the time-based rules (traffic is day-of-week sensitive).
+// Rules ASSIGN (=) rather than only switching on, so moving a ride off a holiday / out of
+// rush hour clears the surcharge instead of leaving it stuck. Manual toggles (_addonTouched,
+// _fuelUserTouched) and per-driver opt-outs still win. Mirrors onQaDateTimeChange().
+function applyQuoteAutoAddons(){
+  const dv=(document.getElementById('q-date')||{}).value||'';
+  const tv=(document.getElementById('q-time')||{}).value||'';
+  let mins=-1;
+  if(tv){ const p=tv.split(':').map(Number); mins=(p[0]||0)*60+(p[1]||0); }
+
+  // Fuel: default on when globally enabled, but never override a manual choice or opt-out.
+  if(globalSettings.fuelEnabled !== false && !_fuelUserTouched && !driverAutoOff('fuel')) addonState.fuel=true;
+
+  // Premium hours — needs TIME only.
+  if(tv && !_addonTouched.premium && !driverAutoOff('premium')) addonState.premium = isPremiumTime(mins);
+
+  // Traffic — needs BOTH date + time, because the day of week decides.
+  if(dv && tv && !_addonTouched.traffic && !driverAutoOff('traffic')){
+    const dow=new Date(dv+'T12:00:00').getDay();
+    addonState.traffic = isTrafficTime(dow,mins);
+  }
+
+  // Holiday / Christmas — needs DATE only. Christmas wins over the plain holiday rate.
   if(dv){
     const mmdd=dv.slice(5); // 'MM-DD'
-    if(isChristmasDate(mmdd)){
-      if(!_addonTouched.christmas && !driverAutoOff('christmas')){ addonState.christmas=true; if(!_addonTouched.holiday) addonState.holiday=false; }
-    } else if(isHolidayDate(mmdd)){
-      if(!_addonTouched.holiday && !driverAutoOff('holiday')){ addonState.holiday=true; if(!_addonTouched.christmas) addonState.christmas=false; }
-    }
-    // Fuel: default on when globally enabled, but never override a driver's manual choice or opt-out
-    if(globalSettings.fuelEnabled !== false && !_fuelUserTouched && !driverAutoOff('fuel')) addonState.fuel=true;
-    const notice=document.getElementById('holiday-notice');
-    if(notice){
-      const name=(typeof HOLIDAY_NAMES!=='undefined') ? HOLIDAY_NAMES[mmdd] : '';
-      if(name){ notice.style.display='block'; notice.textContent='📅 '+name+' — holiday surcharge applied automatically.'; }
-      else { notice.style.display='none'; }
-    }
-    renderAddons();
+    const xmas=isChristmasDate(mmdd), hol=isHolidayDate(mmdd);
+    if(!_addonTouched.christmas && !driverAutoOff('christmas')) addonState.christmas = xmas;
+    if(!_addonTouched.holiday   && !driverAutoOff('holiday'))   addonState.holiday   = hol && !xmas;
   }
+}
+function onDateChange(){
+  applyQuoteAutoAddons(); // re-check date AND time rules, not just the date ones
+  const dv=(document.getElementById('q-date')||{}).value;
+  const notice=document.getElementById('holiday-notice');
+  if(notice){
+    const name=(dv && typeof HOLIDAY_NAMES!=='undefined') ? HOLIDAY_NAMES[dv.slice(5)] : '';
+    if(name){ notice.style.display='block'; notice.textContent='\U0001F4C5 '+name+' \u2014 holiday surcharge applied automatically.'; }
+    else { notice.style.display='none'; }
+  }
+  renderAddons(); // outside the date check so clearing the date still repaints the chips
   if(typeof rebuildQuoteDriverOptions==='function') rebuildQuoteDriverOptions();
   calcQuote();
 }
@@ -3896,21 +3919,7 @@ function renderAddons(){
 }
 // Auto-detect time-based surcharges (premium hours before 5am; traffic on weekday rush)
 function onTimeChange(){
-  const tv=(document.getElementById('q-time')||{}).value;
-  const dv=(document.getElementById('q-date')||{}).value;
-  if(tv){
-    const [th,tm]=(tv||'').split(':').map(Number);
-    const mins=(th||0)*60+(tm||0);
-    // Fuel: default on when globally enabled, but never override a driver's manual choice
-    if(dv && globalSettings.fuelEnabled !== false && !_fuelUserTouched && !driverAutoOff('fuel')) addonState.fuel=true;
-    // Premium hours (editable window) — skip auto-add if this scheduler opted out
-    if(!_addonTouched.premium && !driverAutoOff('premium')) addonState.premium = isPremiumTime(mins);
-    // Traffic (editable days + windows)
-    if(dv){
-      const dow=new Date(dv+'T12:00:00').getDay();
-      if(!_addonTouched.traffic && !driverAutoOff('traffic')) addonState.traffic = isTrafficTime(dow,mins);
-    }
-  }
+  applyQuoteAutoAddons(); // same evaluator as onDateChange — order of entry no longer matters
   renderAddons(); calcQuote();
 }
 
@@ -10879,8 +10888,10 @@ function onQaDateTimeChange(){
     }
     if(dv){
       const mmdd=dv.slice(5);
-      if(isChristmasDate(mmdd)){ if(!_qaTouched.christmas && !driverAutoOff('christmas')){ qaAddonState.christmas=true; if(!_qaTouched.holiday) qaAddonState.holiday=false; } }
-      else if(isHolidayDate(mmdd)){ if(!_qaTouched.holiday && !driverAutoOff('holiday')){ qaAddonState.holiday=true; if(!_qaTouched.christmas) qaAddonState.christmas=false; } }
+      const xmas=isChristmasDate(mmdd), hol=isHolidayDate(mmdd);
+      // Assign rather than only switch on, so moving the ride off a holiday clears the fee.
+      if(!_qaTouched.christmas && !driverAutoOff('christmas')) qaAddonState.christmas = xmas;
+      if(!_qaTouched.holiday   && !driverAutoOff('holiday'))   qaAddonState.holiday   = hol && !xmas;
     }
   }
   renderQaAddons(); recalcQa();

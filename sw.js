@@ -5,8 +5,8 @@
 
 // IMPORTANT: bump this version string on EVERY deploy. Changing sw.js's bytes is what makes
 // the browser reinstall the worker, wipe the old cache, and pull the newest app. (Paired with
-// app build 202606090515.)
-const CACHE = 'nwda-cache-v106';
+// app build 202607152210.)
+const CACHE = 'nwda-cache-v107';
 
 // Take over immediately on install.
 self.addEventListener('install', function (e) {
