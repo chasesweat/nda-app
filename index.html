@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090508">
+<meta name="version" content="202606090513">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -53,7 +53,7 @@ html,body{background:#ffffff !important;}body{font-family:'DM Sans',sans-serif;f
 .auth-error{color:var(--red);font-size:.85rem;margin-top:1rem;min-height:1.2rem;}
 
 /* FORMS */
-.form-group{text-align:left;margin-bottom:1.25rem;}
+.form-group{text-align:left;margin-bottom:1.25rem;min-width:0;}
 .form-group label{display:block;font-size:.78rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:6px;}
 .form-group input,.form-group select,.form-group textarea{width:100%;padding:.7rem 1rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.95rem;background:var(--white);color:var(--black);transition:border-color .2s;}
 .form-group input:focus,.form-group select:focus,.form-group textarea:focus{outline:none;border-color:var(--gold);}
@@ -626,8 +626,8 @@ input,select,textarea{font-size:16px;}
         <div class="form-group"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;"><input type="checkbox" id="q-xxl" onchange="calcQuote()" style="width:16px;height:16px;accent-color:#7c3aed;"><span style="font-size:.78rem;font-weight:600;">Double Vehicle (XXL)</span></label></div><div id="q-vehicle2-group" style="display:none;"><div class="form-group"><label>2nd Vehicle</label><select id="q-vehicle2" onchange="calcQuote()"><option>Sedan</option><option>SUV/Van</option><option>Premium</option><option>Sprinter Van</option></select></div><div class="form-group"><label>2nd Vehicle Rate ($)</label><input type="number" id="q-price2" placeholder="105" oninput="calcQuote()" /></div></div><div class="form-group">
           <label>Date & Time</label>
           <div style="display:flex;gap:.5rem;">
-            <input type="date" id="q-date" onchange="onDateChange();checkPriceShopping('q')" style="flex:1;" />
-            <input type="time" id="q-time" onchange="onTimeChange()" style="flex:1;" />
+            <input type="date" id="q-date" onchange="onDateChange();checkPriceShopping('q')" style="flex:1;min-width:0;" />
+            <input type="time" id="q-time" onchange="onTimeChange()" style="flex:1;min-width:0;" />
           </div>
         </div>
         <div id="q-ap-rt-fields" style="display:none;">
@@ -5383,6 +5383,13 @@ function renderConfirmations(){
       const _instOpts0=(_defInstr0?'<option value="__default"'+(_preKey0==='__default'?' selected':'')+'>Pickup instructions (Default)</option>':'')
         +_termKeys0.map(function(k){ return '<option value="'+escHtml(k)+'"'+(_preKey0===k?' selected':'')+'>Pickup instructions ('+escHtml(k)+')</option>'; }).join('');
       const _isApPickup0=(r.type==='AP PICK UP'||r.type==='AP ROUND TRIP');
+      // This card is built once per ride, keyed to r.date — for a merged single-ride
+      // "AP ROUND TRIP" booking that's always the outbound/home-pickup leg (the return/
+      // airport leg has no separate confirmation card here), so airport-only extras like
+      // terminal instructions and the day-of selfie must NOT default on for it. A true
+      // "AP PICK UP" ride (standalone, or the split return leg from Quick-Add) IS the
+      // airport-meeting leg, so those stay on for it.
+      const _isTrueApPickup0=(r.type==='AP PICK UP');
       const chkRow=function(key,label,fn,defOn,disabled,subNote){
         return '<div style="display:flex;flex-direction:column;gap:.2rem;min-width:0;">'
           +'<div style="display:flex;gap:.4rem;align-items:center;">'
@@ -5401,8 +5408,8 @@ function renderConfirmations(){
         +'<button onclick="sendAllConf('+pid+')" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.45rem;padding:.65rem;background:#16a34a;border:none;border-radius:8px;color:#fff;font-weight:800;font-size:.9rem;cursor:pointer;font-family:\'DM Sans\',sans-serif;">&#x1F4E4; Send checked items in one text</button>'
         +'<div style="font-size:.66rem;color:var(--mid);text-align:center;margin:-.2rem 0 .1rem;">Tick or untick what to include, then send \u2014 or tap any row to send just that piece</div>'
         +chkRow('text','&#x1F4AC; Confirmation text','sendConfText', _sa0.message!==false)
-        +chkRow('inst','&#x1F4CD; Pickup instructions','sendConfInstructions', _sa0.instructions!==false&&_hasAnyInstr0, !_hasAnyInstr0, _instSel0)
-        +chkRow('selfie','&#x1F933; Day-of selfie','sendSelfiePic', _sa0.selfie!==false&&_isApPickup0)
+        +chkRow('inst','&#x1F4CD; Pickup instructions','sendConfInstructions', _sa0.instructions!==false&&_hasAnyInstr0&&_isTrueApPickup0, !_hasAnyInstr0, _instSel0)
+        +chkRow('selfie','&#x1F933; Day-of selfie','sendSelfiePic', _sa0.selfie!==false&&_isTrueApPickup0)
         +chkRow('vcard','&#x1F464; Driver vCard','sendDriverVCard', _sa0.vcard!==false)
         +chkRow('card','&#x1F5BC; Driver card','sendDriverCard', _sa0.card!==false)
         +chkRow('phone','&#x1F4F1; Client phone to driver','sendClientPhone', false, false,
@@ -5547,8 +5554,13 @@ function buildConfirmationText(r){
   const isPickupType  = type==='AP PICK UP'||type==='AP ROUND TRIP';
   const flightLink    = (flightNum&&isPickupType&&trackingLinkEnabled(sender)) ? '\u2708\uFE0F Track your flight live:\nhttps://www.google.com/search?q='+flightNum+'+flight+tracking\n\n' : '';
   const terminalVal   = (r.terminal||'').trim();
-  const start         = (r.pickup||'').trim();   // where the client is picked up
-  const dest          = (r.home||'').trim();     // drop-off / destination
+  // r.pickup/r.home are literal DB fields (airport-side vs home-side); which one is the
+  // client's TRUE pickup depends on the direction of travel — AP RUN/AP ROUND TRIP start
+  // at home and end at the airport, so those need the fields swapped. Same convention as
+  // fillConfTemplate() and the ride-detail address line.
+  const _isHomeStart  = (type==='AP RUN' || type==='AP ROUND TRIP');
+  const start         = (_isHomeStart ? (r.home||'') : (r.pickup||'')).trim();   // where the client is picked up
+  const dest          = (_isHomeStart ? (r.pickup||'') : (r.home||'')).trim();   // drop-off / destination
   const driverLine = sameDriver
     ? 'I will be driving you.'
     : 'My partner '+assigned+' will be driving you on my behalf. '+assigned+' is copied on this message.';
@@ -5615,7 +5627,10 @@ function buildConfirmationText(r){
   const _ods=(typeof driverSettings!=='undefined'&&driverSettings[owner])||{};
   var _pkUseOwn=!!(_cOwner && _cOwner===owner && (_ods.ownPickupInstructionsByTerminal || _ods.ownPickupInstructions));
   var _byTerm = (_pkUseOwn ? _ods.ownPickupInstructionsByTerminal : _ods.pickupInstructionsByTerminal)||{};
-  var _rideTerm = (r.terminal||r.rtTerminal||'').trim();
+  // r.terminal is the OUTBOUND (drop-off) terminal; r.rtTerminal is the RETURN (pickup)
+  // terminal. Pickup instructions only ever apply to the pickup-at-airport leg, so on an
+  // AP Round Trip that means the return terminal, not the outbound one.
+  var _rideTerm = ((r.type||'').trim()==='AP ROUND TRIP' ? (r.rtTerminal||r.terminal||'') : (r.terminal||r.rtTerminal||'')).trim();
   // Tolerant terminal match: "North Domestic", "NORTH TERMINAL", "north" all hit the
   // same entry — old rides stored terminals in different formats.
   var _termInstr = '';
@@ -5665,12 +5680,20 @@ function driverDisplayName(n){ return (n && DRIVER_PROFILES[n] && DRIVER_PROFILE
 
 // Fill {placeholders} in a custom confirmation/instructions template
 function fillConfTemplate(tpl, r, sender, assigned){
+  // r.pickup and r.home are literal DB fields (airport-side address vs client's home
+  // address) — which one the client is actually PICKED UP at depends on the direction
+  // of travel, not the field name. AP RUN and AP ROUND TRIP start at the client's home
+  // and end at the airport; AP PICK UP is the reverse. Matches the same convention used
+  // for the ride-detail address line elsewhere in the app.
+  const _cft = (r.type||'').trim();
+  const truePickup  = (_cft==='AP RUN' || _cft==='AP ROUND TRIP') ? (r.home||'') : (r.pickup||'');
+  const trueDropoff = (_cft==='AP RUN' || _cft==='AP ROUND TRIP') ? (r.pickup||'') : (r.home||'');
   const map = {
     client:  r.client||'',
     date:    (typeof fmtDateShort==='function'?fmtDateShort(r.date):(r.date||'')),
     time:    fmtTime12(r.time),
-    pickup:  r.pickup||'',
-    dropoff: r.home||'',
+    pickup:  truePickup,
+    dropoff: trueDropoff,
     driver:  driverDisplayName(assigned),
     me:      (DRIVER_PROFILES[sender]&&DRIVER_PROFILES[sender].displayName) || (sender||'').split(' ')[0] || '',
     vehicle: r.vehicle||'',
@@ -14067,7 +14090,7 @@ function buildMemberCard(d, opts){
           +'<div style="font-size:.68rem;color:var(--mid);margin-bottom:1px;font-weight:600;">Specific days off</div>'
           +'<div style="font-size:.63rem;color:var(--mid);margin-bottom:4px;line-height:1.4;">Pick a single date you can\u2019t drive (like a vacation day). Each date you add is kept \u2014 adding a new one won\u2019t erase the others.</div>'
           +'<div style="display:flex;gap:.4rem;margin-bottom:.4rem;">'
-          +'<input type="date" id="avail-date-'+dk+'" style="flex:1;padding:.35rem .5rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
+          +'<input type="date" id="avail-date-'+dk+'" style="flex:1;min-width:0;padding:.35rem .5rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
           +'<select id="avail-repeat-'+dk+'" style="padding:.35rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;"><option value="none">One-time</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select>'
           +'<button onclick="addUnavailDate(\''+d+'\')" style="padding:.35rem .8rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Add</button>'
           +'</div>'
@@ -14080,7 +14103,7 @@ function buildMemberCard(d, opts){
           +'<div style="margin-top:.7rem;font-size:.68rem;color:var(--mid);margin-bottom:3px;">Available anyway (override a day off)</div>'
           +'<div style="font-size:.64rem;color:var(--mid);margin-bottom:4px;line-height:1.4;">Mark a single date you <em>can</em> drive even though it&rsquo;s a standing day off &mdash; e.g. a weekday your day job is closed. Doesn&rsquo;t change your regular schedule.</div>'
           +'<div style="display:flex;gap:.4rem;margin-bottom:.4rem;">'
-          +'<input type="date" id="avail-exc-date-'+dk+'" style="flex:1;padding:.35rem .5rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
+          +'<input type="date" id="avail-exc-date-'+dk+'" style="flex:1;min-width:0;padding:.35rem .5rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
           +'<button onclick="addAvailableDate(\''+d+'\')" style="padding:.35rem .8rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Add</button>'
           +'</div>'
           +'<div style="display:flex;flex-wrap:wrap;gap:4px;">'
@@ -21570,8 +21593,8 @@ function openEditHourModal(driverName, id){
     +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.3rem;">Or specific date:</div>'
     +'<input type="date" id="edit-hdate" value="'+(blk.date||'')+'" style="width:100%;padding:.35rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;margin-bottom:.6rem;"/>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.75rem;">'
-    +'<div><label style="font-size:.7rem;color:var(--mid);display:block;margin-bottom:2px;">From</label><input type="time" id="edit-hfrom" value="'+(blk.from||'')+'" style="width:100%;padding:.35rem;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;"/></div>'
-    +'<div><label style="font-size:.7rem;color:var(--mid);display:block;margin-bottom:2px;">To</label><input type="time" id="edit-hto" value="'+(blk.to||'')+'" style="width:100%;padding:.35rem;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;"/></div>'
+    +'<div style="min-width:0;"><label style="font-size:.7rem;color:var(--mid);display:block;margin-bottom:2px;">From</label><input type="time" id="edit-hfrom" value="'+(blk.from||'')+'" style="width:100%;padding:.35rem;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;"/></div>'
+    +'<div style="min-width:0;"><label style="font-size:.7rem;color:var(--mid);display:block;margin-bottom:2px;">To</label><input type="time" id="edit-hto" value="'+(blk.to||'')+'" style="width:100%;padding:.35rem;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;"/></div>'
     +'</div>'
     +'<div style="display:flex;gap:.5rem;">'
     +'<button onclick="saveEditHour(\''+safeName+'\',\''+id+'\',this)" style="flex:1;padding:.6rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:600;cursor:pointer;">Save</button>'
