@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090484">
+<meta name="version" content="202606090485">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -13465,6 +13465,20 @@ function _userSubActionsHTML(u){
   return h;
 }
 
+// One driver's auto-add-surcharge status — same info the old standalone panel showed,
+// now living inside that driver's own card so everything about them is in one place.
+function _driverSurchAutoHTML(dName){
+  var _types=[['premium','Premium'],['traffic','Traffic'],['holiday','Holiday'],['christmas','Christmas'],['fuel','Fuel']];
+  var offs = _types.filter(function(t){ return driverAutoOffFor(dName,t[0]); });
+  var right = offs.length
+    ? offs.map(function(t){ return '<span style="font-size:.66rem;font-weight:700;padding:.12rem .5rem;border-radius:20px;background:var(--light);color:var(--mid);margin:0 6px 4px 0;display:inline-block;">'+t[1]+'</span>'; }).join('')
+    : '<span style="font-size:.72rem;color:#16a34a;font-weight:700;">All on</span>';
+  return '<div style="margin-top:.7rem;">'
+    +'<div style="font-size:.7rem;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">\u23F0 Auto-add surcharges</div>'
+    +'<div>'+right+'</div>'
+    +'<div style="font-size:.64rem;color:var(--mid);margin-top:.3rem;">A pill means that surcharge\u2019s auto-add is off for this driver \u2014 view-only, they set it themselves.</div>'
+    +'</div>';
+}
 function renderAccessControl(){
   if(!(currentUser && currentUser.role==='admin')){
     document.getElementById('access-control-list').innerHTML='<p style="color:var(--mid);">Admins only.</p>';
@@ -13475,13 +13489,6 @@ function renderAccessControl(){
     +'<div style="font-size:.8rem;font-weight:700;color:var(--black);margin-bottom:.25rem;">\uD83D\uDD04 Re-prompt drivers to update their info</div>'
     +'<div style="font-size:.72rem;color:var(--mid);line-height:1.5;margin-bottom:.6rem;">Sends every driver back through the quick setup screen at their next login so they can fill in newly added fields (business name, logo, availability, and more). They can still skip it.</div>'
     +'<button onclick="resetAllOnboarding()" style="padding:.5rem .9rem;border-radius:8px;border:1.5px solid var(--gold);background:none;color:var(--gold);font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.78rem;cursor:pointer;">Re-prompt all drivers</button>'
-    +'</div>';
-  const _surchTypes=[['premium','Premium'],['traffic','Traffic'],['holiday','Holiday'],['christmas','Christmas'],['fuel','Fuel']];
-  const _surchargeReport = '<div style="border:1px solid var(--light);border-radius:10px;padding:.85rem;margin-top:1.25rem;background:var(--surface);">'
-    +'<div style="font-size:.8rem;font-weight:700;color:var(--black);margin-bottom:.25rem;">⏰ Auto-add surcharge status</div>'
-    +'<div style="font-size:.72rem;color:var(--mid);line-height:1.5;margin-bottom:.7rem;">Which auto-add surcharges each driver has switched <strong>off</strong> for rides they schedule. This only turns off the <em>automatic</em> suggestion &mdash; drivers can still add any surcharge to a ride by hand, and only admins set the amounts. View-only.</div>'
-    + DRIVERS.map(function(nm){ var offs=_surchTypes.filter(function(t){ return driverAutoOffFor(nm,t[0]); }); var right = offs.length ? offs.map(function(t){ return '<span style="font-size:.66rem;font-weight:700;padding:.12rem .5rem;border-radius:20px;background:var(--light);color:var(--mid);margin:0 0 4px 4px;display:inline-block;">'+t[1]+'</span>'; }).join('') : '<span style="font-size:.72rem;color:#16a34a;font-weight:700;">All on</span>'; return '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem;padding:.45rem .1rem;border-bottom:1px solid var(--light);"><span style="font-size:.82rem;color:var(--black);font-weight:600;flex-shrink:0;padding-top:.15rem;">'+escHtml(nm)+'</span><span style="text-align:right;line-height:1.9;">'+right+'</span></div>'; }).join('')
-    +'<div style="font-size:.66rem;color:var(--mid);margin-top:.5rem;">A pill means that surcharge’s <strong>auto-add is off</strong> for that driver.</div>'
     +'</div>';
   list.innerHTML = _subsIntroHTML() + USERS.map(function(u){
     const dName  = USER_DRIVER_MAP[u.name]||'';
@@ -13536,13 +13543,14 @@ function renderAccessControl(){
             +'<input type="color" value="'+color+'" onchange="setDriverColor(this.dataset.d,this.value)" data-d="'+dName.replace(/'/g,'&#39;')+'" style="width:38px;height:30px;border:1.5px solid var(--light);border-radius:6px;background:none;cursor:pointer;padding:0;" />'
             +'<input type="text" value="'+color+'" onchange="setDriverColorHex(this.dataset.d,this.value)" data-d="'+dName.replace(/'/g,'&#39;')+'" maxlength="7" spellcheck="false" placeholder="#rrggbb" style="width:88px;font-family:monospace;font-size:.78rem;padding:.3rem .4rem;border:1.5px solid var(--light);border-radius:6px;box-sizing:border-box;" />'
             +'</div>'
+            +_driverSurchAutoHTML(dName)
           : '')
       +'<div style="margin-top:.7rem;"><div style="font-size:.7rem;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Password</div>'
       +'<button onclick="openPwModal(this.dataset.u)" data-u="'+safeN+'" style="font-size:.72rem;padding:4px 11px;border-radius:8px;border:1px solid var(--gold);color:var(--gold);background:none;cursor:pointer;font-family:\'DM Sans\',sans-serif;">🔑 Reset password</button>'
       +'<div style="font-size:.66rem;color:var(--mid);margin-top:.25rem;">Set a new password if they\u2019re locked out — no current password needed.</div></div>'
       +'</div>'
       +'</div>';
-  }).join('') + _onbResetPanel + _surchargeReport + buildColorVaultPanel();
+  }).join('') + _onbResetPanel + buildColorVaultPanel();
 }
 
 
