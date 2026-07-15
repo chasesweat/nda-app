@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202606090513">
+<meta name="version" content="202606090515">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1601,7 +1601,7 @@ input,select,textarea{font-size:16px;}
       </div>
       <div class="form-group"><label>Flight #</label><input type="text" id="qa-flight" placeholder="e.g. DL1234" /></div>
       <div class="form-group"><label>Terminal</label>
-        <select id="qa-terminal">
+        <select id="qa-terminal" onchange="qaAutoFillTerminalAddress()">
           <option value="">—</option>
           <option>North Domestic</option>
           <option>South Domestic</option>
@@ -1613,7 +1613,7 @@ input,select,textarea{font-size:16px;}
         <input type="text" id="qa-notes" placeholder="Any notes…" />
       </div>
     </div>
-    <div class="form-group" style="grid-column:1/-1;"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;background:#f3eeff;border:1px solid #d9c9f5;border-radius:8px;padding:.6rem .75rem;"><input type="checkbox" id="qa-add-client" checked style="width:17px;height:17px;accent-color:var(--accent);"><span style="font-size:.82rem;font-weight:600;color:var(--black);">Add this client to my client list</span></label><div style="font-size:.68rem;color:var(--mid);margin-top:3px;padding-left:.2rem;">Uncheck for one-time or guest rides you don’t want saved.</div></div>
+    <div class="form-group" id="qa-add-client-group" style="grid-column:1/-1;"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;background:#f3eeff;border:1px solid #d9c9f5;border-radius:8px;padding:.6rem .75rem;"><input type="checkbox" id="qa-add-client" checked style="width:17px;height:17px;accent-color:var(--accent);"><span style="font-size:.82rem;font-weight:600;color:var(--black);">Add this client to my client list</span></label><div style="font-size:.68rem;color:var(--mid);margin-top:3px;padding-left:.2rem;">Uncheck for one-time or guest rides you don’t want saved.</div></div>
     <div style="color:var(--red);font-size:.82rem;min-height:1rem;margin:.5rem 0;" id="qa-error"></div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeQuickAddModal()">Cancel</button>
@@ -3271,6 +3271,10 @@ async function _qaCalcMileage(){
     var mh=document.getElementById('qa-miles-hidden');
     if(!mh){ mh=document.createElement('input'); mh.type='hidden'; mh.id='qa-miles-hidden'; document.body.appendChild(mh); }
     mh.value=miles;
+    // Mileage arrives async (after the Maps round-trip) — without this, the price stays
+    // frozen at whatever it was computed as before mileage was known (i.e. no overage
+    // ever gets added, since recalcQa() only runs when OTHER fields change).
+    try{ recalcQa(); }catch(e){}
   }catch(e){
     if(st) st.textContent='Could not calculate distance';
     console.warn('qa mileage', e);
@@ -3736,6 +3740,22 @@ function autoFillTerminalAddress(){
     const rtTerm = document.getElementById('q-rt-terminal');
     if(rtTerm && !rtTerm.value) rtTerm.value = terminal;
   }
+}
+// Quick Add's equivalent of autoFillTerminalAddress(). For AP Run / AP Round Trip the
+// client's home stays in Pickup and the terminal goes in Destination (client starts at
+// home, ends at the airport). For AP Pick Up it's the reverse — the terminal is the
+// Pickup, home is the Destination. Same direction as the main Quote form.
+function qaAutoFillTerminalAddress(){
+  const terminal = (document.getElementById('qa-terminal')||{}).value;
+  const type     = (document.getElementById('qa-type')||{}).value;
+  if(!terminal) return;
+  const addr = TERMINAL_ADDRESSES[terminal];
+  if(!addr) return;
+  var targetId = (type==='AP PICK UP') ? 'qa-pickup' : (type==='AP RUN'||type==='AP ROUND TRIP') ? 'qa-home' : null;
+  if(!targetId) return;
+  const el = document.getElementById(targetId);
+  if(el){ el.value = addr; try{ if(typeof _qaDebounceMileage==='function') _qaDebounceMileage(); }catch(e){} }
+  try{ renderQaAddrPickers(); }catch(e){}
 }
 
 function updateTripFields(){
@@ -4424,7 +4444,9 @@ let _ncRide=null;
 function promptNewClientInfo(ride){
   if(!ride) return;
   _ncRide=ride;
-  const homeAddr = ride.type==='AP RUN' ? (ride.home||'') : (ride.pickup||ride.home||'');
+  const homeAddr = (ride.type==='AP RUN'||ride.type==='AP ROUND TRIP') ? (ride.pickup||'') :
+                    ride.type==='AP PICK UP' ? (ride.home||'') :
+                    (ride.pickup||ride.home||'');
   const fld=(id,label,val,req,ph)=>'<div style="margin-bottom:.7rem;">'
     +'<label style="display:block;font-size:.72rem;font-weight:600;color:var(--mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">'+label+(req?' <span style="color:#dc2626;">*</span>':' <span style="font-weight:400;text-transform:none;letter-spacing:0;">(optional)</span>')+'</label>'
     +'<input id="'+id+'" value="'+escAttr(val||'')+'" placeholder="'+escAttr(ph||'')+'" style="width:100%;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-family:inherit;font-size:.9rem;box-sizing:border-box;" />'
@@ -5554,13 +5576,10 @@ function buildConfirmationText(r){
   const isPickupType  = type==='AP PICK UP'||type==='AP ROUND TRIP';
   const flightLink    = (flightNum&&isPickupType&&trackingLinkEnabled(sender)) ? '\u2708\uFE0F Track your flight live:\nhttps://www.google.com/search?q='+flightNum+'+flight+tracking\n\n' : '';
   const terminalVal   = (r.terminal||'').trim();
-  // r.pickup/r.home are literal DB fields (airport-side vs home-side); which one is the
-  // client's TRUE pickup depends on the direction of travel — AP RUN/AP ROUND TRIP start
-  // at home and end at the airport, so those need the fields swapped. Same convention as
-  // fillConfTemplate() and the ride-detail address line.
-  const _isHomeStart  = (type==='AP RUN' || type==='AP ROUND TRIP');
-  const start         = (_isHomeStart ? (r.home||'') : (r.pickup||'')).trim();   // where the client is picked up
-  const dest          = (_isHomeStart ? (r.pickup||'') : (r.home||'')).trim();   // drop-off / destination
+  // r.pickup and r.home directly represent the client's true pickup/dropoff — filled
+  // correctly per ride type at entry, so no swap needed here.
+  const start         = (r.pickup||'').trim();   // where the client is picked up
+  const dest          = (r.home||'').trim();     // drop-off / destination
   const driverLine = sameDriver
     ? 'I will be driving you.'
     : 'My partner '+assigned+' will be driving you on my behalf. '+assigned+' is copied on this message.';
@@ -5680,20 +5699,16 @@ function driverDisplayName(n){ return (n && DRIVER_PROFILES[n] && DRIVER_PROFILE
 
 // Fill {placeholders} in a custom confirmation/instructions template
 function fillConfTemplate(tpl, r, sender, assigned){
-  // r.pickup and r.home are literal DB fields (airport-side address vs client's home
-  // address) — which one the client is actually PICKED UP at depends on the direction
-  // of travel, not the field name. AP RUN and AP ROUND TRIP start at the client's home
-  // and end at the airport; AP PICK UP is the reverse. Matches the same convention used
-  // for the ride-detail address line elsewhere in the app.
-  const _cft = (r.type||'').trim();
-  const truePickup  = (_cft==='AP RUN' || _cft==='AP ROUND TRIP') ? (r.home||'') : (r.pickup||'');
-  const trueDropoff = (_cft==='AP RUN' || _cft==='AP ROUND TRIP') ? (r.pickup||'') : (r.home||'');
+  // r.pickup and r.home directly represent the client's true pickup and true dropoff
+  // locations — the Pickup/Destination fields are filled correctly per ride type at
+  // entry (client's home in Pickup + terminal in Destination for AP Run; the reverse
+  // for AP Pick Up), so no swapping is needed here.
   const map = {
     client:  r.client||'',
     date:    (typeof fmtDateShort==='function'?fmtDateShort(r.date):(r.date||'')),
     time:    fmtTime12(r.time),
-    pickup:  truePickup,
-    dropoff: trueDropoff,
+    pickup:  r.pickup||'',
+    dropoff: r.home||'',
     driver:  driverDisplayName(assigned),
     me:      (DRIVER_PROFILES[sender]&&DRIVER_PROFILES[sender].displayName) || (sender||'').split(' ')[0] || '',
     vehicle: r.vehicle||'',
@@ -6176,8 +6191,7 @@ function renderRideView(r){
     ? '<div class="detail-row" style="grid-column:1/-1;margin-top:.25rem;">'+(_alreadyOffered?'<div style="padding:.5rem;text-align:center;font-size:.84rem;color:var(--green);font-weight:600;">\u2705 Posted to Offerings</div>':'<button onclick="shareRideToOfferings('+r.id+')" style="width:100%;padding:.55rem;background:none;border:1.5px solid #7c3aed;color:#7c3aed;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.84rem;font-weight:600;cursor:pointer;">\uD83D\uDCE4 Post to Offerings</button>')+'</div>'
     : '';
   const _bothAddr = (r.type==='MEDICAL'||r.type==='ROUND TRIP'||r.type==='ONE WAY');
-  const address = _bothAddr ? '' : (r.type==='AP RUN' ? r.home :
-                  r.type==='AP PICK UP' ? r.pickup : r.home);
+  const address = _bothAddr ? '' : (r.pickup||r.home||'');
 
   document.getElementById('rm-detail-grid').innerHTML=`${rideReqDriverTag(r)}
     ${r.status==='cancelled'?`<div style="grid-column:1/-1;background:#fdecea;border:1.5px solid #e6a8a0;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#b03a2e;font-weight:700;font-size:.9rem;">🚫 CANCELLED${r.cancelledBy?' · by '+escHtml(String(r.cancelledBy)):''} — tap “Reactivate Ride” below to restore.</div>`:''}
@@ -10693,6 +10707,7 @@ function openQuickAddModal(){
   const err=document.getElementById('qa-error'); if(err) err.textContent='';
   const qanc=document.getElementById('qa-new-client'); if(qanc) qanc.checked=false;
   var qac=document.getElementById('qa-add-client'); if(qac) qac.checked=true;
+  var qacg=document.getElementById('qa-add-client-group'); if(qacg) qacg.style.display='';
   populateClientDatalist();
   document.getElementById('quick-add-modal').classList.add('show');
   try{ renderQaAddrPickers(); }catch(e){}
@@ -10843,6 +10858,7 @@ function resetQuickAddForm(){
   qaAddonState={ premium:false, holiday:false, christmas:false, late:false, traffic:false, fuel:false };
   _qaTouched={ premium:false, traffic:false, holiday:false, christmas:false, fuel:false };
   var addc=document.getElementById('qa-add-client'); if(addc) addc.checked=true;
+  var addcg=document.getElementById('qa-add-client-group'); if(addcg) addcg.style.display='';
   try{ renderQaAddons(); }catch(e){}
 }
 
@@ -11445,9 +11461,16 @@ function _clientAddrListByKey(key){
 function _qaClientAddrList(){ return _clientAddrListByKey(_qaClientKey()); }
 function renderQaAddrPickers(){
   var list=_qaClientAddrList();
+  var _qaType=(document.getElementById('qa-type')||{}).value||'';
+  // Which field holds the airport terminal (not a saved client address) for this type —
+  // Destination for AP Run/AP Round Trip (client starts at home, ends at the airport),
+  // Pickup for AP Pick Up (the reverse). Offering/defaulting a saved-address picker on
+  // that field is what was overwriting the terminal address with "Home".
+  var _terminalField = (_qaType==='AP PICK UP') ? 'pickup' : (_qaType==='AP RUN'||_qaType==='AP ROUND TRIP') ? 'home' : null;
   ['pickup','home'].forEach(function(which){
     var sel=document.getElementById('qa-'+which+'-mode'); var inp=document.getElementById('qa-'+which);
     if(!sel||!inp) return;
+    if(which===_terminalField){ sel.style.display='none'; sel.innerHTML=''; return; }
     if(!list.length){ sel.style.display='none'; sel.innerHTML=''; return; }
     var cur=(inp.value||'').trim();
     var match=list.find(function(a){return a.address===cur;});
@@ -11548,6 +11571,8 @@ async function saveQuickAddRide(){
     const _pairId='pair_'+ride.id;
     ride2={...ride,id:nextId++,type:'AP PICK UP',date:rtDate,time:rtTime,
       flight:rtFlight,terminal:rtTerminal,pairId:_pairId,
+      pickup:(TERMINAL_ADDRESSES[rtTerminal]||ride.home||''),
+      home:(ride.pickup||''),
       notes:(ride.notes?ride.notes+' ':'')+('Return leg \u2014 AP Round Trip ')+date};
     ride.type='AP RUN';
     ride.pairId=_pairId;
@@ -19425,7 +19450,8 @@ function buildClientDB(forDriver){
     addPhoneUnique(e.phones, r.phone, '');
     (r.extraPhones||'').split(/[,;]/).forEach(p=>addPhoneUnique(e.phones, p, ''));
     addEmailUnique(e.emails, r.email);
-    const addr = r.type==='AP RUN'?r.home:(r.pickup||r.home||'');
+    const addr = (r.type==='AP RUN'||r.type==='AP ROUND TRIP') ? (r.pickup||'') :
+                 r.type==='AP PICK UP' ? (r.home||'') : (r.pickup||r.home||'');
     if(addr && !e.address) e.address=addr;
     e.rides.push(r);
     if(!e.lastRide || r.date>e.lastRide) e.lastRide=r.date;
@@ -19562,7 +19588,8 @@ async function upsertClientFromRide(ride){
   if(!importedClients[driver]) importedClients[driver]=[];
   const key = ride.client.trim().toLowerCase();
   let rec = importedClients[driver].find(c=>c.name && c.name.toLowerCase()===key);
-  const addr = ride.type==='AP RUN'?ride.home:(ride.pickup||ride.home||'');
+  const addr = (ride.type==='AP RUN'||ride.type==='AP ROUND TRIP') ? (ride.pickup||'') :
+               ride.type==='AP PICK UP' ? (ride.home||'') : (ride.pickup||ride.home||'');
   let changed=false;
   if(!rec){
     const phones=[]; addPhoneUnique(phones, ride.phone, '');
@@ -19637,9 +19664,15 @@ function _anyClientEmail(name){
 let _autofilledVals = {};
 function maybeAutofillClient(prefix){
   const nameEl=document.getElementById(prefix+'-client'); if(!nameEl) return;
-  const val=(nameEl.value||'').trim().toLowerCase(); if(!val) return;
-  let db; try{ db=buildClientDB(clientLookupScope()); }catch(e){ return; }
-  const c=db[val]; if(!c) return;
+  const val=(nameEl.value||'').trim().toLowerCase();
+  let db=null, c=null;
+  if(val){ try{ db=buildClientDB(clientLookupScope()); c=db[val]||null; }catch(e){} }
+  // Quick Add: this client's already on the list — no need to ask about re-adding them.
+  if(prefix==='qa'){
+    var _acg=document.getElementById('qa-add-client-group');
+    if(_acg) _acg.style.display = c ? 'none' : '';
+  }
+  if(!val || !c) return;
   // Smart fill: set a field when it's empty OR still holds the value autofill put there last
   // time (so picking a different client refreshes it) — but never overwrite what the user
   // typed. If the newly-picked client has no value for a field we previously filled, clear it.
@@ -21450,6 +21483,7 @@ function qaTypeChanged(){
     ['qa-leg-run','qa-leg-pickup'].forEach(id=>{ const el=document.getElementById(id); if(el) el.checked=false; });
   }
   qaCheckLegs();
+  try{ qaAutoFillTerminalAddress(); }catch(e){}
   try{ renderQaAddrPickers(); }catch(e){}
 }
 function qaCheckLegs(){
