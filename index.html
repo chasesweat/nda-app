@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607151530">
+<meta name="version" content="202607151531">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -616,6 +616,7 @@ input,select,textarea{font-size:16px;}
         <div class="form-group" id="q-med-hours-group" style="display:none;"><label>Medical transport hours</label><input type="number" id="q-med-hours" min="0" step="0.5" placeholder="e.g. 3" inputmode="decimal" oninput="calcQuote()" /><div style="font-size:.72rem;color:var(--mid);margin-top:3px;line-height:1.4;">Billed hourly at your waiting-time rate. The assigned driver or an admin can adjust the hours during the ride. Add any surcharges below if needed.</div></div>
         <div class="form-group"><label id="q-pickup-label">Pickup</label><input type="text" id="q-pickup" placeholder="Start typing…" oninput="debounceMileage()" /></div>
         <div class="form-group"><label>Gate code <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(optional — only you and the assigned driver see this)</span></label><input type="text" id="q-gate-code" placeholder="e.g. #1234" /></div>
+        <div class="form-group"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;"><input type="checkbox" id="q-private" style="width:auto;margin:0;" /> <span>🔒 Private ride <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(hidden from other drivers — creator, assigned driver, and admins only)</span></span></label></div>
         <div id="q-stops-wrap"></div><div class="form-group" style="margin-top:-.3rem;margin-bottom:.75rem;"><button type="button" id="q-addstop-btn" onclick="qAddStop()" style="background:none;border:1px dashed var(--gold);color:var(--gold);border-radius:8px;padding:.45rem .9rem;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:600;cursor:pointer;">+ Add Stop</button><span style="font-size:.72rem;color:var(--mid);margin-left:.5rem;">Extra pickups between start &amp; drop-off</span></div><div class="form-group" id="q-dropoff-group"><label id="q-dropoff-label">Destination</label><input type="text" id="q-dropoff" placeholder="Start typing…" oninput="debounceMileage()" /></div>
         <div id="q-direction-preview" style="display:none;font-size:.78rem;font-weight:600;color:var(--accent);background:#f3eeff;border:1px solid #d9c9f5;border-radius:8px;padding:.45rem .7rem;margin-bottom:.75rem;"></div>
         <div id="q-mileage-box" style="background:var(--black);border-radius:10px;padding:1rem;margin-bottom:1rem;">
@@ -1204,6 +1205,7 @@ input,select,textarea{font-size:16px;}
         </div>
         <div class="form-group" style="grid-column:1/-1;"><label id="edit-pickup-label">Pickup</label><input type="text" id="edit-pickup" oninput="_editDebounceMileage()" /></div>
         <div class="form-group" style="grid-column:1/-1;"><label>Gate code <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(optional — only the client owner and assigned driver see this)</span></label><input type="text" id="edit-gate-code" placeholder="e.g. #1234" /></div>
+        <div class="form-group" style="grid-column:1/-1;"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;"><input type="checkbox" id="edit-private" style="width:auto;margin:0;" /> <span>🔒 Private ride <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(hidden from other drivers — creator, assigned driver, and admins only)</span></span></label></div>
         <div class="form-group" style="grid-column:1/-1;"><label id="edit-home-label">Destination</label><input type="text" id="edit-home" oninput="_editDebounceMileage()" /></div>
         <div class="form-group"><label>Price ($)</label><input type="number" id="edit-price" min="0" step="0.01" /></div>
         <div class="form-group"><label>Confirmed</label>
@@ -1606,6 +1608,8 @@ input,select,textarea{font-size:16px;}
       </div>
       <div class="form-group" style="grid-column:1/-1;"><label>Gate code <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(optional — only you and the assigned driver see this)</span></label>
         <input type="text" id="qa-gate-code" placeholder="e.g. #1234" />
+      </div>
+      <div class="form-group" style="grid-column:1/-1;"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;"><input type="checkbox" id="qa-private" style="width:auto;margin:0;" /> <span>🔒 Private ride <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(hidden from other drivers — creator, assigned driver, and admins only)</span></span></label>
       </div>
       <div class="form-group" style="grid-column:1/-1;"><label>Destination</label>
         <select id="qa-home-mode" onchange="qaAddrModeChanged('home')" style="display:none;width:100%;margin-bottom:.4rem;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-size:.88rem;background:var(--white);"></select>
@@ -4169,7 +4173,7 @@ async function saveQuote(){
   const total=calcQuote();
   const ride={
     id:nextId++, client, driver:driverVal,
-    pickup:document.getElementById('q-pickup').value,gateCode:document.getElementById('q-gate-code')?.value.trim()||'',
+    pickup:document.getElementById('q-pickup').value,gateCode:document.getElementById('q-gate-code')?.value.trim()||'',private:!!document.getElementById('q-private')?.checked,
     home:document.getElementById('q-dropoff').value,
     miles:parseFloat(document.getElementById('q-miles').value)||0,
     date:document.getElementById('q-date').value,
@@ -4246,7 +4250,7 @@ function _gatherQuoteRide(){
   const total=calcQuote();
   return {
     client, driver:driverVal,
-    pickup:document.getElementById('q-pickup').value,gateCode:document.getElementById('q-gate-code')?.value.trim()||'',
+    pickup:document.getElementById('q-pickup').value,gateCode:document.getElementById('q-gate-code')?.value.trim()||'',private:!!document.getElementById('q-private')?.checked,
     home:document.getElementById('q-dropoff').value,
     miles:parseFloat(document.getElementById('q-miles').value)||0,
     date:document.getElementById('q-date').value,
@@ -5105,7 +5109,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
     const isHoliday=isChristmasDate(mmdd)||isHolidayDate(mmdd);
     const holName=HOLIDAY_NAMES[mmdd]||'';
     const holFee=isChristmasDate(mmdd)?surcharge('christmas'):surcharge('holiday');
-    let dayRides=rides.filter(r=>r.date===ds && r.status!=='cancelled');
+    let dayRides=rides.filter(r=>r.date===ds && r.status!=='cancelled' && canSeeRide(r));
     if(typeof driverFilter==='function') dayRides=dayRides.filter(driverFilter);
     else if(driverFilter&&driverFilter!=='group') dayRides=dayRides.filter(r=>r.driver===driverFilter);
     dayRides.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
@@ -5127,6 +5131,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
               const tc=contrastText(c,0.4);
               const badge=r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP'?'badge-ap':r.type==='ROUND TRIP'?'badge-rt':'badge-pt';
   const xxlBadge=r.xxl?'<span style="font-size:.55rem;font-weight:700;background:#6b21a8;color:#fff;border-radius:3px;padding:1px 4px;margin-left:2px;">XXL</span>':'';
+  const privateBadge=r.private?'<span style="font-size:.55rem;font-weight:700;background:#1b1330;color:#fff;border-radius:3px;padding:1px 4px;margin-left:2px;" title="Hidden from other drivers">🔒</span>':'';
   const pairBadge='';
               return `<div class="week-ride-card" style="border-color:${c};background:${c}66;" onclick="openRideModal(${r.id})">
                 <div style="display:flex;flex-direction:column;min-width:46px;">
@@ -5141,7 +5146,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
                 </div>
                 <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
                   <div class="week-ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}</div>
-                  <span class="badge ${badge}" style="font-size:.6rem;">${r.type==='AP RUN'?'RUN':r.type==='AP PICK UP'?'PU':r.type==='AP ROUND TRIP'?'RT':r.type==='ROUND TRIP'?'RT':r.type==='ONE WAY'?'OW':r.type.split(' ')[0]}</span>${xxlBadge}${pairBadge}
+                  <span class="badge ${badge}" style="font-size:.6rem;">${r.type==='AP RUN'?'RUN':r.type==='AP PICK UP'?'PU':r.type==='AP ROUND TRIP'?'RT':r.type==='ROUND TRIP'?'RT':r.type==='ONE WAY'?'OW':r.type.split(' ')[0]}</span>${xxlBadge}${privateBadge}${pairBadge}
                   ${r.createdBy==='Morgan'?'<span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#5c6bc0;color:#fff;font-size:.5rem;font-weight:700;flex-shrink:0;" title="Created by Morgan">MN</span>':''}
                   ${r.newClient?'<div style="font-size:.58rem;font-weight:700;letter-spacing:.5px;background:#f59e0b;color:#fff;border-radius:4px;padding:1px 5px;white-space:nowrap;">New Client</div>':''}
                 </div>
@@ -5171,7 +5176,7 @@ function renderMonthView(containerId, monthDate, driverFilter, jumpFn){
     const isToday=ds===today;
     const mmdd=ds.slice(5);
     const isHoliday=isChristmasDate(mmdd)||isHolidayDate(mmdd);
-    let dayRides=rides.filter(r=>r.date===ds && r.status!=='cancelled');
+    let dayRides=rides.filter(r=>r.date===ds && r.status!=='cancelled' && canSeeRide(r));
     if(typeof driverFilter==='function') dayRides=dayRides.filter(driverFilter);
     else if(driverFilter&&driverFilter!=='group') dayRides=dayRides.filter(r=>r.driver===driverFilter);
     dayRides.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
@@ -5235,7 +5240,7 @@ function calSearch(){
   results.style.display='';
   let list=rides.filter(r=>{
     const txt=`${r.client||''} ${r.driver||''} ${r.type||''} ${r.vehicle||''} ${r.phone||''}`.toLowerCase();
-    return txt.includes(q);
+    return txt.includes(q) && canSeeRide(r);
   });
   if(calDriverFilter && calDriverFilter!=='group') list=list.filter(r=>r.driver===calDriverFilter);
   list.sort((a,b)=>(a.date||'').localeCompare(b.date||'')||(a.time||'').localeCompare(b.time||''));
@@ -5323,7 +5328,7 @@ function renderMyCal(){
       return `<div style="display:flex;align-items:center;gap:1rem;padding:.75rem 1rem;border-radius:10px;margin-bottom:.5rem;background:${c}66;border:2px solid ${c};cursor:pointer;flex-wrap:wrap;" onclick="openRideModal(${r.id})">
         <div style="width:8px;min-height:36px;border-radius:3px;background:${c};flex-shrink:0;align-self:stretch;"></div>
         <div class="ride-date" style="color:${tc};">${fmtDateShort(r.date)}<br>${fmtTime12(r.time)||'—'}</div>
-        <div class="ride-info"><div class="ride-client" style="color:${tc};">${r.client}${r.confirmSent?' <span style="color:var(--green);font-weight:900;">✓</span>':''}</div><div class="ride-detail" style="color:${tc};opacity:.78;">${rideDisplayType(r)} · ${driverTag}</div>${rideReqDriverTag(r)}${(_mtWatchId&&_mtRideIds.indexOf(r.id)>=0)?'<div style="margin-top:3px;"><span style="display:inline-block;font-size:.68rem;background:#f0fdf4;color:#16a34a;border:1px solid #86efac;border-radius:8px;padding:1px 7px;font-weight:700;animation:mt-pulse .9s ease-in-out infinite;">&#128205; Live tracking</span></div>':''}</div>
+        <div class="ride-info"><div class="ride-client" style="color:${tc};">${r.private?'🔒 ':''}${r.client}${r.confirmSent?' <span style="color:var(--green);font-weight:900;">✓</span>':''}</div><div class="ride-detail" style="color:${tc};opacity:.78;">${rideDisplayType(r)} · ${driverTag}</div>${rideReqDriverTag(r)}${(_mtWatchId&&_mtRideIds.indexOf(r.id)>=0)?'<div style="margin-top:3px;"><span style="display:inline-block;font-size:.68rem;background:#f0fdf4;color:#16a34a;border:1px solid #86efac;border-radius:8px;padding:1px 7px;font-weight:700;animation:mt-pulse .9s ease-in-out infinite;">&#128205; Live tracking</span></div>':''}</div>
         <div class="ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}</div>
       </div>`;
     };
@@ -6170,8 +6175,9 @@ function _openDriverChange(){ var e=document.getElementById('rm-dispatch'); if(e
 function openRideModal(id){
   activeRideId=id;
   const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
+  if(!canSeeRide(r)){ activeRideId=null; showToast('This ride is private','error'); return; }
   if(r.driver) warmDriverCardImage((r.driver||"").trim());
-  document.getElementById('rm-title').textContent=r.client;
+  document.getElementById('rm-title').textContent=(r.private?'\uD83D\uDD12 ':'')+r.client;
   // driver assign row
   const drRow=document.getElementById('rm-driver-row');
   drRow.style.display=canAssignOnRide(r)?'flex':'none';
@@ -6315,7 +6321,7 @@ function renderRideView(r){
   const _isCreatorForBtn = !!(_resolvedMe && _resolvedCreator && _resolvedMe===_resolvedCreator);
   const _myDriverNameForBtn = getMyDriverName();
   const _isAssignedDriverForBtn = !!(_myDriverNameForBtn && r.driver && _myDriverNameForBtn===r.driver);
-  const canPostOfferings = _isCreatorForBtn || _isAssignedDriverForBtn || isAdmin();
+  const canPostOfferings = !r.private && (_isCreatorForBtn || _isAssignedDriverForBtn || isAdmin());
   const shareOfferingsBtn = (r.status!=='cancelled' && canPostOfferings)
     ? '<div class="detail-row" style="grid-column:1/-1;margin-top:.25rem;">'+(_alreadyOffered?'<div style="padding:.5rem;text-align:center;font-size:.84rem;color:var(--green);font-weight:600;">\u2705 Posted to Offerings</div>':'<button onclick="shareRideToOfferings('+r.id+')" style="width:100%;padding:.55rem;background:none;border:1.5px solid #7c3aed;color:#7c3aed;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.84rem;font-weight:600;cursor:pointer;">\uD83D\uDCE4 Post to Offerings</button>')+'</div>'
     : '';
@@ -7338,6 +7344,7 @@ function toggleEditMode(on){
   var _emh0=document.getElementById('edit-med-hours'); if(_emh0) _emh0.value = r.medHours||'';
   document.getElementById('edit-pickup').value   = r.pickup||'';
   var _egc=document.getElementById('edit-gate-code'); if(_egc) _egc.value = r.gateCode||'';
+  var _epv=document.getElementById('edit-private'); if(_epv) _epv.checked = !!r.private;
   document.getElementById('edit-home').value     = r.home||'';
   document.getElementById('edit-price').value    = r.price||0;
   document.getElementById('edit-confirmed').value= r.confirmed?'true':'false';
@@ -7380,6 +7387,7 @@ async function saveRideEdits(){
   r.medHours  = parseFloat((document.getElementById('edit-med-hours')||{}).value)||0;
   r.pickup    = document.getElementById('edit-pickup').value.trim();
   r.gateCode  = document.getElementById('edit-gate-code')?.value.trim()||'';
+  r.private   = !!document.getElementById('edit-private')?.checked;
   r.home      = document.getElementById('edit-home').value.trim();
   r.price     = parseFloat(document.getElementById('edit-price').value)||0;
   r.confirmed = document.getElementById('edit-confirmed').value==='true';
@@ -7398,7 +7406,7 @@ async function saveRideEdits(){
   if(r.driver && r.driver!==oldDriver) addNotification(r.driver, r, 'assigned');
   await saveRides(); await saveNotifs();
   toggleEditMode(false);
-  document.getElementById('rm-title').textContent=r.client;
+  document.getElementById('rm-title').textContent=(r.private?'\uD83D\uDD12 ':'')+r.client;
   renderRideView(r);
   renderInterest(r);
   renderRides(); refreshDash(); renderCal(); updateNotifBadge();
@@ -8862,7 +8870,7 @@ function canSeeInterestList(r){
   return !!(me && cr && me===cr);
 }
 function _heartOwner(){ return (currentUser&&PROXY_MAP[currentUser.name])||getMyDriverName()||(currentUser&&currentUser.name)||''; }
-function myHeartedRides(){ var o=_heartOwner(); var _today=toDateStr(new Date()); return (rides||[]).filter(function(r){ return r&&r.status!=='cancelled'&&(r.date||'')>=_today&&r.interest&&Object.keys(r.interest).some(function(k){ return (USER_DRIVER_MAP[k]||PROXY_MAP[k]||k)===o; }); }); }
+function myHeartedRides(){ var o=_heartOwner(); var _today=toDateStr(new Date()); return (rides||[]).filter(function(r){ return r&&r.status!=='cancelled'&&(r.date||'')>=_today&&r.interest&&Object.keys(r.interest).some(function(k){ return (USER_DRIVER_MAP[k]||PROXY_MAP[k]||k)===o; })&&canSeeRide(r); }); }
 function _myHeartTs(r){ var o=_heartOwner(),ts=0; Object.keys(r.interest||{}).forEach(function(k){ if((USER_DRIVER_MAP[k]||PROXY_MAP[k]||k)===o){ var t=r.interest[k]; if(typeof t==='number'&&(!ts||t<ts)) ts=t; } }); return ts; }
 function closeHeartedRides(){ var o=document.getElementById('hearted-overlay'); if(o) o.remove(); }
 function renderHeartedList(q){ var box=document.getElementById('hearted-list'); if(!box) return; q=(q||'').toLowerCase().trim(); var all=myHeartedRides(); var list=all.slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); }); if(q){ list=list.filter(function(r){ var hay=((r.date||'')+' '+fmtDateShort(r.date)+' '+(r.client||'')+' '+(r.type||'')+' '+(r.time||'')).toLowerCase(); return hay.indexOf(q)>=0; }); } var cnt=document.getElementById('hearted-count'); if(cnt) cnt.textContent=list.length+' ride'+(list.length!==1?'s':''); if(!list.length){ box.innerHTML='<div style="text-align:center;padding:2rem;color:var(--mid);font-size:.9rem;">'+(all.length?'No hearted rides match that search.':'You have not hearted any rides yet. Tap the \uD83E\uDD0D on a ride to add it here.')+'</div>'; return; } box.innerHTML=list.map(function(r){ var c=rideColor(r); var dt=r.driver?r.driver.split(' ')[0]:'Unassigned'; var ts=_myHeartTs(r); var when=ts?('<span style="font-size:.66rem;color:var(--mid);">\u2764 '+fmtTs(ts)+'</span>'):''; return '<div onclick="closeHeartedRides();openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.8rem;padding:.7rem .85rem;border-radius:10px;margin-bottom:.45rem;background:'+c+'22;border:1.5px solid '+c+';cursor:pointer;">'+'<div style="width:7px;align-self:stretch;border-radius:3px;background:'+c+';flex-shrink:0;"></div>'+'<div style="text-align:center;min-width:54px;font-size:.72rem;font-weight:700;color:var(--black);line-height:1.2;">'+fmtDateShort(r.date)+'<br><span style="font-weight:600;color:var(--mid);">'+(fmtTime12(r.time)||'\u2014')+'</span></div>'+'<div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:.9rem;color:var(--black);">'+escHtml(r.client||'\u2014')+'</div><div style="font-size:.74rem;color:var(--mid);">'+escHtml(r.type||'')+' \u00b7 '+escHtml(dt)+'</div>'+when+'</div>'+'<div style="font-weight:700;color:var(--green);font-size:.9rem;">$'+(r.price||0)+'</div></div>'; }).join(''); }
@@ -9857,6 +9865,8 @@ async function shareRideToOfferings(id){
   const _isAssignedDriver=!!(_myDriverName && r.driver && _myDriverName===r.driver);
   if(!_isCreator && !_isAssignedDriver && !isAdmin()){
     showToast('Only the ride creator, assigned driver, or an admin can post to Offerings','error'); return; }
+  if(r.private){
+    showToast('Private rides can\u2019t be posted to Offerings \u2014 that would share the details with the whole team','error'); return; }
   const msg={
     sender: currentUser?.name||'',
     text: '\uD83D\uDE97 Ride Available\n'+r.client+' \u00b7 '+r.type+(r.price?' \u00b7 $'+r.price:'')+'\n\uD83D\uDCC5 '+fmtDate(r.date)+(r.time?' at '+fmtTime12(r.time):'')+(r.vehicle?'\n\uD83D\uDE8C '+r.vehicle:'')+(r.pickup?'\n\uD83D\uDCCD '+r.pickup:'')+(r.driver?'\nDriver: '+r.driver.split(' ')[0]:' (unassigned)')+'\n\nCan anyone cover this?',
@@ -10818,6 +10828,40 @@ function canSeeGateCode(ride){
   }catch(e){ return false; }
 }
 function getClientFeeOwner(clientName,drivingDriver){ return getClientOwner(clientName); }
+// A private ride is visible to exactly three groups: whoever created it (creator, Kat/Morgan
+// treated as one — same convention as everywhere else), whoever's actually assigned to drive
+// it, and any admin (private hides a ride from OTHER DRIVERS, not from the business itself —
+// income/tax reporting and billing still need full visibility). A non-private ride is visible
+// to everyone, unchanged from how the app has always worked.
+function canSeeRide(ride){
+  try{
+    if(!ride || !ride.private) return true;
+    if(isAdmin()) return true;
+    const myDriverName = getMyDriverName();
+    if(myDriverName && (ride.driver===myDriverName || ride.driver2===myDriverName)) return true;
+    const myLogin = currentUser && currentUser.name;
+    if(!myLogin) return false;
+    const myResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[myLogin]) || myDriverName || myLogin;
+    const createdByResolved = ride.createdBy
+      ? ((typeof PROXY_MAP!=='undefined' && PROXY_MAP[ride.createdBy]) || (typeof USER_DRIVER_MAP!=='undefined' && USER_DRIVER_MAP[ride.createdBy]) || ride.createdBy)
+      : null;
+    return !!(myResolvedIdentity && createdByResolved && myResolvedIdentity===createdByResolved);
+  }catch(e){ return false; }
+}
+// Does this driver have a private ride on this date that should block them from being
+// double-booked? Checked dynamically against `rides` — deliberately NOT written into
+// DRIVER_PROFILES.unavailableDates, because that list is publicly visible on every driver's
+// profile ("everyone can see who's off and when"). Writing a private ride's date there would
+// out its existence to the whole team, defeating the point of marking it private at all.
+function hasPrivateRideConflict(driverName, dateStr){
+  try{
+    if(!driverName || !dateStr) return false;
+    return (rides||[]).some(function(r){
+      return r.private && r.date===dateStr && r.status!=='cancelled' &&
+        (r.driver===driverName || r.driver2===driverName);
+    });
+  }catch(e){ return false; }
+}
 
 function renewIncomeUpgrade(){
   showIncomeOrUpgrade(null);
@@ -10861,6 +10905,7 @@ function openQuickAddModal(){
   const xsEl=document.getElementById('qa-xstop'); if(xsEl) xsEl.value=0;
   const xsaEl=document.getElementById('qa-xstop-addr'); if(xsaEl) xsaEl.value='';
   const gcEl=document.getElementById('qa-gate-code'); if(gcEl) gcEl.value='';
+  const qaPriv=document.getElementById('qa-private'); if(qaPriv) qaPriv.checked=false;
   const xswEl=document.getElementById('qa-xstop-addr-wrap'); if(xswEl) xswEl.style.display='none';
   const wtEl=document.getElementById('qa-wait'); if(wtEl) wtEl.value=0;
   const pxEl=document.getElementById('qa-pax'); if(pxEl) pxEl.value=1;
@@ -11713,7 +11758,7 @@ async function saveQuickAddRide(){
     price2:  document.getElementById('qa-xxl')?.checked?(parseFloat(document.getElementById('qa-price2')?.value)||0):0,
     driver:  document.getElementById('qa-driver').value || getMyDriverName() || '',
     price:   parseFloat(document.getElementById('qa-price').value)||0,
-    pickup:  document.getElementById('qa-pickup').value.trim(),gateCode:document.getElementById('qa-gate-code')?.value.trim()||'',
+    pickup:  document.getElementById('qa-pickup').value.trim(),gateCode:document.getElementById('qa-gate-code')?.value.trim()||'',private:!!document.getElementById('qa-private')?.checked,
     home:    document.getElementById('qa-home').value.trim(),
     flight:  document.getElementById('qa-flight').value.trim(),
     terminal:document.getElementById('qa-terminal').value,
@@ -11869,6 +11914,7 @@ function clearQuoteForm(){
   _addonTouched = { premium:false, traffic:false, holiday:false, christmas:false }; // fresh quote — auto-surcharges can re-detect
   ['q-client','q-phone','q-pickup','q-dropoff','q-miles','q-flight','q-rt-flight','q-notes','q-wait','q-gate-code']
     .forEach(function(id){ const el=document.getElementById(id); if(el) el.value=''; });
+  const qPriv=document.getElementById('q-private'); if(qPriv) qPriv.checked=false;
   var _sw=document.getElementById('q-stops-wrap'); if(_sw) _sw.innerHTML=''; _qStopCount=0; var _qac=document.getElementById('q-add-client'); if(_qac) _qac.checked=true; var _asb=document.getElementById('q-addstop-btn'); if(_asb) _asb.style.display='inline-block';
   extraStops=0; var _scnt=document.getElementById('stops-count'); if(_scnt){ _scnt.value='0'; _scnt.style.color='var(--mid)'; } var _xaw=document.getElementById('q-xstop-addr-wrap'); if(_xaw) _xaw.style.display='none';
   const qDate=document.getElementById('q-date'); if(qDate) qDate.value='';
@@ -12075,7 +12121,7 @@ function renderRides(){
   const dv=document.getElementById('filter-driver').value;
   const filtered=rides.filter(r=>{
     const txt=`${r.client} ${r.driver} ${r.type} ${r.vehicle}`.toLowerCase();
-    return(!q||txt.includes(q))&&(!t||r.type===t)&&(!dv||r.driver===dv);
+    return(!q||txt.includes(q))&&(!t||r.type===t)&&(!dv||r.driver===dv)&&canSeeRide(r);
   }).sort((a,b)=>a.date.localeCompare(b.date));
   const tbody=document.getElementById('rides-tbody');
   tbody.innerHTML=filtered.map(r=>{
@@ -14428,6 +14474,9 @@ function isDriverAvailable(driverName, dateStr, timeStr){
   // and standing blocked hours) for that one date — e.g. a normally-blocked weekday when
   // the driver's day job is closed. An explicit unavailableDates entry still wins over it.
   if((prof.unavailableDates||[]).includes(dateStr)) return false;
+  // A private ride already on this date blocks it too — checked dynamically, never written
+  // to the driver's public profile (see hasPrivateRideConflict).
+  if(hasPrivateRideConflict(driverName, dateStr)) return false;
   const isException = (prof.availableDates||[]).includes(dateStr);
   if(!isException && driverRecurringOff(prof, dateStr)) return false; // recurring monthly/yearly day off
   const wd = new Date(dateStr+'T12:00:00').getDay();
