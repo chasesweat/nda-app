@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607152700">
+<meta name="version" content="202607151524">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2291,6 +2291,7 @@ async function _loadAppData() {
     loadClientUnlock(),
     loadCautiousList(),
     loadClientOwners(),
+    loadLockedMileage(),
     loadKmData(),
     loadPendingAdminTutorial(),
     loadChaseAudit(),
@@ -3292,21 +3293,29 @@ async function _qaCalcMileage(){
   var disp=document.getElementById('qa-miles-display');
   var st=document.getElementById('qa-mileage-status');
   try{
-    var result=await new Promise(function(resolve,reject){
-      cachedDistanceMatrix({
-        origins:[pu], destinations:[dp],
-        travelMode:google.maps.TravelMode.DRIVING,
-        unitSystem:google.maps.UnitSystem.IMPERIAL,
-      }, function(resp,status){ if(status==='OK') resolve(resp); else reject(new Error(status)); });
-    });
-    var el=result.rows[0].elements[0];
-    if(el.status!=='OK') throw new Error(el.status);
-    var miles=Math.ceil(el.distance.value/1609.344);
-    var mins=Math.round(el.duration.value/60);
+    var locked=getLockedRoute(pu,dp);
+    var meters, seconds, fresh;
+    if(locked){ meters=locked.meters; seconds=locked.seconds; fresh=false; }
+    else{
+      var result=await new Promise(function(resolve,reject){
+        cachedDistanceMatrix({
+          origins:[pu], destinations:[dp],
+          travelMode:google.maps.TravelMode.DRIVING,
+          unitSystem:google.maps.UnitSystem.IMPERIAL,
+        }, function(resp,status){ if(status==='OK') resolve(resp); else reject(new Error(status)); });
+      });
+      var el=result.rows[0].elements[0];
+      if(el.status!=='OK') throw new Error(el.status);
+      meters=el.distance.value; seconds=el.duration.value; fresh=true;
+      setLockedRoute(pu,dp,meters,seconds);
+    }
+    var miles=Math.floor(meters/1609.344); // rounds DOWN to match the sheet's convention
+    var mins=Math.round(seconds/60);
     var hrs=Math.floor(mins/60);
     var durStr=hrs>0?(hrs+'h '+(mins%60)+'m drive'):(mins+' min drive');
     if(disp) disp.textContent=miles+' mi';
-    if(st) st.textContent='\u2713 '+durStr+' (Google Maps)';
+    if(st) st.innerHTML='\u2713 '+durStr+' ('+(fresh?'Google Maps':'saved route')+') '
+      +'<span style="color:#8a7fa3;cursor:pointer;text-decoration:underline;font-size:.8em;" onclick="forceRecalcMileage(\'qa\')">recalculate</span>';
     var mh=document.getElementById('qa-miles-hidden');
     if(!mh){ mh=document.createElement('input'); mh.type='hidden'; mh.id='qa-miles-hidden'; document.body.appendChild(mh); }
     mh.value=miles;
@@ -3333,16 +3342,23 @@ async function _editCalcMileage(){
   var dp=((document.getElementById('edit-home')||{}).value||'').trim();
   if(!pu||!dp) return;
   try{
-    var result=await new Promise(function(resolve,reject){
-      cachedDistanceMatrix({
-        origins:[pu], destinations:[dp],
-        travelMode:google.maps.TravelMode.DRIVING,
-        unitSystem:google.maps.UnitSystem.IMPERIAL,
-      }, function(resp,status){ if(status==='OK') resolve(resp); else reject(new Error(status)); });
-    });
-    var el=result.rows[0].elements[0];
-    if(el.status!=='OK') return;
-    var miles=Math.ceil(el.distance.value/1609.344);
+    var locked=getLockedRoute(pu,dp);
+    var meters;
+    if(locked){ meters=locked.meters; }
+    else{
+      var result=await new Promise(function(resolve,reject){
+        cachedDistanceMatrix({
+          origins:[pu], destinations:[dp],
+          travelMode:google.maps.TravelMode.DRIVING,
+          unitSystem:google.maps.UnitSystem.IMPERIAL,
+        }, function(resp,status){ if(status==='OK') resolve(resp); else reject(new Error(status)); });
+      });
+      var el=result.rows[0].elements[0];
+      if(el.status!=='OK') return;
+      meters=el.distance.value;
+      setLockedRoute(pu,dp,meters,el.duration.value);
+    }
+    var miles=Math.floor(meters/1609.344); // rounds DOWN to match the sheet's convention
     var mi=document.getElementById('edit-miles'); if(mi) mi.value=miles;
     _editAutoPrice();
   }catch(e){ console.warn('edit mileage', e); }
@@ -3647,10 +3663,19 @@ async function calcMileage(){
   try {
     let totalMeters = 0;
     let totalSeconds = 0;
+    let anyFresh = false; // whether at least one leg needed a real Google lookup this time
     // Sum each consecutive leg: stop[i] → stop[i+1]
     for(let i = 0; i < stops.length - 1; i++){
       const origin = stops[i];
       const dest   = stops[i+1];
+      // Already-locked route → reuse it, no Google call needed for this leg.
+      const locked = getLockedRoute(origin, dest);
+      if(locked){
+        totalMeters  += locked.meters;
+        totalSeconds += locked.seconds;
+        continue;
+      }
+      anyFresh = true;
       const result = await new Promise((resolve, reject)=>{
         cachedDistanceMatrix({
           origins: [origin],
@@ -3666,17 +3691,20 @@ async function calcMileage(){
       if(element.status !== 'OK') throw new Error('Leg ' + (i+1) + ': ' + element.status);
       totalMeters  += element.distance.value;
       totalSeconds += element.duration.value;
+      setLockedRoute(origin, dest, element.distance.value, element.duration.value);
     }
 
     const miles    = totalMeters / 1609.344;
     const mins     = Math.round(totalSeconds / 60);
     const hrs      = Math.floor(mins / 60);
     const durStr   = hrs > 0 ? `${hrs}h ${mins % 60}m drive` : `${mins} min drive`;
-    const milesVal = Math.ceil(miles);
+    const milesVal = Math.floor(miles); // rounds DOWN to match the sheet's convention
 
     document.getElementById('q-miles').value = milesVal;
     const legNote = legCount > 1 ? ` · ${legCount} legs` : '';
-    statusEl.textContent = `✓ ${milesVal} miles · ${durStr}${legNote} (Google Maps)`;
+    const srcNote = anyFresh ? 'Google Maps' : 'saved route';
+    statusEl.innerHTML = `✓ ${milesVal} miles · ${durStr}${legNote} (${srcNote}) `
+      + `<span style="color:#8a7fa3;cursor:pointer;text-decoration:underline;font-size:.8em;" onclick="forceRecalcMileage('q')">recalculate</span>`;
     updateMilesDisplay();
     calcQuote();
   } catch(err){
@@ -3709,6 +3737,23 @@ function resetMileage(){
   if(noteEl) noteEl.textContent='';
   document.getElementById('q-miles').value=0;
   calcQuote();
+}
+// Clears the saved route lock for the addresses currently in the form, then re-runs the
+// lookup so it hits Google fresh — for the rare case an address changed and the client's
+// locked-in mileage needs to move with it. Scoped to just this one route, not a bulk reset.
+function forceRecalcMileage(prefix){
+  try{
+    if(prefix==='qa'){
+      const pu=((document.getElementById('qa-pickup')||{}).value||'').trim();
+      const dp=((document.getElementById('qa-home')||{}).value||'').trim();
+      if(pu && dp) clearLockedRoute(pu, dp);
+      _qaCalcMileage();
+    } else {
+      const stops=_qGetAllStops();
+      for(let i=0;i<stops.length-1;i++) clearLockedRoute(stops[i], stops[i+1]);
+      calcMileage();
+    }
+  }catch(e){}
 }
 
 function openGoogleMaps(){
@@ -15814,6 +15859,15 @@ async function persistRideTip(rideId,val){
 let feePayments = {};
 async function loadFeePayments(){ const d=await storageGet('kat:feePayments'); if(d) feePayments=d; }
 let cautiousList=[]; let clientOwners={};
+// Per-route locked mileage: once a route (origin+destination pair) has been looked up on
+// Google Maps, the result is saved here and reused for every future ride on that same
+// route — same client, any staff member, any device, any day. This is what actually makes
+// a repeat client's price consistent (Google's own "typical route" pick can drift a little
+// over time even without live traffic), and it also means a repeat route never re-bills
+// Google for a lookup it already has the answer to. Keyed the same way the on-device
+// Distance Matrix cache is (see _dmKey), but this one is cloud-synced and never evicted,
+// so it survives across devices and doesn't age out like the local cache does.
+let lockedMileage = {};
 let deceasedClients=[];
 let hiddenClients=[];
 async function loadHiddenClients(){ const d=await storageGet('kat:hiddenClients'); if(Array.isArray(d)) hiddenClients=d; }
@@ -15828,6 +15882,37 @@ async function loadCautiousList(){ const d=await storageGet('kat:cautiousList');
 async function saveCautiousList(){ await storageSet('kat:cautiousList',cautiousList); }
 async function saveClientOwners(){ try{ await storageSet('kat:clientOwners', clientOwners); }catch(e){} }
 async function loadClientOwners(){ try{ const d=await storageGet('kat:clientOwners'); if(d && typeof d==='object') clientOwners=d; }catch(e){} }
+
+async function saveLockedMileage(){ try{ await storageSet('kat:lockedMileage', lockedMileage); }catch(e){} }
+async function loadLockedMileage(){ try{ const d=await storageGet('kat:lockedMileage'); if(d && typeof d==='object') lockedMileage=d; }catch(e){} }
+// Returns {meters, seconds} for a route if it's already locked in, or null if this route
+// has never been looked up before (or was reset via forceRecalcMileage).
+function getLockedRoute(origin, dest){
+  try{
+    const key=_dmKey({origins:[origin], destinations:[dest], travelMode:'DRIVING'});
+    const hit=lockedMileage[key];
+    return (hit && isFinite(hit.meters)) ? hit : null;
+  }catch(e){ return null; }
+}
+// Locks in a route's result the first time it's computed. Fire-and-forget save — same
+// pattern as clientOwners and every other per-business map in the app.
+function setLockedRoute(origin, dest, meters, seconds){
+  try{
+    const key=_dmKey({origins:[origin], destinations:[dest], travelMode:'DRIVING'});
+    lockedMileage[key]={ meters:meters, seconds:seconds||0, ts:Date.now() };
+    saveLockedMileage();
+  }catch(e){}
+}
+// Clears the lock for one route so the next lookup forces a fresh Google call — for the
+// rare case an address changes or a client moves. Not exposed as a list anywhere; it's a
+// small "Recalculate" action next to the mileage status line, scoped to just that route.
+function clearLockedRoute(origin, dest){
+  try{
+    const key=_dmKey({origins:[origin], destinations:[dest], travelMode:'DRIVING'});
+    delete lockedMileage[key];
+    saveLockedMileage();
+  }catch(e){}
+}
 
 function getCautiousMatches(name,phone){
   const n=(name||'').trim().toLowerCase(); if(!n) return [];
