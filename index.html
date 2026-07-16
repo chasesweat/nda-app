@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607151531">
+<meta name="version" content="202607151532">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -4867,6 +4867,25 @@ function renderNotifPanel(){
 // DRIVER COLOR HELPERS
 // ═══════════════════════════════════════════
 function driverColor(name){ return driverColors[name]||'#888888'; }
+// The short driver label shown on ride cards is normally just the first name. If two
+// drivers on the roster share a first name (e.g. two Michaels), that's ambiguous on a
+// card — so this adds the first initial of the last name whenever there's a collision,
+// checked against the whole DRIVERS list rather than just the rides on screen, so it's
+// consistent everywhere regardless of which specific ride is being shown.
+function driverShortName(fullName){
+  if(!fullName) return 'Unassigned';
+  const parts = fullName.trim().split(' ');
+  const first = parts[0];
+  try{
+    const list = (typeof DRIVERS!=='undefined' && Array.isArray(DRIVERS)) ? DRIVERS : [];
+    const collision = list.filter(function(d){ return d && d.split(' ')[0]===first; }).length > 1;
+    if(collision && parts.length>1){
+      const last = parts[parts.length-1];
+      return first + ' ' + last.charAt(0).toUpperCase() + '.';
+    }
+  }catch(e){}
+  return first;
+}
 const COLOR_POOL = ['#7c3aed','#4a148c','#f5a623','#ffcba4','#000000','#e53935','#43a047','#1e88e5','#e0c3fc','#a0522d','#a0a0a0','#ff6d00','#8b0000','#2e7d32','#ff6b6b','#c8920a','#0097a7','#e91e8c','#00838f','#5d4037','#c2185b','#00897b','#6d4c41','#455a64','#d84315','#827717'];
 function _norm(c){ return (c||'').toLowerCase(); }
 function pickUnusedColor(){ var used=Object.values(driverColors).map(_norm); var free=COLOR_POOL.filter(function(c){ return used.indexOf(_norm(c))<0; }); if(free.length) return free[Math.floor(Math.random()*free.length)]; var r=function(){return Math.floor(Math.random()*180+30);}; return '#'+[r(),r(),r()].map(function(n){return n.toString(16).padStart(2,'0');}).join(''); }
@@ -5140,7 +5159,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
                 </div>
                 <div style="flex:1;min-width:0;">
                   <div class="week-ride-client" style="color:${tc};">${r.confirmSent?'<span style="color:var(--green);font-weight:900;">✓ </span>':''}${r.client}</div>
-                  <div class="week-ride-detail" style="color:${tc};opacity:.78;">${r.vehicle} · ${r.driver?r.driver.split(' ')[0]:'Unassigned'}${ic?` · <span style="color:#e0245e;font-weight:700;">❤️${ic}</span>`:''}</div>
+                  <div class="week-ride-detail" style="color:${tc};opacity:.78;">${r.vehicle} · ${driverShortName(r.driver)}${ic?` · <span style="color:#e0245e;font-weight:700;">❤️${ic}</span>`:''}</div>
                   ${r.type==='AP PICK UP'&&r.flight?`<a href="https://www.google.com/search?q=${encodeURIComponent((r.flight||"").trim().replace(/\s+/g,"").toUpperCase())}+flight+tracking" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:${tc};text-decoration:underline;opacity:.9;white-space:nowrap;">✈️ Flight Tracking</a>`:''}
                   ${r.type==='AP RUN'?'<a href="https://www.atl.com/times/" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:'+tc+';text-decoration:underline;opacity:.9;white-space:nowrap;">🔒 TSA Wait Times</a>':''}  
                 </div>
@@ -5257,7 +5276,7 @@ function calSearch(){
       return '<div onclick="openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.85rem;padding:.7rem .85rem;border-radius:10px;margin-bottom:.5rem;background:'+c+'66;border:2px solid '+c+';cursor:pointer;flex-wrap:wrap;">'
         +'<div style="width:6px;align-self:stretch;min-height:34px;border-radius:3px;background:'+c+';"></div>'
         +'<div style="min-width:58px;"><strong style="font-size:.82rem;color:'+tc+';">'+fmtDateShort(r.date)+'</strong><br><span style="font-size:.72rem;color:'+tc+';opacity:.78;">'+(fmtTime12(r.time)||'')+'</span></div>'
-        +'<div style="flex:1;min-width:120px;"><div style="font-weight:600;font-size:.9rem;color:'+tc+';">'+check+escHtml(r.client||'—')+'</div><div style="font-size:.74rem;color:'+tc+';opacity:.78;">'+(r.driver?escHtml(r.driver.split(' ')[0]):'Unassigned')+(r.phone&&(currentUser&&(PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name)===(r.createdBy?(PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy):null)||(getMyDriverName()&&getMyDriverName()===r.driver))?' · '+escHtml(r.phone):'')+'</div></div>'
+        +'<div style="flex:1;min-width:120px;"><div style="font-weight:600;font-size:.9rem;color:'+tc+';">'+check+escHtml(r.client||'—')+'</div><div style="font-size:.74rem;color:'+tc+';opacity:.78;">'+escHtml(driverShortName(r.driver))+(r.phone&&(currentUser&&(PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name)===(r.createdBy?(PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy):null)||(getMyDriverName()&&getMyDriverName()===r.driver))?' · '+escHtml(r.phone):'')+'</div></div>'
         +'<span class="badge '+typeCls+'">'+escHtml((r.type||'')+apVehSuffix(r))+'</span>'
         +'<div style="font-weight:600;color:'+(tc==='#fff'?'#fff':'var(--green)')+';">$'+r.price+'</div>'
       +'</div>';
@@ -5323,7 +5342,7 @@ function renderMyCal(){
       .sort((a,b)=>a.date.localeCompare(b.date)||(a.time||'').localeCompare(b.time||''));
     const rideCard=(r)=>{
       const c=rideColor(r);
-      const driverTag = r.driver ? r.driver.split(' ')[0] : 'Unassigned';
+      const driverTag = driverShortName(r.driver);
       const tc=contrastText(c,0.4);
       return `<div style="display:flex;align-items:center;gap:1rem;padding:.75rem 1rem;border-radius:10px;margin-bottom:.5rem;background:${c}66;border:2px solid ${c};cursor:pointer;flex-wrap:wrap;" onclick="openRideModal(${r.id})">
         <div style="width:8px;min-height:36px;border-radius:3px;background:${c};flex-shrink:0;align-self:stretch;"></div>
@@ -5550,7 +5569,7 @@ function renderConfirmations(){
         +'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem;margin-bottom:.4rem;">'
         +'<div>'
         +'<div style="font-size:.88rem;font-weight:700;color:var(--black);">'+escHtml(r.client||'Unknown client')+'</div>'
-        +'<div style="font-size:.75rem;color:var(--mid);">'+r.type+' \u00b7 '+r.vehicle+' \u00b7 '+(r.driver?r.driver.split(' ')[0]:'Unassigned')+'</div>'
+        +'<div style="font-size:.75rem;color:var(--mid);">'+r.type+' \u00b7 '+r.vehicle+' \u00b7 '+driverShortName(r.driver)+'</div>'
         +(phoneLink?'<div style="margin-top:3px;">'+phoneLink+'</div>':'')
         +'</div>'
         +'<div style="font-size:.82rem;font-weight:700;color:var(--mid);white-space:nowrap;">'+(fmtTime12(r.time)||'')+'</div>'
@@ -5786,7 +5805,7 @@ function buildConfirmationText(r){
   // Add XXL note to message if this is a double-vehicle booking
   if(r.xxl && r.vehicle2){
     const d2name=r.driver2?r.driver2.split(' ')[0]:'2nd driver';
-    const d1name=r.driver?r.driver.split(' ')[0]:'1st driver';
+    const d1name=r.driver?driverShortName(r.driver):'1st driver';
     const price1=Math.round((r.price||0)-(r.price2||0));
     message += '\n\nNote: XXL booking — 2 vehicles required.\n'
       +'  Vehicle 1: '+(r.vehicle||'?')+' ('+d1name+') — $'+price1+'\n'
@@ -5982,7 +6001,7 @@ function confirmationRecipients(r){
     add(label||null, phone);
   });
   // Assigned driver(s) — include driver2 for XXL bookings
-  if(r.driver) add(r.driver.split(' ')[0], (DRIVER_PROFILES[r.driver]||{}).phone);
+  if(r.driver) add(driverShortName(r.driver), (DRIVER_PROFILES[r.driver]||{}).phone);
   if(r.xxl && r.driver2) add(r.driver2.split(' ')[0], (DRIVER_PROFILES[r.driver2]||{}).phone);
   // Main driver = whoever scheduled/owns the ride (createdBy → driver name)
   const owner = r.createdBy ? USER_DRIVER_MAP[r.createdBy] : null;
@@ -6274,7 +6293,7 @@ function _prevPaySend(withTip){
 }
 
 function renderRideView(r){
-  const driverFirst = r.driver ? r.driver.split(' ')[0] : 'Unassigned';
+  const driverFirst = driverShortName(r.driver);
   const color = rideColor(r);
   const ink = readableInk(color);
   const feeBreak = buildFeeBreakdown(r);
@@ -8873,7 +8892,7 @@ function _heartOwner(){ return (currentUser&&PROXY_MAP[currentUser.name])||getMy
 function myHeartedRides(){ var o=_heartOwner(); var _today=toDateStr(new Date()); return (rides||[]).filter(function(r){ return r&&r.status!=='cancelled'&&(r.date||'')>=_today&&r.interest&&Object.keys(r.interest).some(function(k){ return (USER_DRIVER_MAP[k]||PROXY_MAP[k]||k)===o; })&&canSeeRide(r); }); }
 function _myHeartTs(r){ var o=_heartOwner(),ts=0; Object.keys(r.interest||{}).forEach(function(k){ if((USER_DRIVER_MAP[k]||PROXY_MAP[k]||k)===o){ var t=r.interest[k]; if(typeof t==='number'&&(!ts||t<ts)) ts=t; } }); return ts; }
 function closeHeartedRides(){ var o=document.getElementById('hearted-overlay'); if(o) o.remove(); }
-function renderHeartedList(q){ var box=document.getElementById('hearted-list'); if(!box) return; q=(q||'').toLowerCase().trim(); var all=myHeartedRides(); var list=all.slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); }); if(q){ list=list.filter(function(r){ var hay=((r.date||'')+' '+fmtDateShort(r.date)+' '+(r.client||'')+' '+(r.type||'')+' '+(r.time||'')).toLowerCase(); return hay.indexOf(q)>=0; }); } var cnt=document.getElementById('hearted-count'); if(cnt) cnt.textContent=list.length+' ride'+(list.length!==1?'s':''); if(!list.length){ box.innerHTML='<div style="text-align:center;padding:2rem;color:var(--mid);font-size:.9rem;">'+(all.length?'No hearted rides match that search.':'You have not hearted any rides yet. Tap the \uD83E\uDD0D on a ride to add it here.')+'</div>'; return; } box.innerHTML=list.map(function(r){ var c=rideColor(r); var dt=r.driver?r.driver.split(' ')[0]:'Unassigned'; var ts=_myHeartTs(r); var when=ts?('<span style="font-size:.66rem;color:var(--mid);">\u2764 '+fmtTs(ts)+'</span>'):''; return '<div onclick="closeHeartedRides();openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.8rem;padding:.7rem .85rem;border-radius:10px;margin-bottom:.45rem;background:'+c+'22;border:1.5px solid '+c+';cursor:pointer;">'+'<div style="width:7px;align-self:stretch;border-radius:3px;background:'+c+';flex-shrink:0;"></div>'+'<div style="text-align:center;min-width:54px;font-size:.72rem;font-weight:700;color:var(--black);line-height:1.2;">'+fmtDateShort(r.date)+'<br><span style="font-weight:600;color:var(--mid);">'+(fmtTime12(r.time)||'\u2014')+'</span></div>'+'<div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:.9rem;color:var(--black);">'+escHtml(r.client||'\u2014')+'</div><div style="font-size:.74rem;color:var(--mid);">'+escHtml(r.type||'')+' \u00b7 '+escHtml(dt)+'</div>'+when+'</div>'+'<div style="font-weight:700;color:var(--green);font-size:.9rem;">$'+(r.price||0)+'</div></div>'; }).join(''); }
+function renderHeartedList(q){ var box=document.getElementById('hearted-list'); if(!box) return; q=(q||'').toLowerCase().trim(); var all=myHeartedRides(); var list=all.slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); }); if(q){ list=list.filter(function(r){ var hay=((r.date||'')+' '+fmtDateShort(r.date)+' '+(r.client||'')+' '+(r.type||'')+' '+(r.time||'')).toLowerCase(); return hay.indexOf(q)>=0; }); } var cnt=document.getElementById('hearted-count'); if(cnt) cnt.textContent=list.length+' ride'+(list.length!==1?'s':''); if(!list.length){ box.innerHTML='<div style="text-align:center;padding:2rem;color:var(--mid);font-size:.9rem;">'+(all.length?'No hearted rides match that search.':'You have not hearted any rides yet. Tap the \uD83E\uDD0D on a ride to add it here.')+'</div>'; return; } box.innerHTML=list.map(function(r){ var c=rideColor(r); var dt=driverShortName(r.driver); var ts=_myHeartTs(r); var when=ts?('<span style="font-size:.66rem;color:var(--mid);">\u2764 '+fmtTs(ts)+'</span>'):''; return '<div onclick="closeHeartedRides();openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.8rem;padding:.7rem .85rem;border-radius:10px;margin-bottom:.45rem;background:'+c+'22;border:1.5px solid '+c+';cursor:pointer;">'+'<div style="width:7px;align-self:stretch;border-radius:3px;background:'+c+';flex-shrink:0;"></div>'+'<div style="text-align:center;min-width:54px;font-size:.72rem;font-weight:700;color:var(--black);line-height:1.2;">'+fmtDateShort(r.date)+'<br><span style="font-weight:600;color:var(--mid);">'+(fmtTime12(r.time)||'\u2014')+'</span></div>'+'<div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:.9rem;color:var(--black);">'+escHtml(r.client||'\u2014')+'</div><div style="font-size:.74rem;color:var(--mid);">'+escHtml(r.type||'')+' \u00b7 '+escHtml(dt)+'</div>'+when+'</div>'+'<div style="font-weight:700;color:var(--green);font-size:.9rem;">$'+(r.price||0)+'</div></div>'; }).join(''); }
 function openHeartedRides(){ closeHeartedRides(); var back=document.createElement('div'); back.id='hearted-overlay'; back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13000;display:flex;align-items:flex-start;justify-content:center;padding:2.5rem 1rem 1rem;overflow:auto;'; back.onclick=function(e){ if(e.target===back) closeHeartedRides(); }; back.innerHTML='<div style="background:var(--white);border-radius:16px;max-width:560px;width:100%;padding:1.1rem 1.1rem 1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.4);max-height:90vh;display:flex;flex-direction:column;box-sizing:border-box;">'+'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.4rem;">'+'<div style="font-size:1.05rem;font-weight:700;color:var(--black);">\u2764\uFE0F Rides you&#39;re interested in</div>'+'<button onclick="closeHeartedRides()" style="background:none;border:none;font-size:1.5rem;line-height:1;color:var(--mid);cursor:pointer;padding:0 .25rem;">&times;</button>'+'</div>'+'<div id="hearted-count" style="font-size:.74rem;color:var(--mid);margin-bottom:.6rem;"></div>'+'<input id="hearted-search" oninput="renderHeartedList(this.value)" placeholder="Search by date or client\u2026" style="width:100%;padding:.6rem .8rem;border:1.5px solid var(--light);border-radius:9px;font-family:inherit;font-size:.9rem;margin-bottom:.75rem;box-sizing:border-box;" />'+'<div id="hearted-list" style="overflow:auto;flex:1;"></div>'+'</div>'; document.body.appendChild(back); renderHeartedList(''); }
 
 function renderInterest(r){
@@ -9768,11 +9787,11 @@ function buildRideOfferCard(m){
   const rd=m.rideData||{};
   const price=rd.price?'$'+rd.price:'';
   const when=(rd.date?fmtDateShort(rd.date):'')+(rd.time?' at '+rd.time:'');
-  const driverTxt=rd.driver?rd.driver.split(' ')[0]:'Unassigned';
+  const driverTxt=driverShortName(rd.driver);
   // Live ride state: covered? who volunteered? am I the owner?
   const live = m.rideId ? rides.find(x=>x&&(x.id===m.rideId||x.id===+m.rideId||String(x.id)===String(m.rideId))) : null;
   const covered = !!(live && live.offerCovered);
-  const coveredBy = (covered && live && live.driver) ? live.driver.split(' ')[0] : '';
+  const coveredBy = (covered && live && live.driver) ? driverShortName(live.driver) : '';
   const vols = (live && Array.isArray(live.volunteers)) ? live.volunteers : [];
   const myDriver = (typeof getMyDriverName==='function') ? getMyDriverName() : '';
   const owner = live ? _offerOwner(live) : '';
@@ -9869,7 +9888,7 @@ async function shareRideToOfferings(id){
     showToast('Private rides can\u2019t be posted to Offerings \u2014 that would share the details with the whole team','error'); return; }
   const msg={
     sender: currentUser?.name||'',
-    text: '\uD83D\uDE97 Ride Available\n'+r.client+' \u00b7 '+r.type+(r.price?' \u00b7 $'+r.price:'')+'\n\uD83D\uDCC5 '+fmtDate(r.date)+(r.time?' at '+fmtTime12(r.time):'')+(r.vehicle?'\n\uD83D\uDE8C '+r.vehicle:'')+(r.pickup?'\n\uD83D\uDCCD '+r.pickup:'')+(r.driver?'\nDriver: '+r.driver.split(' ')[0]:' (unassigned)')+'\n\nCan anyone cover this?',
+    text: '\uD83D\uDE97 Ride Available\n'+r.client+' \u00b7 '+r.type+(r.price?' \u00b7 $'+r.price:'')+'\n\uD83D\uDCC5 '+fmtDate(r.date)+(r.time?' at '+fmtTime12(r.time):'')+(r.vehicle?'\n\uD83D\uDE8C '+r.vehicle:'')+(r.pickup?'\n\uD83D\uDCCD '+r.pickup:'')+(r.driver?'\nDriver: '+driverShortName(r.driver):' (unassigned)')+'\n\nCan anyone cover this?',
     ts: Date.now(), read: false, type: 'ride_offer', rideId: id,
     rideData:{ client:r.client||'', date:r.date||'', time:r.time||'', type:r.type||'', vehicle:r.vehicle||'', price:r.price||0, driver:r.driver||'', pickup:r.pickup||'' }
   };
@@ -12131,7 +12150,7 @@ function renderRides(){
       <td><div style="width:8px;min-height:36px;border-radius:3px;background:${rideColor(r)};align-self:stretch;"></div></td>
       <td><strong>${fmtDateShort(r.date)}</strong><br><span style="color:var(--mid);font-size:.75rem">${fmtTime12(r.time)||''}</span></td>
       <td><strong>${r.client}</strong><br><span style="font-size:.75rem;color:var(--mid)">${r.phone||''}</span></td>
-      <td style="font-size:.83rem;">${r.driver?`${driverDot(r.driver)}${r.driver.split(' ')[0]}`:'<span style="color:var(--mid)">Unassigned</span>'}</td>
+      <td style="font-size:.83rem;">${r.driver?`${driverDot(r.driver)}${driverShortName(r.driver)}`:'<span style="color:var(--mid)">Unassigned</span>'}</td>
       <td><span class="badge ${typeCls}">${r.type}${apVehSuffix(r)}</span></td>
       <td class="hide-sm" style="font-size:.83rem">${r.vehicle}</td>
       <td style="font-weight:600;color:var(--green)">$${r.price}</td>
@@ -12181,7 +12200,7 @@ function refreshDash(){
       <div class="ride-date" style="color:${tc};">${fmtDateShort(r.date)}<br><span style="font-size:.72rem">${fmtTime12(r.time)||''}</span></div>
       <div class="ride-info">
         <div class="ride-client" style="color:${tc};">${(r.confirmed||r.status==='confirmed'||r.status==='completed'||r.status==='paid')?'<span title="Confirmed" style="color:#16a34a;font-weight:700;">&#x2713;</span> ':''}${r.client}</div>
-        <div class="ride-detail" style="color:${tc};opacity:.78;">${r.type} · ${r.vehicle} · ${r.driver?r.driver.split(' ')[0]:'<em>Unassigned</em>'}</div>
+        <div class="ride-detail" style="color:${tc};opacity:.78;">${r.type} · ${r.vehicle} · ${r.driver?driverShortName(r.driver):'<em>Unassigned</em>'}</div>
       </div>
       <span class="badge ${typeCls}">${r.type}${apVehSuffix(r)}</span>
       <div class="ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}</div>
@@ -12256,7 +12275,7 @@ function renderDashConfirmations(){
     return `<div onclick="openRideModal(${r.id})" style="display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem;border-bottom:1px solid #f3d9a0;cursor:pointer;">
       <span style="min-width:58px;font-size:.8rem;font-weight:700;color:var(--black);">${fmtTime12(r.time)||'—'}</span>
       <span style="flex:1;font-size:.85rem;color:var(--black);">${escHtml(r.client||'—')}</span>
-      <span style="font-size:.72rem;color:var(--mid);">${r.driver?escHtml(r.driver.split(' ')[0]):'Unassigned'}</span>
+      <span style="font-size:.72rem;color:var(--mid);">${escHtml(driverShortName(r.driver))}</span>
       <span style="font-size:.8rem;font-weight:800;color:#b5651d;white-space:nowrap;">Send &rsaquo;</span>
     </div>`;
   }).join('');
@@ -17775,7 +17794,7 @@ async function sendDriverVCard(id){
   // save it — rather than auto-downloading the .vcf onto the sender's own phone.
   if(navigator.canShare){
     try{
-      const shareData={ files:[vcf], title:(r.driver.split(' ')[0]+' \u2014 driver contact') };
+      const shareData={ files:[vcf], title:(driverShortName(r.driver)+' \u2014 driver contact') };
       if(navigator.canShare(shareData)){
         await navigator.share(shareData);
         markPartSent(id,'vcard');
@@ -17960,7 +17979,7 @@ function buildIncomeRow(r, i, admin){
     driverCell = '<td style="padding:.55rem .75rem;">'
       + '<span style="display:flex;align-items:center;gap:4px;">'
       + '<span style="width:8px;height:8px;border-radius:50%;background:'+c+';flex-shrink:0;"></span>'
-      + (r.driver?r.driver.split(' ')[0]:'Unassigned')
+      + (driverShortName(r.driver))
       + '</span></td>';
   }
 
