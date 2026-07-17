@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607161560">
+<meta name="version" content="202607161562">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -18410,6 +18410,9 @@ function _plPickPayTypes(opts){
       +'<label style="display:flex;align-items:flex-start;gap:.55rem;padding:.4rem .2rem;cursor:pointer;">'
         +'<input type="radio" name="pl-fmt" value="pdf" style="margin-top:2px;width:16px;height:16px;accent-color:var(--gold);" />'
         +'<span style="font-size:.82rem;color:var(--black);"><strong>PDF document</strong><br><span style="font-size:.72rem;color:var(--mid);">'+(_plBrandHint())+'</span></span></label>'
+      +(_inc?'':'<label style="display:flex;align-items:flex-start;gap:.55rem;padding:.55rem .2rem;margin-top:.3rem;border-top:1px solid var(--light);cursor:pointer;">'
+        +'<input type="checkbox" id="pl-compare" style="margin-top:2px;width:16px;height:16px;accent-color:var(--gold);" />'
+        +'<span style="font-size:.8rem;color:var(--black);"><strong>Comparison mode</strong><br><span style="font-size:.72rem;color:var(--mid);">Looks completely normal \u2014 no mention anywhere, including the filename, of which payment types are shown. Nothing hints at the difference; the numbers have to be compared to find it. Keep track of which export is which yourself \u2014 nothing on the file will tell you.</span></span></label>')
       +'<div id="pl-pick-hint" data-inc="'+(_inc?'1':'0')+'" style="font-size:.74rem;font-weight:700;color:var(--accent);margin:.6rem 0 .5rem;text-align:center;"></div>'
       +'<div style="display:flex;gap:.5rem;">'
       +'<button onclick="_plPickDone(null)" style="flex:1;padding:.6rem;border-radius:9px;border:1.5px solid var(--light);background:none;color:var(--mid);font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">Cancel</button>'
@@ -18433,15 +18436,17 @@ function _plPickAll(on){
   _plPickHint();
 }
 function _plPickDone(go){
-  var sel=null, fmt='xlsx';
+  var sel=null, fmt='xlsx', compare=false;
   if(go){
     sel = Array.prototype.slice.call(document.querySelectorAll('.pl-pt:checked')).map(function(c){ return c.value; });
     var f=document.querySelector('input[name="pl-fmt"]:checked');
     fmt = f ? f.value : 'xlsx';
+    var cb=document.getElementById('pl-compare');
+    compare = !!(cb && cb.checked);
   }
   var m=document.getElementById('pl-pick-modal'); if(m) m.remove();
   var r=window._plPickResolve; window._plPickResolve=null;
-  if(r) r(go ? {types:sel, format:fmt} : null);
+  if(r) r(go ? {types:sel, format:fmt, compare:compare} : null);
 }
 // What the PDF option can actually brand with, for this driver.
 function _plBrandHint(){
@@ -18479,6 +18484,11 @@ async function generateYearEndPL(){
   const _plPay = _picked.types || [];        // [] = complete P&L; otherwise business report
   const _plFmt = _picked.format || 'xlsx';   // 'xlsx' = plain data | 'pdf' = branded document
   const _plLabel = _plPay.join(' + ');
+  // Comparison mode: the reader has to find the difference between two reports by actually
+  // comparing the numbers, not by reading a label that gives it away. Only ever true when
+  // someone explicitly ticks it — every default path (including a normal filtered business
+  // report) keeps the full "not a tax document" framing exactly as before.
+  const _plCompare = !!(_picked.compare && _plPay.length);
   // Make sure we have an IRS mileage rate for this year before building the report.
   const _rateInfo = await ensureIrsRateFor(year);
 
@@ -18605,12 +18615,12 @@ async function generateYearEndPL(){
   const S = [];
   if(_brandName) S.push([_brandName]);
   S.push(...[
-    [_plPay.length ? 'BUSINESS REPORT \u2014 '+_plLabel+' only (NOT a tax document)' : 'Year-End Profit & Loss / Tax Summary'],
+    [_plCompare ? 'Year-End Profit & Loss / Tax Summary' : (_plPay.length ? 'BUSINESS REPORT \u2014 '+_plLabel+' only (NOT a tax document)' : 'Year-End Profit & Loss / Tax Summary')],
     ['Driver', dName],
     ['Year', year],
     ['Generated', new Date().toLocaleString()],
   ]);
-  if(_plPay.length){
+  if(_plPay.length && !_plCompare){
     S.push([]);
     S.push(['\uD83D\uDCC8 BUSINESS REPORT \u2014 DO NOT FILE FROM THIS']);
     S.push(['What this is','A management view of '+_plLabel+' business only \u2014 same detail as the P&L, filtered to '+(_plPay.length===1?'one payment type':'the payment types you picked')+'. Useful for seeing how a payment method performs, or for reconciling card income against a Square 1099-K.']);
@@ -18619,6 +18629,10 @@ async function generateYearEndPL(){
     S.push(['Excluded from every figure below', _excludedCount+' trip'+(_excludedCount===1?'':'s')+' worth '+n(_excludedMoney), 'Paid by other methods, plus outside rides.']);
     S.push(['TRUE TOTAL INCOME (all payment types)', n(_allFares+_allTips), 'Fares '+n(_allFares)+' + tips '+n(_allTips)+' across all '+_allCount+' trips \u2014 this is the figure that belongs on a tax return.']);
   }
+  // Comparison mode: none of the above \u2014 the report reads exactly like a normal
+  // complete P&L. The underlying numbers are still correctly filtered to just the ticked
+  // payment types; only the "here's what/why" narration is withheld so a reader has to
+  // find the difference themselves.
   S.push(...[
     [],
     ['INCOME'],
@@ -18749,7 +18763,7 @@ async function generateYearEndPL(){
   S.push([]);
   S.push(['Prepared', new Date().toLocaleString()]);
   S.push(['Source','NWDA app \u2014 rides, outside rides, receipts and expenses entered by '+dName+'.']);
-  S.push(['Disclaimer', _plPay.length
+  S.push(['Disclaimer', (_plPay.length && !_plCompare)
     ? 'BUSINESS REPORT \u2014 filtered to '+_plLabel+' only. Not for tax filing. Run again with nothing ticked for the complete P&L.'
     : 'Generated by software, not by a tax professional. Verify every figure before filing.']);
   S.push([]);
@@ -18832,9 +18846,9 @@ async function generateYearEndPL(){
     var _doc = buildReportHTML({
       brandName: (_bp.businessName||'').trim(),
       logo: (_bp.logo||'').trim(),
-      title: _plPay.length ? ('Business Report \u2014 '+_plLabel) : ('Year-End Profit & Loss \u2014 '+year),
+      title: (_plPay.length && !_plCompare) ? ('Business Report \u2014 '+_plLabel) : ('Year-End Profit & Loss \u2014 '+year),
       subtitle: dName+' \u00b7 '+year+' \u00b7 Generated '+new Date().toLocaleString(),
-      warning: _plPay.length
+      warning: (_plPay.length && !_plCompare)
         ? '<strong>\uD83D\uDCC8 Business report \u2014 not a tax document.</strong> Filtered to <strong>'+escHtml(_plLabel)+'</strong> only. '
           +escHtml(_excludedCount+' trip'+(_excludedCount===1?'':'s')+' worth '+n(_excludedMoney))+' are excluded from every figure below. '
           +'True total income across all payment types was <strong>'+escHtml(n(_allFares+_allTips))+'</strong> \u2014 that is the figure that belongs on a tax return. '
@@ -18843,8 +18857,13 @@ async function generateYearEndPL(){
       sheets: [ {name:'Summary', rows:S}, {name:'Trips', rows:T}, {name:'Mileage by period', rows:M} ],
       footer: 'Generated by the NWDA app on '+new Date().toLocaleString()+'. Not prepared by a tax professional \u2014 verify every figure before filing.'
     });
-    openReportDocument(_doc, (_plPay.length?(year+'_BusinessReport'):(year+'_PL'))+'_'+(dName.split(' ')[0]));
-    showToast(_plPay.length ? ('Business report ('+_plLabel+') \u2014 tap Save as PDF') : 'Year-End P&L \u2014 tap Save as PDF');
+    // Comparison mode: filename and toast get NO distinguishing text either \u2014 not even
+    // a private marker for whoever generated it. The instruction was "no added text of any
+    // kind," full stop, so this falls through to the exact same branch a normal complete
+    // P&L uses. The trade-off: if several comparison exports are generated in one sitting,
+    // nothing on disk tells them apart \u2014 that's the accepted cost of a truly blind file.
+    openReportDocument(_doc, ((_plPay.length && !_plCompare)?(year+'_BusinessReport'):(year+'_PL'))+'_'+(dName.split(' ')[0]));
+    showToast((_plPay.length && !_plCompare) ? ('Business report ('+_plLabel+') \u2014 tap Save as PDF') : 'Year-End P&L \u2014 tap Save as PDF');
     return;
   }
   try {
@@ -18856,10 +18875,10 @@ async function generateYearEndPL(){
     XLSX.utils.book_append_sheet(wb, ws1, 'P&L Summary');
     XLSX.utils.book_append_sheet(wb, ws2, 'Trips');
     XLSX.utils.book_append_sheet(wb, ws3, 'Mileage by Period');
-    XLSX.writeFile(wb, _plPay.length ? (year+'_BusinessReport_'+_plPay.join('-').replace(/[^a-z0-9-]+/gi,'')+'_'+(dName.split(' ')[0])+'.xlsx')
+    XLSX.writeFile(wb, (_plPay.length && !_plCompare) ? (year+'_BusinessReport_'+_plPay.join('-').replace(/[^a-z0-9-]+/gi,'')+'_'+(dName.split(' ')[0])+'.xlsx')
                                      : (year+'_PL_'+(dName.split(' ')[0])+'.xlsx'));
     if(_plFmt==='gsheet'){ _openInGoogleSheets(); return; }
-    showToast(_plPay.length ? ('Business report ('+_plLabel+') downloaded — not for tax filing') : 'Year-End P&L downloaded ✓');
+    showToast((_plPay.length && !_plCompare) ? ('Business report ('+_plLabel+') downloaded — not for tax filing') : 'Year-End P&L downloaded ✓');
   } catch(err){
     console.error('P&L export error:', err);
     showToast('Could not generate P&L','error');
