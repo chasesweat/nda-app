@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607161573">
+<meta name="version" content="202607171575">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -8009,7 +8009,7 @@ function _openStartRideWithHome(rideId, startAddr, endAddr){
 }
 
 // ── LOG MILES MODAL (after the ride) ─────────────────────────────────────
-function _closeLogMiles(){ window._payAfterMiles=null; var o=document.getElementById('log-miles-overlay'); if(o)o.remove(); }
+function _closeLogMiles(){ window._payAfterMiles=null; var o=document.getElementById('log-miles-overlay'); if(o){ _unpinOverlay(o); o.remove(); } }
 
 function openLogMiles(rideId){
   var r=rides.find(function(x){return x.id===rideId;});
@@ -8017,14 +8017,20 @@ function openLogMiles(rideId){
   // Clear any leftover overlay WITHOUT touching _payAfterMiles — going through the full
   // _closeLogMiles() here would silently wipe out a flag toggleRidePaid may have just set
   // moments earlier, breaking the mark-paid → verify miles → back-to-payment sequence.
-  var _stale=document.getElementById('log-miles-overlay'); if(_stale) _stale.remove();
+  var _stale=document.getElementById('log-miles-overlay'); if(_stale){ _unpinOverlay(_stale); _stale.remove(); }
   var ov=document.createElement('div');
   ov.id='log-miles-overlay';
-  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14000;'
-    +'display:flex;align-items:center;justify-content:center;padding:1.5rem;';
+  // top:0/left:0 + explicit width/height (not inset:0) so _pinToVisualViewport can shrink
+  // this to the actually-visible area when the keyboard opens — see the comment on that
+  // function for why the earlier 85vh / 85dvh height caps could never have worked here.
+  // margin:auto on the child centers it in whatever space is left, and still scrolls
+  // correctly if the modal is taller than that space; align-items:center would clip the
+  // overflowing top with no way to scroll back to it.
+  ov.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,.65);z-index:14000;'
+    +'display:flex;justify-content:center;padding:1rem;overflow-y:auto;box-sizing:border-box;';
   ov.onclick=function(e){if(e.target===ov)_closeLogMiles();};
-  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:360px;width:100%;padding:1.25rem;'
-    +'box-shadow:0 24px 60px rgba(0,0,0,.35);max-height:85vh;overflow-y:auto;box-sizing:border-box;">'
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:360px;width:100%;margin:auto;padding:1.25rem;'
+    +'box-shadow:0 24px 60px rgba(0,0,0,.35);box-sizing:border-box;">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.9rem;">'
     +'<div><div style="font-size:1.05rem;font-weight:800;color:#0f172a;">&#128205; Log Miles</div>'
     +'<div style="font-size:.75rem;color:#64748b;margin-top:2px;">'+escHtml(r.client||'')+'</div></div>'
@@ -8055,6 +8061,7 @@ function openLogMiles(rideId){
     +'</div>'
     +'</div>';
   document.body.appendChild(ov);
+  ov._vvDetach = _pinToVisualViewport(ov);
   setTimeout(function(){ var el=document.getElementById('lm-miles'); if(el)el.focus(); },100);
 }
 
@@ -8718,7 +8725,44 @@ function _mtUpdateBar(){
 }
 
 // ── STOP POPUP ────────────────────────────────────────────────────────────
-function _mtClosePop(){var p=document.getElementById('mt-popup');if(p)p.remove();}
+// ── KEYBOARD-SAFE OVERLAYS ───────────────────────────────────────────────
+// Why this exists (and why the v568 max-height:85vh and v574 max-height:85dvh fixes
+// before it did NOT work): the on-screen keyboard is NOT part of the browser UI as far
+// as CSS viewport units are concerned. When it opens, only the VISUAL viewport shrinks.
+// The LAYOUT viewport — the box that position:fixed;inset:0 resolves against, and the box
+// vh/svh/lvh/dvh are all measured from — does not change at all. So `85dvh` computes to
+// exactly the same pixel value as `85vh` with the keyboard up, and a full-screen fixed
+// overlay stays full-screen. A modal centered inside it stays centered on the whole
+// screen, which puts its lower half (the Save button) behind the keyboard. A height cap
+// can't fix that: the Log Miles modal's content is shorter than the cap anyway, so
+// overflow-y:auto never even engages.
+// The only thing that actually tracks the visible area is window.visualViewport. This
+// pins an overlay to it, so "centered" means centered in what the user can actually see.
+// Returns a detach function; callers MUST call it before removing the overlay or the
+// listeners leak and keep writing to a dead node.
+function _pinToVisualViewport(ov){
+  var vv = window.visualViewport;
+  if(!vv || !ov) return function(){};
+  function apply(){
+    try{
+      ov.style.top    = vv.offsetTop + 'px';
+      ov.style.left   = vv.offsetLeft + 'px';
+      ov.style.width  = vv.width + 'px';
+      ov.style.height = vv.height + 'px';
+      ov.style.right  = 'auto';
+      ov.style.bottom = 'auto';
+    }catch(_e){}
+  }
+  apply();
+  vv.addEventListener('resize', apply);
+  vv.addEventListener('scroll', apply);
+  return function(){
+    try{ vv.removeEventListener('resize', apply); vv.removeEventListener('scroll', apply); }catch(_e){}
+  };
+}
+function _unpinOverlay(el){ try{ if(el && el._vvDetach){ el._vvDetach(); el._vvDetach=null; } }catch(_e){} }
+
+function _mtClosePop(){var p=document.getElementById('mt-popup');if(p){_unpinOverlay(p);p.remove();}}
 
 function _mtSplitEvenly(){
   var cnt=_mtRideIds.length; if(!cnt)return;
@@ -8780,9 +8824,13 @@ function _mtShowStopPopup(){
 
   var popup=document.createElement('div');
   popup.id='mt-popup';
-  popup.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14000;display:flex;align-items:flex-start;justify-content:center;padding:2rem 1rem 1rem;overflow:auto;';
+  // top:0/left:0 + explicit width/height (not inset:0) so _pinToVisualViewport can shrink
+  // this to the actually-visible area when the keyboard opens. margin:auto on the child
+  // (rather than align-items) centers it when there's room but still scrolls correctly
+  // when there isn't — align-items:center clips the overflowing top unscrollably.
+  popup.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,.65);z-index:14000;display:flex;justify-content:center;padding:1rem;overflow-y:auto;box-sizing:border-box;';
   popup.onclick=function(e){if(e.target===popup)_mtClosePop();};
-  popup.innerHTML='<div style="background:#fff;border-radius:16px;max-width:480px;width:100%;padding:1.25rem;box-shadow:0 24px 60px rgba(0,0,0,.35);max-height:90vh;overflow-y:auto;display:flex;flex-direction:column;box-sizing:border-box;">'
+  popup.innerHTML='<div style="background:#fff;border-radius:16px;max-width:480px;width:100%;margin:auto;padding:1.25rem;box-shadow:0 24px 60px rgba(0,0,0,.35);display:flex;flex-direction:column;box-sizing:border-box;">'
     // header
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">'
     +'<div><div style="font-size:1.05rem;font-weight:800;color:#0f172a;">\uD83D\uDCCD Session Summary</div>'
@@ -8812,6 +8860,7 @@ function _mtShowStopPopup(){
     +'</div>'
     +'</div>';
   document.body.appendChild(popup);
+  popup._vvDetach = _pinToVisualViewport(popup);
 }
 
 // ── START / ADD / STOP ────────────────────────────────────────────────────
