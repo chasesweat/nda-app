@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607171577">
+<meta name="version" content="202607171578">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -8145,44 +8145,59 @@ async function _saveLogMiles(rideId){
     showToast('\u26A0\uFE0F Could not find that ride \u2014 nothing was saved');
     return;
   }
-  var mi=parseFloat(document.getElementById('lm-miles').value)||0;
-  var tip=parseFloat(document.getElementById('lm-tip').value)||0;
-  var gas=parseFloat(document.getElementById('lm-gas').value)||0;
-  // These are the miles the DRIVER actually drove (e.g. round trip), used only
-  // for their gas/maintenance cost and profit. It does NOT change the client's
-  // fare, which is based on the originally quoted r.miles.
-  r.drivenMiles=mi;
-  var _r2=(r.linkedRide!=null)?_rideById(r.linkedRide):null;
-  if(_r2){ var _m1=parseFloat(r.miles)||0,_m2=parseFloat(_r2.miles)||0,_tot=_m1+_m2; var _s1=_tot>0?Math.round(mi*(_m1/_tot)*10)/10:Math.round(mi/2*10)/10; r.drivenMiles=_s1; _r2.drivenMiles=Math.round((mi-_s1)*10)/10; }
-  if(tip>0) r.tip=tip;
-  if(gas>0) await _mtSaveGasPrice(gas);
-  try{await saveRides();}catch(e){console.warn(e);}
-  if(_r2 && !window._srtTipChained){
-    window._srtTipChained=true;
-    // Carry the mark-paid flag over to the second linked ride if it was pointing at this
-    // one — same reasoning as the fix in openLogMiles above.
-    var _carryPayAfter = _sameRideId(window._payAfterMiles, rideId) ? _r2.id : null;
-    var _staleOv=document.getElementById('log-miles-overlay'); if(_staleOv) _staleOv.remove();
-    if(_carryPayAfter!=null) window._payAfterMiles=_carryPayAfter;
-    var _w0=document.getElementById('mt-wrap'); if(_w0)_w0.innerHTML=mtBarHtml(rideId);
-    showToast('\uD83D\uDCCD '+r.drivenMiles+' mi (split) saved \u2014 now log the second ride');
-    setTimeout(function(){ try{ openLogMiles(_r2.id); }catch(e){} }, 220);
-    return;
+  // v577 only made the RIDE-NOT-FOUND path loud. Everything below it — gas price save,
+  // linked-ride math, the mileage-bar refresh, the payment-follow-up chain — was still able
+  // to throw and die silently, leaving the modal open with no toast and no console line. That
+  // gap is exactly what was reported next: no "ride not found" toast (so the id WAS found),
+  // yet Save still visibly does nothing. One unguarded throw anywhere in here explains it.
+  // No single line here reproduces with synthetic test data, so rather than guess again, the
+  // whole body is wrapped: whatever is actually throwing on a real device will now say so.
+  try{
+    var mi=parseFloat(document.getElementById('lm-miles').value)||0;
+    var tip=parseFloat(document.getElementById('lm-tip').value)||0;
+    var gas=parseFloat(document.getElementById('lm-gas').value)||0;
+    // These are the miles the DRIVER actually drove (e.g. round trip), used only
+    // for their gas/maintenance cost and profit. It does NOT change the client's
+    // fare, which is based on the originally quoted r.miles.
+    r.drivenMiles=mi;
+    var _r2=(r.linkedRide!=null)?_rideById(r.linkedRide):null;
+    if(_r2){ var _m1=parseFloat(r.miles)||0,_m2=parseFloat(_r2.miles)||0,_tot=_m1+_m2; var _s1=_tot>0?Math.round(mi*(_m1/_tot)*10)/10:Math.round(mi/2*10)/10; r.drivenMiles=_s1; _r2.drivenMiles=Math.round((mi-_s1)*10)/10; }
+    if(tip>0) r.tip=tip;
+    if(gas>0) await _mtSaveGasPrice(gas);
+    try{await saveRides();}catch(e){console.warn(e);}
+    if(_r2 && !window._srtTipChained){
+      window._srtTipChained=true;
+      // Carry the mark-paid flag over to the second linked ride if it was pointing at this
+      // one — same reasoning as the fix in openLogMiles above.
+      var _carryPayAfter = _sameRideId(window._payAfterMiles, rideId) ? _r2.id : null;
+      var _staleOv=document.getElementById('log-miles-overlay'); if(_staleOv) _staleOv.remove();
+      if(_carryPayAfter!=null) window._payAfterMiles=_carryPayAfter;
+      var _w0=document.getElementById('mt-wrap'); if(_w0)_w0.innerHTML=mtBarHtml(rideId);
+      showToast('\uD83D\uDCCD '+r.drivenMiles+' mi (split) saved \u2014 now log the second ride');
+      setTimeout(function(){ try{ openLogMiles(_r2.id); }catch(e){} }, 220);
+      return;
+    }
+    window._srtTipChained=false;
+    // _payAfterMiles is assigned from r.id directly (toggleRidePaid), so it keeps the id's real
+    // type, while rideId arrived coerced through the onclick attribute. Strict === compared a
+    // string to a number here and quietly skipped the mark-paid follow-up.
+    var _doPayNext=_sameRideId(window._payAfterMiles, rideId);
+    _closeLogMiles();
+    // Refresh the mileage bar in the open ride modal
+    var w=document.getElementById('mt-wrap'); if(w)w.innerHTML=mtBarHtml(rideId);
+    // Reflect the freshly logged miles/tip everywhere right away — otherwise the income
+    // sheet keeps showing the old (quoted) miles until you navigate away and back.
+    try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+    try{ if(typeof renderIncome==='function' && document.getElementById('page-income') && document.getElementById('page-income').classList.contains('active')) renderIncome(); }catch(e){}
+    showToast('\uD83D\uDCCD '+mi+' mi saved'+(tip?' + $'+tip+' tip':''));
+    if(_doPayNext && typeof openPaymentModal==='function'){ setTimeout(function(){ try{ openPaymentModal(rideId); }catch(e){} }, 180); }
+  }catch(err){
+    // The safety net. Whatever this says next time is the real bug — report it verbatim.
+    try{ console.error('[LogMiles] save threw:', err && (err.stack||err.message) || err); }catch(_e){}
+    try{ showToast('\u26A0\uFE0F Save error: '+((err&&err.message)||'unknown')+' \u2014 nothing was saved, try again'); }catch(_e){}
+    // Best-effort: don't leave the driver stuck staring at a dead modal on top of the error.
+    try{ _closeLogMiles(); }catch(_e){}
   }
-  window._srtTipChained=false;
-  // _payAfterMiles is assigned from r.id directly (toggleRidePaid), so it keeps the id's real
-  // type, while rideId arrived coerced through the onclick attribute. Strict === compared a
-  // string to a number here and quietly skipped the mark-paid follow-up.
-  var _doPayNext=_sameRideId(window._payAfterMiles, rideId);
-  _closeLogMiles();
-  // Refresh the mileage bar in the open ride modal
-  var w=document.getElementById('mt-wrap'); if(w)w.innerHTML=mtBarHtml(rideId);
-  // Reflect the freshly logged miles/tip everywhere right away — otherwise the income
-  // sheet keeps showing the old (quoted) miles until you navigate away and back.
-  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
-  try{ if(typeof renderIncome==='function' && document.getElementById('page-income') && document.getElementById('page-income').classList.contains('active')) renderIncome(); }catch(e){}
-  showToast('\uD83D\uDCCD '+mi+' mi saved'+(tip?' + $'+tip+' tip':''));
-  if(_doPayNext && typeof openPaymentModal==='function'){ setTimeout(function(){ try{ openPaymentModal(rideId); }catch(e){} }, 180); }
 }
 
 // ── CLIENT LIST UNLOCK (double admin approval) ────────────────────────────
