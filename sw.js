@@ -1,19 +1,44 @@
 // NWDA app service worker
-// Network-first for the app shell so a new deploy ALWAYS loads (fixes the "still shows the
-// old version after I upload" problem), with an offline cache fallback. Assets are cached
-// stale-while-revalidate. Push notifications are handled separately by firebase-messaging-sw.js.
+// App shell (index.html) is served stale-while-revalidate: the cached copy renders instantly,
+// the network copy updates the cache in the background, and a version-mismatch check tells the
+// page to reload if what it just cached differs from what's on screen. See the full reasoning
+// on the `if (isHTML)` block below. (This comment used to say "network-first" — that was true
+// through build 575 and stopped being true at 576; it just wasn't updated here until 579.)
+// Other assets (icons, images, fonts) are also stale-while-revalidate. Push notifications are
+// handled separately by firebase-messaging-sw.js.
 
 // IMPORTANT: bump this version string on EVERY deploy. Changing sw.js's bytes is what makes
 // the browser reinstall the worker, wipe the old cache, and pull the newest app. (Paired with
-// app build 202607171578.)
+// app build 202607171581.)
 // VERSIONING RULE: the visible build number (hamburger menu, last 3 digits of index.html's
 // <meta name="version"> tag) is always this cache number PLUS 409. Bump both by exactly 1
-// together on every single deploy — never skip, never jump. Current: cache v169 = build 578.
-const CACHE = 'nwda-cache-v169';
+// together on every single deploy — never skip, never jump. Current: cache v172 = build 581.
+const CACHE = 'nwda-cache-v172';
 
 // Take over immediately on install.
 self.addEventListener('install', function (e) {
-  self.skipWaiting();
+  // BUG (reported, v580): activate wipes every cache except the new CACHE name — which is
+  // correct, since every deploy bumps it — but that means the new cache starts EMPTY. The
+  // very next thing that happens is the page's own auto-update code force-reloading (see
+  // registerSW's controllerchange handler in index.html) into that empty cache. The
+  // stale-while-revalidate fetch handler below has nothing to serve, so THIS ONE RELOAD —
+  // the one immediately after every single deploy — falls through to a full, blocking
+  // network fetch of the ~3MB shell. Reported as a 47-second load on cell data; the v576
+  // handoff undersold this as "you may see the previous build for a second," which was wrong
+  // — there is no cache to show the previous build FROM once activate has already run.
+  //
+  // Fix: warm the NEW cache with the shell here, during install, while the OLD worker is
+  // still fully serving traffic and the OLD cache still exists. By the time activate deletes
+  // the old cache and the forced reload lands, the new cache already has content — so that
+  // reload hits the fast cached path instead of a live network fetch. Best-effort: if this
+  // fails (offline install, flaky network), skipWaiting proceeds anyway and the existing
+  // stale-while-revalidate + network-fallback logic still works, just without this warm start.
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(function (c) { return c.add('./index.html'); })
+      .catch(function (err) { console.warn('[SW] precache during install failed (non-fatal):', err); })
+      .then(function () { self.skipWaiting(); })
+  );
 });
 
 // Clean out old caches and control open pages right away.
