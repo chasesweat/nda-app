@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607161562">
+<meta name="version" content="202607161563">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -7996,7 +7996,7 @@ function openLogMiles(rideId){
     +'</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin-bottom:.75rem;align-items:end;">'
     +'<div><label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">MILES DRIVEN</label>'
-    +'<div style="font-size:.66rem;color:#94a3b8;margin-bottom:4px;">Total from Waze / Apple / Google Maps</div>'
+    +'<div style="font-size:.66rem;color:#94a3b8;margin-bottom:4px;">Total from Waze / Apple / Google Maps — include the drive to pick them up, not just the ride itself. That’s still deductible business mileage.</div>'
     +'<input id="lm-miles" type="number" min="0" step="0.1" value="'+(r.drivenMiles||r.miles||'')+'" placeholder="e.g. 41" '
     +'style="width:100%;padding:.55rem .65rem;border:1.5px solid #c4b5fd;border-radius:9px;font-family:inherit;font-size:1rem;box-sizing:border-box;">'
     +'</div>'
@@ -18285,11 +18285,21 @@ function _irsToggleEdit(id){
 // Reports are built as arrays of rows (the same arrays the .xlsx is made from), so the
 // exact same numbers can be written to a spreadsheet OR laid out as a branded document.
 // Excel = plain data for an accountant. PDF = branded, for handing over.
+// Row labels (Summary sheet, column 0) whose numeric value is NOT a dollar amount —
+// miles and counts, not money. Everything else numeric in that sheet genuinely is a
+// dollar figure, so this is a short exclusion list rather than trying to enumerate every
+// money row (which is most of them).
+var _REPORT_NON_MONEY_LABELS = ['Year','Business miles on logged rides','Total miles',
+  'Trips logged','Booked rides on schedule','Unpaid rides not counted'];
 function _reportSectionsToHTML(sheets){
   var h='';
   sheets.forEach(function(sh){
     h+='<h2>'+escHtml(sh.name)+'</h2>';
     var rows=sh.rows||[];
+    // Only the Summary sheet mixes dollar figures with plain counts/miles in the same
+    // label/value layout — Trips and Mileage-by-period are their own separate,
+    // differently-shaped detail tables and are left exactly as they were.
+    var moneySheet = (sh.name==='Summary');
     // A row of >=3 short cells that looks like a header starts a table; otherwise label/value.
     h+='<table>';
     rows.forEach(function(r){
@@ -18299,12 +18309,17 @@ function _reportSectionsToHTML(sheets){
       var isHead = r.length===1 && first && first===first.toUpperCase() && /[A-Z]/.test(first);
       if(isHead){ h+='<tr class="hd"><td colspan="4">'+escHtml(first)+'</td></tr>'; return; }
       if(r.length===1){ h+='<tr><td colspan="4" class="nt">'+escHtml(first)+'</td></tr>'; return; }
+      var rowIsMoney = moneySheet && _REPORT_NON_MONEY_LABELS.indexOf(first)===-1;
       var cells='';
       for(var i=0;i<r.length && i<4;i++){
         var v=r[i]==null?'':r[i];
         if(v && typeof v==='object' && v.v!==undefined) v=v.v;   // formula cell -> its value
         var num=(typeof v==='number');
-        cells+='<td class="'+(i===0?'lb':(num?'num':'tx'))+'">'+escHtml(String(v))+'</td>';
+        // Any NUMERIC cell in a money row is a dollar figure here — text notes (like
+        // "80.1% of income") are already strings, so the num check alone already keeps
+        // this from touching them. Column 0 (the label) is handled separately above.
+        var display = (num && i>0 && rowIsMoney) ? money(v) : String(v);
+        cells+='<td class="'+(i===0?'lb':(num?'num':'tx'))+'">'+escHtml(display)+'</td>';
       }
       for(var k=r.length;k<4;k++) cells+='<td></td>';
       h+='<tr'+(/^(TOTAL|NET|Gross|Total)/.test(first)?' class="tot"':'')+'>'+cells+'</tr>';
