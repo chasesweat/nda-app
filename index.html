@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607171575">
+<meta name="version" content="202607171577">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -8011,9 +8011,37 @@ function _openStartRideWithHome(rideId, startAddr, endAddr){
 // ── LOG MILES MODAL (after the ride) ─────────────────────────────────────
 function _closeLogMiles(){ window._payAfterMiles=null; var o=document.getElementById('log-miles-overlay'); if(o){ _unpinOverlay(o); o.remove(); } }
 
+// Find a ride by id, tolerating the type the id arrives as.
+//
+// Why this has to exist: ride ids are created as numbers (`nextId++`), but any function
+// reached from an inline onclick="" attribute receives them via string concatenation —
+// `onclick="_saveLogMiles('+rideId+')"` renders a bare `1752800000001` NUMBER LITERAL, so a
+// STRING id "1752800000001" silently arrives as a number and `x.id === rideId` is false.
+// The id repair block at boot claims "every ride must have a UNIQUE numeric id" but its
+// check is `isFinite(Number(r.id))`, which a numeric string passes — so it never actually
+// coerces the type it promises, and string ids survive in real data.
+//
+// The codebase already knew this: addRideToCalendar, toggleConfirmSent, textClient and three
+// others all hand-roll `x.id===id||x.id===+id||String(x.id)===String(id)`. Every one of them
+// is reached from an onclick. Log Miles is reached from an onclick too and never got the
+// workaround — which is exactly why its Save button did nothing for builds on end.
+// This is that same comparison, named once, so the next onclick-reached function can just
+// call it instead of rediscovering the bug.
+function _rideById(id){
+  if(id==null || typeof rides==='undefined' || !rides) return null;
+  var s=String(id);
+  return rides.find(function(x){
+    return x && x.id!=null && (x.id===id || x.id===+id || String(x.id)===s);
+  }) || null;
+}
+function _sameRideId(a,b){
+  if(a==null || b==null) return false;
+  return a===b || String(a)===String(b);
+}
+
 function openLogMiles(rideId){
-  var r=rides.find(function(x){return x.id===rideId;});
-  if(!r){ showToast('Ride not found'); return; }
+  var r=_rideById(rideId);
+  if(!r){ console.warn('[LogMiles] openLogMiles: no ride for id', rideId, '(type '+(typeof rideId)+')'); showToast('Ride not found'); return; }
   // Clear any leftover overlay WITHOUT touching _payAfterMiles — going through the full
   // _closeLogMiles() here would silently wipe out a flag toggleRidePaid may have just set
   // moments earlier, breaking the mark-paid → verify miles → back-to-payment sequence.
@@ -8103,7 +8131,20 @@ function _maybeOfferFeeAndPaid(rideId){
 
 
 async function _saveLogMiles(rideId){
-  var r=rides.find(function(x){return x.id===rideId;}); if(!r)return;
+  // This `if(!r)` used to be a bare `return` — no toast, no throw, no console line. Combined
+  // with the id-type coercion described on _rideById, that made Save a button that visibly
+  // did NOTHING when clicked, which is exactly how it was reported ("almost like clicking
+  // the save button doesnt call anything"). Three separate builds tried to fix that symptom
+  // as a keyboard-overlap problem because nothing in the app ever said otherwise.
+  // The lookup is fixed below; this stays loud on purpose. A save that doesn't happen must
+  // never again look identical to a save that did.
+  var r=_rideById(rideId);
+  if(!r){
+    try{ console.warn('[LogMiles] save: no ride for id', rideId, '(type '+(typeof rideId)+')',
+      'known:', (rides||[]).slice(0,5).map(function(x){ return x && x.id+':'+(typeof x.id); })); }catch(_e){}
+    showToast('\u26A0\uFE0F Could not find that ride \u2014 nothing was saved');
+    return;
+  }
   var mi=parseFloat(document.getElementById('lm-miles').value)||0;
   var tip=parseFloat(document.getElementById('lm-tip').value)||0;
   var gas=parseFloat(document.getElementById('lm-gas').value)||0;
@@ -8111,7 +8152,7 @@ async function _saveLogMiles(rideId){
   // for their gas/maintenance cost and profit. It does NOT change the client's
   // fare, which is based on the originally quoted r.miles.
   r.drivenMiles=mi;
-  var _r2=(r.linkedRide!=null)?rides.find(function(x){return x&&x.id===r.linkedRide;}):null;
+  var _r2=(r.linkedRide!=null)?_rideById(r.linkedRide):null;
   if(_r2){ var _m1=parseFloat(r.miles)||0,_m2=parseFloat(_r2.miles)||0,_tot=_m1+_m2; var _s1=_tot>0?Math.round(mi*(_m1/_tot)*10)/10:Math.round(mi/2*10)/10; r.drivenMiles=_s1; _r2.drivenMiles=Math.round((mi-_s1)*10)/10; }
   if(tip>0) r.tip=tip;
   if(gas>0) await _mtSaveGasPrice(gas);
@@ -8120,7 +8161,7 @@ async function _saveLogMiles(rideId){
     window._srtTipChained=true;
     // Carry the mark-paid flag over to the second linked ride if it was pointing at this
     // one — same reasoning as the fix in openLogMiles above.
-    var _carryPayAfter = (window._payAfterMiles===rideId) ? _r2.id : null;
+    var _carryPayAfter = _sameRideId(window._payAfterMiles, rideId) ? _r2.id : null;
     var _staleOv=document.getElementById('log-miles-overlay'); if(_staleOv) _staleOv.remove();
     if(_carryPayAfter!=null) window._payAfterMiles=_carryPayAfter;
     var _w0=document.getElementById('mt-wrap'); if(_w0)_w0.innerHTML=mtBarHtml(rideId);
@@ -8129,7 +8170,10 @@ async function _saveLogMiles(rideId){
     return;
   }
   window._srtTipChained=false;
-  var _doPayNext=(window._payAfterMiles===rideId);
+  // _payAfterMiles is assigned from r.id directly (toggleRidePaid), so it keeps the id's real
+  // type, while rideId arrived coerced through the onclick attribute. Strict === compared a
+  // string to a number here and quietly skipped the mark-paid follow-up.
+  var _doPayNext=_sameRideId(window._payAfterMiles, rideId);
   _closeLogMiles();
   // Refresh the mileage bar in the open ride modal
   var w=document.getElementById('mt-wrap'); if(w)w.innerHTML=mtBarHtml(rideId);
@@ -21208,12 +21252,35 @@ async function registerSW(){
           if(nw.state==='installed' && navigator.serviceWorker.controller){ try{ nw.postMessage({type:'SKIP_WAITING'}); }catch(_e){} }
         }); }
       });
-      if(!window._swReloadHooked){ window._swReloadHooked=true; var _swReloaded=false;
-        navigator.serviceWorker.addEventListener('controllerchange', function(){ if(_swReloaded) return; _swReloaded=true; window.location.reload(); });
+      // NOTE: this flag is deliberately on `window`, not a local. The app-update-ready
+      // handler below guards on the same one — a function-scoped `var` here would be a
+      // different variable, letting both paths fire and reload twice.
+      if(!window._swReloadHooked){ window._swReloadHooked=true; window._swReloaded=false;
+        navigator.serviceWorker.addEventListener('controllerchange', function(){ if(window._swReloaded) return; window._swReloaded=true; window.location.reload(); });
       }
     // When a notification is tapped, the service worker tells us — deep-link straight
     // to the ride/chat it came from; fall back to the bell panel only if no target.
     navigator.serviceWorker.addEventListener('message', function(ev){
+      // The app shell is now served from cache first (instant launch instead of re-downloading
+      // ~3MB every time). The worker revalidates in the background and fires this when the
+      // build it just cached differs from the one currently on screen. This is the safety net
+      // for a deploy that changed index.html but forgot to bump sw.js — in that case the
+      // worker never reinstalls, so the updatefound/controllerchange path below never runs and
+      // this is the ONLY thing that catches it.
+      if(ev && ev.data && ev.data.type==='app-update-ready'){
+        try{
+          if(window._swReloaded) return;
+          // Don't yank the page out from under someone mid-edit. A modal open, or text typed
+          // into a field, means they're doing something — the new build can wait for the next
+          // launch, which is already cached and will be instant.
+          var busy = !!document.querySelector('.modal-overlay.show, #log-miles-overlay, #mt-popup, #ride-modal.show')
+                  || (document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName));
+          if(busy) return;
+          window._swReloaded = true;
+          window.location.reload();
+        }catch(_e){}
+        return;
+      }
       if(ev && ev.data && ev.data.type==='notification-click'){
         try{
           if(typeof currentUser!=='undefined' && currentUser){
