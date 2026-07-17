@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607161557">
+<meta name="version" content="202607161558">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -5999,28 +5999,7 @@ function buildClientVCard(ride){
 // Lets the assigned driver save the client as a phone contact — driver-only by design,
 // double-checked here even though the button itself is also gated, since this writes
 // out to the driver's own device and shouldn't be reachable by anyone else.
-async function saveClientContact(rideId){
-  const r = rides.find(x=>x&&(x.id===rideId||x.id===+rideId||String(x.id)===String(rideId)));
-  if(!r){ showToast('Ride not found','error'); return; }
-  const myDriverName = getMyDriverName();
-  if(!myDriverName || r.driver!==myDriverName){ showToast('Only the assigned driver can save this contact','error'); return; }
-  if(!r.client){ showToast('No client name on this ride','error'); return; }
-  const file = buildClientVCard(r);
-  try{
-    if(navigator.canShare && navigator.canShare({files:[file]})){
-      await navigator.share({files:[file], title:r.client+' — contact'});
-      return;
-    }
-  }catch(e){ if(e && e.name==='AbortError') return; }
-  try{
-    const url = URL.createObjectURL(file);
-    const a = document.createElement('a');
-    a.href = url; a.download = file.name;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(()=>URL.revokeObjectURL(url), 4000);
-    showToast('📇 Saved '+r.client+'\u2019s contact');
-  }catch(e){ showToast('Could not save contact','error'); }
-}
+
 
 const _driverCardImgCache = {};
 // Pre-built share payloads keyed by ride id — populated when To Confirm renders
@@ -6319,11 +6298,6 @@ function renderRideView(r){
   const gateCodeRowHtml = canSeeGateCode(r)
     ? '<div style="font-size:.88rem;margin-bottom:3px;color:#7c3aed;font-weight:600;">\uD83D\uDD11 Gate code: '+escHtml(r.gateCode)+'</div>'
     : '';
-  // Save the client as a contact — assigned driver only, and only if there's a real
-  // phone number to save. Personal convenience, never sent to the client/creator/Morgan.
-  const saveClientContactRowHtml = (r.client && getMyDriverName()===r.driver && clientPhoneFor(r))
-    ? '<button onclick="saveClientContact('+r.id+')" style="background:none;border:1.5px solid #7c3aed;color:#7c3aed;border-radius:8px;padding:.35rem .7rem;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;margin-bottom:.5rem;">📇 Save '+escHtml((r.client||'').split(' ')[0])+'\u2019s contact</button>'
-    : '';
   if(!window._offeredRides) window._offeredRides=new Set();
   const _alreadyOffered=window._offeredRides.has(r.id);
   const _pairedRideForBtn=(r.pairId&&rides)?rides.find(function(x){return x.id!==r.id&&x.pairId===r.pairId;}):null;
@@ -6528,7 +6502,7 @@ function renderRideView(r){
 
     <!-- ═══ ACTIONS ═══ -->
     ${(()=>{
-      const _hasActions = !!((getMyDriverName()===r.driver) || saveClientContactRowHtml || (canSeeContact&&hasIncomeAccess()&&_slLocalType)
+      const _hasActions = !!((getMyDriverName()===r.driver) || (canSeeContact&&hasIncomeAccess()&&_slLocalType)
         || (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP') || _pairedRideForBtn || shareOfferingsBtn);
       if(!_hasActions) return '';
       return `<div class="detail-row" style="grid-column:1/-1;">
@@ -6536,7 +6510,6 @@ function renderRideView(r){
         <div style="display:flex;flex-direction:column;gap:.5rem;">
           ${(getMyDriverName()===r.driver) ? `<div><button onclick="addRideToCalendar(${r.id})" class="btn-secondary" style="width:100%;font-size:.85rem;display:flex;align-items:center;justify-content:center;gap:.4rem;">&#128197; Add to calendar</button>
           <div style="font-size:.68rem;color:var(--mid);text-align:center;margin-top:3px;">Opens a file you can add to Apple, Google, Outlook, or Skylight</div></div>` : ''}
-          ${saveClientContactRowHtml}
           ${canSeeContact&&hasIncomeAccess()&&_slLocalType?'<button onclick="shareLocationToClient('+r.id+')" style="padding:.45rem .75rem;background:#0f172a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;">&#128205; Share Location \u2014 let the client see you coming</button>':''}
           ${(r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')?`<button onclick="sendArrivalText(${r.id})" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.6rem;background:#1d4ed8;border:none;border-radius:8px;color:#fff;font-weight:800;font-size:.88rem;cursor:pointer;font-family:'DM Sans',sans-serif;">\u2708\uFE0F Send arrival text to ${escHtml((r.client||'client').split(' ')[0])}</button>`:''}
           ${_pairedRideForBtn?`<button onclick="openRideModal(${_pairedRideForBtn.id})" style="width:100%;padding:.6rem;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">${_pairedRideForBtn.type==='AP PICK UP'?'\u2708\ufe0f View return leg \u2192':'\u2708\ufe0f View outbound leg \u2192'}</button>`:''}
@@ -8860,7 +8833,8 @@ function mtBarHtml(rid){
   // GPS / Pause / Stop / Resume. If GPS was skipped AND the driver never corrects it before
   // marking paid, there is currently no manual re-entry point \u2014 an accepted trade-off.
   if(!on && !paused && hasMiles) return '';
-  return '<div id="mt-bar" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;'
+  var _justify=(on||paused)?'':'justify-content:center;'; // center when there's no status text on the left to balance against
+  return '<div id="mt-bar" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;'+_justify
     +'background:'+(paused?'#fffbeb':'#f8fafc')+';border:1.5px solid '+(on?'#22c55e':paused?'#f59e0b':'#e2e8f0')+';'
     +'border-radius:10px;padding:.65rem .9rem;margin-bottom:.6rem;">'
     +(paused
