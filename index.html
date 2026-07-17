@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607161556">
+<meta name="version" content="202607161557">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1027,7 +1027,6 @@ input,select,textarea{font-size:16px;}
       <div id="rm-interest"></div>
       <div class="detail-grid" id="rm-detail-grid"></div>
       <div id="mt-wrap"></div>
-      <div id="rm-share-loc-btn"></div>
       <div class="rm-expander" id="rm-dispatch">
         <button type="button" class="rm-exp-head" onclick="toggleDispatchTools()">
           <span>&#128736; Dispatch tools</span>
@@ -6299,10 +6298,10 @@ function renderRideView(r){
   const canSeeContact = (_ccRm && _ccRc && _ccRm === _ccRc)
     || (_myDName && _myDName === r.driver)
     || (r.xxl && _myDName && _myDName === r.driver2);
-  // Share Location button — driver+creator only, Premium (canSeeContact now in scope)
-  var _slBtn=document.getElementById('rm-share-loc-btn');
+  // Share Location button now renders inline inside the Actions section below —
+  // no separate DOM write needed (it used to live in its own #rm-share-loc-btn div,
+  // far from every other action button; consolidated so it can't render twice).
   var _slLocalType=(r.type==='ONE WAY'||r.type==='ROUND TRIP');
-  if(_slBtn)_slBtn.innerHTML=canSeeContact&&hasIncomeAccess()&&_slLocalType?'<button onclick="shareLocationToClient('+r.id+')" style="padding:.45rem .75rem;background:#0f172a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;margin:0 0 .85rem;">&#128205; Share Location \u2014 let the client see you coming</button>':'';
   const _pairedRide = r.pairId ? (rides||[]).find(function(x){ return x.id!==r.id && x.pairId===r.pairId; }) : null;
   const _pairLabel = _pairedRide ? (_pairedRide.type==='AP PICK UP' ? '\u2708\ufe0f View return leg \u2192' : '\u2708\ufe0f View outbound leg \u2192') : null;
   const apType = r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP';
@@ -6394,6 +6393,7 @@ function renderRideView(r){
     </div>
 `;
   document.getElementById('rm-detail-grid').innerHTML=`
+    <!-- ═══ TRIP DETAILS ═══ -->
     <div class="detail-row" style="grid-column:1/-1;">
       <div style="display:flex;align-items:flex-start;gap:.75rem;">
         <i class="ti ti-users" style="font-size:18px;color:${ink};margin-top:2px;" aria-hidden="true"></i>
@@ -6403,6 +6403,13 @@ function renderRideView(r){
         </div>
       </div>
     </div>
+
+    ${canSeeContact && r.phone ? `<div class="detail-row" style="grid-column:1/-1;">
+      <div style="display:flex;align-items:center;gap:.75rem;">
+        <i class="ti ti-phone" style="font-size:18px;color:var(--mid);" aria-hidden="true"></i>
+        <a href="tel:${r.phone}" style="font-size:.92rem;color:#4285f4;font-weight:600;">${r.phone}</a>
+      </div>
+    </div>` : ''}
 
     ${address ? `<div class="detail-row" style="grid-column:1/-1;">
       <div style="display:flex;align-items:flex-start;gap:.75rem;">
@@ -6434,29 +6441,46 @@ function renderRideView(r){
           <div style="font-size:.88rem;margin-bottom:3px;">${r.pax||1} Passenger${(r.pax||1)>1?'s':''}</div>
           ${r.checkedBags ? `<div style="font-size:.88rem;margin-bottom:3px;">Checked bags: ${r.checkedBags}</div>` : ''}
           ${r.carryOnBags ? `<div style="font-size:.88rem;margin-bottom:3px;">Carry-on bags: ${r.carryOnBags}</div>` : ''}
-          ${buildFeeMathHTML(r)}
-          ${r.terminal ? `<div style="font-size:.88rem;margin-bottom:3px;">${r.terminal} Terminal</div>` : ''}
-          ${flightRowHtml}
-          ${gateCodeRowHtml}
-          ${saveClientContactRowHtml}
         </div>
       </div>
     </div>
 
-    ${canSeeContact && r.phone ? `<div class="detail-row" style="grid-column:1/-1;">
-      <div style="display:flex;align-items:center;gap:.75rem;">
-        <i class="ti ti-phone" style="font-size:18px;color:var(--mid);" aria-hidden="true"></i>
-        <a href="tel:${r.phone}" style="font-size:.92rem;color:#4285f4;font-weight:600;">${r.phone}</a>
+    ${(r.terminal || flightRowHtml || gateCodeRowHtml) ? `<div class="detail-row" style="grid-column:1/-1;">
+      <div style="display:flex;align-items:flex-start;gap:.75rem;">
+        <i class="ti ti-notes" style="font-size:18px;color:var(--mid);margin-top:2px;" aria-hidden="true"></i>
+        <div>
+          ${r.terminal ? `<div style="font-size:.88rem;margin-bottom:3px;">${r.terminal} Terminal</div>` : ''}
+          ${flightRowHtml}
+          ${gateCodeRowHtml}
+        </div>
       </div>
     </div>` : ''}
 
-    ${(getMyDriverName()===r.driver) ? `<div class="detail-row" style="grid-column:1/-1;">
-      <button onclick="addRideToCalendar(${r.id})" class="btn-secondary" style="width:100%;font-size:.85rem;display:flex;align-items:center;justify-content:center;gap:.4rem;">&#128197; Add to calendar</button>
-      <div style="font-size:.68rem;color:var(--mid);text-align:center;margin-top:3px;">Opens a file you can add to Apple, Google, Outlook, or Skylight</div>
-    </div>` : ''}
+    <!-- ═══ PAYMENT ═══ -->
+    <div class="detail-row" style="grid-column:1/-1;">
+      <div style="width:100%;background:var(--surface);border-radius:10px;padding:.85rem;">
+        ${buildFeeMathHTML(r)}
+        ${buildRideLifecycle(r, true)}
+        ${(()=>{
+          const _c2m=currentUser?(PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name):null;const _c2c=r.createdBy?(PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy):null;const _isCreator2=!!(_c2m&&_c2c&&_c2m===_c2c);
+          if(!_isCreator2) return '';
+          const _feeApplied=r.feeType;
+          return `<div style="margin-top:.75rem;padding-top:.75rem;border-top:1px solid var(--light);">`
+            +`<div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Quick fees</div>`
+            +(_feeApplied
+              ?`<div style="background:${r.feeType==='cancel'?'#fff5f5':'#fff8e1'};border:1.5px solid ${r.feeType==='cancel'?'#fca5a5':'#fcd34d'};border-radius:9px;padding:.6rem .85rem;display:flex;align-items:center;justify-content:space-between;"><span style="font-size:.9rem;font-weight:700;color:${r.feeType==='cancel'?'#dc2626':'#92400e'};">${r.feeType==='cancel'?' Cancellation fee':'⚡ Change fee'}: $${r.feeAmount}</span><button onclick="clearRideFee(${r.id})" style="background:none;border:none;color:#aaa;cursor:pointer;font-size:.85rem;">Remove</button></div>`
+              :`<div style="display:flex;gap:.5rem;flex-wrap:wrap;">`
+                +`<button onclick="applyRideFee(${r.id},'change')" style="flex:1;min-width:140px;padding:.6rem .75rem;background:#fef3c7;border:1.5px solid #fcd34d;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:700;color:#92400e;cursor:pointer;">⚡ Change fee +$${changeFeeAmt()}</button>`
+                +`<button onclick="applyRideFee(${r.id},'cancel')" style="flex:1;min-width:140px;padding:.6rem .75rem;background:#fff5f5;border:1.5px solid #fca5a5;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:700;color:#dc2626;cursor:pointer;"> Cancel — ${cancelFeePct()}% fee $${Math.round((r.price||0)*cancelFeePct()/100)}</button>`
+                +`</div>`)
+            +`</div>`;
+        })()}
+      </div>
+    </div>
 
+    <!-- ═══ NOTES ═══ -->
     ${(()=>{
-      // Whole row disappears when there's nothing to read and nothing to add.
+      // Whole section disappears when there's nothing to read and nothing to add.
       const _c=r.createdBy===currentUser?.name||(r.createdBy==='Morgan'&&currentUser?.name==='Kat');
       const _h=!!(r.notes && String(r.notes).trim());
       const _rq=!!(currentUser&&currentUser.name===r.createdBy&&r.reqDriverNote);
@@ -6502,28 +6526,27 @@ function renderRideView(r){
       +`</div>`;
     })()}
 
+    <!-- ═══ ACTIONS ═══ -->
     ${(()=>{
-      const _c2m=currentUser?(PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name):null;const _c2c=r.createdBy?(PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy):null;const _isCreator2=!!(_c2m&&_c2c&&_c2m===_c2c);
-      if(!_isCreator2) return '';
-      const _feeApplied=r.feeType;
-      return `<div class="detail-row" style="grid-column:1/-1;">`
-        +`<div style="font-size:.72rem;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Quick fees</div>`
-        +(_feeApplied
-          ?`<div style="background:${r.feeType==='cancel'?'#fff5f5':'#fff8e1'};border:1.5px solid ${r.feeType==='cancel'?'#fca5a5':'#fcd34d'};border-radius:9px;padding:.6rem .85rem;display:flex;align-items:center;justify-content:space-between;"><span style="font-size:.9rem;font-weight:700;color:${r.feeType==='cancel'?'#dc2626':'#92400e'};">${r.feeType==='cancel'?' Cancellation fee':'⚡ Change fee'}: $${r.feeAmount}</span><button onclick="clearRideFee(${r.id})" style="background:none;border:none;color:#aaa;cursor:pointer;font-size:.85rem;">Remove</button></div>`
-          :`<div style="display:flex;gap:.5rem;flex-wrap:wrap;">`
-            +`<button onclick="applyRideFee(${r.id},'change')" style="flex:1;min-width:140px;padding:.6rem .75rem;background:#fef3c7;border:1.5px solid #fcd34d;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:700;color:#92400e;cursor:pointer;">⚡ Change fee +$${changeFeeAmt()}</button>`
-            +`<button onclick="applyRideFee(${r.id},'cancel')" style="flex:1;min-width:140px;padding:.6rem .75rem;background:#fff5f5;border:1.5px solid #fca5a5;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:700;color:#dc2626;cursor:pointer;"> Cancel — ${cancelFeePct()}% fee $${Math.round((r.price||0)*cancelFeePct()/100)}</button>`
-            +`</div>`)
-        +`</div>`;
+      const _hasActions = !!((getMyDriverName()===r.driver) || saveClientContactRowHtml || (canSeeContact&&hasIncomeAccess()&&_slLocalType)
+        || (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP') || _pairedRideForBtn || shareOfferingsBtn);
+      if(!_hasActions) return '';
+      return `<div class="detail-row" style="grid-column:1/-1;">
+        <div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Actions</div>
+        <div style="display:flex;flex-direction:column;gap:.5rem;">
+          ${(getMyDriverName()===r.driver) ? `<div><button onclick="addRideToCalendar(${r.id})" class="btn-secondary" style="width:100%;font-size:.85rem;display:flex;align-items:center;justify-content:center;gap:.4rem;">&#128197; Add to calendar</button>
+          <div style="font-size:.68rem;color:var(--mid);text-align:center;margin-top:3px;">Opens a file you can add to Apple, Google, Outlook, or Skylight</div></div>` : ''}
+          ${saveClientContactRowHtml}
+          ${canSeeContact&&hasIncomeAccess()&&_slLocalType?'<button onclick="shareLocationToClient('+r.id+')" style="padding:.45rem .75rem;background:#0f172a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;">&#128205; Share Location \u2014 let the client see you coming</button>':''}
+          ${(r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')?`<button onclick="sendArrivalText(${r.id})" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.6rem;background:#1d4ed8;border:none;border-radius:8px;color:#fff;font-weight:800;font-size:.88rem;cursor:pointer;font-family:'DM Sans',sans-serif;">\u2708\uFE0F Send arrival text to ${escHtml((r.client||'client').split(' ')[0])}</button>`:''}
+          ${_pairedRideForBtn?`<button onclick="openRideModal(${_pairedRideForBtn.id})" style="width:100%;padding:.6rem;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">${_pairedRideForBtn.type==='AP PICK UP'?'\u2708\ufe0f View return leg \u2192':'\u2708\ufe0f View outbound leg \u2192'}</button>`:''}
+          ${shareOfferingsBtn}
+        </div>
+      </div>`;
     })()}
-    ${(r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')?`<div class="detail-row" style="grid-column:1/-1;">
-      ${`<button onclick="sendArrivalText(${r.id})" style="margin-top:.5rem;width:100%;display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.6rem;background:#1d4ed8;border:none;border-radius:8px;color:#fff;font-weight:800;font-size:.88rem;cursor:pointer;font-family:'DM Sans',sans-serif;">\u2708\uFE0F Send arrival text to ${escHtml((r.client||'client').split(' ')[0])}</button>`}
-    </div>`:''}
-    ${_pairedRideForBtn?`<div class="detail-row" style="grid-column:1/-1;margin-top:.25rem;"><button onclick="openRideModal(${_pairedRideForBtn.id})" style="width:100%;padding:.6rem;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">${_pairedRideForBtn.type==='AP PICK UP'?'\u2708\ufe0f View return leg \u2192':'\u2708\ufe0f View outbound leg \u2192'}</button></div>`:''}
-    ${shareOfferingsBtn}
-    ${buildRideLifecycle(r)}
   `;
 }
+
 
 // ── RIDE LIFECYCLE & PAYMENT ──
 // Stages: Scheduled → Confirmed → Completed → Paid.
@@ -6532,7 +6555,10 @@ function renderRideView(r){
 //   • Owner assigns it out   → the assigned driver collects the fare and owes the owner 15% of the fare.
 const RIDE_STAGES = ['scheduled','confirmed','paid'];
 const RIDE_STAGE_LABEL = {scheduled:'Scheduled', confirmed:'Confirmed', completed:'Paid', paid:'Paid'};
-function buildRideLifecycle(r){
+// `nested`=true when the caller already provides the outer detail-row + surface box
+// (the merged Payment section in renderRideView) — otherwise buildRideLifecycle wraps
+// itself, for any other caller that still wants it as a standalone block.
+function buildRideLifecycle(r, nested){
   if(!hasIncomeAccess()) return '';
   // Legacy rides stored as 'completed' now map to the combined 'paid' stage.
   const rawStatus = r.status==='completed' ? 'paid' : r.status;
@@ -6566,12 +6592,14 @@ function buildRideLifecycle(r){
         <span style="font-weight:700;color:var(--green);">$${fare.toFixed(2)}</span></div>`;
   }
 
+  const inner = `<div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Ride status</div>
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.75rem;">${chips}</div>
+    <div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Payment owed</div>
+    ${payHtml}`;
+  if(nested) return inner;
   return `<div class="detail-row" style="grid-column:1/-1;">
     <div style="width:100%;background:var(--surface);border-radius:10px;padding:.85rem;">
-      <div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Ride status</div>
-      <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.75rem;">${chips}</div>
-      <div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Payment owed</div>
-      ${payHtml}
+      ${inner}
     </div>
   </div>`;
 }
