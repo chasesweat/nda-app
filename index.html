@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607171578">
+<meta name="version" content="202607171581">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -6305,6 +6305,21 @@ function _prevPaySend(withTip){
 }
 
 function renderRideView(r){
+  // BUG (reported, v581): "mark unpaid the paid banner at the top doesnt reset." This function
+  // was called BARE at several sites — including setRideStatus (the function responsible for
+  // clearing that exact banner) and openRideModal — with no try/catch anywhere in the call
+  // chain up to two of them. It's 250+ lines building ONE template literal from a large number
+  // of interpolated r.* fields (paired rides, XXL driver2, carryover-unpaid lookups, gate code
+  // access, offerings state, and more). If ANY of those expressions throws for a real ride's
+  // particular field combination — something a clean synthetic test won't reproduce, the same
+  // shape as the Save bug — the WHOLE assignment never happens, because it's one atomic
+  // statement: `document.getElementById(...).innerHTML = \`...\`;`. Whatever was already
+  // painted stays exactly as it was. If the ride was paid before this render was triggered,
+  // that's the paid banner, frozen, looking like nothing happened — while callers with a bare
+  // `renderRideView(r);` (like setRideStatus) would have the exception propagate up and abort
+  // everything AFTER that call too, silently skipping their own toast/refresh/button updates.
+  // Wrapping the whole function turns that into a visible, diagnosable failure instead.
+  try{
   const driverFirst = driverShortName(r.driver);
   const color = rideColor(r);
   const ink = readableInk(color);
@@ -6557,6 +6572,11 @@ function renderRideView(r){
       </div>`;
     })()}
   `;
+  }catch(err){
+    // Whatever this says next is the real bug — no more guessing which field is bad.
+    try{ console.error('[renderRideView] threw for ride', r&&r.id, (err&&(err.stack||err.message))||err); }catch(_e){}
+    try{ showToast('\u26A0\uFE0F Ride details failed to refresh \u2014 close and reopen this ride'); }catch(_e){}
+  }
 }
 
 
@@ -7191,9 +7211,20 @@ async function setRideStatus(id, status){
   renderRideView(r);
   if(typeof refreshDash==='function') refreshDash();
   const paidBtn=document.getElementById('rm-paid-btn');
+  // BUG (reported, v579): renderRideView() just above rebuilds this button from its ORIGINAL
+  // markup — style="background:var(--green);color:#fff;..." — so color:#fff is always present
+  // on the freshly-rendered element. This block used to patch background/fontWeight but never
+  // color. Toggling to unpaid clears the background (falls through to .btn-secondary's
+  // background:transparent) while the white text stays — invisible text on a transparent
+  // button, with only the 💰 visible since emoji glyphs render from the system font and don't
+  // take a CSS color at all. That's the exact bug: "white with nothing but the money emoji."
+  // The paid state had the same gap (white text on the #f0fdf4 pale-mint background used
+  // everywhere else in this file paired with color:#16a34a — see the CLIENT PAID banner,
+  // confirmation-sent chip, GPS-live badge) — lower contrast, just not reported yet.
   if(paidBtn){ paidBtn.textContent=r.status==='paid'?'✓ Paid':'💰 Mark Paid';
     paidBtn.style.fontWeight=r.status==='paid'?'700':'400';
-    paidBtn.style.background=r.status==='paid'?'#f0fdf4':''; }
+    paidBtn.style.background=r.status==='paid'?'#f0fdf4':'var(--green)';
+    paidBtn.style.color=r.status==='paid'?'#16a34a':'#fff'; }
   if(document.getElementById('page-income')?.classList.contains('active') && typeof renderIncome==='function') renderIncome();
   showToast('Status: '+(RIDE_STAGE_LABEL[status]||status));
 }
@@ -8085,11 +8116,39 @@ function openLogMiles(rideId){
     +'</div></div>'
     +'<div style="display:flex;gap:.5rem;">'
     +'<button onclick="_closeLogMiles()" style="flex:1;padding:.6rem;background:#f1f5f9;color:#475569;border:none;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:600;cursor:pointer;">Cancel</button>'
-    +'<button onclick="_saveLogMiles('+rideId+')" style="flex:2;padding:.6rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.9rem;font-weight:700;cursor:pointer;">&#128190; Save</button>'
+    +'<button id="lm-save-btn" onclick="if(!this.dataset.lmFired){this.dataset.lmFired=\'1\';_saveLogMiles('+rideId+');}" style="flex:2;padding:.6rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.9rem;font-weight:700;cursor:pointer;">&#128190; Save</button>'
     +'</div>'
     +'</div>';
   document.body.appendChild(ov);
   ov._vvDetach = _pinToVisualViewport(ov);
+  // Best-evidenced theory for the reported "hit Save, absolutely nothing happens, not even
+  // the v580 catch-all's error toast": that catch-all wraps the FUNCTION body, so if it never
+  // shows anything, the function was never called — the click never reached it in the first
+  // place. Tapping Save is what blurs the miles/tip/gas input, and blurring on iOS can trigger
+  // the exact resize/scroll cascade _pinToVisualViewport listens for, synchronously moving this
+  // overlay mid-tap. If that relayout lands between touchstart and touchend, the browser can
+  // fail to deliver the click to whatever moved out from under the finger. Cancel and X are
+  // reported as reliable, which is consistent with this: they're the natural buttons to test
+  // once the keyboard's already settled, not the one tapped immediately after typing.
+  // touchstart fires at first contact — before any of that subsequent blur-driven relayout can
+  // begin — so binding the save action there sidesteps the race instead of merely narrowing it.
+  // preventDefault stops the later synthetic 'click' from firing this a second time.
+  try{
+    var _saveBtn = document.getElementById('lm-save-btn');
+    if(_saveBtn){
+      _saveBtn.addEventListener('touchstart', function(ev){
+        // Shared guard with the onclick attribute above (this.dataset.lmFired), not just
+        // preventDefault: relying on preventDefault alone to suppress the browser's synthetic
+        // click assumes every input method respects it, which assistive tech and some
+        // non-touch interactions aren't guaranteed to. Whichever path fires first wins; the
+        // other becomes a no-op — a double-tap can never mean a double-save.
+        if(this.dataset.lmFired) return;
+        this.dataset.lmFired='1';
+        try{ ev.preventDefault(); }catch(_e){}
+        _saveLogMiles(rideId);
+      }, {passive:false});
+    }
+  }catch(_e){}
   setTimeout(function(){ var el=document.getElementById('lm-miles'); if(el)el.focus(); },100);
 }
 
@@ -8802,7 +8861,16 @@ function _mtUpdateBar(){
 function _pinToVisualViewport(ov){
   var vv = window.visualViewport;
   if(!vv || !ov) return function(){};
-  function apply(){
+  // BUG (reported, v581): this used to write 5 inline styles synchronously on EVERY 'resize'
+  // and 'scroll' event with no throttling. On iOS, focusing/blurring an input inside this
+  // overlay can fire both repeatedly during the keyboard's open/close animation, and iOS also
+  // fires 'scroll' just from keeping a focused input visible above the keyboard while typing —
+  // so a full form fill-in could mean dozens of synchronous reflows of this overlay, which is
+  // a very plausible source of the reported app-wide "laggy" feeling while this modal is open.
+  // rAF-batching caps this at one reflow per frame no matter how many events land in it.
+  var scheduled = false;
+  function doApply(){
+    scheduled = false;
     try{
       ov.style.top    = vv.offsetTop + 'px';
       ov.style.left   = vv.offsetLeft + 'px';
@@ -8812,7 +8880,12 @@ function _pinToVisualViewport(ov){
       ov.style.bottom = 'auto';
     }catch(_e){}
   }
-  apply();
+  function apply(){
+    if(scheduled) return;
+    scheduled = true;
+    try{ requestAnimationFrame(doApply); }catch(_e){ doApply(); }
+  }
+  doApply(); // pin immediately on setup — no reason to wait a frame for the first paint
   vv.addEventListener('resize', apply);
   vv.addEventListener('scroll', apply);
   return function(){
