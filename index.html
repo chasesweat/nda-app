@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607161541">
+<meta name="version" content="202607161543">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -524,7 +524,6 @@ input,select,textarea{font-size:16px;}
     <button class="qn active" data-qn="dashboard" onclick="nav('dashboard')"><span class="qn-i">🏠</span><span class="qn-l">Home</span></button>
     <button class="qn" data-qn="quote" onclick="nav('quote')"><span class="qn-i">📝</span><span class="qn-l">Quote</span></button>
     <button class="qn" data-qn="calendar" onclick="nav('calendar')"><span class="qn-i">📅</span><span class="qn-l">Calendar</span></button>
-    <button class="qn" data-qn="flights" onclick="nav('flights')"><span class="qn-i">✈️</span><span class="qn-l" style="white-space:normal;line-height:1.05;text-align:center;">Flights &amp; Traffic</span></button>
     <button class="qn" data-qn="clients" onclick="nav('clients')"><span class="qn-i"><svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" style="display:block;"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg></span><span class="qn-l">Clients</span></button>
     <button class="qn" data-qn="chat" onclick="nav('chat')"><span class="qn-i" style="position:relative;">💬<span id="chat-badge-topbar" style="display:none;position:absolute;top:-2px;right:-4px;width:9px;height:9px;border-radius:50%;background:#dc2626;border:1.5px solid #150a25;"></span></span><span class="qn-l">Chat</span></button>
   </div>
@@ -4237,7 +4236,6 @@ function buildQuoteHTML(q){
   const dateStr = q.date ? fmtDateShort(q.date) : 'Date to be confirmed';
   const timeStr = q.time ? ((typeof fmtTime12==='function'?fmtTime12(q.time):q.time)) : '';
   const typeStr = (typeof _tripTypeLabel==='function' && q.type) ? _tripTypeLabel(q.type) : (q.type||'');
-  const money=(n)=>'$'+(Math.round((parseFloat(n)||0)*100)/100).toFixed(2);
   const rows = (bd.lines||[]).map(function(l){
     return '<tr><td style="padding:7px 0;color:#444;font-size:14px;">'+esc(l.label)+'</td>'
       +'<td style="padding:7px 0;text-align:right;color:#111;font-size:14px;white-space:nowrap;">'+money(l.val)+'</td></tr>';
@@ -4965,6 +4963,11 @@ function getWeekStart(d){
 }
 function addDays(d,n){ const r=new Date(d); r.setDate(r.getDate()+n); return r; }
 function toDateStr(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+// Shared currency formatter. Declared at top level (as a hoisted `function`, not a const)
+// because buildFeeMathHTML and buildQuoteHTML both need it and they live ~4,600 lines apart.
+// It previously existed ONLY as a local const inside buildQuoteHTML, so every call from
+// buildFeeMathHTML threw "money is not defined" — which killed the whole ride modal.
+function money(n){ return '$'+(Math.round((parseFloat(n)||0)*100)/100).toFixed(2); }
 function weekLabel(start){
   const end=addDays(start,6);
   if(start.getMonth()===end.getMonth())
@@ -6247,14 +6250,12 @@ function renderRideView(r){
   const _pairLabel = _pairedRide ? (_pairedRide.type==='AP PICK UP' ? '\u2708\ufe0f View return leg \u2192' : '\u2708\ufe0f View outbound leg \u2192') : null;
   const apType = r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP';
   const _flightNum = (r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'').toUpperCase();
-  const _isPickup  = (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP');
+  // Live flight tracking and TSA wait times live only on the dashboard thumbnail now —
+  // that's the fast, glanceable spot for "is my flight coming in on time" while actively
+  // coordinating a pickup. Duplicating the same links here just added clutter to an
+  // already-busy card. The flight number itself still shows, as plain reference text.
   const flightRowHtml = r.flight
-    ? '<div style="font-size:.88rem;margin-bottom:3px;">Flight: ' + (_isPickup && _flightNum
-        ? '<a href="https://www.google.com/search?q='+_flightNum+'+flight+tracking" target="_blank" rel="noopener" style="color:#4285f4;font-weight:600;text-decoration:underline;">'+escHtml(r.flight)+' \u2708\uFE0F Track live</a>'
-        : escHtml(r.flight)) + '</div>'
-    : '';
-  const tsaRowHtml = (r.type==='AP RUN')
-    ? '<div style="font-size:.88rem;margin-bottom:3px;"><a href="https://www.atl.com/times/" target="_blank" rel="noopener" style="color:#4285f4;font-weight:600;text-decoration:underline;">\uD83D\uDD12 TSA Wait Times \u2014 ATL</a></div>'
+    ? '<div style="font-size:.88rem;margin-bottom:3px;">Flight: ' + escHtml(r.flight) + '</div>'
     : '';
   // Gate code — visible only to this client's owner and whoever's actually assigned to
   // drive this ride (see canSeeGateCode). Never shown to anyone else, and never included
@@ -6379,7 +6380,6 @@ function renderRideView(r){
           ${buildFeeMathHTML(r)}
           ${r.terminal ? `<div style="font-size:.88rem;margin-bottom:3px;">${r.terminal} Terminal</div>` : ''}
           ${flightRowHtml}
-          ${tsaRowHtml}
           ${gateCodeRowHtml}
           ${saveClientContactRowHtml}
         </div>
@@ -17179,13 +17179,15 @@ function renderDashFlightTracking(){
   var box=document.getElementById('dash-flight-tracking');
   if(!box) return;
   var today=toDateStr(new Date());
-  var dName=getMyDriverName();
   var due=rides.filter(function(r){
     if(!r || r.date!==today || r.status==='cancelled' || r.status==='paid') return false;
     if(r.type!=='AP RUN' && r.type!=='AP PICK UP' && r.type!=='AP ROUND TRIP') return false;
     if(!r.flight) return false;
-    var mine=(r.driver&&dName&&r.driver.trim()===dName) || isMyScheduledRide(r) || isAdmin();
-    return mine;
+    // Flights I need to watch = flights I am DRIVING. Same rule as the "Rides you're
+    // driving" list this panel sits above (isMyDrivingRide). It previously OR'd in
+    // isAdmin(), which made every ride "mine" for an admin and showed the whole team's
+    // flights. Rides you scheduled for other drivers live in Confirmations, not here.
+    return isMyDrivingRide(r);
   }).sort(function(a,b){ return (a.time||'').localeCompare(b.time||''); });
   if(!due.length){ box.innerHTML=''; return; }
   var rows=due.map(function(r){
