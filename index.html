@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607171582">
+<meta name="version" content="202607171584">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1158,9 +1158,9 @@ input,select,textarea{font-size:16px;}
 <!-- PAYMENT METHOD + RECEIPT MODAL (shown when a ride is marked Completed & Paid) -->
 <div class="modal-overlay" id="payment-modal">
   <div class="modal" style="max-width:min(460px,95vw);">
-    <div class="modal-header">
-      <div class="modal-title">💰 Payment received</div>
-      <button class="modal-close" onclick="closePaymentModal()">&times;</button>
+    <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between;">
+      <div class="modal-title" style="font-size:1.15rem;font-weight:800;color:var(--black);">💰 Payment received</div>
+      <button class="modal-close" onclick="closePaymentModal()" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--mid);line-height:1;padding:0 0 0 .5rem;flex-shrink:0;">&times;</button>
     </div>
     <div style="padding:.25rem .25rem 0;">
       <div style="font-size:.82rem;color:var(--mid);margin-bottom:.9rem;" id="pay-modal-sub">How was this ride paid?</div>
@@ -4021,7 +4021,7 @@ function icsEscape(str){
   return String(str||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\r?\n/g,'\\n');
 }
 function addRideToCalendar(rideId){
-  var r=rides.find(function(x){return x.id===rideId||x.id===+rideId||String(x.id)===String(rideId);});
+  var r=_rideById(rideId);
   if(!r){ showToast('Ride not found','error'); return; }
   var pad=function(n){return String(n).padStart(2,'0');};
   var toICS=function(ds,ts){ var p=(ds||'').split('-'); var t=(ts||'09:00').split(':'); return p[0]+pad(p[1])+pad(p[2])+'T'+pad(t[0])+pad(t[1])+'00'; };
@@ -5621,7 +5621,7 @@ function renderConfirmations(){
 async function _unmarkConfirmFromRide(id){ await toggleConfirmSent(id); try{ openRideModal(id); }catch(e){} }
 async function toggleConfirmSent(id){
   await _ensureFresh();
-  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id)));
+  const r=_rideById(id);
   if(!r) return;
   const wasConfirmed=r.confirmSent;
   r.confirmSent=!r.confirmSent;
@@ -6108,7 +6108,7 @@ function prebuildAllDriverCardImages(){
 function _setConfInstKey(id,val){ window._confInstKey=window._confInstKey||{}; window._confInstKey[id]=val; }
 async function textClient(id, opts){
   if(!confirmTextGate()) return;
-  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
+  const r=_rideById(id); if(!r) return;
   const nums=confirmationRecipients(r).map(x=>x.phone);
   if(!nums.length){ showToast('No phone numbers to text \u2014 add the client\u2019s number first','error'); return; }
   const _conf=buildConfirmationText(r);
@@ -6192,7 +6192,7 @@ function closeDayModal(){document.getElementById('day-modal').classList.remove('
 function toggleDispatchTools(){ var e=document.getElementById('rm-dispatch'); if(e) e.classList.toggle('open'); }
 function openRideModal(id){
   activeRideId=id;
-  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
+  const r=_rideById(id); if(!r) return;
   if(!canSeeRide(r)){ activeRideId=null; showToast('This ride is private','error'); return; }
   if(r.driver) warmDriverCardImage((r.driver||"").trim());
   document.getElementById('rm-title').textContent=(r.private?'\uD83D\uDD12 ':'')+r.client;
@@ -6641,7 +6641,7 @@ function buildRideLifecycle(r, nested){
 // day" — repair them on the spot by giving the extras fresh unique ids, then
 // operate only on the intended ride (matched by object identity where possible).
 function _ridesMatchingId(id){
-  return (rides||[]).filter(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id)));
+  return (rides||[]).filter(function(x){ return _rideIdMatches(x, id); });
 }
 async function _repairDuplicateIds(){
   let seen={}, maxId=0, changed=false;
@@ -6665,7 +6665,7 @@ async function _repairDuplicateIds(){
 async function toggleRidePaid(id){
   // Self-heal duplicate ids before acting, so we never flip more than one ride.
   if(_ridesMatchingId(id).length>1){ await _repairDuplicateIds(); }
-  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r||r.status==='cancelled') return;
+  const r=_rideById(id); if(!r||r.status==='cancelled') return;
   // One ride-card state: "Completed & Paid" (stored as 'paid') vs not.
   const nowPaid = r.status!=='paid';
   await setRideStatus(r.id, nowPaid?'paid':'scheduled');
@@ -7176,7 +7176,7 @@ async function markRideUnpaid(id){
 async function setRideStatus(id, status){
   // Self-heal duplicate ids before acting, so we only ever change the one ride.
   if(_ridesMatchingId(id).length>1){ await _repairDuplicateIds(); }
-  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
+  const r = _rideById(id); if(!r) return;
   r.status = status;
   touchRide(r, 'set status to '+status);
   if(status==='paid'){
@@ -7288,7 +7288,7 @@ async function showConfirmModal(opts){
   });
 }
 async function cancelRide(id){
-  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
+  const r = _rideById(id); if(!r) return;
   if(r.status==='cancelled'){ return reactivateRide(id); }
   // Only the client's owner (or an admin) may cancel
   const myDrv = getMyDriverName();
@@ -7332,7 +7332,7 @@ async function cancelRide(id){
   showToast(_choice==='fee'?'Ride cancelled \u2014 $'+_feeAmt+' fee applied':'Ride cancelled \u2014 no fee');
 }
 async function reactivateRide(id){
-  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
+  const r = _rideById(id); if(!r) return;
   r.status='scheduled'; delete r.cancelledAt; delete r.cancelledBy;
   await saveRides();
   refreshAllRideViews(r); setCancelBtn(false);
@@ -7475,7 +7475,7 @@ async function saveRideEdits(){
 }
 
 async function applyRideFee(rideId, feeType){
-  const ride=rides.find(x=>x&&(x.id===rideId||x.id===+rideId||String(x.id)===String(rideId)));
+  const ride=_rideById(rideId);
   if(!ride) return;
   const feeAmount = feeType==='cancel' ? Math.round((ride.price||0)*cancelFeePct()/100) : changeFeeAmt();
   const label = feeType==='cancel' ? 'Cancellation' : 'Last-minute change';
@@ -7498,7 +7498,7 @@ async function applyRideFee(rideId, feeType){
   openRideModal(rideId);
 }
 function clearRideFee(rideId){
-  const ride=rides.find(x=>x&&(x.id===rideId||x.id===+rideId||String(x.id)===String(rideId)));
+  const ride=_rideById(rideId);
   if(!ride||!confirm('Remove this fee from the ride?')) return;
   if(ride.notes) ride.notes=ride.notes.replace(/\n?(Cancellation|Last-minute change) fee: \$\d+/g,'').trim();
   delete ride.feeType; delete ride.feeAmount; delete ride.cancelled;
@@ -7524,7 +7524,7 @@ function _rmShowNoteEditor(rideId){
   const ta=document.getElementById('rm-notes-'+rideId); if(ta) ta.focus();
 }
 function saveRideNote(rideId){
-  const ride=rides.find(x=>x&&(x.id===rideId||x.id===+rideId||String(x.id)===String(rideId)));
+  const ride=_rideById(rideId);
   if(!ride) return;
   const ta=document.getElementById('rm-notes-'+rideId);
   if(!ta) return;
@@ -7534,7 +7534,7 @@ function saveRideNote(rideId){
   renderCal();
 }
 function saveRidePrivateNote(rideId){
-  const ride=rides.find(x=>x&&(x.id===rideId||x.id===+rideId||String(x.id)===String(rideId)));
+  const ride=_rideById(rideId);
   if(!ride) return;
   const ta=document.getElementById('rm-privnote-'+rideId);
   if(!ta) return;
@@ -8058,12 +8058,16 @@ function _closeLogMiles(){ window._payAfterMiles=null; var o=document.getElement
 // workaround — which is exactly why its Save button did nothing for builds on end.
 // This is that same comparison, named once, so the next onclick-reached function can just
 // call it instead of rediscovering the bug.
+// The tolerant id-match check itself, factored out so _rideById (single lookup) and
+// _ridesMatchingId (duplicate-detection) share ONE implementation instead of each
+// hand-rolling the same three-way comparison — which is exactly how 25 separate call sites
+// ended up with 25 copies of this logic in the first place (see the v577 handoff section).
+function _rideIdMatches(x, id){
+  return !!x && x.id!=null && id!=null && (x.id===id || x.id===+id || String(x.id)===String(id));
+}
 function _rideById(id){
   if(id==null || typeof rides==='undefined' || !rides) return null;
-  var s=String(id);
-  return rides.find(function(x){
-    return x && x.id!=null && (x.id===id || x.id===+id || String(x.id)===s);
-  }) || null;
+  return rides.find(function(x){ return _rideIdMatches(x, id); }) || null;
 }
 function _sameRideId(a,b){
   if(a==null || b==null) return false;
@@ -9223,7 +9227,7 @@ function showUnheartConfirm(id){
   back.querySelector('#uhc-no').addEventListener('click',function(){ back.remove(); });
   back.querySelector('#uhc-yes').addEventListener('click',async function(){
     back.remove();
-    const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
+    const r=_rideById(id); if(!r) return;
     const me=myInterestKey(); if(!me) return;
     if(r.interest && r.interest[me]){ delete r.interest[me]; }
     if(r.interest && Object.keys(r.interest).length===0) delete r.interest;
@@ -9235,7 +9239,7 @@ function showUnheartConfirm(id){
   });
 }
 async function toggleInterest(id){
-  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id)));
+  const r = _rideById(id);
   if(!r) return;
   const me = myInterestKey();
   if(!me){ showToast('Could not identify your driver profile','error'); return; }
@@ -9316,7 +9320,7 @@ function buildFeeMathHTML(r){
 
 let _feeEdit=null;
 function openFeeEditor(id){
-  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
+  const r = _rideById(id); if(!r) return;
   if(typeof canDeleteRide==='function' && !canDeleteRide(r)){ showToast("You can't edit this fee",'error'); return; }
   const sec = document.getElementById('rm-fee-section'); if(!sec) return;
   const price = parseFloat(r.price)||0;
@@ -9408,7 +9412,7 @@ function recalcFeeEdit(setAmount){
 }
 
 async function saveFeeEdit(id){
-  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
+  const r = _rideById(id); if(!r) return;
   if(typeof canDeleteRide==='function' && !canDeleteRide(r)){ showToast("You can't edit this fee",'error'); return; }
   const amtEl=document.getElementById('fee-edit-amount');
   const noteEl=document.getElementById('fee-edit-note');
@@ -9439,7 +9443,7 @@ async function saveFeeEdit(id){
 }
 
 function cancelFeeEdit(id){
-  const r = rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
+  const r = _rideById(id); if(!r) return;
   renderRideView(r);
 }
 
@@ -10095,7 +10099,7 @@ function openRideFromChat(id){
 function _offerOwner(r){ return (typeof getClientOwner==='function' && getClientOwner(r.client)) || (typeof feeOwnerFor==='function' && feeOwnerFor(r.createdBy)) || ''; }
 // Volunteer to cover an offered ride. Does NOT assign \u2014 the ride's owner assigns.
 async function volunteerForRide(id){
-  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
+  const r=_rideById(id); if(!r) return;
   const myDriver=getMyDriverName();
   if(!myDriver){ showToast('You need a driver profile to volunteer','error'); return; }
   if(r.status==='cancelled'){ showToast('This ride is cancelled','error'); return; }
@@ -10116,7 +10120,7 @@ async function volunteerForRide(id){
 }
 // The ride's owner (or an admin) assigns one of the volunteers.
 async function assignVolunteer(id, driverName){
-  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
+  const r=_rideById(id); if(!r) return;
   var owner=_offerOwner(r); var me=getMyDriverName();
   if(!((typeof isAdmin==='function'&&isAdmin()) || (me && me===owner))){ showToast('Only the ride owner can assign this ride','error'); return; }
   if(!driverName){ return; }
@@ -10134,7 +10138,7 @@ async function assignVolunteer(id, driverName){
 }
  // back-compat alias
 async function shareRideToOfferings(id){
-  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id))); if(!r) return;
+  const r=_rideById(id); if(!r) return;
   if(r.status==='cancelled'){ showToast('Cannot share a cancelled ride','error'); return; }
   // Three ways in: the person who booked it (creator, Kat↔Morgan treated as same — "who
   // owns this client"), whoever is literally assigned to drive it (no proxy resolution —
@@ -12026,7 +12030,7 @@ async function assignDriver(){
 }
 
 async function deleteRide(id){
-  const r=rides.find(x=>x&&(x.id===id||x.id===+id||String(x.id)===String(id)));
+  const r=_rideById(id);
   if(!canDeleteRide(r)){ showToast('You can only delete rides you created.','error'); return; }
   // Your OWN ride: delete it right away. Using the admin override to delete someone
   // ELSE'S ride needs a second admin (cancelling stays instant for live dispatch).
@@ -17571,7 +17575,7 @@ function buildArrivalText(r){
 }
 function sendArrivalText(id){
   if(typeof confirmTextGate==='function' && !confirmTextGate()) return;
-  var r=rides.find(function(x){ return x&&(x.id===id||x.id===+id||String(x.id)===String(id)); });
+  var r=_rideById(id);
   if(!r){ showToast('Ride not found','error'); return; }
   openGroupThread(id, buildArrivalText(r));
   try{ markPartSent(id,'arrival'); }catch(e){}
@@ -17581,7 +17585,7 @@ function sendArrivalText(id){
 }
 // Dashboard arrival flow: confirm first, then send. 'No' just closes and leaves the row.
 function dashSendArrival(id){
-  var r=rides.find(function(x){ return x&&(x.id===id||x.id===+id||String(x.id)===String(id)); });
+  var r=_rideById(id);
   if(!r){ showToast('Ride not found','error'); return; }
   var when=fmtTime12(r.time)||'the scheduled time';
   var ok=confirm('Send the arrival text to '+(r.client||'this client')+'?\n\nPickup scheduled at '+when+'.');
