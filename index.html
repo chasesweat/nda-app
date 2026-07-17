@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607171581">
+<meta name="version" content="202607171582">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -8136,6 +8136,23 @@ function openLogMiles(rideId){
   try{
     var _saveBtn = document.getElementById('lm-save-btn');
     if(_saveBtn){
+      // DIAGNOSTIC (v582): two builds (v575's relayout-race theory, v581's touchstart-first-
+      // contact fix) have both failed to resolve a report of Save producing zero feedback —
+      // confirmed now on Android specifically, a platform this code was never designed
+      // against (the v575 fix assumes iOS's "only the visual viewport shrinks" behavior;
+      // Android often resizes the actual layout viewport instead, which is a different
+      // mechanism this code doesn't account for and may even be working against).
+      // Rather than guess a third mechanism blind, this fires UNCONDITIONALLY on first
+      // contact with the button — before the dataset guard, before anything else — so the
+      // next report answers one question with certainty: does ANY event reach this element
+      // at all? If this toast never appears, something is blocking or covering the button
+      // itself (a hit-testing/pointer-events/z-index problem), not a race in the save logic.
+      // If it DOES appear but the real save still silently fails, that's new information
+      // pointing at something between "event received" and "_saveLogMiles runs" — also not
+      // yet explained by anything shipped so far. Either answer moves this forward for real.
+      _saveBtn.addEventListener('pointerdown', function(){
+        try{ showToast('\uD83D\uDC46 tap detected on Save'); }catch(_e){}
+      }, {passive:true});
       _saveBtn.addEventListener('touchstart', function(ev){
         // Shared guard with the onclick attribute above (this.dataset.lmFired), not just
         // preventDefault: relying on preventDefault alone to suppress the browser's synthetic
