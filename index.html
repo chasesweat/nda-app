@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607161567">
+<meta name="version" content="202607161572">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -6650,8 +6650,10 @@ async function toggleRidePaid(id){
   await setRideStatus(r.id, nowPaid?'paid':'scheduled');
   const btn=document.getElementById('rm-paid-btn');
   if(btn) btn.style.fontWeight=nowPaid?'700':'400';
-  // When a ride is newly marked paid, ask for the payment method and offer a receipt.
-  if(nowPaid){ var _needWrap = !(parseFloat(r.drivenMiles)>0) || (r.tip==null || r.tip===''); try{ if(_needWrap && typeof openLogMiles==='function'){ window._payAfterMiles=r.id; openLogMiles(r.id); } else { openPaymentModal(r.id); } }catch(e){ console.warn('paid prompt failed', e); } }
+  // When a ride is newly marked paid, always route through Log Miles first — not just
+  // when data is missing — so mileage can be checked/corrected every time, alongside tip,
+  // before moving on to the payment method + receipt.
+  if(nowPaid){ try{ if(typeof openLogMiles==='function'){ window._payAfterMiles=r.id; openLogMiles(r.id); } else { openPaymentModal(r.id); } }catch(e){ console.warn('paid prompt failed', e); } }
 }
 
 // ── PAYMENT METHOD + RECEIPT (on mark-paid) ────────────────────────────────
@@ -7104,6 +7106,12 @@ async function savePaymentAndMaybeReceipt(){
   closePaymentModal();
   if(wantReceipt){ shareReceiptDocument(r.id); }
   else { showToast('Payment saved'+(method?': '+method:'')); }
+  // The 15% owner fee is only ever offered here — the true end of the mark-paid
+  // sequence, once status, mileage, tip, and payment method are all recorded. Logging
+  // miles on its own (outside this flow) never offers it, since that can happen well
+  // before the client has actually paid (e.g. invoiced through Square, paid days later).
+  var _ridForFee=r.id;
+  setTimeout(function(){ try{ _maybeOfferFeeAndPaid(_ridForFee); }catch(e){} }, 200);
 }
 
 // Send the receipt to the client. Uses SMS if we have a phone number (opens the
@@ -8005,22 +8013,25 @@ function _closeLogMiles(){ window._payAfterMiles=null; var o=document.getElement
 function openLogMiles(rideId){
   var r=rides.find(function(x){return x.id===rideId;});
   if(!r){ showToast('Ride not found'); return; }
-  _closeLogMiles();
+  // Clear any leftover overlay WITHOUT touching _payAfterMiles — going through the full
+  // _closeLogMiles() here would silently wipe out a flag toggleRidePaid may have just set
+  // moments earlier, breaking the mark-paid → verify miles → back-to-payment sequence.
+  var _stale=document.getElementById('log-miles-overlay'); if(_stale) _stale.remove();
   var ov=document.createElement('div');
   ov.id='log-miles-overlay';
   ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14000;'
     +'display:flex;align-items:center;justify-content:center;padding:1.5rem;';
   ov.onclick=function(e){if(e.target===ov)_closeLogMiles();};
   ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:360px;width:100%;padding:1.25rem;'
-    +'box-shadow:0 24px 60px rgba(0,0,0,.35);">'
+    +'box-shadow:0 24px 60px rgba(0,0,0,.35);max-height:85vh;overflow-y:auto;box-sizing:border-box;">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.9rem;">'
     +'<div><div style="font-size:1.05rem;font-weight:800;color:#0f172a;">&#128205; Log Miles</div>'
     +'<div style="font-size:.75rem;color:#64748b;margin-top:2px;">'+escHtml(r.client||'')+'</div></div>'
     +'<button onclick="_closeLogMiles()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button>'
     +'</div>'
+    +'<div style="font-size:.66rem;color:#94a3b8;margin-bottom:.6rem;line-height:1.4;">Total from Waze / Apple / Google Maps — include the drive to pick them up, not just the ride itself. That’s still deductible business mileage.</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin-bottom:.75rem;align-items:end;">'
     +'<div><label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">MILES DRIVEN</label>'
-    +'<div style="font-size:.66rem;color:#94a3b8;margin-bottom:4px;">Total from Waze / Apple / Google Maps — include the drive to pick them up, not just the ride itself. That’s still deductible business mileage.</div>'
     +'<input id="lm-miles" type="number" min="0" step="0.1" value="'+(r.drivenMiles||r.miles||'')+'" placeholder="e.g. 41" '
     +'style="width:100%;padding:.55rem .65rem;border:1.5px solid #c4b5fd;border-radius:9px;font-family:inherit;font-size:1rem;box-sizing:border-box;">'
     +'</div>'
@@ -8046,6 +8057,43 @@ function openLogMiles(rideId){
   setTimeout(function(){ var el=document.getElementById('lm-miles'); if(el)el.focus(); },100);
 }
 
+// After a driver logs mileage/tip directly (not through the mark-paid flow, which
+// already handles its own follow-up), offer the two natural next steps: pay the 15%
+// client fee to whoever owns this client, if it's not their own client and it isn't
+// already paid; then offer to mark the ride's own payment as received. Two separate,
+// sequential confirms — the fee payment and the client's payment are genuinely
+// different things (money TO the owner vs money FROM the client), never combined.
+// Offered ONLY at the true end of the mark-paid sequence — after status, mileage, tip,
+// and payment method are all recorded (called from savePaymentAndMaybeReceipt). Never
+// from a standalone mileage log, since a ride can be logged well before the client has
+// actually paid (e.g. invoiced through Square, paid days later) — asking to pay the
+// owner's fee before the driver has been paid themselves would be backwards.
+function _maybeOfferFeeAndPaid(rideId){
+  var r=rides.find(function(x){return x.id===rideId;});
+  if(!r) return;
+  var dName=getMyDriverName();
+  if(!dName || r.driver!==dName) return; // only for the driver who was just marked paid
+  var owner = (typeof clientIsDriver==='function' && clientIsDriver(r.client)) ? null
+            : ((typeof getClientOwner==='function' ? getClientOwner(r.client) : null) || (typeof feeOwnerFor==='function' ? feeOwnerFor(r.createdBy) : null));
+  if(!owner || owner===dName) return; // own client, no fee owed to anyone
+  var fare=parseFloat(r.price)||0;
+  if(fare<=0) return;
+  var key=owner+':recv:'+dName;
+  var fp=feePayments[key]||{};
+  if(_feeRidePending(fp, rideId) || (fp.paidRides && fp.paidRides.indexOf(rideId)>=0)) return; // already sent or paid
+  var fee=Math.round(fare*(typeof clientFeeRate==='function'?clientFeeRate():0.15)*100)/100;
+  var handle=(typeof driverVenmo!=='undefined')?driverVenmo[owner]:'';
+  if(!handle || fee<=0) return; // nothing to pay to
+  if(confirm('Pay '+owner.split(' ')[0]+'\u2019s $'+fee.toFixed(2)+' fee via Venmo now?')){
+    var venmoUrl=(typeof venmoPayUrl==='function')?venmoPayUrl(handle, fee, (typeof _venmoRideNote==='function')?_venmoRideNote(r):''):'';
+    if(venmoUrl){
+      if(typeof venmoAutoMarkRide==='function') venmoAutoMarkRide(owner, dName, rideId);
+      setTimeout(function(){ window.location.href=venmoUrl; }, 150);
+    }
+  }
+}
+
+
 async function _saveLogMiles(rideId){
   var r=rides.find(function(x){return x.id===rideId;}); if(!r)return;
   var mi=parseFloat(document.getElementById('lm-miles').value)||0;
@@ -8062,7 +8110,11 @@ async function _saveLogMiles(rideId){
   try{await saveRides();}catch(e){console.warn(e);}
   if(_r2 && !window._srtTipChained){
     window._srtTipChained=true;
-    _closeLogMiles();
+    // Carry the mark-paid flag over to the second linked ride if it was pointing at this
+    // one — same reasoning as the fix in openLogMiles above.
+    var _carryPayAfter = (window._payAfterMiles===rideId) ? _r2.id : null;
+    var _staleOv=document.getElementById('log-miles-overlay'); if(_staleOv) _staleOv.remove();
+    if(_carryPayAfter!=null) window._payAfterMiles=_carryPayAfter;
     var _w0=document.getElementById('mt-wrap'); if(_w0)_w0.innerHTML=mtBarHtml(rideId);
     showToast('\uD83D\uDCCD '+r.drivenMiles+' mi (split) saved \u2014 now log the second ride');
     setTimeout(function(){ try{ openLogMiles(_r2.id); }catch(e){} }, 220);
@@ -8729,7 +8781,7 @@ function _mtShowStopPopup(){
   popup.id='mt-popup';
   popup.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14000;display:flex;align-items:flex-start;justify-content:center;padding:2rem 1rem 1rem;overflow:auto;';
   popup.onclick=function(e){if(e.target===popup)_mtClosePop();};
-  popup.innerHTML='<div style="background:#fff;border-radius:16px;max-width:480px;width:100%;padding:1.25rem;box-shadow:0 24px 60px rgba(0,0,0,.35);max-height:90vh;display:flex;flex-direction:column;box-sizing:border-box;">'
+  popup.innerHTML='<div style="background:#fff;border-radius:16px;max-width:480px;width:100%;padding:1.25rem;box-shadow:0 24px 60px rgba(0,0,0,.35);max-height:90vh;overflow-y:auto;display:flex;flex-direction:column;box-sizing:border-box;">'
     // header
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">'
     +'<div><div style="font-size:1.05rem;font-weight:800;color:#0f172a;">\uD83D\uDCCD Session Summary</div>'
@@ -11849,7 +11901,7 @@ function refreshDash(){
   // rides, which read as if it needed attention now. Anything further out belongs on the
   // Calendar, not the daily-glance dashboard.
   const weekAheadStr=toDateStr(addDays(now,7));
-  let upcoming=rides.filter(r=>r.date>=todayStr && r.date<=weekAheadStr && r.status!=='cancelled' && isMyDrivingRide(r));
+  let upcoming=rides.filter(r=>r.date>=todayStr && r.date<=weekAheadStr && r.status!=='cancelled' && r.status!=='paid' && isMyDrivingRide(r));
   upcoming=upcoming.sort((a,b)=>a.date.localeCompare(b.date)||(a.time||'').localeCompare(b.time||'')).slice(0,10);
   const _upd=document.getElementById('upcoming-list'); if(_upd) _upd.innerHTML=upcoming.length?upcoming.map((r,idx)=>{
     const c=rideColor(r);
@@ -12308,25 +12360,10 @@ function renderDashFees(){
     }
   });
   const hasOwed=Object.keys(owedToMe).length, hasOwe=Object.keys(iOwe).length;
-  // Fees marked paid today (as payer) — same-day undo list (computed up front so the
-  // fees box still shows for a same-day undo even when nothing is currently owed).
-  var _recent=[];
-  try{
-    Object.keys(feePayments||{}).forEach(function(k){
-      var m=k.match(/^(.*):recv:(.*)$/); if(!m) return;
-      var _own=m[1], _pyr=m[2]; if(_pyr!==dName) return;
-      var fp=feePayments[k];
-      (fp.paidRides||[]).forEach(function(rid){
-        var rr=(rides||[]).find(function(x){return x&&x.id===rid;}); if(!rr) return;
-        if(rr.date!==today) return;   // only rides dated today — clears at midnight of the ride day
-        _recent.push({owner:_own, rid:rid, label:(rr.client||'Ride')+(rr.date?' \u00b7 '+rr.date.slice(5).replace('-','/'):'')});
-      });
-    });
-  }catch(e){}
   var _waiveHtml=(typeof _renderFeeWaiveRequestsHTML==='function')?_renderFeeWaiveRequestsHTML(dName):'';
   var _aaHtml=(typeof _renderAdminApprovalsHTML==='function')?_renderAdminApprovalsHTML():'';
   var _cautHtml=(typeof _renderCautiousFlagRequestsHTML==='function')?_renderCautiousFlagRequestsHTML(dName):'';
-  if(!hasOwed&&!hasOwe&&!_recent.length&&!_waiveHtml&&!_aaHtml&&!_cautHtml){ box.innerHTML=''; return; }
+  if(!hasOwed&&!hasOwe&&!_waiveHtml&&!_aaHtml&&!_cautHtml){ box.innerHTML=''; return; }
 
   function _rideLabel(ri){
     return escHtml(ri.client||'Ride')+(ri.date?' \u00b7 '+ri.date.slice(5).replace('-','/'):'')+' \u00b7 $'+ri.fee.toFixed(2);
@@ -12347,10 +12384,16 @@ function renderDashFees(){
       // One row per ride — each is marked paid individually
       (v.rides||[]).forEach(function(ri){
         var _fpr=feePayments[dName+':recv:'+name]||{};
-        var _sentBadge=_feeRidePending(_fpr, ri.id)?'<span style="font-size:.68rem;color:#b45309;font-weight:700;align-self:center;margin-right:.15rem;">\u23F3 sent</span>':'';
-        html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.35rem .85rem .35rem 1.4rem;border-bottom:1px solid var(--light);gap:.6rem;">'
+        var _pendRcv=_feeRidePending(_fpr, ri.id);
+        var _sentBadge=_pendRcv?'<span style="font-size:.68rem;color:#b45309;font-weight:700;align-self:center;margin-right:.15rem;">\u23F3 sent</span>':'';
+        // Reject only makes sense once the driver has actually claimed to have sent it \u2014
+        // tapping it puts the fee straight back to owed-and-not-sent on both dashboards,
+        // the same underlying action as the driver's own pending-undo.
+        var _rejectBtn=_pendRcv?('<button onclick="_feeUndoRide(\''+escAttr(dName)+'\',\''+escAttr(name)+'\','+_feeIdArg(ri.id)+')" '
+          +'style="flex-shrink:0;padding:.26rem .6rem;background:none;border:1.5px solid #dc2626;color:#dc2626;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;">\u2717 Not received</button>'):'';
+        html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.35rem .85rem .35rem 1.4rem;border-bottom:1px solid var(--light);gap:.6rem;flex-wrap:wrap;">'
           +'<div style="font-size:.74rem;color:var(--mid);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_rideLabel(ri)+'</div>'
-          +'<div style="display:flex;gap:.3rem;align-items:center;flex-shrink:0;">'+_sentBadge
+          +'<div style="display:flex;gap:.3rem;align-items:center;flex-shrink:0;">'+_sentBadge+_rejectBtn
           +'<button onclick="markFeeRidePaid(\''+escAttr(dName)+'\',\''+escAttr(name)+'\','+_feeIdArg(ri.id)+')" '
           +'style="flex-shrink:0;padding:.26rem .6rem;background:#16a34a;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;">\u2713 Received</button></div>'
           +'</div>';
@@ -12410,12 +12453,6 @@ function renderDashFees(){
   }
   html+='<div style="padding:.5rem .85rem;font-size:.72rem;color:var(--mid);">View full breakdown in <span onclick="nav(\'income\')" style="color:var(--accent);cursor:pointer;text-decoration:underline;">Income</span></div>'
     +'</div>';
-  if(_recent.length){
-    html+='<div style="font-size:.72rem;font-weight:600;color:var(--mid);padding:.45rem .85rem;border-top:1px solid var(--light);border-bottom:1px solid var(--light);">Today\u2019s rides marked paid \u2014 tap to undo</div>';
-    _recent.slice(-8).forEach(function(it){
-      html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.35rem .85rem;border-bottom:1px solid var(--light);gap:.6rem;"><div style="font-size:.74rem;color:var(--mid);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+escHtml(it.label)+'</div><button onclick="_feeUndoRide(\''+escAttr(it.owner)+'\',\''+escAttr(dName)+'\','+_feeIdArg(it.rid)+')" style="flex-shrink:0;padding:.24rem .55rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.68rem;font-weight:600;cursor:pointer;">\u21a9 Undo</button></div>';
-    });
-  }
   box.innerHTML=html;
 }
 
