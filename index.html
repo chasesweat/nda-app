@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607171584">
+<meta name="version" content="202607171592">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -211,6 +211,9 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
 .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem 1.5rem;margin-bottom:1.25rem;}
 .detail-row{padding:.4rem 0;border-bottom:1px solid var(--light);}
 .driver-select-row{display:flex;gap:.5rem;align-items:center;margin-bottom:1.25rem;}
+.driver-select-row>span{flex-shrink:0;}
+.driver-select-row>select{flex:1;min-width:0;}
+.driver-select-row>button{flex-shrink:0;white-space:nowrap;}
 .driver-select-row select{flex:1;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.9rem;}
 .rm-expander{border:1.5px solid var(--light);border-radius:12px;overflow:hidden;margin:.35rem 0 1rem;}
 .rm-exp-head{width:100%;display:flex;align-items:center;justify-content:space-between;gap:.5rem;background:var(--surface);border:none;padding:.7rem .9rem;font-family:'DM Sans',sans-serif;font-size:.86rem;font-weight:700;color:var(--black);cursor:pointer;}
@@ -1702,7 +1705,21 @@ function _dismissAdminPromo(){
 }
 function isAdmin(){ return currentUser?.role==='admin'; }
 function canDeleteRide(ride){ return isAdmin() || ride?.createdBy === currentUser?.name; }
-function canAssignOnRide(ride){ return isAdmin() || ride?.createdBy === currentUser?.name; }
+function canAssignOnRide(ride){
+  if(isAdmin() || ride?.createdBy === currentUser?.name) return true;
+  // Reported: once a ride is confirmed, the assigned driver should get Dispatch Tools too —
+  // previously it was creator/admin-only regardless of ride status, which is why an admin
+  // account (Chase) briefly appeared to have "lost" driver-change on rides he didn't create,
+  // before that turned out to be a labeling mix-up (Assign Driver replacing an older Change
+  // Driver control) rather than a real bug. This is the actual, deliberate expansion asked
+  // for on top of that: once a ride reaches 'confirmed' (or has moved past it — 'paid'),
+  // the driver who's actually going to be doing this ride gets the same dispatch access
+  // creator/admin already has — reassigning, finding a closer driver, unmarking the
+  // confirmation text — not just a read-only view of their own ride.
+  const myDriverName = (typeof getMyDriverName==='function') ? getMyDriverName() : null;
+  const _confirmedOrLater = ride?.status==='confirmed' || ride?.status==='paid';
+  return !!(myDriverName && ride?.driver===myDriverName && _confirmedOrLater);
+}
 function requireAdmin(action='do that'){
   if(!isAdmin()){ showToast(`Only admins can ${action}.`,'error'); return false; }
   return true;
@@ -2709,6 +2726,98 @@ document.addEventListener('click', function(e){
   document.querySelectorAll('.mtip-dot.on').forEach(function(d){ d.classList.remove('on'); });
   _mtipOpenId = null;
 }, true);
+
+// ── SWIPE BETWEEN THE 5 TOP QUICKNAV TABS ──
+// Swipe left/right anywhere on a page body to move to the next/previous tab, the same as
+// tapping it — NOT a sliding/dragging carousel. That's a deliberate scope decision: a real
+// finger-follows-drag carousel needs every page mounted at once (12 pages currently swap via
+// display:none, not a horizontal track) and touches page-lifecycle code that assumes a page
+// only initializes when switched TO (initChat(), calendar rendering, etc.) — a much bigger,
+// more fragile project. This gets the "don't have to reach the tab bar" benefit for a fraction
+// of the risk, especially given how much of this session went into just how unreliable touch-
+// gesture code turns out to be across real Android/iOS devices (see the Save button history).
+//
+// Only cycles the 5 tabs actually IN the top bar, in their displayed order. If some other page
+// (Income, Documents, etc. — reached via the hamburger menu, not this bar) is active, swiping
+// does nothing here; it was never asked to cover those.
+(function(){
+  var TABS = ['dashboard','quote','calendar','clients','chat'];
+  var MIN_DISTANCE = 70;      // px — short flicks and accidental brushes shouldn't navigate
+  var MAX_OFF_AXIS_RATIO = 0.6; // vertical drift allowed before it's treated as a scroll, not a swipe
+  var MAX_DURATION_MS = 700;  // slow drags are probably not an intentional swipe
+
+  var startX = null, startY = null, startT = 0, tracking = false;
+
+  function currentTabIndex(){
+    var active = document.querySelector('.page.active');
+    if(!active) return -1;
+    var id = active.id.replace(/^page-/, '');
+    return TABS.indexOf(id);
+  }
+
+  // Reject a swipe that started inside something that's ACTUALLY horizontally scrollable right
+  // now (the calendar's own tab row, the documents filter row, wide financial tables that wrap
+  // in overflow-x:auto) — checked by real scrollability, not a hardcoded selector list, so any
+  // horizontally-scrolling element added later is covered automatically without remembering to
+  // update this.
+  function startedInHorizontalScroller(target){
+    var el = target;
+    while(el && el !== document.body){
+      if(el.scrollWidth > el.clientWidth + 2){
+        var cs = window.getComputedStyle(el);
+        if(cs.overflowX === 'auto' || cs.overflowX === 'scroll') return true;
+      }
+      if(el.classList && el.classList.contains('page')) break; // no need to check above page level
+      el = el.parentElement;
+    }
+    return false;
+  }
+
+  function somethingIsOpen(){
+    // Same shape as the "busy" check in the app-update-ready handler — reused rather than
+    // reinvented. Extended here with the hamburger menu, which that check didn't need to know
+    // about, and which very much should block a page-swipe (a swipe on an open menu should
+    // scroll the menu, not flip the page underneath it).
+    var panel = document.getElementById('user-menu-panel');
+    var backdrop = document.getElementById('menu-backdrop');
+    var menuOpen = (panel && panel.style.display !== 'none' && panel.style.display !== '')
+                || (backdrop && backdrop.style.display !== 'none' && backdrop.style.display !== '');
+    return menuOpen || !!document.querySelector(
+      '.modal-overlay.show, #log-miles-overlay, #mt-popup, #ride-modal.show'
+    );
+  }
+
+  document.addEventListener('touchstart', function(e){
+    tracking = false;
+    if(e.touches.length !== 1) return;               // ignore pinch/multi-touch
+    if(somethingIsOpen()) return;
+    if(startedInHorizontalScroller(e.target)) return;
+    if(currentTabIndex() < 0) return;                  // active page isn't one of the 5 tabs
+    var t = e.touches[0];
+    startX = t.clientX; startY = t.clientY; startT = Date.now();
+    tracking = true;
+  }, {passive:true});
+
+  document.addEventListener('touchend', function(e){
+    if(!tracking) return;
+    tracking = false;
+    if(somethingIsOpen()) return;  // something could have opened mid-gesture
+    var t = e.changedTouches && e.changedTouches[0];
+    if(!t) return;
+    var dx = t.clientX - startX, dy = t.clientY - startY;
+    var elapsed = Date.now() - startT;
+    if(elapsed > MAX_DURATION_MS) return;
+    if(Math.abs(dx) < MIN_DISTANCE) return;
+    if(Math.abs(dy) > Math.abs(dx) * MAX_OFF_AXIS_RATIO) return; // too vertical — was a scroll
+
+    var idx = currentTabIndex();
+    if(idx < 0) return;
+    var next = dx < 0 ? idx + 1 : idx - 1;  // swipe left (finger moves left) → next tab
+    if(next < 0 || next >= TABS.length) return; // at an edge — no wraparound
+    try{ nav(TABS[next]); }catch(_e){}
+  }, {passive:true});
+})();
+
 function showPageTip(pageId){
   if(isUiDismissed('tips')) return;
   if(_shownTips.has(pageId)) return;
@@ -5378,6 +5487,31 @@ function mapsLink(addr, color){
        + 'style="color:'+(color||"inherit")+';text-decoration:underline;text-underline-offset:2px;">'
        + escHtml(a)+'</a>';
 }
+// Reported: a driver typed "additional pick up 4225 Ivy Chase Ln, Suwanee, Ga 30024" into a
+// ride's freeform NOTES field (not a structured address field — checked directly, r.xstopAddr
+// is never displayed read-only anywhere; this is genuinely just text someone typed), and asked
+// for it to be clickable "just like the main address." Notes are rendered as plain escHtml —
+// no address awareness at all. This finds a US-style street address ANYWHERE inside arbitrary
+// note text (number + street text + city + state + zip, case-insensitive on the state
+// abbreviation since real typed addresses aren't always "GA" — "Ga" is exactly what was
+// typed here) and wraps ONLY that portion in the same mapsLink/openNav mechanism the main
+// pickup/destination addresses already use — everything else in the note stays plain text.
+// Deliberately general rather than keyed to the specific "additional pick up" wording, since
+// that phrase is just whatever this one driver happened to type, not a recognized field name.
+const ADDRESS_PATTERN = /\d{1,6}\s+[A-Za-z0-9.'#\-\s]+?,\s*[A-Za-z .'\-]+,\s*[A-Za-z]{2}\s*\d{5}(?:-\d{4})?/g;
+function linkifyAddresses(text){
+  const s = String(text||'');
+  if(!s) return '';
+  let out = '', last = 0, m;
+  ADDRESS_PATTERN.lastIndex = 0;
+  while((m = ADDRESS_PATTERN.exec(s))){
+    out += escHtml(s.slice(last, m.index));
+    out += mapsLink(m[0], 'var(--accent)');
+    last = m.index + m[0].length;
+  }
+  out += escHtml(s.slice(last));
+  return out;
+}
 function openNav(addr){
   addr=(addr||"").trim(); if(!addr) return;
   const q=encodeURIComponent(addr);
@@ -6186,6 +6320,138 @@ async function textClient(id, opts){
 
 function closeDayModal(){document.getElementById('day-modal').classList.remove('show');}
 
+// ── DRIVER-CHANGE NOTIFICATIONS ──────────────────────────────────────────
+// Reported: when a confirmed ride's driver is reassigned, nobody but the new driver (via a
+// silent in-app push, addNotification) hears about it — the client, and whoever owns that
+// client (Kat/Morgan), find out only if someone remembers to tell them by hand.
+//
+// Text-sending mechanism duplicated from textClient just above rather than refactored into a
+// shared helper: textClient is existing, working, tested code, and this session has a real
+// track record of edits introducing regressions in code that "obviously" wasn't touched.
+// Refactoring a working function to serve a brand-new caller is exactly the kind of change
+// that's cheap to get subtly wrong and expensive to notice — the duplication costs a few dozen
+// lines; a regression in client confirmation texts costs a lot more. Same iOS/Android/
+// clipboard-fallback shape, kept independent on purpose.
+async function _sendTextWithFiles(nums, message, files){
+  files = files || [];
+  if(!nums || !nums.length) return false;
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const sep = isIOS ? '&' : '?';
+  const smsURL = 'sms:'+nums.join(',')+sep+'body='+encodeURIComponent(message);
+  const cardFile = files.find(function(f){ return f.type==='image/png'; });
+
+  let _cardCopied=false;
+  if(cardFile && window.ClipboardItem && navigator.clipboard && navigator.clipboard.write){
+    try{ await navigator.clipboard.write([new ClipboardItem({'image/png':cardFile})]); _cardCopied=true; }catch(e){ console.warn('clipboard write failed',e); }
+  }
+
+  if(navigator.canShare && files.length){
+    const shareData={files:files, text:message};
+    try{
+      if(navigator.canShare(shareData)){
+        await navigator.share(shareData);
+        if(_cardCopied) setTimeout(function(){ showToast('\uD83D\uDDBC\uFE0F Driver card also copied \u2014 long-press to paste it if it is missing'); },900);
+        return true;
+      }
+    }catch(e){
+      if(e && e.name==='AbortError') return false;
+      console.warn('driver-change share failed, falling back to sms:',e);
+    }
+  }
+
+  const toasts=[];
+  if(_cardCopied) toasts.push('\uD83D\uDDBC\uFE0F Card copied \u2014 long-press to paste in Messages');
+  window.location.href=smsURL;
+  if(toasts.length) setTimeout(function(){ showToast(toasts.join(' \u00b7 ')); },800);
+  return true;
+}
+
+// Kat and Morgan are modeled as two separate driver profiles (Kathleen Herringdine /
+// Morgan Newton), but for anything client-ownership-related they operate as one unit —
+// Morgan dispatches on Kat's behalf (see PROXY_MAP). Whichever of the two actually owns a
+// given client, BOTH get notified of a driver change on it, not just whichever the ownership
+// lookup happens to resolve to. getClientOwner can return a raw override (clientOwners[key])
+// that ISN'T normalized through feeOwnerFor's Morgan\u2192Kat collapsing, so this checks both
+// names explicitly rather than assuming the collapsing already happened upstream.
+function _ownerPhonesForClient(clientName){
+  const KAT = USER_DRIVER_MAP['Kat'] || 'Kathleen Herringdine';
+  const MORGAN = 'Morgan Newton';
+  const owner = (typeof getClientOwner==='function') ? getClientOwner(clientName) : null;
+  if(!owner) return [];
+  const isKatOrMorgan = owner===KAT || owner==='Kat' || owner===MORGAN || owner==='Morgan';
+  const names = isKatOrMorgan ? [KAT, MORGAN] : [owner];
+  const phones = [];
+  names.forEach(function(n){
+    const p = (DRIVER_PROFILES[n]||{}).phone;
+    if(p) phones.push(p.replace(/[^0-9+]/g,''));
+  });
+  return Array.from(new Set(phones)); // dedupe — if owner already resolved to one of the pair
+}
+
+// The one exact-worded message specified for this feature — the client is the audience that
+// actually needs precise, reassuring wording (their itinerary hasn't changed, just the driver).
+// Owner and driver notifications use their own short, practical text instead; nobody asked for
+// exact wording there, and internal notices don't carry the same "written to a client" stakes.
+function _driverChangeClientMessage(ride, newDriverName, newDriverPhone){
+  const dateStr = fmtDateShort(ride.date) || '';
+  const timeStr = fmtTime12(ride.time) || '';
+  return 'Dear '+(ride.client||'Client')+',\n\n'
+    + 'Please be advised that there has been a change regarding your scheduled pickup on '+dateStr+' at '+timeStr+'.\n\n'
+    + 'Your new driver will be '+newDriverName+'. We have attached a photo of your driver and the vehicle for easy identification upon arrival. '
+    + 'If you need to reach them directly, they can be contacted at '+(newDriverPhone||'the office')+'.\n\n'
+    + 'There are no changes to your scheduled itinerary or pickup location. If you have any questions, please reply to this message.';
+}
+
+// Orchestrates all three notifications for a driver reassignment on an already-confirmed
+// ride. Called from assignDriver() — see the exact trigger condition there (driver actually
+// changed AND the ride had already reached 'confirmed'). Staggered, not simultaneous — firing
+// three separate share-sheet/SMS actions back to back risks them colliding on a real device,
+// same reasoning as the existing 180/900ms staggers elsewhere in this file (sendAllConf).
+// Each step is independently wrapped: one recipient's send failing (no phone on file, share
+// sheet dismissed) must not silently swallow the other two.
+async function notifyDriverChange(ride, oldDriverName, newDriverName){
+  const newPhone = (DRIVER_PROFILES[newDriverName]||{}).phone || '';
+
+  // 1. Client owner(s) — short internal notice, fires first.
+  try{
+    const ownerPhones = _ownerPhonesForClient(ride.client);
+    if(ownerPhones.length){
+      const ownerMsg = 'Driver changed on '+(ride.client||'a client')+'\u2019s '+(fmtDateShort(ride.date)||'')+' ride: now '+newDriverName+(oldDriverName?' (was '+oldDriverName+')':'')+'.';
+      await _sendTextWithFiles(ownerPhones, ownerMsg, []);
+    }
+  }catch(e){ console.warn('owner driver-change notice failed',e); }
+
+  // 2. New driver — assignment notice, now WITH the client's vCard attached (reusing the
+  // same buildClientVCard used by sendClientVCardToDriver/sendClientPhone from v586) so the
+  // driver can save the client's contact the same way they would for a normal assignment.
+  // Deliberately scoped to ONLY this recipient — explicitly re-confirmed: the client's own
+  // vCard must never go to the client themselves (step 3, below) or to the owner(s) (step 1,
+  // above). Those two stay exactly as they were; only this one gained a file.
+  await new Promise(function(r){ setTimeout(r, 400); });
+  try{
+    if(newPhone){
+      const driverMsg = 'You\u2019ve been assigned '+(ride.client||'a client')+'\u2019s ride on '+(fmtDateShort(ride.date)||'')+' at '+(fmtTime12(ride.time)||'')+(ride.pickup?('. Pickup: '+ride.pickup):'')+'.';
+      let driverFiles=[];
+      try{ const vcf=(window._confFilesMap&&window._confFilesMap[ride.id]&&window._confFilesMap[ride.id].vcard) || buildClientVCard(ride); if(vcf) driverFiles=[vcf]; }catch(e){ console.warn('client vcard build for driver-change failed',e); }
+      await _sendTextWithFiles([newPhone.replace(/[^0-9+]/g,'')], driverMsg, driverFiles);
+    }
+  }catch(e){ console.warn('new driver SMS failed',e); }
+
+  // 3. Client — the exact specified message, with the new driver's card image attached.
+  await new Promise(function(r){ setTimeout(r, 400); });
+  try{
+    const clientPhone = clientPhoneFor(ride);
+    if(clientPhone){
+      let files=[];
+      try{ const card=await warmDriverCardImage(newDriverName); if(card) files=[card]; }catch(e){}
+      const clientMsg = _driverChangeClientMessage(ride, newDriverName, newPhone);
+      await _sendTextWithFiles([clientPhone.replace(/[^0-9+]/g,'')], clientMsg, files);
+    } else {
+      showToast('\u26A0\uFE0F No client phone on file \u2014 driver-change text to '+(ride.client||'the client')+' was not sent','error');
+    }
+  }catch(e){ console.warn('client driver-change text failed',e); showToast('\u26A0\uFE0F Could not send the driver-change text to the client','error'); }
+}
+
 // ═══════════════════════════════════════════
 // RIDE DETAIL MODAL
 // ═══════════════════════════════════════════
@@ -6371,6 +6637,17 @@ function renderRideView(r){
     : '';
   const _bothAddr = (r.type==='MEDICAL'||r.type==='ROUND TRIP'||r.type==='ONE WAY');
   const address = _bothAddr ? '' : (r.pickup||r.home||'');
+  // Extra-stop address(es), shared between both possible layouts below (the single-`address`
+  // airport-ride layout and the pickup+destination layout) so the parsing/labeling logic lives
+  // in exactly one place. See the fuller reasoning where this is used.
+  const extraStopsHtml = (()=>{
+    const stops=(r.xstopAddr||'').split(';').map(function(x){return x.trim();}).filter(Boolean);
+    if(!stops.length) return '';
+    return stops.map(function(addr,i){
+      const lbl = stops.length>1 ? 'STOP '+(i+1) : 'EXTRA STOP';
+      return `<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:#b45309;min-width:58px;margin-top:2px;">${lbl}</span><div style="font-size:.86rem;">${mapsLink(addr,"var(--accent)")}</div></div>`;
+    }).join('');
+  })();
 
   document.getElementById('rm-detail-grid-top').innerHTML=`${rideReqDriverTag(r)}
     ${r.status==='cancelled'?`<div style="grid-column:1/-1;background:#fdecea;border:1.5px solid #e6a8a0;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#b03a2e;font-weight:700;font-size:.9rem;">🚫 CANCELLED${r.cancelledBy?' · by '+escHtml(String(r.cancelledBy)):''} — tap “Reactivate Ride” below to restore.</div>`:''}
@@ -6446,9 +6723,14 @@ function renderRideView(r){
       </div>
     </div>` : ''}
 
+    ${extraStopsHtml && address ? `<div class="detail-row" style="grid-column:1/-1;">
+      <div style="display:flex;flex-direction:column;gap:.4rem;">${extraStopsHtml}</div>
+    </div>` : ''}
+
     ${_bothAddr && (r.pickup||r.home) ? `<div class="detail-row" style="grid-column:1/-1;">
       <div style="display:flex;flex-direction:column;gap:.4rem;">
         ${r.pickup?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:58px;margin-top:2px;">PICKUP</span><div style="font-size:.86rem;">${mapsLink(r.pickup,"var(--accent)")}</div></div>`:''}
+        ${extraStopsHtml}
         ${r.home?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:58px;margin-top:2px;">DESTINATION</span><div style="font-size:.86rem;">${mapsLink(r.home,"var(--accent)")}</div></div>`:''}
       </div>
     </div>` : ''}
@@ -6529,7 +6811,7 @@ function renderRideView(r){
             if(_isCreator){
               return `<textarea id="rm-notes-${r.id}" rows="2" placeholder="Add a note…" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.86rem;color:var(--black);resize:vertical;background:var(--surface);box-sizing:border-box;" oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'">${escHtml(r.notes||'')}` + `</textarea><button onclick="saveRideNote(${r.id})" style="margin-top:.3rem;padding:.3rem .8rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:600;cursor:pointer;">Save note</button>`;
             } else {
-              return `<div style="font-size:.86rem;color:var(--black);padding:.45rem .1rem;">${escHtml(r.notes)}</div>`;
+              return `<div style="font-size:.86rem;color:var(--black);padding:.45rem .1rem;">${linkifyAddresses(r.notes)}</div>`;
             }
           })()}
           ${(currentUser&&currentUser.name===r.createdBy&&r.reqDriverNote)?`<div style="margin-top:.4rem;"><span style="display:inline-block;font-size:.9rem;background:#fff;color:#7c3aed;border:1.5px solid #c4b5fd;border-radius:9px;padding:4px 12px;font-weight:700;">\u2605 Requested driver: ${escHtml(r.reqDriverNote)}</span><div style="font-size:.66rem;color:var(--mid);margin-top:3px;">Private \u2014 only you can see this</div></div>`:''}
@@ -9109,7 +9391,19 @@ function mtBarHtml(rid){
   if(!r || !_me) return '';
   var _iAmDriving = (r.driver===_me) || (r.xxl && r.driver2===_me);
   if(!_iAmDriving) return '';
-  var mi=r?(parseFloat(r.drivenMiles)||parseFloat(r.miles)||0):0;
+  // BUG (reported: "Log Miles, GPS — nothing appears at all where it used to be"): this used
+  // to fall back to r.miles (the QUOTED mileage from the fare calculation, set on essentially
+  // every ride from the moment it's created) whenever r.drivenMiles wasn't set yet. Its only
+  // consumer is `hasMiles` below, which exists to answer "has this trip's ACTUAL mileage
+  // already been captured" — meant to hide Start Ride/GPS once a trip is done, not before one
+  // has even begun. Falling back to the pre-trip quote made a completely normal, not-yet-driven
+  // ride with a quoted mileage (i.e. almost every ride in this app) look like its mileage was
+  // already logged — hiding Start Ride and GPS for it before the driver ever got a chance to
+  // use them. Confirmed against the pre-session base file: this bug predates this session
+  // entirely; it just took a real ride with a normal quote to expose it, since most of this
+  // project's own test fixtures happened not to set r.miles at all. Fixed: only the actually-
+  // driven figure counts as "already logged" — the quote is irrelevant to this check.
+  var mi=r?(parseFloat(r.drivenMiles)||0):0;
   var tip=r?parseFloat(r.tip)||0:0;
   // Was gated to the CALENDAR DAY of the ride, which is wrong for anything near midnight:
   // a 12:05 AM airport pickup wouldn't unlock Start Ride / GPS until 12:00 AM — by which
@@ -11989,7 +12283,7 @@ function showPolicyTextPrompt(clientName, phone, rideDate, rideTime, ridePrice){
 
 async function assignDriver(){
   await _ensureFresh();
-  const r=rides.find(x=>x.id===activeRideId); if(!r) return;
+  const r=_rideById(activeRideId); if(!r) return;
   if(!canAssignOnRide(r)){ showToast('You can only assign drivers to rides you created.','error'); return; }
   const newDriver=document.getElementById('rm-driver-select').value;
   const oldDriver=r.driver;
@@ -12006,6 +12300,13 @@ async function assignDriver(){
   if(newDriver!==oldDriver && _wasConfirmed){
     r.confirmSent=false; if(r.status==='confirmed') r.status='scheduled'; r.driverChangedPending=true;
     touchRide(r, 'driver changed \u2014 confirmation reset to Scheduled');
+    // Reported: once a ride's already confirmed and the driver changes, the new driver, the
+    // client owner (Kat/Morgan, whichever applies), and the client itself should all hear
+    // about it — not just the silent in-app push the new driver already gets above. Fire-and-
+    // forget from here (not awaited) so reassigning a driver doesn't visibly hang the UI
+    // waiting on three staggered share-sheet prompts; each step handles its own failures and
+    // toasts internally rather than needing a caller to catch anything.
+    if(newDriver){ notifyDriverChange(r, oldDriver, newDriver).catch(function(e){ console.warn('notifyDriverChange failed',e); }); }
   }
   await saveRides();
   await saveNotifs();
@@ -17369,20 +17670,51 @@ async function sendClientVCardToDriver(id){
   }catch(e){ showToast('Could not prepare contact','error'); }
 }
 
-function sendClientPhone(id){
-  const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
+// Send client's phone number to the assigned driver(s), for a specific ride's context
+// (e.g. "For your AP RUN on 2026-07-19 at 6:00 AM") — genuinely separate from
+// sendClientVCardToDriver above: that one is pure contact info with no ride-specific
+// date/time, this one exists specifically to carry that context. Originally sent as a plain
+// SMS body with the name/number typed out. Changed (reported: "sending this instead of the
+// vcard") to attach a REAL vCard file too, reusing the exact same build/cache/save/share
+// mechanism as sendClientVCardToDriver just above — including its "two delivery paths"
+// reasoning (self vs. share-sheet) and its same real platform limit (a vCard is a file; every
+// recipient of a merged group share sees every attachment, so this stays its own separate send,
+// same as vcard does). The ride-context line moves to the share text/title instead of being
+// baked into a message body, and drops the "Name's number:" phrasing since the attached vCard
+// now carries the name and number itself — repeating it in the text would just be redundant.
+async function sendClientPhone(id){
+  const r=_rideById(id); if(!r||!r.driver||!r.client) return;
   const clientPhone=clientPhoneFor(r);
   if(!clientPhone){ showToast('No valid phone on file for '+(r.client||'this client')+' \u2014 add their number to the ride first.','error'); return; }
-  const clientName=r.client||'your client';
-  const msg=clientName+'\'s number: '+clientPhone+'\nFor your '+r.type+' on '+(r.date||'')+(r.time?' at '+fmtTime12(r.time):'');
-  // Send to driver(s)
-  const driverNums=[];
-  if(r.driver){ const p=(DRIVER_PROFILES[r.driver]||{}).phone; if(p) driverNums.push(p.replace(/[^0-9+]/g,'')); }
-  if(r.xxl&&r.driver2){ const p=(DRIVER_PROFILES[r.driver2]||{}).phone; if(p) driverNums.push(p.replace(/[^0-9+]/g,'')); }
-  if(!driverNums.length){ showToast('No phone number on file for the assigned driver','error'); return; }
-  const sep=/iphone|ipad|ipod|mac/i.test(navigator.userAgent)?'&':'?';
-  window.location.href='sms:'+driverNums.join(',')+sep+'body='+encodeURIComponent(msg);
-  markPartSent(id,'phone');
+  const vcf=(window._confFilesMap&&window._confFilesMap[id]&&window._confFilesMap[id].vcard) || buildClientVCard(r);
+  const context='For your '+r.type+' on '+(r.date||'')+(r.time?' at '+fmtTime12(r.time):'');
+  const myDriverName=(typeof getMyDriverName==='function')?getMyDriverName():null;
+  if(myDriverName && r.driver===myDriverName){
+    try{
+      const url=URL.createObjectURL(vcf);
+      const a=document.createElement('a'); a.href=url; a.download=vcf.name; a.style.display='none';
+      document.body.appendChild(a); a.click();
+      setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1000);
+      showToast('\uD83D\uDCC7 '+(r.client||'Client')+'\u2019s contact saved \u2014 '+context);
+    }catch(e){ showToast('Could not save contact','error'); }
+    return;
+  }
+  if(navigator.canShare){
+    try{
+      const shareData={ files:[vcf], title:(r.client||'Client')+'\u2019s contact \u2014 for '+driverShortName(r.driver), text:context };
+      if(navigator.canShare(shareData)){
+        await navigator.share(shareData);
+        return;
+      }
+    }catch(e){ if(e && e.name==='AbortError') return; console.warn('client phone vcard share failed',e); }
+  }
+  try{
+    const url=URL.createObjectURL(vcf);
+    const a=document.createElement('a'); a.href=url; a.download=vcf.name; a.style.display='none';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1000);
+    showToast('\uD83D\uDCC7 Saved \u2014 send this to '+driverShortName(r.driver)+' manually. '+context);
+  }catch(e){ showToast('Could not prepare contact','error'); }
 }
 
 
