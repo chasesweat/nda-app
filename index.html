@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607211603">
+<meta name="version" content="202607211604">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1308,6 +1308,10 @@ input,select,textarea{font-size:16px;}
       <div class="form-group"><label>Your full name</label>
         <input type="text" id="onb-name" placeholder="e.g. Chase Sweat" readonly style="background:#f5f3fa;" /></div>
 
+      <div class="form-group"><label>What do you prefer to be called? <span style="font-weight:600;color:#15803d;font-size:.72rem;">(optional)</span></label>
+        <div style="font-size:.7rem;color:var(--mid);margin:-2px 0 4px;line-height:1.4;">The name clients see in your confirmation texts and contact card &mdash; e.g. if you go by a nickname (Kathleen &rarr; Kat). Leave blank to use your full name.</div>
+        <input type="text" id="onb-displayname" placeholder="e.g. Chase, or a nickname" /></div>
+
       <div class="form-group" style="background:#fff8ec;border:1.5px solid #f5d98a;border-radius:10px;padding:.75rem .85rem;">
         <label style="color:#92400e;">🔒 Set your password</label>
         <div style="font-size:.72rem;color:var(--mid);margin:-2px 0 .5rem;line-height:1.4;">Everyone starts with a shared temporary password. Set your own private one now, or keep the current one for now (you can change it later in your profile).</div>
@@ -1403,6 +1407,28 @@ input,select,textarea{font-size:16px;}
           <button onclick="closeOnboarding(true)" class="btn-secondary" style="flex:1;padding:.6rem;font-size:.82rem;">Don't show again</button>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+<div class="modal-overlay" id="venmo-modal" style="display:none;">
+  <div class="modal" style="max-width:min(460px,95vw);">
+    <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between;">
+      <h2 style="margin:0;font-size:1.1rem;">Change Venmo username</h2>
+      <button onclick="closeVenmoModal()" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--mid);line-height:1;">&times;</button>
+    </div>
+    <div style="padding:.25rem;">
+      <div style="background:#fff8ec;border:1.5px solid #f5d98a;border-radius:10px;padding:.75rem .85rem;margin-bottom:.8rem;font-size:.76rem;line-height:1.5;color:var(--black);">
+        &#9888;&#65039; Enter your Venmo username <b>exactly as it is spelled on your Venmo profile &mdash; uppercase letters and all</b>. Capitalization matters: <b>Kathleen-Herringdine</b> works, but <b>kathleen-herringdine</b> splits the payment. Tap <b>Test</b> to open Venmo and confirm it goes to <b>one</b> person before saving.
+      </div>
+      <div style="display:flex;gap:.4rem;align-items:center;margin-bottom:.7rem;">
+        <input type="text" id="venmo-modal-input" placeholder="@venmohandle" style="flex:1;padding:.5rem .7rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.9rem;" />
+        <button type="button" onclick="_venmoTestField('venmo-modal-input')" style="flex-shrink:0;padding:.5rem .8rem;background:none;border:1.5px solid #3d95ce;color:#3d95ce;border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:700;cursor:pointer;white-space:nowrap;">Test &#8599;</button>
+      </div>
+      <label style="display:flex;align-items:flex-start;gap:.5rem;cursor:pointer;margin-bottom:.9rem;font-size:.8rem;line-height:1.4;color:var(--black);">
+        <input type="checkbox" id="venmo-modal-ack" onchange="document.getElementById('venmo-modal-save').disabled=!this.checked;" style="width:17px;height:17px;accent-color:var(--accent);flex-shrink:0;margin-top:1px;" />
+        <span>I&rsquo;ve read the warning above and confirmed my Venmo username is spelled exactly right.</span>
+      </label>
+      <button id="venmo-modal-save" onclick="saveVenmoFromModal()" disabled class="btn-primary" style="width:100%;padding:.75rem;opacity:1;">Save Venmo username</button>
     </div>
   </div>
 </div>
@@ -11644,6 +11670,7 @@ function openOnboarding(){
   // Prefill from any existing data
   var setV = function(id,val){ var el=document.getElementById(id); if(el) el.value = val||''; };
   setV('onb-name', dn);
+  setV('onb-displayname', prof.displayName || '');
   setV('onb-address', prof.homeAddress || '');
   setV('onb-vehicle', prof.vehicle || '');
   setV('onb-vehicleyear', prof.vehicleYear || '');
@@ -11773,6 +11800,7 @@ async function saveOnboarding(){
   // Update DRIVER_PROFILES
   DRIVER_PROFILES[dn] = DRIVER_PROFILES[dn] || {};
   var p = DRIVER_PROFILES[dn];
+  if(gv('onb-displayname')) p.displayName = gv('onb-displayname').trim();
   if(gv('onb-address'))     p.homeAddress = gv('onb-address');
   if(gv('onb-vehicle'))     p.vehicle     = gv('onb-vehicle');
   if(gv('onb-vehicleyear')) p.vehicleYear = gv('onb-vehicleyear');
@@ -14343,7 +14371,20 @@ function renderMyProfileCard(){
   // Account Settings tab so My Info stays short. Fields keep their IDs, so Save still works.
   try{
     var _slot=document.getElementById('mp-account-settings-slot');
-    if(_slot){ _slot.innerHTML=''; ['profile-settings-block','profile-settings-block-b','profile-settings-block-se','profile-settings-block-c'].forEach(function(_id){ var _el=document.getElementById(_id); if(_el) _slot.appendChild(_el); }); var _sv=document.getElementById('mp-settings-save'); if(_sv) _sv.style.display='block'; }
+    if(_slot){ _slot.innerHTML=''; ['profile-settings-block','profile-settings-block-b','profile-settings-block-se'].forEach(function(_id){ var _el=document.getElementById(_id); if(_el) _slot.appendChild(_el); }); var _sv=document.getElementById('mp-settings-save'); if(_sv) _sv.style.display='block'; }
+  }catch(e){}
+  // Move "My Availability" (profile-settings-block-se) up to sit directly below the Display
+  // Name field, per request — it's authored further down in the card next to the other
+  // settings, so we relocate it in the DOM rather than reorder the big template literal.
+  try{
+    var _dk=me.replace(/ /g,'_');
+    var _availBlk=document.getElementById('profile-settings-block-c');
+    var _dnInput=document.getElementById('prof-displayname-'+_dk);
+    if(_availBlk && _dnInput){
+      // Insert right after the Display Name field's wrapping group (the div holding the input + hint)
+      var _dnGroup=_dnInput.closest('div');
+      if(_dnGroup && _dnGroup.parentNode){ _dnGroup.parentNode.insertBefore(_availBlk, _dnGroup.nextSibling); }
+    }
   }catch(e){}
 }
 // Persistent welcome banner shown at the top of My Profile on the first login only.
@@ -14406,7 +14447,7 @@ function renderTeamAvailability(){
       +(weekly.length?'<div style="font-size:.78rem;margin-bottom:.3rem;"><span style="color:var(--mid);">Standing days off:</span> <strong>'+weekly.join(', ')+'</strong></div>':'')
       +(upcoming.length?'<div style="font-size:.78rem;margin-bottom:.3rem;"><span style="color:var(--mid);">Unavailable dates:</span><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:3px;">'
           +upcoming.map(function(dt){ return '<span style="font-size:.72rem;background:#fdecea;color:#b03a2e;border:1px solid #f3c4bd;border-radius:12px;padding:2px 8px;">'+fmtDateShort(dt)+'</span>'; }).join('')+'</div></div>':'')
-      +(hrs.length?'<div style="font-size:.78rem;margin-bottom:.2rem;"><span style="color:var(--mid);">Blocked hours:</span> '+hrs.map(function(h){ var _w=h.date?fmtDateShort(h.date):((h.days||[]).map(function(x){return WEEKDAY_ABBR[x];}).join('/')); return escHtml(_w+' '+(h.from||'')+'\u2013'+(h.to||'')); }).join(' \u00b7 ')+'</div>':'')
+      +(hrs.length?'<div style="font-size:.78rem;margin-bottom:.2rem;"><span style="color:var(--mid);">Blocked hours:</span> '+hrs.map(function(h){ var _w=h.date?fmtDateShort(h.date):((h.days||[]).map(function(x){return WEEKDAY_ABBR[x];}).join('/')); return escHtml(_w+' '+fmtTime12(h.from||'')+'\u2013'+fmtTime12(h.to||'')); }).join(' \u00b7 ')+'</div>':'')
       +(hasAny?'':'<div style="font-size:.78rem;color:var(--mid);">No blocked days \u2014 available anytime.</div>')
       +'</div>';
   }).join('');
@@ -14555,7 +14596,7 @@ function buildMemberCard(d, opts){
                +'<div style="font-size:.6rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Currently set</div>'
                +(weekly.length?'<div style="font-size:.76rem;margin-bottom:.25rem;"><span style="color:var(--mid);">Days off:</span> <strong>'+weekly.join(', ')+'</strong></div>':'')
                +(upcoming.length?'<div style="font-size:.76rem;margin-bottom:.25rem;"><span style="color:var(--mid);">Off dates:</span> '+upcoming.map(function(dt){return fmtDateShort(dt);}).join(', ')+'</div>':'')
-               +(hrs.length?'<div style="font-size:.76rem;margin-bottom:.25rem;"><span style="color:var(--mid);">Blocked hours:</span> '+hrs.map(function(h){var _w=h.date?fmtDateShort(h.date):((h.days||[]).map(function(x){return WEEKDAY_ABBR[x];}).join('/'));return escHtml(_w+' '+(h.from||'')+"\u2013"+(h.to||''));}).join(" \u00b7 ")+'</div>':'')
+               +(hrs.length?'<div style="font-size:.76rem;margin-bottom:.25rem;"><span style="color:var(--mid);">Blocked hours:</span> '+hrs.map(function(h){var _w=h.date?fmtDateShort(h.date):((h.days||[]).map(function(x){return WEEKDAY_ABBR[x];}).join('/'));return escHtml(_w+' '+fmtTime12(h.from||'')+"\u2013"+fmtTime12(h.to||''));}).join(" \u00b7 ")+'</div>':'')
                +(avExc.length?'<div style="font-size:.76rem;margin-bottom:.25rem;"><span style="color:#15803d;">Available anyway:</span> '+avExc.map(function(dt){return fmtDateShort(dt);}).join(', ')+'</div>':'')
                +(any?'':'<div style="font-size:.76rem;color:var(--mid);">Nothing blocked \u2014 available anytime.</div>')
                +'</div>';
@@ -14621,14 +14662,17 @@ function buildMemberCard(d, opts){
           <button onclick="downloadDriverCard('${d}')" style="flex:1;padding:.45rem;background:#f5a623;border:none;color:#fff;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">⬇ Download</button>
         </div>
         ${(opts.publicOnly && isAdmin())?`<button onclick="openDriverPhotoUpload('${d}')" style="width:100%;margin-top:.4rem;padding:.45rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.76rem;font-weight:600;cursor:pointer;">🖼️ Edit / generate driver card</button>`:''}${(opts.publicOnly && isAdmin())?`<button onclick="openEditDriverModal('${d}')" style="width:100%;margin-top:.4rem;padding:.45rem;background:var(--gold);border:none;color:#fff;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.76rem;font-weight:700;cursor:pointer;">\u2699\uFE0F Edit driver</button><div style="display:flex;align-items:center;gap:.5rem;margin-top:.4rem;font-size:.74rem;color:var(--mid);"><span>Calendar color</span><input type="color" value="${driverColor(d)}" onchange="setDriverColor('${d}',this.value)" style="width:34px;height:26px;border:1.5px solid var(--light);border-radius:6px;background:none;cursor:pointer;padding:0;" /><span>${driverColor(d)}</span></div>${(opts.publicOnly && isAdmin())?(function(){var ty=[['premium','Premium'],['traffic','Traffic'],['holiday','Holiday'],['christmas','Christmas'],['fuel','Fuel']];var off=ty.filter(function(t){return driverAutoOffFor(d,t[0]);});return '<div style="margin-top:.45rem;font-size:.7rem;color:var(--mid);line-height:1.5;">⏰ Auto-add: '+(off.length?off.map(function(t){return '<span style=\'background:var(--light);border-radius:10px;padding:1px 6px;margin:0 3px 3px 0;display:inline-block;\'>'+t[1]+' off'+'</span>';}).join(''):'<span style=\'color:#15803d;font-weight:600;\'>all on</span>')+'</div>';})():''}`:''}
-        ${venmo?('<button onclick="shareDriverVenmo(\''+d+'\')" style="width:100%;margin-top:.4rem;padding:.45rem;background:#3d95ce;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">↗ Share Venmo link</button>'):''}
-        ${canEdit?('<div style="display:flex;gap:.4rem;align-items:center;margin-top:.5rem;">'
+        ${venmo?('<div style="display:flex;gap:.4rem;margin-top:.4rem;">'
+          +'<button onclick="shareDriverVenmo(\''+d+'\')" style="flex:1;padding:.45rem;background:#3d95ce;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">↗ Share Venmo link</button>'
+          + (canEdit?('<button onclick="openVenmoModal(\''+d+'\')" style="flex-shrink:0;padding:.45rem .7rem;background:none;border:1.5px solid #3d95ce;color:#3d95ce;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.76rem;font-weight:600;cursor:pointer;white-space:nowrap;">⚙ Change Venmo</button>'):'')
+          +'</div>'):''}
+        ${(canEdit && !venmo)?('<div style="display:flex;gap:.4rem;align-items:center;margin-top:.5rem;">'
           +'<input type="text" id="venmo-'+dk+'" value="'+venmo+'" placeholder="@venmohandle" style="flex:1;padding:.35rem .65rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
           +'<button type="button" onclick="_venmoTestField(\'venmo-'+dk+'\')" style="flex-shrink:0;padding:.35rem .65rem;background:none;border:1.5px solid #3d95ce;color:#3d95ce;border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;">Test \u2197</button>'
           +'</div>'
           +'<div style="font-size:.68rem;color:var(--mid);margin-top:.3rem;line-height:1.45;">\u26A0\uFE0F Enter your Venmo username <b>exactly as it is spelled on your Venmo profile \u2014 uppercase letters and all</b>. Capitalization matters: <b>Kathleen-Herringdine</b> works, but <b>kathleen-herringdine</b> splits the payment. Tap <b>Test</b> to open Venmo and confirm it goes to <b>one</b> person before saving.</div>'
           +'<button onclick="saveDriverProfile(\''+d+'\')" style="width:100%;margin-top:.6rem;padding:.5rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:600;font-size:.82rem;cursor:pointer;">Save My Info</button>')
-        :''}
+        :(canEdit?('<button onclick="saveDriverProfile(\''+d+'\')" style="width:100%;margin-top:.6rem;padding:.5rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:600;font-size:.82rem;cursor:pointer;">Save My Info</button>'):'')}
       </div>
     </div>`;
 }
@@ -14646,6 +14690,37 @@ function _captureAvailInputs(dn){ try{
   var xd=(document.getElementById('avail-exc-date-'+dk)||{}).value;
   if(xd){ prof.unavailableDates=(prof.unavailableDates||[]).filter(function(x){return x!==xd;}); prof.availableDates=prof.availableDates||[]; if(prof.availableDates.indexOf(xd)<0) prof.availableDates.push(xd); }
 }catch(e){} }
+// Change-Venmo modal: opened from the profile card once a handle already exists, so the
+// warning + acknowledgement gate the change instead of an always-visible field that read as
+// confusing. First-time setup (no handle yet) still uses the inline field for zero friction.
+function openVenmoModal(driverName){
+  const myDriverName = profileDriver();
+  if(!(isAdmin() || myDriverName===driverName)){ showToast('You can only edit your own profile.','error'); return; }
+  window._venmoModalDriver = driverName;
+  const inp = document.getElementById('venmo-modal-input');
+  if(inp) inp.value = (typeof driverVenmo!=='undefined' && driverVenmo[driverName]) ? driverVenmo[driverName] : '';
+  const ack = document.getElementById('venmo-modal-ack'); if(ack) ack.checked = false;
+  const save = document.getElementById('venmo-modal-save'); if(save) save.disabled = true;
+  const ov = document.getElementById('venmo-modal'); if(ov) ov.style.display = 'flex';
+}
+function closeVenmoModal(){ const ov=document.getElementById('venmo-modal'); if(ov) ov.style.display='none'; window._venmoModalDriver=null; }
+async function saveVenmoFromModal(){
+  const driverName = window._venmoModalDriver;
+  if(!driverName){ closeVenmoModal(); return; }
+  const ack = document.getElementById('venmo-modal-ack');
+  if(!ack || !ack.checked){ showToast('Please confirm you\u2019ve read the warning first','error'); return; }
+  const inp = document.getElementById('venmo-modal-input');
+  const _vchk = _venmoValidate(inp ? inp.value : '');
+  if(!_vchk.ok){ showToast(_vchk.reason,'error'); return; }
+  if(typeof driverVenmo==='undefined'){ driverVenmo={}; }
+  driverVenmo[driverName] = _vchk.handle;   // exact case preserved — Venmo pay links are case-sensitive
+  try{ await storageSet('kat:driverVenmo', driverVenmo); }catch(e){ console.warn('venmo save', e); }
+  closeVenmoModal();
+  if(_vchk.warn) showToast('Saved \u2014 but \u201c'+_vchk.handle+'\u201d looks like a name. If Venmo splits the payment, use the exact @username from your profile (Test it first).','error');
+  else showToast('Venmo username updated \u2713');
+  try{ renderDriverMembers(); }catch(e){}
+  if(typeof renderMyProfileCard==='function'){ try{ renderMyProfileCard(); }catch(e){} }
+}
 async function saveDriverProfile(driverName){
   const myDriverName = profileDriver(); try{ window._auditTarget = myDriverName; }catch(e){}
   const canEdit = isAdmin() || myDriverName===driverName;
