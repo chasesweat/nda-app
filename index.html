@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607211604">
+<meta name="version" content="202607211605">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -566,6 +566,7 @@ input,select,textarea{font-size:16px;}
   <div class="page" id="page-quote">
     <div class="page-title">Quick quote</div>
     <div class="page-sub">Mileage auto-calculated via Google Maps</div>
+    <div onclick="openPlaceholderModal()" style="display:inline-flex;align-items:center;gap:.35rem;margin:.5rem 0 .3rem;padding:.35rem .7rem;background:var(--surface);border:1.5px dashed var(--mid);border-radius:20px;font-size:.78rem;color:var(--mid);font-weight:600;cursor:pointer;">📌 Not sure yet? Just reserve the day</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:1rem;">
       <div>
         <div class="form-group">
@@ -1430,6 +1431,44 @@ input,select,textarea{font-size:16px;}
       </label>
       <button id="venmo-modal-save" onclick="saveVenmoFromModal()" disabled class="btn-primary" style="width:100%;padding:.75rem;opacity:1;">Save Venmo username</button>
     </div>
+  </div>
+</div>
+<div class="modal-overlay" id="placeholder-modal" style="display:none;">
+  <div class="modal" style="max-width:min(460px,95vw);">
+    <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between;">
+      <h2 style="margin:0;font-size:1.1rem;">📌 Reserve a day</h2>
+      <button onclick="closePlaceholderModal()" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--mid);line-height:1;">&times;</button>
+    </div>
+    <div style="padding:.25rem;">
+      <div style="background:#f3eeff;border:1px solid #d9c9f5;border-radius:10px;padding:.7rem .85rem;margin-bottom:.9rem;font-size:.78rem;line-height:1.5;color:var(--black);">
+        For when you know a ride is coming but don&rsquo;t have the details yet. This blocks the day on the calendar so nothing else gets double-booked into it &mdash; fill in the real details whenever you have them.
+      </div>
+      <div class="form-group"><label>Date <span style="font-weight:600;color:#dc2626;font-size:.72rem;">(needed)</span></label>
+        <input type="date" id="ph-date" /></div>
+      <div class="form-group"><label>Rough time of day <span style="font-weight:600;color:#15803d;font-size:.72rem;">(optional)</span></label>
+        <select id="ph-timeofday" style="width:100%;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.9rem;background:var(--white);">
+          <option value="">Not sure yet</option>
+          <option value="morning">Morning</option>
+          <option value="afternoon">Afternoon</option>
+          <option value="evening">Evening</option>
+        </select></div>
+      <div class="form-group"><label>What do you know so far? <span style="font-weight:600;color:#15803d;font-size:.72rem;">(optional)</span></label>
+        <textarea id="ph-note" rows="2" placeholder="e.g. Sarah's wedding — details TBD" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;"></textarea></div>
+      <div class="form-group"><label>Driver</label>
+        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.4rem;"><input type="radio" name="ph-driver-mode" value="unassigned" checked style="accent-color:var(--accent);"><span style="font-size:.85rem;">Leave unassigned for now</span></label>
+        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;"><input type="radio" name="ph-driver-mode" value="me" style="accent-color:var(--accent);"><span style="font-size:.85rem;">Assign to me</span></label></div>
+      <div style="color:var(--red);font-size:.82rem;min-height:1rem;margin:.3rem 0;" id="ph-error"></div>
+      <button onclick="savePlaceholderRide()" class="btn-primary" style="width:100%;padding:.8rem;">📌 Reserve this day</button>
+    </div>
+  </div>
+</div>
+<div class="modal-overlay" id="placeholder-view-modal" style="display:none;">
+  <div class="modal" style="max-width:min(440px,95vw);">
+    <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between;">
+      <h2 style="margin:0;font-size:1.1rem;">📌 Reserved — details TBD</h2>
+      <button onclick="closePlaceholderViewModal()" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--mid);line-height:1;">&times;</button>
+    </div>
+    <div id="ph-view-body" style="padding:.25rem;"></div>
   </div>
 </div>
 <div class="modal-overlay" id="quick-add-modal">
@@ -4373,7 +4412,7 @@ function checkPriceShopping(prefix){
   var schedBy=[], quoteBy=[], sSeen={}, qSeen={};
   var addS=function(b){ b=(b||'').trim(); if(b&&!sSeen[b.toLowerCase()]){ sSeen[b.toLowerCase()]=1; schedBy.push(b); } };
   var addQ=function(b){ b=(b||'').trim(); if(b&&!qSeen[b.toLowerCase()]){ qSeen[b.toLowerCase()]=1; quoteBy.push(b); } };
-  (rides||[]).forEach(function(r){ if(!r||r.status==='cancelled') return; if((r.client||'').trim().toLowerCase()!==key) return; if(r.date!==date) return; addS(r.createdBy||r.driver); });
+  (rides||[]).forEach(function(r){ if(!r||r.status==='cancelled'||r.status==='placeholder') return; if((r.client||'').trim().toLowerCase()!==key) return; if(r.date!==date) return; addS(r.createdBy||r.driver); });
   (typeof savedQuotes!=='undefined'?savedQuotes:[]).forEach(function(q){ if(!q) return; if((q.client||'').trim().toLowerCase()!==key) return; if(q.date!==date) return; addQ(q.createdBy||q.driver); });
   var owner='';
   try{ owner=(typeof getClientOwner==='function'&&getClientOwner(client))||''; }catch(e){}
@@ -5117,6 +5156,7 @@ function readableInk(hex){
 
 // Returns the color for a ride — driver's color if assigned, otherwise creator's color
 function rideColor(r){
+  if(r.status==='placeholder') return '#9ca3af'; // distinct neutral gray — never a real driver's color
   if(r.driver) return driverColor(r.driver);
   // map login name → full driver name via USER_DRIVER_MAP
   if(r.createdBy && USER_DRIVER_MAP[r.createdBy]) return driverColor(USER_DRIVER_MAP[r.createdBy]);
@@ -5244,8 +5284,20 @@ function renderWeekView(containerId, weekStart, driverFilter){
         ${dayRides.length
           ? dayRides.map(r=>{
               const c=rideColor(r);
-              const ic=canSeeInterestList(r)?interestCount(r):0;
               const tc=contrastText(c,0.4);
+              if(r.status==='placeholder'){
+                return `<div class="week-ride-card" style="border-color:${c};border-style:dashed;background:${c}33;" onclick="openRideModal(${r.id})">
+                  <div style="display:flex;flex-direction:column;min-width:46px;">
+                    <div class="week-ride-time" style="color:${tc};">${r.timeOfDay?r.timeOfDay.charAt(0).toUpperCase()+r.timeOfDay.slice(1):'—'}</div>
+                    <div style="width:8px;height:8px;border-radius:50%;background:${c};margin-top:3px;"></div>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="week-ride-client" style="color:${tc};">📌 Reserved — details TBD</div>
+                    <div class="week-ride-detail" style="color:${tc};opacity:.85;">${escHtml(r.note||'No notes yet')}${r.driver?' · '+driverShortName(r.driver):' · Unassigned'}</div>
+                  </div>
+                </div>`;
+              }
+              const ic=canSeeInterestList(r)?interestCount(r):0;
               const badge=r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP'?'badge-ap':r.type==='ROUND TRIP'?'badge-rt':'badge-pt';
   const xxlBadge=r.xxl?'<span style="font-size:.55rem;font-weight:700;background:#6b21a8;color:#fff;border-radius:3px;padding:1px 4px;margin-left:2px;">XXL</span>':'';
   const privateBadge=r.private?'<span style="font-size:.55rem;font-weight:700;background:#1b1330;color:#fff;border-radius:3px;padding:1px 4px;margin-left:2px;" title="Hidden from other drivers">🔒</span>':'';
@@ -5303,8 +5355,8 @@ function renderMonthView(containerId, monthDate, driverFilter, jumpFn){
       const c=rideColor(r);
       const check=r.confirmSent?'<span style="font-weight:900;">✓</span> ':'';
       const tc=contrastText(c);
-      const lbl=`${r.time?fmtTime12(r.time)+' ':''}${(r.client||'').split(' ')[0]}`;
-      return `<div class="month-pill" style="background:${c};color:${tc};${r.newClient?'white-space:normal;':''}" title="${r.confirmSent?'✓ Confirmed · ':''}${r.newClient?'★ New Client · ':''}${(r.client||'')} · ${r.type} · $${r.price}" onclick="event.stopPropagation();openRideModal(${r.id})">${check}${lbl}${r.newClient?`<br><span style="font-size:.52rem;font-weight:700;letter-spacing:.4px;opacity:.95;">New Client</span>`:''}</div>`;
+      const lbl=r.status==='placeholder' ? `${r.time?fmtTime12(r.time)+' ':''}📌 Reserved` : `${r.time?fmtTime12(r.time)+' ':''}${(r.client||'').split(' ')[0]}`;
+      return `<div class="month-pill" style="background:${c};color:${tc};${r.newClient?'white-space:normal;':''}" title="${r.status==='placeholder'?('📌 Placeholder — '+(r.note||'no details yet')):((r.confirmSent?'✓ Confirmed · ':'')+(r.newClient?'★ New Client · ':'')+(r.client||'')+' · '+r.type+' · $'+r.price)}" onclick="event.stopPropagation();openRideModal(${r.id})">${check}${lbl}${r.newClient?`<br><span style="font-size:.52rem;font-weight:700;letter-spacing:.4px;opacity:.95;">New Client</span>`:''}</div>`;
     }).join('');
     const more=extra>0?`<div class="month-more">+${extra} more</div>`:'';
     const hol=isHoliday?`<span class="month-holiday" title="${HOLIDAY_NAMES[mmdd]||'Holiday'} — $${isChristmasDate(mmdd)?surcharge('christmas'):surcharge('holiday')} surcharge">✨ +$${isChristmasDate(mmdd)?surcharge('christmas'):surcharge('holiday')}</span>`:'';
@@ -6488,6 +6540,7 @@ function openRideModal(id){
   activeRideId=id;
   const r=_rideById(id); if(!r) return;
   if(!canSeeRide(r)){ activeRideId=null; showToast('This ride is private','error'); return; }
+  if(r.status==='placeholder'){ openPlaceholderViewModal(id); return; }
   if(r.driver) warmDriverCardImage((r.driver||"").trim());
   document.getElementById('rm-title').textContent=(r.private?'\uD83D\uDD12 ':'')+r.client;
   // driver assign row
@@ -6975,7 +7028,7 @@ async function _repairDuplicateIds(){
 async function toggleRidePaid(id){
   // Self-heal duplicate ids before acting, so we never flip more than one ride.
   if(_ridesMatchingId(id).length>1){ await _repairDuplicateIds(); }
-  const r=_rideById(id); if(!r||r.status==='cancelled') return;
+  const r=_rideById(id); if(!r||r.status==='cancelled'||r.status==='placeholder') return;
   // One ride-card state: "Completed & Paid" (stored as 'paid') vs not.
   const nowPaid = r.status!=='paid';
   await setRideStatus(r.id, nowPaid?'paid':'scheduled');
@@ -10437,6 +10490,7 @@ async function volunteerForRide(id){
   const myDriver=getMyDriverName();
   if(!myDriver){ showToast('You need a driver profile to volunteer','error'); return; }
   if(r.status==='cancelled'){ showToast('This ride is cancelled','error'); return; }
+  if(r.status==='placeholder'){ showToast('This is a placeholder — add the real details first','error'); return; }
   if(r.offerCovered){ showToast('This ride is already covered','error'); return; }
   if(!Array.isArray(r.volunteers)) r.volunteers=[];
   if(r.volunteers.indexOf(myDriver)>=0){ showToast('You already volunteered for this ride'); return; }
@@ -10474,6 +10528,7 @@ async function assignVolunteer(id, driverName){
 async function shareRideToOfferings(id){
   const r=_rideById(id); if(!r) return;
   if(r.status==='cancelled'){ showToast('Cannot share a cancelled ride','error'); return; }
+  if(r.status==='placeholder'){ showToast('Add the real details before posting this to Offerings','error'); return; }
   // Three ways in: the person who booked it (creator, Kat↔Morgan treated as same — "who
   // owns this client"), whoever is literally assigned to drive it (no proxy resolution —
   // "are you the one who actually needs coverage"), or any admin, who should always be
@@ -11105,7 +11160,7 @@ function previousUnpaidAPRide(refRide){
   let best = null, bestStamp = '';
   (rides||[]).forEach(function(r){
     if(!r || r.id===refRide.id) return;
-    if(r.status==='cancelled') return;
+    if(r.status==='cancelled'||r.status==='placeholder') return;
     if(!r.client || String(r.client).toLowerCase().trim()!==key) return;
     if(!isAPRideType(r.type)) return;
     const stamp = (r.date||'') + 'T' + (r.time||'00:00');
@@ -12541,7 +12596,7 @@ function renderDashConfirmations(){
   if(!confTextEnabled(getMyDriverName())){ box.innerHTML=''; return; }
   const tomorrow = toDateStr(addDays(new Date(),1));
   let due = rides.filter(r=>{
-    if(r.date!==tomorrow || r.status==='cancelled') return false;
+    if(r.date!==tomorrow || r.status==='cancelled' || r.status==='placeholder') return false;
     // You confirm rides YOU scheduled (matches the My Rides → To Confirm tab)
     return isMyScheduledRide(r);
   }).sort((a,b)=>(a.time||'').localeCompare(b.time||''));
@@ -14720,6 +14775,91 @@ async function saveVenmoFromModal(){
   else showToast('Venmo username updated \u2713');
   try{ renderDriverMembers(); }catch(e){}
   if(typeof renderMyProfileCard==='function'){ try{ renderMyProfileCard(); }catch(e){} }
+}
+// Placeholder rides: for when a day is spoken for but the details aren't known yet. Kept out
+// of every place that assumes a ride is real (confirmations, dispatch, reports, income) via
+// status==='placeholder' — mirrors the exact same exclusion pattern already used for
+// status==='cancelled' throughout the app, rather than inventing new logic per call site.
+function openPlaceholderModal(){
+  const d=document.getElementById('ph-date'); if(d) d.value='';
+  const t=document.getElementById('ph-timeofday'); if(t) t.value='';
+  const n=document.getElementById('ph-note'); if(n) n.value='';
+  const err=document.getElementById('ph-error'); if(err) err.textContent='';
+  const unassigned=document.querySelector('input[name="ph-driver-mode"][value="unassigned"]'); if(unassigned) unassigned.checked=true;
+  const ov=document.getElementById('placeholder-modal'); if(ov) ov.style.display='flex';
+}
+function closePlaceholderModal(){ const ov=document.getElementById('placeholder-modal'); if(ov) ov.style.display='none'; }
+async function savePlaceholderRide(){
+  const err=document.getElementById('ph-error');
+  const date=(document.getElementById('ph-date')||{}).value||'';
+  if(!date){ if(err) err.textContent='Pick a date first.'; return; }
+  const timeOfDay=(document.getElementById('ph-timeofday')||{}).value||'';
+  const note=((document.getElementById('ph-note')||{}).value||'').trim();
+  const driverMode=(document.querySelector('input[name="ph-driver-mode"]:checked')||{}).value||'unassigned';
+  const myDriverName=getMyDriverName();
+  const ride={
+    id: nextId++,
+    status: 'placeholder',
+    date, timeOfDay, note,
+    client: '', type: '', price: 0,
+    driver: (driverMode==='me' && myDriverName) ? myDriverName : '',
+    createdBy: currentUser?.name||'',
+  };
+  touchRide(ride, 'reserved (placeholder — details TBD)');
+  rides.push(ride);
+  try{ await saveRides(); }catch(e){ console.warn('placeholder save failed', e); }
+  closePlaceholderModal();
+  showToast('📌 Day reserved — fill in the details whenever you have them');
+  try{ if(typeof renderCal==='function') renderCal(); }catch(e){}
+}
+function closePlaceholderViewModal(){ const ov=document.getElementById('placeholder-view-modal'); if(ov) ov.style.display='none'; activeRideId=null; }
+function openPlaceholderViewModal(id){
+  const r=_rideById(id); if(!r) return;
+  const body=document.getElementById('ph-view-body'); if(!body) return;
+  const canEdit = isAdmin() || currentUser?.name===r.createdBy || (getMyDriverName() && getMyDriverName()===r.driver);
+  const timeLbl = r.timeOfDay ? (r.timeOfDay.charAt(0).toUpperCase()+r.timeOfDay.slice(1)) : 'Not sure yet';
+  body.innerHTML =
+    '<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.8rem .9rem;margin-bottom:.9rem;">'
+    +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Date</div>'
+    +'<div style="font-size:.95rem;font-weight:700;color:var(--black);margin-bottom:.6rem;">'+escHtml(fmtDateShort(r.date)||r.date||'—')+'</div>'
+    +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Rough time of day</div>'
+    +'<div style="font-size:.9rem;color:var(--black);margin-bottom:.6rem;">'+escHtml(timeLbl)+'</div>'
+    +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Notes</div>'
+    +'<div style="font-size:.9rem;color:var(--black);margin-bottom:.6rem;">'+(r.note?escHtml(r.note):'<span style="color:var(--mid);">Nothing noted yet</span>')+'</div>'
+    +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Driver</div>'
+    +'<div style="font-size:.9rem;color:var(--black);">'+(r.driver?escHtml(driverShortName(r.driver)):'<span style="color:var(--mid);">Unassigned</span>')+'</div>'
+    +'</div>'
+    +'<div style="font-size:.74rem;color:var(--mid);margin-bottom:.8rem;">Reserved by '+escHtml(r.createdBy||'—')+'.</div>'
+    +(canEdit
+      ? '<button onclick="convertPlaceholderToRide('+r.id+')" class="btn-primary" style="width:100%;padding:.75rem;margin-bottom:.5rem;">✏️ Fill in details</button>'
+        +'<button onclick="deletePlaceholderRide('+r.id+')" style="width:100%;padding:.6rem;background:none;border:1.5px solid var(--red);color:var(--red);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">Remove this reservation</button>'
+      : '<div style="font-size:.78rem;color:var(--mid);">Only whoever reserved this, their assigned driver, or an admin can edit or remove it.</div>');
+  const ov=document.getElementById('placeholder-view-modal'); if(ov) ov.style.display='flex';
+}
+async function convertPlaceholderToRide(id){
+  const r=_rideById(id); if(!r) return;
+  const canEdit = isAdmin() || currentUser?.name===r.createdBy || (getMyDriverName() && getMyDriverName()===r.driver);
+  if(!canEdit){ showToast('You can only edit your own reservation.','error'); return; }
+  r.status='scheduled';
+  touchRide(r, 'converted from placeholder to a real ride');
+  try{ await saveRides(); }catch(e){ console.warn('convert placeholder save failed', e); }
+  closePlaceholderViewModal();
+  openRideModal(id);
+  // Land directly in edit mode with everything blank and ready to fill in — reuses the
+  // existing, already-tested edit-field machinery (client/type/price/pickup/etc.) rather
+  // than building a second, parallel "fill in the rest" form.
+  setTimeout(()=>{ try{ toggleEditMode(true); }catch(e){} }, 50);
+}
+async function deletePlaceholderRide(id){
+  const r=_rideById(id); if(!r) return;
+  const canEdit = isAdmin() || currentUser?.name===r.createdBy || (getMyDriverName() && getMyDriverName()===r.driver);
+  if(!canEdit){ showToast('You can only remove your own reservation.','error'); return; }
+  if(!confirm('Remove this reservation? This can\'t be undone.')) return;
+  rides = rides.filter(x=>x.id!==id);
+  try{ await saveRides(); }catch(e){ console.warn('placeholder delete save failed', e); }
+  closePlaceholderViewModal();
+  showToast('Reservation removed');
+  try{ if(typeof renderCal==='function') renderCal(); }catch(e){}
 }
 async function saveDriverProfile(driverName){
   const myDriverName = profileDriver(); try{ window._auditTarget = myDriverName; }catch(e){}
@@ -18034,7 +18174,7 @@ function renderDashArrivals(){
   // TODAY's airport pickups this user is driving (or owns), not yet arrival-texted.
   var dName=getMyDriverName();
   var due=rides.filter(function(r){
-    if(!r || r.date!==today || r.status==='cancelled') return false;
+    if(!r || r.date!==today || r.status==='cancelled' || r.status==='placeholder') return false;
     if(r.type!=='AP PICK UP' && r.type!=='AP ROUND TRIP') return false;
     if(r.arrivalSentAt) return false;
     // Reported: a dispatcher (Kat) who scheduled a ride for a DIFFERENT driver was being
@@ -18077,7 +18217,7 @@ function renderDashFlightTracking(){
     // tracking it is no longer useful (you'd already know whether it landed on time). Rather
     // than touch the shared helper — mtBarHtml still legitimately depends on its unbounded
     // lookback — add this widget's own forward-only bound on top of it.
-    if(!r || !_isRideWithinHours(r,12) || _hoursUntilRide(r)<0 || r.status==='cancelled' || r.status==='paid') return false;
+    if(!r || !_isRideWithinHours(r,12) || _hoursUntilRide(r)<0 || r.status==='cancelled' || r.status==='paid' || r.status==='placeholder') return false;
     if(r.type!=='AP RUN' && r.type!=='AP PICK UP' && r.type!=='AP ROUND TRIP') return false;
     if(!r.flight) return false;
     // Flights I need to watch = flights I am DRIVING. Same rule as the "Rides you're
@@ -18108,7 +18248,7 @@ function renderDashGateCodes(){
   if(!box) return;
   var today=toDateStr(new Date());
   var due=rides.filter(function(r){
-    if(!r || r.date!==today || r.status==='cancelled') return false;
+    if(!r || r.date!==today || r.status==='cancelled' || r.status==='placeholder') return false;
     return canSeeGateCode(r);
   }).sort(function(a,b){ return (a.time||'').localeCompare(b.time||''); });
   if(!due.length){ box.innerHTML=''; return; }
@@ -18251,7 +18391,7 @@ function renderFinderFees(dName, start, end){
   const box = document.getElementById('income-finderfees');
   if(!box) return;
   const inRange = (r)=>{
-    if(!r.date || parseFloat(r.price||0)<=0 || r.status==='cancelled') return false;
+    if(!r.date || parseFloat(r.price||0)<=0 || r.status==='cancelled' || r.status==='placeholder') return false;
     if(start && end){ const d=new Date(r.date+'T12:00:00'); if(d<start||d>end) return false; }
     return true;
   };
@@ -18556,7 +18696,7 @@ function generateRidesReport(){
   // Count rides scheduled per month, grouped by year (cancelled excluded).
   var byYM={}, years={};
   (rides||[]).forEach(function(r){
-    if(!r || !r.date || r.status==='cancelled') return;
+    if(!r || !r.date || r.status==='cancelled' || r.status==='placeholder') return;
     var y=r.date.slice(0,4), m=parseInt(r.date.slice(5,7),10)-1;
     if(!/^[0-9]{4}$/.test(y) || isNaN(m) || m<0 || m>11) return;
     years[y]=true;
@@ -18598,7 +18738,7 @@ function generateRidesReport(){
   // ── Per-driver breakdown: how many each driver SCHEDULED (booked) vs DROVE (assigned) ──
   var byDriver={};
   (rides||[]).forEach(function(r){
-    if(!r || r.status==='cancelled') return;
+    if(!r || r.status==='cancelled' || r.status==='placeholder') return;
     if(r.createdBy){ byDriver[r.createdBy]=byDriver[r.createdBy]||{sched:0,driven:0}; byDriver[r.createdBy].sched++; }
     if(r.driver){ byDriver[r.driver]=byDriver[r.driver]||{sched:0,driven:0}; byDriver[r.driver].driven++; }
   });
