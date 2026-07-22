@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607221619">
+<meta name="version" content="202607221620">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -14216,6 +14216,21 @@ const _TEMPLATE_FIELD_MAP = {
   receiptshare: { global: 'defaultReceiptShareTemplate',  personal: null },
   receiptclosing:{ global: 'defaultReceiptClosingLine',   personal: null },
 };
+// The actual hardcoded text each message falls back to when neither a driver's own
+// customization nor an admin default is set - pulled directly from the functions that
+// build these messages (buildConfirmationText, buildArrivalText, _driverChangeClientMessage,
+// the receipt share/closing builders), so this is guaranteed to match what actually sends.
+// Confirmation text and pickup instructions genuinely vary by ride type / terminal - there's
+// no single universal default for those two - so the AP Run/general version is shown as a
+// representative example, noted as such, rather than presenting it as the only possibility.
+const HARDCODED_MSG_DEFAULTS = {
+  confirm: '(Varies by ride type - shown here is the AP Run / Local version)\n\nI am confirming your pickup scheduled for tomorrow at {time}.\n\n[driver + contact info]\n\nMany thanks,\n\n[signature]\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)',
+  pickup: '(Varies by terminal for AP Pick Up - shown here is the South Domestic version)\n\nText your driver once you have retrieved your luggage from baggage claim.\n\nTake the escalator or elevator located between Doors S2 and S3 down to the Lower Level Pickup Area (LS1).\n\nText your driver again when you are on your way to the LS1 pickup area.\n\nWait on the curb just before the crosswalk near the curbside baggage check-in.',
+  arrival: "Hi, this is {driver}, your driver. I see that you've landed\u2014welcome! I'm parked just a few minutes away.\nOnce you grab your bags and start heading toward the pickup location, please let me know and I will pull right up. (If you haven't already, sending a quick description or selfie helps me spot you faster!) See you soon.",
+  driverchange: "Dear {client},\n\nPlease be advised that there has been a change regarding your scheduled pickup on {date} at {time}.\n\nYour new driver will be {driver}. We have attached a photo of your driver and the vehicle for easy identification upon arrival. If you need to reach them directly, they can be contacted at {phone}.\n\nThere are no changes to your scheduled itinerary or pickup location. If you have any questions, please reply to this message.",
+  receiptshare: "Here's the receipt for {date}. Open it, then use Share or Print \u2192 Save as PDF to keep a copy.",
+  receiptclosing: 'Thank you for riding with {org}!',
+};
 function renderMessageTemplates(){
   const panel = document.getElementById('driver-panel-templates');
   if(!panel) return;
@@ -14226,15 +14241,32 @@ function renderMessageTemplates(){
   if(!admin && !hasOwnCustomText){ panel.innerHTML=''; return; }
 
   const gs = globalSettings || {};
+  // Each field is now a collapsible section - collapsed by default, showing the label and
+  // a status pill so you can scan which messages are customized without opening every one.
   function field(scope, key, label, hint, value, rows){
     const id = 'msgtpl-'+scope+'-'+key;
-    return '<div style="margin-bottom:1.25rem;">'
-      +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.2rem;">'
-      +'<div style="font-size:.82rem;font-weight:700;color:var(--black);">'+label+'</div>'
+    const bodyId = id+'-body';
+    const arrowId = id+'-arrow';
+    const isSet = !!(value && value.trim());
+    const statusColor = isSet ? '#15803d' : 'var(--mid)';
+    const statusBg = isSet ? '#e8f5ee' : 'var(--surface)';
+    const statusText = isSet ? 'Custom set' : 'Using default';
+    const placeholderText = escAttr((HARDCODED_MSG_DEFAULTS[key]||'').replace(/\n/g,' '));
+    return '<div style="border:1.5px solid var(--light);border-radius:10px;margin-bottom:.6rem;overflow:hidden;">'
+      +'<button type="button" onclick="toggleMsgTplField(\''+id+'\')" style="width:100%;text-align:left;background:var(--surface);border:none;padding:.65rem .8rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-family:\'DM Sans\',sans-serif;">'
+      +'<span style="font-size:.82rem;font-weight:700;color:var(--black);">'+label+'</span>'
+      +'<span style="display:flex;align-items:center;gap:.5rem;flex-shrink:0;">'
+      +'<span style="font-size:.66rem;font-weight:700;color:'+statusColor+';background:'+statusBg+';border-radius:10px;padding:2px 8px;">'+statusText+'</span>'
+      +'<span id="'+arrowId+'" style="font-size:.7rem;color:var(--mid);">\u25be</span>'
+      +'</span></button>'
+      +'<div id="'+bodyId+'" style="display:none;padding:.75rem .8rem;">'
+      +'<div style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:.2rem;">'
       +'<button onclick="saveTemplateField(\''+scope+'\',\''+key+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Save</button>'
       +'</div>'
       +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">'+hint+'</div>'
-      +'<textarea id="'+id+'" rows="'+(rows||4)+'" placeholder="Leave blank to keep the app\'s built-in default" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(value||'')+'</textarea>'
+      +'<textarea id="'+id+'" rows="'+(rows||4)+'" placeholder="'+placeholderText+'" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(value||'')+'</textarea>'
+      +'<div style="font-size:.66rem;color:var(--mid);margin-top:.35rem;line-height:1.4;">Shown above (grayed out, in the box) is the app\'s current built-in default \u2014 leave blank to keep using it.</div>'
+      +'</div>'
       +'</div>';
   }
 
@@ -14244,10 +14276,10 @@ function renderMessageTemplates(){
     const _byType = myCustom.pickupInstructionsByType || {};
     const _typeOn = !!myCustom.useTypeInstructions;
     html += '<div style="font-size:.72rem;color:var(--mid);margin-bottom:1rem;line-height:1.5;background:#f3eeff;border:1px solid #d9c9f5;border-radius:8px;padding:.7rem .85rem;">'
-      + 'Your own current wording, shown exactly as it\'ll be sent — fix a typo without retyping the whole thing. This always wins over the app-wide default below.</div>'
+      + 'Your own current wording, shown exactly as it\'ll be sent — fix a typo without retyping the whole thing. This always wins over the app-wide default below. Tap a message to open it.</div>'
       + field('personal','confirm', 'My confirmation text', 'Placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}', myCustom.confTemplate, 5)
       + field('personal','pickup', 'My pickup instructions', 'Folded into the confirmation text. Same placeholders as above.', myCustom.pickupInstructions, 3)
-      + '<div style="border:1.5px solid var(--light);border-radius:10px;padding:.7rem;margin:-.5rem 0 1.25rem;">'
+      + '<div style="border:1.5px solid var(--light);border-radius:10px;padding:.7rem;margin-bottom:.6rem;">'
       + '<label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.4rem;">'
       + '<input type="checkbox" id="msgtpl-pickup-bytype-on"'+(_typeOn?' checked':'')+' onchange="document.getElementById(\'msgtpl-pickup-bytype-fields\').style.display=this.checked?\'block\':\'none\';" style="width:16px;height:16px;accent-color:var(--accent);flex-shrink:0;">'
       + '<span style="font-size:.78rem;font-weight:700;color:var(--black);">Different instructions for AP Run, One Way, or Round Trip</span>'
@@ -14267,7 +14299,7 @@ function renderMessageTemplates(){
 
   if(admin){
     html += '<div style="font-size:.72rem;color:var(--mid);margin-bottom:1.25rem;line-height:1.5;background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.7rem .85rem;">'
-      +'App-wide default \u2014 the fallback every driver gets unless they\'ve customized their own version. A driver\'s own customization always wins over this. Leaving a field blank keeps the app\'s original built-in message.</div>'
+      +'App-wide default \u2014 the fallback every driver gets unless they\'ve customized their own version. A driver\'s own customization always wins over this. Tap a message to open it; leaving a field blank keeps the app\'s original built-in message.</div>'
       + field('global','confirm', 'Confirmation text', 'Sent to clients confirming their ride. Placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}', gs.defaultConfirmTemplate, 5)
       + field('global','pickup', 'Pickup instructions', 'Folded into the confirmation text. Same placeholders as above.', gs.defaultPickupInstructions, 3)
       + field('global','arrival', 'Arrival text', 'Sent when a client lands. Placeholders: {driver} {client}', gs.defaultArrivalTemplate, 4)
@@ -14279,6 +14311,14 @@ function renderMessageTemplates(){
   }
 
   panel.innerHTML = html;
+}
+function toggleMsgTplField(id){
+  const body = document.getElementById(id+'-body');
+  const arrow = document.getElementById(id+'-arrow');
+  if(!body) return;
+  const opening = (body.style.display==='none' || !body.style.display);
+  body.style.display = opening ? 'block' : 'none';
+  if(arrow) arrow.textContent = opening ? '\u25b4' : '\u25be';
 }
 // Saves a single field, either the admin-wide default or the current user's own
 // customization, depending on scope. One shared function instead of separate per-field
