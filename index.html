@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607221623">
+<meta name="version" content="202607221625">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -375,6 +375,14 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
   }
   /* Home address reads better full-width even in the two-col zone (Notes+below already full via n+8) */
   #myprofile-card .member-card-body > *:nth-child(5) {
+    grid-column: 1 / -1;
+  }
+  /* My Availability (profile-settings-block-c) is relocated here via JS, right after Display
+     Name, so its position in the child order doesn't match the nth-child assumptions above.
+     Targeted by ID instead of position so it stays correct regardless of where it lands -
+     it's tall and clearly not meant to sit beside a single short field, which left Display
+     Name's column looking mostly empty above it. */
+  #myprofile-card #profile-settings-block-c {
     grid-column: 1 / -1;
   }
 }
@@ -2318,6 +2326,7 @@ async function _loadAppData() {
   ]);
   try{ _migrateLegacyProfileTemplates(); }catch(e){ console.warn('legacy template migration', e); }
   try{ await _promoteChaseTemplatesToGlobalDefault(); }catch(e){ console.warn('Chase default promotion', e); }
+  try{ await _clearChasePersonalDuplicates(); }catch(e){ console.warn('Chase personal duplicate cleanup', e); }
   await loadBiometricCreds();
     // Repair ride IDs: every ride must have a UNIQUE numeric id. Duplicate or
     // non-numeric ids (e.g. from a NaN nextId or repeated imports) caused clicking one
@@ -7394,7 +7403,7 @@ async function shareReceiptDocument(id){
       const _dateLbl = r.date ? fmtDateShort(r.date) : 'your ride';
       const _shareTpl = (globalSettings && globalSettings.defaultReceiptShareTemplate) || '';
       const _shareText = _shareTpl ? _shareTpl.replace(/\{date\}/g, _dateLbl)
-        : 'Here\u2019s the receipt for '+_dateLbl+'. Open it, then use Share or Print \u2192 Save as PDF to keep a copy.';
+        : 'Here\u2019s the receipt for your transportation service on '+_dateLbl+'.';
       await navigator.share({ files:[file], title:'Transportation Receipt', text:_shareText });
       return;
     }
@@ -14228,7 +14237,7 @@ const HARDCODED_MSG_DEFAULTS = {
   pickup: '(Varies by terminal for AP Pick Up - shown here is the South Domestic version)\n\nText your driver once you have retrieved your luggage from baggage claim.\n\nTake the escalator or elevator located between Doors S2 and S3 down to the Lower Level Pickup Area (LS1).\n\nText your driver again when you are on your way to the LS1 pickup area.\n\nWait on the curb just before the crosswalk near the curbside baggage check-in.',
   arrival: "Hi, this is {driver}, your driver. I see that you've landed\u2014welcome! I'm parked just a few minutes away.\nOnce you grab your bags and start heading toward the pickup location, please let me know and I will pull right up. (If you haven't already, sending a quick description or selfie helps me spot you faster!) See you soon.",
   driverchange: "Dear {client},\n\nPlease be advised that there has been a change regarding your scheduled pickup on {date} at {time}.\n\nYour new driver will be {driver}. We have attached a photo of your driver and the vehicle for easy identification upon arrival. If you need to reach them directly, they can be contacted at {phone}.\n\nThere are no changes to your scheduled itinerary or pickup location. If you have any questions, please reply to this message.",
-  receiptshare: "Here's the receipt for {date}. Open it, then use Share or Print \u2192 Save as PDF to keep a copy.",
+  receiptshare: "Here's the receipt for your transportation service on {date}.",
   receiptclosing: 'Thank you for riding with {org}!',
 };
 function renderMessageTemplates(){
@@ -14299,14 +14308,27 @@ function renderMessageTemplates(){
       + 'Your own current wording, shown exactly as it\'ll be sent — fix a typo without retyping the whole thing. This always wins over the app-wide default below. Tap a message to open it.</div>'
       + field('personal','confirm', 'My confirmation text', 'Placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}', myCustom.confTemplate, 5)
       + field('personal','pickup', 'My pickup instructions', 'For AP Run, One Way, and Round Trip rides only \u2014 AP Pick Up always uses the per-terminal instructions below instead. Folded into the confirmation text. Same placeholders as above.', myCustom.pickupInstructions, 3, _byTypeHtml)
-      + '<div style="border:1.5px solid var(--light);border-radius:10px;padding:.7rem;margin-bottom:.6rem;">'
-      + '<div style="font-size:.78rem;font-weight:700;color:var(--black);margin-bottom:.2rem;">AP Pick Up — per-terminal instructions</div>'
-      + '<div style="font-size:.66rem;color:var(--mid);margin-bottom:.6rem;line-height:1.4;">AP Pick Up rides use ONLY these terminal-specific instructions, never the general pickup instructions above \u2014 that field is for rides that start at the client\'s location instead of the airport. Leave a terminal blank to use the app\'s built-in walkthrough for it.</div>'
-      + '<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">North Domestic</div><textarea id="msgtpl-pickup-term-north" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byTerm['North Domestic']||'')+'</textarea></div>'
-      + '<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">South Domestic</div><textarea id="msgtpl-pickup-term-south" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byTerm['South Domestic']||'')+'</textarea></div>'
-      + '<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">International</div><textarea id="msgtpl-pickup-term-intl" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byTerm['International']||'')+'</textarea></div>'
-      + '<button onclick="savePerTerminalPickupInstructions()" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Save</button>'
-      + '</div>'
+      + (function(){
+          const _termIsSet = !!(_byTerm['North Domestic'] || _byTerm['South Domestic'] || _byTerm['International']);
+          const _termColor = _termIsSet ? '#15803d' : 'var(--mid)';
+          const _termBg = _termIsSet ? '#e8f5ee' : 'var(--surface)';
+          const _termStatus = _termIsSet ? 'Custom set' : 'Using default';
+          return '<div style="border:1.5px solid var(--light);border-radius:10px;margin-bottom:.6rem;overflow:hidden;">'
+          +'<button type="button" onclick="toggleMsgTplField(\'msgtpl-pickup-terminal\')" style="width:100%;text-align:left;background:var(--surface);border:none;padding:.65rem .8rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-family:\'DM Sans\',sans-serif;">'
+          +'<span style="font-size:.82rem;font-weight:700;color:var(--black);">AP Pick Up \u2014 per-terminal instructions</span>'
+          +'<span style="display:flex;align-items:center;gap:.5rem;flex-shrink:0;">'
+          +'<span style="font-size:.66rem;font-weight:700;color:'+_termColor+';background:'+_termBg+';border-radius:10px;padding:2px 8px;">'+_termStatus+'</span>'
+          +'<span id="msgtpl-pickup-terminal-arrow" style="font-size:.7rem;color:var(--mid);">\u25be</span>'
+          +'</span></button>'
+          +'<div id="msgtpl-pickup-terminal-body" style="display:none;padding:.75rem .8rem;">'
+          +'<div style="font-size:.66rem;color:var(--mid);margin-bottom:.6rem;line-height:1.4;">AP Pick Up rides use ONLY these terminal-specific instructions, never the general pickup instructions above \u2014 that field is for rides that start at the client\'s location instead of the airport. Leave a terminal blank to use the app\'s built-in walkthrough for it.</div>'
+          +'<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">North Domestic</div><textarea id="msgtpl-pickup-term-north" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byTerm['North Domestic']||'')+'</textarea></div>'
+          +'<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">South Domestic</div><textarea id="msgtpl-pickup-term-south" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byTerm['South Domestic']||'')+'</textarea></div>'
+          +'<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">International</div><textarea id="msgtpl-pickup-term-intl" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byTerm['International']||'')+'</textarea></div>'
+          +'<button onclick="savePerTerminalPickupInstructions()" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Save</button>'
+          +'</div>'
+          +'</div>';
+        })()
       + field('personal','arrival', 'My arrival text', 'Placeholders: {driver} {client}', myCustom.arrivalTemplate, 4)
       + '<div id="msgtpl-personal-error" style="color:var(--red);font-size:.82rem;min-height:1rem;margin-bottom:.5rem;"></div>'
       + '<button onclick="saveAllTemplateFields(\'personal\')" class="btn-primary" style="width:100%;padding:.75rem;margin-bottom:'+(admin?'2rem':'0')+';">Save All My Messages</button>';
@@ -17714,6 +17736,27 @@ async function _promoteChaseTemplatesToGlobalDefault(){
   if(chase.arrivalTemplate && !globalSettings.defaultArrivalTemplate){ globalSettings.defaultArrivalTemplate=chase.arrivalTemplate; changed=true; }
   globalSettings._chaseDefaultsPromoted = true;
   try{ await storageSet('kat:globalSettings', globalSettings); }catch(e){ console.warn('Chase default promotion save failed', e); }
+}
+// One-time cleanup, runs after the promotion above: once Chase's own wording HAS become the
+// global default, keeping an identical copy in his own driverSettings just makes the personal
+// section show "Custom set" for text that's no longer actually custom relative to the default
+// he himself controls - confusing, and made it look like there were two separate places to
+// edit the same pickup instructions. Only clears a field if it's an EXACT match to what's now
+// the global default, so anything Chase has intentionally changed personally since the
+// promotion (making his own text genuinely different from the shared default again) is left
+// completely alone.
+async function _clearChasePersonalDuplicates(){
+  globalSettings = globalSettings || {};
+  if(globalSettings._chasePersonalDuplicatesCleared) return;
+  var chase = (driverSettings && driverSettings['Chase Sweat']);
+  if(!chase) return;
+  var changed=false;
+  if(chase.confTemplate && chase.confTemplate===globalSettings.defaultConfirmTemplate){ delete chase.confTemplate; changed=true; }
+  if(chase.pickupInstructions && chase.pickupInstructions===globalSettings.defaultPickupInstructions){ delete chase.pickupInstructions; changed=true; }
+  if(chase.arrivalTemplate && chase.arrivalTemplate===globalSettings.defaultArrivalTemplate){ delete chase.arrivalTemplate; changed=true; }
+  globalSettings._chasePersonalDuplicatesCleared = true;
+  try{ await storageSet('kat:globalSettings', globalSettings); if(changed) await saveDriverSettings(); }
+  catch(e){ console.warn('Chase personal duplicate cleanup failed', e); }
 }
 function _restoreKatTemplatesV2(){
   try{
