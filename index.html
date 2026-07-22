@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607211608">
+<meta name="version" content="202607221612">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -208,6 +208,18 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
    auto-darken heuristics, which can rewrite an element's colors on top of whatever CSS
    actually says \u2014 even inline styles \u2014 and can get individual elements wrong. */
 .modal-footer button{width:100%;box-sizing:border-box;padding:.65rem .5rem;text-align:center;white-space:normal;line-height:1.25;color:#fff;font-weight:800;border:none;forced-color-adjust:none;-webkit-forced-color-adjust:none;color-scheme:only light;}
+/* Reported: Skip/Cancel/Close buttons using .btn-secondary inside a modal-footer were showing
+   white text and a white border on the pale background .btn-secondary sets — effectively
+   invisible until :hover switched the background solid. Root cause: .modal-footer button's
+   color/border rule (0,1,1 specificity) beats .btn-secondary's own (0,1,0), and that white-
+   text default is correct for the OTHER buttons that live here (Delete, Mark Paid — solid
+   colored backgrounds, white text makes sense) but wrong for .btn-secondary's pale-outline
+   style specifically. This rule (0,2,0 specificity) wins over both and restores the correct
+   look ONLY for .btn-secondary, leaving every solid-color footer button untouched. Also fixes
+   the same problem on the v607 Add Ride Cancel button — that fix corrected the background but
+   never checked text/border color, so it was only half-fixed; caught while investigating this. */
+.modal-footer .btn-secondary{color:var(--gold);border:1.5px solid var(--gold);}
+.modal-footer .btn-secondary:hover{color:#fff;}
 .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem 1.5rem;margin-bottom:1.25rem;}
 .detail-row{padding:.4rem 0;border-bottom:1px solid var(--light);}
 .driver-select-row{display:flex;gap:.5rem;align-items:center;margin-bottom:1.25rem;}
@@ -883,6 +895,7 @@ input,select,textarea{font-size:16px;}
       <button class="cal-tab" id="mptab-account" onclick="switchProfileTab('account',this)">Account Settings</button>
       <button class="cal-tab" id="mptab-access" onclick="switchProfileTab('access',this)" style="display:none;">Access control</button>
       <button class="cal-tab" id="mptab-pricing" onclick="switchProfileTab('pricing',this)" style="display:none;">Pricing</button>
+      <button class="cal-tab" id="mptab-templates" onclick="switchProfileTab('templates',this)" style="display:none;">Message Templates</button>
     </div>
     <div id="profile-panel-me">
       <div id="profile-driver-picker"></div>
@@ -907,6 +920,7 @@ input,select,textarea{font-size:16px;}
     </div>
     <div id="driver-panel-access" style="display:none;"><div id="access-control-list"></div></div>
     <div id="driver-panel-pricing" style="display:none;"></div>
+    <div id="driver-panel-templates" style="display:none;"></div>
   </div>
 
   <!-- MY RIDES -->
@@ -1023,7 +1037,6 @@ input,select,textarea{font-size:16px;}
       <button onclick="closeRideModal()" style="background:none;border:none;font-size:1.6rem;line-height:1;color:var(--mid);cursor:pointer;padding:0 .25rem;flex-shrink:0;" aria-label="Close">&times;</button>
       <div style="display:flex;gap:.5rem;align-items:center;">
         <button id="rm-edit-btn" class="btn-secondary" onclick="toggleEditMode(true)" style="font-size:.8rem;padding:.4rem .9rem;display:inline-flex;align-items:center;justify-content:center;gap:.3rem;line-height:1;">✏️ Edit</button>
-        <button id="rm-save-btn" class="btn-primary" onclick="saveRideEdits()" style="display:none;width:auto;padding:.4rem .9rem;font-size:.8rem;">Save Changes</button>
         <button id="rm-cancel-btn" class="btn-secondary" onclick="toggleEditMode(false)" style="display:none;font-size:.8rem;padding:.4rem .9rem;">Cancel</button>
       </div>
     </div>
@@ -1114,6 +1127,7 @@ input,select,textarea{font-size:16px;}
         <label>Requested driver <span style="font-weight:600;color:var(--mid);font-size:.72rem;">(private — only you can see this)</span></label>
         <input type="text" id="edit-reqdriver" placeholder="e.g. a driver this client prefers" style="width:100%;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;box-sizing:border-box;" />
       </div>
+      <button id="rm-save-btn" class="btn-primary" onclick="saveRideEdits()" style="display:none;width:100%;padding:.75rem;margin-top:.75rem;font-size:.92rem;">Save Changes</button>
     </div>
     <div class="modal-footer">
       <button id="rm-delete-btn" class="btn-danger" onclick="deleteRide(activeRideId)" style="background:#dc2626;color:#fff;font-weight:800;">🗑️ Delete Ride</button>
@@ -1386,7 +1400,7 @@ input,select,textarea{font-size:16px;}
         <div style="display:flex;flex-wrap:wrap;gap:.5rem .9rem;"><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.8rem;color:var(--black);"><input type="checkbox" id="onb-auto-premium" checked style="width:15px;height:15px;accent-color:#15803d;" />Premium</label><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.8rem;color:var(--black);"><input type="checkbox" id="onb-auto-traffic" checked style="width:15px;height:15px;accent-color:#15803d;" />Traffic</label><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.8rem;color:var(--black);"><input type="checkbox" id="onb-auto-holiday" checked style="width:15px;height:15px;accent-color:#15803d;" />Holiday</label><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.8rem;color:var(--black);"><input type="checkbox" id="onb-auto-christmas" checked style="width:15px;height:15px;accent-color:#15803d;" />Christmas</label><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.8rem;color:var(--black);"><input type="checkbox" id="onb-auto-fuel" checked style="width:15px;height:15px;accent-color:#15803d;" />Fuel</label></div>
       </div>
 
-      <div class="form-group"><label>Confirmation text</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">The message clients get when their ride is confirmed. Set one per ride type, or just a general default.</div><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.4rem;"><input type="radio" name="onb-conf-mode" value="default" checked onchange="_onbConfMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Stay with the default text</strong></span></label><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.6rem;"><input type="radio" name="onb-conf-mode" value="custom" onchange="_onbConfMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Customize my own</strong></span></label><div id="onb-conf-fields" style="display:none;border:1.5px solid var(--light);border-radius:10px;padding:.7rem;"><div style="background:#f3eeff;border:1px solid var(--accent);border-radius:8px;padding:.65rem .75rem;margin-bottom:.75rem;"><div style="font-size:.78rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Already have a message you send?</div><div style="font-size:.7rem;color:var(--mid);margin-bottom:.55rem;line-height:1.4;">Paste it and we&rsquo;ll turn the parts that change every ride into tokens automatically — no need to learn the placeholders.</div><button type="button" onclick="openConfImporter('onb-conf')" style="padding:.45rem 1rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">✨ Import my confirmation text</button></div><div style="font-size:.68rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Placeholders <code style="font-size:.66rem;">{client}</code> <code style="font-size:.66rem;">{date}</code> <code style="font-size:.66rem;">{time}</code> <code style="font-size:.66rem;">{pickup}</code> <code style="font-size:.66rem;">{dropoff}</code> <code style="font-size:.66rem;">{driver}</code> <code style="font-size:.66rem;">{me}</code> <code style="font-size:.66rem;">{amount}</code> <code style="font-size:.66rem;">{flight}</code> <code style="font-size:.66rem;">{terminal}</code> <code style="font-size:.66rem;">{phone}</code> fill in automatically.</div><div style="margin-bottom:.7rem;"><div style="font-size:.7rem;font-weight:700;color:var(--black);margin-bottom:2px;">General default <span style="font-weight:600;color:var(--mid);">(used when a ride type is blank)</span></div><textarea id="onb-conf" rows="4" placeholder="Type your default confirmation message…" style="width:100%;padding:.5rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea><button type="button" onclick="_onbInsertConfExample()" style="margin-top:3px;font-size:.68rem;padding:2px 8px;background:none;border:1px solid var(--accent);color:var(--accent);border-radius:8px;cursor:pointer;font-family:'DM Sans',sans-serif;">Insert example</button></div><div style="font-size:.66rem;font-weight:700;color:var(--mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:.4rem;">Per ride type (optional)</div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">AP Run</div><textarea id="onb-conf-aprun" rows="3" placeholder="Confirmation message for AP Run rides… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">AP Pick Up</div><textarea id="onb-conf-appickup" rows="3" placeholder="Confirmation message for AP Pick Up rides… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Local One Way</div><textarea id="onb-conf-oneway" rows="3" placeholder="Confirmation message for Local One Way rides… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Local Round Trip</div><textarea id="onb-conf-roundtrip" rows="3" placeholder="Confirmation message for Local Round Trip rides… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea></div></div></div><div class="form-group"><label>Scheduling / cancellation message</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">The text a client gets when you schedule their ride — it includes your change &amp; cancellation policy. The fee amounts pull from Pricing automatically.</div><button type="button" onclick="openPolicyEditor()" style="padding:.5rem 1rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">✏️ Edit scheduling message</button></div><div class="form-group"><label>➕ My own client messages</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Dispatchers who also build their own client list can keep a <strong>second</strong> confirmation &amp; pickup set, used only for their own clients. Leave it empty to use your default set for everyone.</div><button type="button" onclick="openOwnMsgEditor()" style="padding:.5rem 1rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">➕ Set up my own-client messages</button></div><div class="form-group"><label>Pickup instructions (airport)</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">How clients are told where to meet you at each terminal.</div><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.4rem;"><input type="radio" name="onb-pickup-mode" value="default" checked onchange="_onbPickupMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Stay with the default instructions</strong></span></label><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.6rem;"><input type="radio" name="onb-pickup-mode" value="custom" onchange="_onbPickupMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Customize my own</strong></span></label><div id="onb-pickup-fields" style="display:none;border:1.5px solid var(--light);border-radius:10px;padding:.7rem;"><div style="background:#f3eeff;border:1px solid var(--accent);border-radius:8px;padding:.65rem .75rem;margin-bottom:.75rem;"><div style="font-size:.78rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Already have pickup instructions you send?</div><div style="font-size:.7rem;color:var(--mid);margin-bottom:.55rem;line-height:1.4;">Paste them and we&rsquo;ll tokenize the changing parts for you.</div><button type="button" onclick="openConfImporter('onb-pickup-default')" style="padding:.45rem 1rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">✨ Import my pickup instructions</button></div><div style="font-size:.68rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Placeholders <code style="font-size:.66rem;">{terminal}</code> <code style="font-size:.66rem;">{driver}</code> <code style="font-size:.66rem;">{phone}</code> fill in automatically. Leave a terminal blank to use your general default.</div><div style="margin-bottom:.7rem;"><div style="font-size:.7rem;font-weight:700;color:var(--black);margin-bottom:2px;">General default <span style="font-weight:600;color:var(--mid);">(round trips, AP Runs &amp; any terminal left blank)</span></div><textarea id="onb-pickup-default" rows="2" placeholder="e.g. When you land, text me once you have your bags and head to the lower-level pickup area." style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;"></textarea><button type="button" onclick="_onbInsertPickupDefault()" style="margin-top:3px;font-size:.68rem;padding:2px 8px;background:none;border:1px solid var(--accent);color:var(--accent);border-radius:8px;cursor:pointer;font-family:'DM Sans',sans-serif;">Insert example</button></div><div style="font-size:.66rem;font-weight:700;color:var(--mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:.4rem;">Per-terminal (optional)</div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">North Domestic</div><textarea id="onb-pickup-north" rows="2" placeholder="Where you meet clients arriving at North Domestic… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">South Domestic</div><textarea id="onb-pickup-south" rows="2" placeholder="Where you meet clients arriving at South Domestic… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">International</div><textarea id="onb-pickup-intl" rows="2" placeholder="Where you meet clients arriving at International… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;"></textarea></div>
+      <div class="form-group"><label>Confirmation text</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">The message clients get when their ride is confirmed. Set one per ride type, or just a general default.</div><div id="onb-conf-currentdefault" style="display:none;background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.5rem .65rem;margin-bottom:.6rem;font-size:.72rem;color:var(--mid);line-height:1.4;"></div><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.4rem;"><input type="radio" name="onb-conf-mode" value="default" checked onchange="_onbConfMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Stay with the default text</strong></span></label><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.6rem;"><input type="radio" name="onb-conf-mode" value="custom" onchange="_onbConfMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Customize my own</strong></span></label><div id="onb-conf-fields" style="display:none;border:1.5px solid var(--light);border-radius:10px;padding:.7rem;"><div style="background:#f3eeff;border:1px solid var(--accent);border-radius:8px;padding:.65rem .75rem;margin-bottom:.75rem;"><div style="font-size:.78rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Already have a message you send?</div><div style="font-size:.7rem;color:var(--mid);margin-bottom:.55rem;line-height:1.4;">Paste it and we&rsquo;ll turn the parts that change every ride into tokens automatically — no need to learn the placeholders.</div><button type="button" onclick="openConfImporter('onb-conf')" style="padding:.45rem 1rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">✨ Import my confirmation text</button></div><div style="font-size:.68rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Placeholders <code style="font-size:.66rem;">{client}</code> <code style="font-size:.66rem;">{date}</code> <code style="font-size:.66rem;">{time}</code> <code style="font-size:.66rem;">{pickup}</code> <code style="font-size:.66rem;">{dropoff}</code> <code style="font-size:.66rem;">{driver}</code> <code style="font-size:.66rem;">{me}</code> <code style="font-size:.66rem;">{amount}</code> <code style="font-size:.66rem;">{flight}</code> <code style="font-size:.66rem;">{terminal}</code> <code style="font-size:.66rem;">{phone}</code> fill in automatically.</div><div style="margin-bottom:.7rem;"><div style="font-size:.7rem;font-weight:700;color:var(--black);margin-bottom:2px;">General default <span style="font-weight:600;color:var(--mid);">(used when a ride type is blank)</span></div><textarea id="onb-conf" rows="4" placeholder="Type your default confirmation message…" style="width:100%;padding:.5rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea><button type="button" onclick="_onbInsertConfExample()" style="margin-top:3px;font-size:.68rem;padding:2px 8px;background:none;border:1px solid var(--accent);color:var(--accent);border-radius:8px;cursor:pointer;font-family:'DM Sans',sans-serif;">Insert example</button></div><div style="font-size:.66rem;font-weight:700;color:var(--mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:.4rem;">Per ride type (optional)</div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">AP Run</div><textarea id="onb-conf-aprun" rows="3" placeholder="Confirmation message for AP Run rides… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">AP Pick Up</div><textarea id="onb-conf-appickup" rows="3" placeholder="Confirmation message for AP Pick Up rides… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Local One Way</div><textarea id="onb-conf-oneway" rows="3" placeholder="Confirmation message for Local One Way rides… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Local Round Trip</div><textarea id="onb-conf-roundtrip" rows="3" placeholder="Confirmation message for Local Round Trip rides… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea></div></div></div><div class="form-group"><label>Scheduling / cancellation message</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">The text a client gets when you schedule their ride — it includes your change &amp; cancellation policy. The fee amounts pull from Pricing automatically.</div><button type="button" onclick="openPolicyEditor()" style="padding:.5rem 1rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">✏️ Edit scheduling message</button></div><div class="form-group"><label>➕ My own client messages</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Dispatchers who also build their own client list can keep a <strong>second</strong> confirmation &amp; pickup set, used only for their own clients. Leave it empty to use your default set for everyone.</div><button type="button" onclick="openOwnMsgEditor()" style="padding:.5rem 1rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">➕ Set up my own-client messages</button></div><div class="form-group"><label>Pickup instructions (airport)</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">How clients are told where to meet you at each terminal.</div><div id="onb-pickup-currentdefault" style="display:none;background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.5rem .65rem;margin-bottom:.6rem;font-size:.72rem;color:var(--mid);line-height:1.4;"></div><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.4rem;"><input type="radio" name="onb-pickup-mode" value="default" checked onchange="_onbPickupMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Stay with the default instructions</strong></span></label><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.6rem;"><input type="radio" name="onb-pickup-mode" value="custom" onchange="_onbPickupMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Customize my own</strong></span></label><div id="onb-pickup-fields" style="display:none;border:1.5px solid var(--light);border-radius:10px;padding:.7rem;"><div style="background:#f3eeff;border:1px solid var(--accent);border-radius:8px;padding:.65rem .75rem;margin-bottom:.75rem;"><div style="font-size:.78rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Already have pickup instructions you send?</div><div style="font-size:.7rem;color:var(--mid);margin-bottom:.55rem;line-height:1.4;">Paste them and we&rsquo;ll tokenize the changing parts for you.</div><button type="button" onclick="openConfImporter('onb-pickup-default')" style="padding:.45rem 1rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">✨ Import my pickup instructions</button></div><div style="font-size:.68rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Placeholders <code style="font-size:.66rem;">{terminal}</code> <code style="font-size:.66rem;">{driver}</code> <code style="font-size:.66rem;">{phone}</code> fill in automatically. Leave a terminal blank to use your general default.</div><div style="margin-bottom:.7rem;"><div style="font-size:.7rem;font-weight:700;color:var(--black);margin-bottom:2px;">General default <span style="font-weight:600;color:var(--mid);">(round trips, AP Runs &amp; any terminal left blank)</span></div><textarea id="onb-pickup-default" rows="2" placeholder="e.g. When you land, text me once you have your bags and head to the lower-level pickup area." style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;"></textarea><button type="button" onclick="_onbInsertPickupDefault()" style="margin-top:3px;font-size:.68rem;padding:2px 8px;background:none;border:1px solid var(--accent);color:var(--accent);border-radius:8px;cursor:pointer;font-family:'DM Sans',sans-serif;">Insert example</button></div><div style="font-size:.66rem;font-weight:700;color:var(--mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:.4rem;">Per-terminal (optional)</div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">North Domestic</div><textarea id="onb-pickup-north" rows="2" placeholder="Where you meet clients arriving at North Domestic… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">South Domestic</div><textarea id="onb-pickup-south" rows="2" placeholder="Where you meet clients arriving at South Domestic… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;"></textarea></div><div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">International</div><textarea id="onb-pickup-intl" rows="2" placeholder="Where you meet clients arriving at International… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;"></textarea></div>
 <div style="border-top:1px solid var(--light);padding-top:.6rem;margin-top:.3rem;">
 <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.4rem;">
 <input type="checkbox" id="onb-pickup-bytype-on" onchange="document.getElementById('onb-pickup-bytype-fields').style.display=this.checked?'block':'none';" style="width:16px;height:16px;accent-color:var(--accent);flex-shrink:0;">
@@ -1399,7 +1413,7 @@ input,select,textarea{font-size:16px;}
 <div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Round Trip</div><textarea id="onb-pickup-roundtrip" rows="2" placeholder="e.g. Call 10 minutes before the return pickup… (blank = use your general default)" style="width:100%;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;"></textarea></div>
 </div>
 </div>
-</div></div><div class="form-group"><label>&#x1F4E4; What your confirmation bundle sends</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">These come pre-checked on every confirmation you send. Untick anything you never want included &mdash; for example, turn off the day-of selfie if you&rsquo;d rather not send one. You can still tick or untick per ride before sending, and change these later under Profile.</div><div style="border:1.5px solid var(--light);border-radius:10px;padding:.55rem .7rem;"><label style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;font-size:.8rem;cursor:pointer;"><input type="checkbox" id="onb-sendpart-message" checked style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;"/><span>&#x2709;&#xFE0F; Confirmation message</span></label><label style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;font-size:.8rem;cursor:pointer;"><input type="checkbox" id="onb-sendpart-instructions" checked style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;"/><span>&#x1F4CD; Pickup instructions</span></label><label style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;font-size:.8rem;cursor:pointer;"><input type="checkbox" id="onb-sendpart-selfie" checked style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;"/><span>&#x1F933; Day-of selfie (airport pickups)</span></label><label style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;font-size:.8rem;cursor:pointer;"><input type="checkbox" id="onb-sendpart-vcard" checked style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;"/><span>&#x1F464; Contact card (vCard)</span></label><label style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;font-size:.8rem;cursor:pointer;"><input type="checkbox" id="onb-sendpart-card" checked style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;"/><span>&#x1F5BC; Driver card image</span></label></div></div><div class="form-group"><label>✨ Your driver card</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Don’t have a card yet? Build one from a photo of you and a photo of your vehicle — we’ll lay it out for you.</div><button type="button" onclick="openCardGenerator((document.getElementById('onb-name')||{}).value||'', function(url){ _onbGeneratedCard=url; var p=document.getElementById('onb-cardgen-prev'); if(p){ p.style.display='block'; p.innerHTML='<img src=&quot;'+url+'&quot; style=&quot;width:100%;border-radius:8px;display:block;&quot;>'; } })" style="display:block;width:100%;box-sizing:border-box;padding:.6rem 1rem;background:var(--gold);color:#fff;border:1.5px solid var(--gold);border-radius:8px;font-size:.85rem;font-weight:700;text-align:center;cursor:pointer;font-family:'DM Sans',sans-serif;">✨ Generate a driver card</button><div style="font-size:.7rem;color:var(--mid);margin:.5rem 0 .35rem;text-align:center;">— or —</div><label style="display:block;width:100%;box-sizing:border-box;padding:.6rem 1rem;background:#fff;border:1.5px dashed var(--accent);border-radius:8px;text-align:center;font-size:.85rem;color:var(--accent);font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">📤 Upload a driver card<input type="file" accept="image/*" onchange="_onbCardUploadPick(this)" style="display:none;" /></label><div id="onb-cardgen-prev" style="display:none;margin-top:.6rem;"></div></div><div class="form-group"><label>Your day-of-travel selfie</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.4rem;line-height:1.4;">This is the photo clients see so they can recognize you on pickup day. Add your own, or leave it to use the shared default.</div><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.5rem;"><input type="radio" name="onb-selfie-choice" value="default" checked onchange="_onbSelfieChoice()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Use the shared default selfie</strong></span></label><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.5rem;"><input type="radio" name="onb-selfie-choice" value="own" onchange="_onbSelfieChoice()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Use my own selfie</strong></span></label><div id="onb-selfie-uploader" style="display:none;align-items:center;gap:.7rem;"><div id="onb-photo-preview" style="width:48px;height:48px;border-radius:10px;background:#f3eeff;border:1.5px solid var(--light);background-size:cover;background-position:center;flex-shrink:0;"></div><button type="button" onclick="_onbUploadPhoto()" class="btn-secondary" style="padding:.5rem .9rem;font-size:.8rem;">📷 Upload photo</button><span id="onb-photo-status" style="font-size:.72rem;color:var(--mid);">No photo yet</span></div></div><div style="color:var(--red);font-size:.82rem;min-height:1rem;margin:.4rem 0;" id="onb-error"></div>
+</div></div><div class="form-group"><label>Arrival text</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">The message sent the moment a client lands, before you send arrival instructions.</div><div id="onb-arrival-currentdefault" style="display:none;background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.5rem .65rem;margin-bottom:.6rem;font-size:.72rem;color:var(--mid);line-height:1.4;"></div><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.4rem;"><input type="radio" name="onb-arrival-mode" value="default" checked onchange="_onbArrivalMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Stay with the default text</strong></span></label><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.6rem;"><input type="radio" name="onb-arrival-mode" value="custom" onchange="_onbArrivalMode()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Customize my own</strong></span></label><div id="onb-arrival-fields" style="display:none;border:1.5px solid var(--light);border-radius:10px;padding:.7rem;"><div style="font-size:.68rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Placeholders <code style="font-size:.66rem;">{driver}</code> <code style="font-size:.66rem;">{client}</code> fill in automatically.</div><textarea id="onb-arrival" rows="4" placeholder="Type your arrival message…" style="width:100%;padding:.5rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea><button type="button" onclick="_onbInsertArrivalExample()" style="margin-top:3px;font-size:.68rem;padding:2px 8px;background:none;border:1px solid var(--accent);color:var(--accent);border-radius:8px;cursor:pointer;font-family:'DM Sans',sans-serif;">Insert example</button></div></div><div class="form-group"><label>&#x1F4E4; What your confirmation bundle sends</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">These come pre-checked on every confirmation you send. Untick anything you never want included &mdash; for example, turn off the day-of selfie if you&rsquo;d rather not send one. You can still tick or untick per ride before sending, and change these later under Profile.</div><div style="border:1.5px solid var(--light);border-radius:10px;padding:.55rem .7rem;"><label style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;font-size:.8rem;cursor:pointer;"><input type="checkbox" id="onb-sendpart-message" checked style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;"/><span>&#x2709;&#xFE0F; Confirmation message</span></label><label style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;font-size:.8rem;cursor:pointer;"><input type="checkbox" id="onb-sendpart-instructions" checked style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;"/><span>&#x1F4CD; Pickup instructions</span></label><label style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;font-size:.8rem;cursor:pointer;"><input type="checkbox" id="onb-sendpart-selfie" checked style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;"/><span>&#x1F933; Day-of selfie (airport pickups)</span></label><label style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;font-size:.8rem;cursor:pointer;"><input type="checkbox" id="onb-sendpart-vcard" checked style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;"/><span>&#x1F464; Contact card (vCard)</span></label><label style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;font-size:.8rem;cursor:pointer;"><input type="checkbox" id="onb-sendpart-card" checked style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;"/><span>&#x1F5BC; Driver card image</span></label></div></div><div class="form-group"><label>✨ Your driver card</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Don’t have a card yet? Build one from a photo of you and a photo of your vehicle — we’ll lay it out for you.</div><button type="button" onclick="openCardGenerator((document.getElementById('onb-name')||{}).value||'', function(url){ _onbGeneratedCard=url; var p=document.getElementById('onb-cardgen-prev'); if(p){ p.style.display='block'; p.innerHTML='<img src=&quot;'+url+'&quot; style=&quot;width:100%;border-radius:8px;display:block;&quot;>'; } })" style="display:block;width:100%;box-sizing:border-box;padding:.6rem 1rem;background:var(--gold);color:#fff;border:1.5px solid var(--gold);border-radius:8px;font-size:.85rem;font-weight:700;text-align:center;cursor:pointer;font-family:'DM Sans',sans-serif;">✨ Generate a driver card</button><div style="font-size:.7rem;color:var(--mid);margin:.5rem 0 .35rem;text-align:center;">— or —</div><label style="display:block;width:100%;box-sizing:border-box;padding:.6rem 1rem;background:#fff;border:1.5px dashed var(--accent);border-radius:8px;text-align:center;font-size:.85rem;color:var(--accent);font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">📤 Upload a driver card<input type="file" accept="image/*" onchange="_onbCardUploadPick(this)" style="display:none;" /></label><div id="onb-cardgen-prev" style="display:none;margin-top:.6rem;"></div></div><div class="form-group"><label>Your day-of-travel selfie</label><div style="font-size:.7rem;color:var(--mid);margin-bottom:.4rem;line-height:1.4;">This is the photo clients see so they can recognize you on pickup day. Add your own, or leave it to use the shared default.</div><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.5rem;"><input type="radio" name="onb-selfie-choice" value="default" checked onchange="_onbSelfieChoice()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Use the shared default selfie</strong></span></label><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.5rem;"><input type="radio" name="onb-selfie-choice" value="own" onchange="_onbSelfieChoice()" style="accent-color:var(--accent);"><span style="font-size:.8rem;"><strong>Use my own selfie</strong></span></label><div id="onb-selfie-uploader" style="display:none;align-items:center;gap:.7rem;"><div id="onb-photo-preview" style="width:48px;height:48px;border-radius:10px;background:#f3eeff;border:1.5px solid var(--light);background-size:cover;background-position:center;flex-shrink:0;"></div><button type="button" onclick="_onbUploadPhoto()" class="btn-secondary" style="padding:.5rem .9rem;font-size:.8rem;">📷 Upload photo</button><span id="onb-photo-status" style="font-size:.72rem;color:var(--mid);">No photo yet</span></div></div><div style="color:var(--red);font-size:.82rem;min-height:1rem;margin:.4rem 0;" id="onb-error"></div>
 
       <div style="display:flex;flex-direction:column;gap:.5rem;margin-top:.5rem;">
         <button onclick="saveOnboarding()" class="btn-primary" style="width:100%;padding:.85rem;">Save &amp; Get Started</button>
@@ -5328,7 +5342,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
               }
               const ic=canSeeInterestList(r)?interestCount(r):0;
               const badge=r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP'?'badge-ap':r.type==='ROUND TRIP'?'badge-rt':'badge-pt';
-  const xxlBadge=r.xxl?'<span style="font-size:.55rem;font-weight:700;background:#6b21a8;color:#fff;border-radius:3px;padding:1px 4px;margin-left:2px;">XXL</span>':'';
+  const xxlBadge=(r.xxl&&r.vehicle2)?'<span style="font-size:.55rem;font-weight:700;background:#6b21a8;color:#fff;border-radius:3px;padding:1px 4px;margin-left:2px;">XXL</span>':'';
   const privateBadge=r.private?'<span style="font-size:.55rem;font-weight:700;background:#1b1330;color:#fff;border-radius:3px;padding:1px 4px;margin-left:2px;" title="Hidden from other drivers">🔒</span>':'';
   const pairBadge='';
               return `<div class="week-ride-card" style="border-color:${c};background:${c}66;" onclick="openRideModal(${r.id})">
@@ -5983,7 +5997,7 @@ function buildConfirmationText(r){
   var _cOwner=(typeof clientOwners!=='undefined' && r && r.client) ? (clientOwners[(r.client||'').trim().toLowerCase()]||'') : '';
   var _useOwnConf=!!(_cOwner && _cOwner===sender && (_ds.ownConfTemplateByType || _ds.ownConfTemplate));
   var _byType = (_useOwnConf ? _ds.ownConfTemplateByType : _ds.confTemplateByType)||{};
-  var _genTpl = (_useOwnConf ? _ds.ownConfTemplate : _ds.confTemplate)||'';
+  var _genTpl = (_useOwnConf ? _ds.ownConfTemplate : _ds.confTemplate)||(globalSettings&&globalSettings.defaultConfirmTemplate)||'';
   var _rideType = (r.type||'').trim();
   var _typeMsg = (_rideType && _byType[_rideType]) ? _byType[_rideType] : '';
   // AP PICK UP has its own built-in message (Flight #, tracking link) — only a template
@@ -6030,7 +6044,7 @@ function buildConfirmationText(r){
   // hasn't opted in, or hasn't filled in that specific ride type.
   var _typeInstr = (_ods.useTypeInstructions && _ods.pickupInstructionsByType && type!=='AP PICK UP')
     ? (_ods.pickupInstructionsByType[type]||'') : '';
-  const customInstr = (_termInstr || _typeInstr || (type!=='AP PICK UP' ? (_ods.pickupInstructions||_oProf.pickupInstructions||'') : '')).trim();
+  const customInstr = (_termInstr || _typeInstr || (type!=='AP PICK UP' ? (_ods.pickupInstructions||_oProf.pickupInstructions||(globalSettings&&globalSettings.defaultPickupInstructions)||'') : '')).trim();
   if(customMsg)   message      = fillConfTemplate(customMsg, r, sender, assigned);
   if(customInstr) instructions = fillConfTemplate(customInstr, r, sender, assigned);
 
@@ -6504,6 +6518,15 @@ function _ownerPhonesForClient(clientName){
 function _driverChangeClientMessage(ride, newDriverName, newDriverPhone){
   const dateStr = fmtDateShort(ride.date) || '';
   const timeStr = fmtTime12(ride.time) || '';
+  const _tpl = (globalSettings && globalSettings.defaultDriverChangeTemplate) || '';
+  if(_tpl){
+    return _tpl
+      .replace(/\{client\}/g, ride.client||'Client')
+      .replace(/\{date\}/g, dateStr)
+      .replace(/\{time\}/g, timeStr)
+      .replace(/\{driver\}/g, newDriverName||'')
+      .replace(/\{phone\}/g, newDriverPhone||'the office');
+  }
   return 'Dear '+(ride.client||'Client')+',\n\n'
     + 'Please be advised that there has been a change regarding your scheduled pickup on '+dateStr+' at '+timeStr+'.\n\n'
     + 'Your new driver will be '+newDriverName+'. We have attached a photo of your driver and the vehicle for easy identification upon arrival. '
@@ -6519,24 +6542,28 @@ function _driverChangeClientMessage(ride, newDriverName, newDriverPhone){
 // Each step is independently wrapped: one recipient's send failing (no phone on file, share
 // sheet dismissed) must not silently swallow the other two.
 async function notifyDriverChange(ride, oldDriverName, newDriverName){
+  // Reported: this used to fire all three notifications silently and automatically the
+  // moment a driver was reassigned — no prompt, straight to a text message — and in
+  // practice only the owner notice reliably went out; the new-driver and client texts were
+  // going missing. Root cause is a real platform quirk, not a logic bug: the owner step has
+  // no file attachment, so it sends via a plain `sms:` navigation; the other two attach a
+  // vCard/driver-card image, so they go through navigator.share() instead — a MODAL, blocking
+  // UI the user has to personally dismiss before the awaited promise resolves and the next
+  // step can even begin. Firing the plain sms: navigation FIRST risked disrupting the JS
+  // context needed for the two share()-based steps that came after it. Two changes: (1) an
+  // explicit confirm before anything fires at all, matching what was actually asked for, and
+  // (2) the two share()-based notifications (new driver, client) now fire BEFORE the owner's
+  // plain sms: step, not after — so the ones that were quietly going missing get their turn
+  // first, while the more reliable owner notice still goes out either way.
+  if(!confirm('Notify everyone about this driver change?\n\n\u2022 '+(oldDriverName?('New driver ('+newDriverName+')'):newDriverName)+' gets the assignment + client contact\n\u2022 '+(ride.client||'The client')+' gets a text with the new driver\'s info\n\u2022 The client\'s owner gets an internal notice\n\nEach opens Messages/Share one at a time \u2014 you\'ll confirm each yourself.')) return;
   const newPhone = (DRIVER_PROFILES[newDriverName]||{}).phone || '';
 
-  // 1. Client owner(s) — short internal notice, fires first.
-  try{
-    const ownerPhones = _ownerPhonesForClient(ride.client);
-    if(ownerPhones.length){
-      const ownerMsg = 'Driver changed on '+(ride.client||'a client')+'\u2019s '+(fmtDateShort(ride.date)||'')+' ride: now '+newDriverName+(oldDriverName?' (was '+oldDriverName+')':'')+'.';
-      await _sendTextWithFiles(ownerPhones, ownerMsg, []);
-    }
-  }catch(e){ console.warn('owner driver-change notice failed',e); }
-
-  // 2. New driver — assignment notice, now WITH the client's vCard attached (reusing the
-  // same buildClientVCard used by sendClientVCardToDriver/sendClientPhone from v586) so the
-  // driver can save the client's contact the same way they would for a normal assignment.
-  // Deliberately scoped to ONLY this recipient — explicitly re-confirmed: the client's own
-  // vCard must never go to the client themselves (step 3, below) or to the owner(s) (step 1,
-  // above). Those two stay exactly as they were; only this one gained a file.
-  await new Promise(function(r){ setTimeout(r, 400); });
+  // 1. New driver — assignment notice, WITH the client's vCard attached (reusing the same
+  // buildClientVCard used by sendClientVCardToDriver/sendClientPhone from v586) so the driver
+  // can save the client's contact the same way they would for a normal assignment.
+  // Deliberately scoped to ONLY this recipient — the client's own vCard must never go to the
+  // client themselves (step 3, below) or to the owner (step 2). Those two stay exactly as
+  // they were; only this one gets a file.
   try{
     if(newPhone){
       const driverMsg = 'You\u2019ve been assigned '+(ride.client||'a client')+'\u2019s ride on '+(fmtDateShort(ride.date)||'')+' at '+(fmtTime12(ride.time)||'')+(ride.pickup?('. Pickup: '+ride.pickup):'')+'.';
@@ -6546,7 +6573,7 @@ async function notifyDriverChange(ride, oldDriverName, newDriverName){
     }
   }catch(e){ console.warn('new driver SMS failed',e); }
 
-  // 3. Client — the exact specified message, with the new driver's card image attached.
+  // 2. Client — the exact specified message, with the new driver's card image attached.
   await new Promise(function(r){ setTimeout(r, 400); });
   try{
     const clientPhone = clientPhoneFor(ride);
@@ -6559,6 +6586,16 @@ async function notifyDriverChange(ride, oldDriverName, newDriverName){
       showToast('\u26A0\uFE0F No client phone on file \u2014 driver-change text to '+(ride.client||'the client')+' was not sent','error');
     }
   }catch(e){ console.warn('client driver-change text failed',e); showToast('\u26A0\uFE0F Could not send the driver-change text to the client','error'); }
+
+  // 3. Client owner(s) — short internal notice, fires last (plain sms: navigation, no files).
+  await new Promise(function(r){ setTimeout(r, 400); });
+  try{
+    const ownerPhones = _ownerPhonesForClient(ride.client);
+    if(ownerPhones.length){
+      const ownerMsg = 'Driver changed on '+(ride.client||'a client')+'\u2019s '+(fmtDateShort(ride.date)||'')+' ride: now '+newDriverName+(oldDriverName?' (was '+oldDriverName+')':'')+'.';
+      await _sendTextWithFiles(ownerPhones, ownerMsg, []);
+    }
+  }catch(e){ console.warn('owner driver-change notice failed',e); }
 }
 
 // ═══════════════════════════════════════════
@@ -6814,7 +6851,7 @@ function renderRideView(r){
         <i class="ti ti-users" style="font-size:18px;color:${ink};margin-top:2px;" aria-hidden="true"></i>
         <div>
           <div style="font-size:.92rem;font-weight:600;color:${ink};">${r.driver||'Unassigned'}</div>
-          <div style="font-size:.82rem;color:var(--mid);">${r.vehicle}${r.xxl&&r.vehicle2?'&nbsp;<span style="font-size:.7rem;font-weight:700;background:#6b21a8;color:#fff;border-radius:3px;padding:1px 4px;">XXL</span>&nbsp;+&nbsp;'+r.vehicle2+(r.driver2?'&nbsp;('+r.driver2.split(' ')[0]+')':'')+'&nbsp;&mdash;&nbsp;$'+r.price2:''}</div>
+          <div style="font-size:.82rem;color:var(--mid);">${r.xxl&&r.vehicle2?'<span style="font-size:.7rem;font-weight:700;background:#6b21a8;color:#fff;border-radius:3px;padding:1px 4px;">XXL</span>&nbsp;+&nbsp;'+r.vehicle2+(r.driver2?'&nbsp;('+r.driver2.split(' ')[0]+')':'')+'&nbsp;&mdash;&nbsp;$'+r.price2:''}</div>
         </div>
       </div>
     </div>
@@ -6978,7 +7015,7 @@ function renderRideView(r){
 //   • Owner drives the ride  → client owes the driver the FULL fare.
 //   • Owner assigns it out   → the assigned driver collects the fare and owes the owner 15% of the fare.
 const RIDE_STAGES = ['scheduled','confirmed','paid'];
-const RIDE_STAGE_LABEL = {scheduled:'Scheduled', confirmed:'Confirmed', completed:'Paid', paid:'Paid'};
+const RIDE_STAGE_LABEL = {scheduled:'Scheduled', confirmed:'Text sent?', completed:'Paid', paid:'Paid'};
 // `nested`=true when the caller already provides the outer detail-row + surface box
 // (the merged Payment section in renderRideView) — otherwise buildRideLifecycle wraps
 // itself, for any other caller that still wants it as a standalone block.
@@ -7246,7 +7283,8 @@ function buildReceiptText(r){
     L.push('TOTAL: $'+(amt+_tip).toFixed(2));
   }
   L.push('');
-  L.push('Thank you for riding with '+orgName+'!');
+  const _closingTpl = (globalSettings && globalSettings.defaultReceiptClosingLine) || '';
+  L.push(_closingTpl ? _closingTpl.replace(/\{org\}/g, orgName) : 'Thank you for riding with '+orgName+'!');
   return L.join('\n');
 }
 
@@ -7374,7 +7412,11 @@ async function shareReceiptDocument(id){
   try{
     const file = new File([html], fname, {type:'text/html'});
     if(navigator.canShare && navigator.canShare({files:[file]})){
-      await navigator.share({ files:[file], title:'Transportation Receipt', text:'Your transportation service receipt \u2014 open to view or Save as PDF.' });
+      const _dateLbl = r.date ? fmtDateShort(r.date) : 'your ride';
+      const _shareTpl = (globalSettings && globalSettings.defaultReceiptShareTemplate) || '';
+      const _shareText = _shareTpl ? _shareTpl.replace(/\{date\}/g, _dateLbl)
+        : 'Here\u2019s the receipt for '+_dateLbl+'. Open it, then use Share or Print \u2192 Save as PDF to keep a copy.';
+      await navigator.share({ files:[file], title:'Transportation Receipt', text:_shareText });
       return;
     }
   }catch(e){ if(e && e.name==='AbortError') return; }
@@ -7752,6 +7794,16 @@ function toggleEditMode(on){
   document.getElementById('rm-edit-btn').style.display   = on?'none':'inline-flex';
   document.getElementById('rm-save-btn').style.display   = on?'inline-block':'none';
   document.getElementById('rm-cancel-btn').style.display = on?'inline-block':'none';
+  // Mark Paid / Delete / Cancel Ride are irrelevant (and a little risky to have sitting right
+  // there) while actively editing — hide them for the duration. Their visibility the rest of
+  // the time is permission-based (canDeleteRide, ride status, etc.), computed elsewhere when
+  // the ride was opened — so on exit, restore whatever that was rather than forcing them
+  // visible and potentially showing a button someone shouldn't see.
+  ['rm-delete-btn','rm-cancelride-btn','rm-paid-btn'].forEach(function(id){
+    var btn=document.getElementById(id); if(!btn) return;
+    if(on){ btn.dataset.prevDisplay = btn.style.display; btn.style.display='none'; }
+    else if(btn.dataset.prevDisplay!==undefined){ btn.style.display = btn.dataset.prevDisplay; }
+  });
   if(!on) return;
   // populate edit fields
   const r=rides.find(x=>x.id===activeRideId); if(!r) return;
@@ -8117,7 +8169,7 @@ function openStartRide(rideId){
     +'display:flex;align-items:center;justify-content:center;padding:1.5rem;';
   ov.onclick=function(e){if(e.target===ov)_closeNavModal();};
   ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:340px;width:100%;padding:1.25rem;'
-    +'box-shadow:0 24px 60px rgba(0,0,0,.35);">'
+    +'box-shadow:0 24px 60px rgba(0,0,0,.35);max-height:85vh;overflow-y:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.9rem;">'
     +'<div style="font-size:1rem;font-weight:800;color:#0f172a;">Where are you starting?</div>'
     +'<button onclick="_closeNavModal()" style="background:none;border:none;font-size:1.4rem;color:#94a3b8;cursor:pointer;">&times;</button>'
@@ -8194,7 +8246,7 @@ function _askReturnDest(rideId, locStr){
     +'display:flex;align-items:center;justify-content:center;padding:1.5rem;';
   ov.onclick=function(e){if(e.target===ov)_closeNavModal();};
   ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:340px;width:100%;padding:1.25rem;'
-    +'box-shadow:0 24px 60px rgba(0,0,0,.35);">'
+    +'box-shadow:0 24px 60px rgba(0,0,0,.35);max-height:85vh;overflow-y:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.9rem;">'
     +'<div style="font-size:1rem;font-weight:800;color:#0f172a;">Where should the route end?</div>'
     +'<button onclick="_closeNavModal()" style="background:none;border:none;font-size:1.4rem;color:#94a3b8;cursor:pointer;">&times;</button>'
@@ -8369,7 +8421,7 @@ function _openStartRideWithHome(rideId, startAddr, endAddr){
     +'display:flex;align-items:center;justify-content:center;padding:1.5rem;';
   ov.onclick=function(e){if(e.target===ov)_closeNavModal();};
   ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:380px;width:100%;padding:1.25rem;'
-    +'box-shadow:0 24px 60px rgba(0,0,0,.35);">'
+    +'box-shadow:0 24px 60px rgba(0,0,0,.35);max-height:85vh;overflow-y:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;">'
 
     // Header
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.9rem;">'
@@ -8523,8 +8575,8 @@ function openLogMiles(rideId){
     +'<span style="font-weight:600;color:#78350f;">$</span>'
     +'<input id="lm-gas" type="number" min="0" step="0.01" value="'+(_mtGasPrice||'')+'" placeholder="e.g. 3.49" '
     +'style="flex:1;padding:.45rem .6rem;border:1.5px solid #fcd34d;border-radius:7px;font-family:inherit;font-size:.9rem;">'
-    +'<span style="font-size:.7rem;color:#92400e;">auto-fills next time</span>'
-    +'</div></div>'
+    +'</div>'
+    +'<div style="font-size:.68rem;color:#92400e;margin-top:.3rem;">Auto-fills next time</div></div>'
     +'<div style="display:flex;gap:.5rem;">'
     +(_sameRideId(window._payAfterMiles, rideId)
       ? '<button onclick="_skipLogMiles('+rideId+')" style="flex:1;padding:.6rem;background:#f1f5f9;color:#475569;border:none;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:600;cursor:pointer;">Skip</button>'
@@ -9146,8 +9198,8 @@ function _rtShowSplitPopup(totalMiles, method, stops){
     +'<div style="display:flex;align-items:center;gap:.5rem;">'
     +'<span style="font-size:.9rem;font-weight:600;color:#78350f;">$</span>'
     +'<input id="rt-gas" type="number" min="0" step="0.01" value="'+(_mtGasPrice||'')+'" placeholder="e.g. 3.49" style="flex:1;padding:.4rem .6rem;border:1.5px solid #fcd34d;border-radius:7px;font-family:inherit;font-size:.9rem;">'
-    +'<span style="font-size:.72rem;color:#92400e;">saved for next time</span>'
-    +'</div></div>'
+    +'</div>'
+    +'<div style="font-size:.68rem;color:#92400e;margin-top:.3rem;">Saved for next time</div></div>'
     +'<div style="display:flex;gap:.6rem;">'
     +'<button onclick="_rtClosePopup()" style="flex:1;padding:.6rem;background:#f1f5f9;color:#475569;border:none;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:600;cursor:pointer;">Cancel</button>'
     +'<button onclick="_rtSave()" style="flex:2;padding:.6rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:700;cursor:pointer;">&#128190; Save Miles &amp; Tips</button>'
@@ -9408,8 +9460,8 @@ function _mtShowStopPopup(){
     +'<div style="display:flex;align-items:center;gap:.5rem;">'
     +'<span style="font-size:.9rem;font-weight:600;color:#78350f;">$</span>'
     +'<input id="mt-gas-input" type="number" min="0" step="0.01" value="'+(_mtGasPrice||'').toString()+'" placeholder="e.g. 3.49" style="flex:1;padding:.4rem .6rem;border:1.5px solid #fcd34d;border-radius:7px;font-family:inherit;font-size:.9rem;">'
-    +'<span style="font-size:.72rem;color:#92400e;">saved for next time</span>'
-    +'</div></div>'
+    +'</div>'
+    +'<div style="font-size:.68rem;color:#92400e;margin-top:.3rem;">Saved for next time</div></div>'
     // buttons
     +'<div style="display:flex;gap:.6rem;">'
     +'<button onclick="_mtClosePop()" style="flex:1;padding:.6rem;background:#f1f5f9;color:#475569;border:none;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:600;cursor:pointer;">Cancel</button>'
@@ -9590,6 +9642,9 @@ function openHeartedRides(){ closeHeartedRides(); var back=document.createElemen
 function renderInterest(r){
   const el = document.getElementById('rm-interest');
   if(!el) return;
+  // Once a driver is assigned, "who can take this ride?" no longer applies — the interest
+  // list existed to help find a driver for an OPEN ride, not to track sentiment afterward.
+  if(r.driver){ el.innerHTML=''; el.style.display='none'; return; }
   const interest = r.interest || {};
   const names = Object.keys(interest).sort((a,b)=>interest[a]-interest[b]);
   const me = myInterestKey();
@@ -10245,6 +10300,20 @@ async function togglePushNotifications(){
 // ── NAVIGATION ──
 function nav(id){
   closeMenu();
+  // Reported: the calendar search stayed active after navigating away and back — had to be
+  // cleared by hand every time. The calendar page div stays in the DOM (just hidden), so its
+  // search input's value was never touched by navigation at all. Reset it whenever heading
+  // anywhere other than the calendar itself.
+  if(id!=='cal'){
+    var _cs=document.getElementById('cal-search');
+    if(_cs && _cs.value){
+      _cs.value='';
+      var _csGrid=document.getElementById('cal-grid'), _csCtrl=document.getElementById('cal-controls'), _csRes=document.getElementById('cal-search-results');
+      if(_csRes){ _csRes.style.display='none'; _csRes.innerHTML=''; }
+      if(_csGrid) _csGrid.style.display='';
+      if(_csCtrl) _csCtrl.style.display='';
+    }
+  }
   // Show contextual tutorial tip for this page (first visit per session)
   var _tipPages=['dashboard','quote','cal','myrides','clients','income','flights','chat','team','myprofile'];
   if(_tipPages.indexOf(id)>=0) setTimeout(function(){ showPageTip(id); }, 600);
@@ -10479,25 +10548,26 @@ function buildRideOfferCard(m){
   const vols = (live && Array.isArray(live.volunteers)) ? live.volunteers : [];
   const myDriver = (typeof getMyDriverName==='function') ? getMyDriverName() : '';
   const owner = live ? _offerOwner(live) : '';
-  const iAmOwner = !!owner && ((myDriver && myDriver===owner) || (typeof isAdmin==='function' && isAdmin()));
+  const iAmOwner = (!!owner && ((myDriver && myDriver===owner) || (typeof isAdmin==='function' && isAdmin()))) || (!!myDriver && !!live && myDriver===live.driver);
   const _bs='font-family:\'DM Sans\',sans-serif;cursor:pointer;';
   let btns='';
   if(m.rideId && !covered){
-    btns += '<button onclick="openRideFromChat('+m.rideId+')" style="margin-top:.5rem;width:100%;padding:.4rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;'+_bs+'font-size:.78rem;font-weight:600;">View Ride</button>';
+    btns += '<button onclick="event.stopPropagation();openRideFromChat('+m.rideId+')" style="margin-top:.5rem;width:100%;padding:.4rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;'+_bs+'font-size:.78rem;font-weight:600;">View Ride</button>';
     if(iAmOwner && vols.length){
       btns += '<div style="margin-top:.5rem;font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#7c3aed;">Volunteers \u2014 tap to assign</div>';
-      vols.forEach(function(v){ btns += '<button onclick="assignVolunteer('+m.rideId+',\''+String(v).replace(/'/g,"\\'")+'\')" style="margin-top:.3rem;width:100%;padding:.4rem;background:#15803d;color:#fff;border:none;border-radius:8px;'+_bs+'font-size:.78rem;font-weight:700;">Assign '+escHtml(String(v).split(' ')[0])+'</button>'; });
+      vols.forEach(function(v){ btns += '<button onclick="event.stopPropagation();assignVolunteer('+m.rideId+',\''+String(v).replace(/'/g,"\\'")+'\')" style="margin-top:.3rem;width:100%;padding:.4rem;background:#15803d;color:#fff;border:none;border-radius:8px;'+_bs+'font-size:.78rem;font-weight:700;">Assign '+escHtml(String(v).split(' ')[0])+'</button>'; });
     } else {
       var mine = vols.indexOf(myDriver)>=0;
-      btns += '<button onclick="volunteerForRide('+m.rideId+')" '+(mine?'disabled ':'')+'style="margin-top:.3rem;width:100%;padding:.4rem;background:'+(mine?'#9ca3af':'#15803d')+';color:#fff;border:none;border-radius:8px;'+_bs+'font-size:.78rem;font-weight:700;'+(mine?'cursor:default;':'')+'">'+(mine?'\u2705 You volunteered':'\uD83D\uDE4B I can cover it')+'</button>';
+      btns += '<button onclick="event.stopPropagation();volunteerForRide('+m.rideId+')" '+(mine?'disabled ':'')+'style="margin-top:.3rem;width:100%;padding:.4rem;background:'+(mine?'#9ca3af':'#15803d')+';color:#fff;border:none;border-radius:8px;'+_bs+'font-size:.78rem;font-weight:700;'+(mine?'cursor:default;':'')+'">'+(mine?'\u2705 You volunteered':'\uD83D\uDE4B I can cover it')+'</button>';
       if(iAmOwner && !vols.length){ btns += '<div style="margin-top:.35rem;font-size:.7rem;color:var(--mid);">No volunteers yet.</div>'; }
     }
   } else if(m.rideId && covered){
-    btns += '<button onclick="openRideFromChat('+m.rideId+')" style="margin-top:.5rem;width:100%;padding:.4rem;background:none;border:1.5px solid var(--light);color:var(--mid);border-radius:8px;'+_bs+'font-size:.76rem;">View Ride</button>';
+    btns += '<button onclick="event.stopPropagation();openRideFromChat('+m.rideId+')" style="margin-top:.5rem;width:100%;padding:.4rem;background:none;border:1.5px solid var(--light);color:var(--mid);border-radius:8px;'+_bs+'font-size:.76rem;">View Ride</button>';
   }
   var _fade = covered ? 'opacity:.62;' : '';
   var _strike = covered ? 'text-decoration:line-through;' : '';
-  return '<div style="background:var(--surface);border:1.5px solid '+(covered?'#9ca3af':'#7c3aed')+';border-radius:10px;padding:.7rem .85rem;min-width:190px;max-width:240px;'+_fade+'">'
+  var _cardClick = m.rideId ? 'onclick="openRideFromChat('+m.rideId+')" ' : '';
+  return '<div '+_cardClick+'style="background:var(--surface);border:1.5px solid '+(covered?'#9ca3af':'#7c3aed')+';border-radius:10px;padding:.7rem .85rem;min-width:190px;max-width:240px;'+(m.rideId?'cursor:pointer;':'')+_fade+'">'
     +'<div style="font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:'+(covered?'#6b7280':'#7c3aed')+';margin-bottom:.35rem;">'+(covered?'\u2705 Covered':'\uD83D\uDE97 Ride Available')+'</div>'
     +'<div style="font-size:.9rem;font-weight:600;color:var(--black);margin-bottom:.2rem;'+_strike+'">'+escHtml(rd.client||'\u2014')+'</div>'
     +(when?'<div style="font-size:.8rem;color:var(--mid);'+_strike+'">\uD83D\uDCC5 '+escHtml(when)+'</div>':'')
@@ -10515,6 +10585,19 @@ function openRideFromChat(id){
 function _offerOwner(r){ return (typeof getClientOwner==='function' && getClientOwner(r.client)) || (typeof feeOwnerFor==='function' && feeOwnerFor(r.createdBy)) || ''; }
 // Volunteer to cover an offered ride. Does NOT assign \u2014 the ride's owner assigns.
 async function volunteerForRide(id){
+  // Reported: tapping "I can cover it" sometimes registered twice (duplicate volunteer entry,
+  // duplicate notification/chat message). The function had no guard against a second tap
+  // landing before the first async save finished. Lock per-ride for the duration of the call.
+  if(!window._volunteerLock) window._volunteerLock = new Set();
+  if(window._volunteerLock.has(id)) return;
+  window._volunteerLock.add(id);
+  try{
+    await _volunteerForRideInner(id);
+  } finally {
+    window._volunteerLock.delete(id);
+  }
+}
+async function _volunteerForRideInner(id){
   const r=_rideById(id); if(!r) return;
   const myDriver=getMyDriverName();
   if(!myDriver){ showToast('You need a driver profile to volunteer','error'); return; }
@@ -10539,7 +10622,9 @@ async function volunteerForRide(id){
 async function assignVolunteer(id, driverName){
   const r=_rideById(id); if(!r) return;
   var owner=_offerOwner(r); var me=getMyDriverName();
-  if(!((typeof isAdmin==='function'&&isAdmin()) || (me && me===owner))){ showToast('Only the ride owner can assign this ride','error'); return; }
+  // The assigned driver is the one who actually needs coverage — they should be able to hand
+  // the ride to a volunteer themselves, not only the client's owner.
+  if(!((typeof isAdmin==='function'&&isAdmin()) || (me && me===owner) || (me && me===r.driver))){ showToast('Only the ride owner or assigned driver can assign this ride','error'); return; }
   if(!driverName){ return; }
   r.driver=driverName; r.offerCovered=true;
   touchRide(r,'assigned via Offerings'); await saveRides();
@@ -11601,6 +11686,17 @@ function _onbConfMode(){
   var fields = document.getElementById('onb-conf-fields');
   if(fields) fields.style.display = (mode && mode.value==='custom') ? 'block' : 'none';
 }
+function _onbArrivalMode(){
+  var mode = document.querySelector('input[name="onb-arrival-mode"]:checked');
+  var fields = document.getElementById('onb-arrival-fields');
+  if(fields) fields.style.display = (mode && mode.value==='custom') ? 'block' : 'none';
+}
+function _onbInsertArrivalExample(){
+  var el = document.getElementById('onb-arrival');
+  if(el && !el.value.trim()){
+    el.value = "Hi {client}, this is {driver}, your driver. I see that you've landed\u2014welcome! I'm parked just a few minutes away. Once you grab your bags and head toward pickup, let me know and I'll pull right up.";
+  }
+}
 function _escReImport(s){ return String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
 // Turn a real example message into a tokenized template the generator can auto-fill.
 function _tokenizeConfText(text, opts){
@@ -11802,6 +11898,34 @@ function openOnboarding(){
   var ccDef=document.querySelector('input[name=\'onb-conf-mode\'][value=\'default\']');
   if(hasCustomConf){ if(ccCustom)ccCustom.checked=true; } else { if(ccDef)ccDef.checked=true; }
   if(typeof _onbConfMode==='function') _onbConfMode();
+  // Prefill arrival text
+  var existingArrival = _dsX.arrivalTemplate || '';
+  setC('onb-arrival', existingArrival);
+  var acCustom=document.querySelector('input[name=\'onb-arrival-mode\'][value=\'custom\']');
+  var acDef=document.querySelector('input[name=\'onb-arrival-mode\'][value=\'default\']');
+  if(existingArrival){ if(acCustom)acCustom.checked=true; } else { if(acDef)acDef.checked=true; }
+  if(typeof _onbArrivalMode==='function') _onbArrivalMode();
+
+  // Show the current admin-set global default (read-only) for the three templates that
+  // support it, so a driver can see what they'd be overriding before customizing their own.
+  (function(){
+    var gs = globalSettings || {};
+    var boxes = [
+      ['onb-conf-currentdefault', gs.defaultConfirmTemplate],
+      ['onb-pickup-currentdefault', gs.defaultPickupInstructions],
+      ['onb-arrival-currentdefault', gs.defaultArrivalTemplate],
+    ];
+    boxes.forEach(function(pair){
+      var el = document.getElementById(pair[0]); if(!el) return;
+      if(pair[1] && pair[1].trim()){
+        el.style.display = 'block';
+        el.innerHTML = '<strong style="color:var(--black);">Current admin default:</strong><br>' + escHtml(pair[1]);
+      } else {
+        el.style.display = 'block';
+        el.innerHTML = '<em>No admin default set — the app\'s original built-in message is used.</em>';
+      }
+    });
+  })();
   // Prefill pickup instructions (per-terminal + general default)
   var _ds = driverSettings[dn] || {};
   var byT = _ds.pickupInstructionsByTerminal || {};
@@ -11935,6 +12059,15 @@ async function saveOnboarding(){
     driverSettings[dn]=driverSettings[dn]||{};
     if(confVal){ driverSettings[dn].confTemplate=confVal; }
     if(Object.keys(confByType).length){ driverSettings[dn].confTemplateByType=confByType; }
+  }
+  // Arrival text: only save if they chose to customize
+  var acMode = document.querySelector('input[name=\'onb-arrival-mode\']:checked');
+  if(acMode && acMode.value==='custom'){
+    var arrivalVal = (document.getElementById('onb-arrival')||{}).value;
+    if(arrivalVal && arrivalVal.trim()){
+      driverSettings[dn]=driverSettings[dn]||{};
+      driverSettings[dn].arrivalTemplate=arrivalVal.trim();
+    }
   }
   // Pickup instructions: only save if they chose to customize
   var pkMode = document.querySelector('input[name=\'onb-pickup-mode\']:checked');
@@ -12423,19 +12556,20 @@ async function assignDriver(){
   if(newDriver&&newDriver!==oldDriver) addNotification(newDriver, r, 'assigned');
   if(newDriver!==oldDriver) touchRide(r, newDriver ? 'assigned to '+newDriver.split(' ')[0] : 'unassigned');
   var _wasConfirmed=(r.confirmSent||r.status==='confirmed');
+  var _shouldNotify = (newDriver!==oldDriver && _wasConfirmed && newDriver);
   if(newDriver!==oldDriver && _wasConfirmed){
     r.confirmSent=false; if(r.status==='confirmed') r.status='scheduled'; r.driverChangedPending=true;
     touchRide(r, 'driver changed \u2014 confirmation reset to Scheduled');
-    // Reported: once a ride's already confirmed and the driver changes, the new driver, the
-    // client owner (Kat/Morgan, whichever applies), and the client itself should all hear
-    // about it — not just the silent in-app push the new driver already gets above. Fire-and-
-    // forget from here (not awaited) so reassigning a driver doesn't visibly hang the UI
-    // waiting on three staggered share-sheet prompts; each step handles its own failures and
-    // toasts internally rather than needing a caller to catch anything.
-    if(newDriver){ notifyDriverChange(r, oldDriver, newDriver).catch(function(e){ console.warn('notifyDriverChange failed',e); }); }
   }
   await saveRides();
   await saveNotifs();
+  // Notifications happen AFTER the save completes, not before — notifyDriverChange now opens
+  // with a confirm() dialog, which fully blocks JS execution until answered. Firing it before
+  // the save would have held up the actual driver reassignment on the user's answer; the data
+  // change itself should never wait on whether someone gets notified about it.
+  if(_shouldNotify){
+    notifyDriverChange(r, oldDriver, newDriver).catch(function(e){ console.warn('notifyDriverChange failed',e); });
+  }
   // Verify save worked by reading back
   const saved = await storageGet('kat:rides');
   const verified = saved && saved.find(x=>x.id===activeRideId&&x.driver===newDriver);
@@ -12649,7 +12783,7 @@ function renderDashConfirmations(){
   }).join('');
 
   box.innerHTML = `<div style="background:#fff8ec;border:1.5px solid #f3d9a0;border-radius:12px;padding:1rem;">
-    <div style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#b5651d;margin-bottom:.5rem;">📋 Confirmations to send for tomorrow · ${stillDue} ${mtipDot('dash-conf','Tap Send \u203a to open that ride and send it, change the driver after confirming, or mark fees paid \u2014 all without opening the calendar.')}</div>
+    <div style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#b5651d;margin-bottom:.5rem;">📋 Confirmations to send for tomorrow · ${stillDue} ${mtipDot('dash-conf','Tap Send \u203a to open that ride and send it, change the driver after confirming, or mark fees paid \u2014 all without opening the calendar. Already-sent ones stay listed in green \u2014 tap Unsend if you need to redo one.')}</div>
     ${rows}
     <button onclick="nav('myrides'); switchMyTab('confirm', document.getElementById('mytab-confirm'))" style="width:100%;margin-top:.7rem;padding:.55rem;background:#b5651d;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">Go to My Rides → To Confirm</button>
   </div>`;
@@ -14094,6 +14228,57 @@ function _driverSurchAutoHTML(dName){
     +'<div style="font-size:.64rem;color:var(--mid);margin-top:.3rem;">A pill means that surcharge\u2019s auto-add is off for this driver \u2014 view-only, they set it themselves.</div>'
     +'</div>';
 }
+// Admin-only tab: lets admins set the GLOBAL default for each auto-generated message.
+// Three-tier fallback for the ones that already had per-driver customization (confirmation
+// text, pickup instructions, arrival text): driver's own custom text -> this admin default ->
+// the original hardcoded message, in that order. The three that had no per-driver system at
+// all (driver-change notice, receipt share text, receipt closing line) get a simpler two-tier
+// fallback: admin default -> hardcoded. Regular drivers never see this tab (admin-only, same
+// gating as Access Control and Pricing) -- they can only ever edit THEIR OWN customization,
+// in onboarding, which is unchanged by this feature.
+function renderMessageTemplates(){
+  const panel = document.getElementById('driver-panel-templates');
+  if(!panel || !isAdmin()) return;
+  const gs = globalSettings || {};
+  function field(id, label, hint, value, rows){
+    return '<div style="margin-bottom:1.5rem;">'
+      +'<div style="font-size:.82rem;font-weight:700;color:var(--black);margin-bottom:.2rem;">'+label+'</div>'
+      +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">'+hint+'</div>'
+      +'<textarea id="'+id+'" rows="'+(rows||4)+'" placeholder="Leave blank to keep the app\'s built-in default" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(value||'')+'</textarea>'
+      +'</div>';
+  }
+  panel.innerHTML =
+    '<div style="font-size:.72rem;color:var(--mid);margin-bottom:1.25rem;line-height:1.5;background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.7rem .85rem;">'
+    +'Sets the fallback every driver gets unless they\'ve customized their own version in onboarding. A driver\'s own customization always wins over this. Leaving a field blank keeps the app\'s original built-in message.</div>'
+
+    + field('msgtpl-confirm', 'Confirmation text', 'Sent to clients confirming their ride. Placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}', gs.defaultConfirmTemplate, 5)
+    + field('msgtpl-pickup', 'Pickup instructions', 'Folded into the confirmation text. Same placeholders as above.', gs.defaultPickupInstructions, 3)
+    + field('msgtpl-arrival', 'Arrival text', 'Sent when a client lands. Placeholders: {driver} {client}', gs.defaultArrivalTemplate, 4)
+    + field('msgtpl-driverchange', 'Driver-change notice to client', 'Sent to the client when their driver gets reassigned. Placeholders: {client} {date} {time} {driver} {phone}', gs.defaultDriverChangeTemplate, 5)
+    + field('msgtpl-receiptshare', 'Receipt share text', 'The message sent alongside a shared PDF receipt. Placeholders: {date}', gs.defaultReceiptShareTemplate, 3)
+    + field('msgtpl-receiptclosing', 'Receipt closing line', 'Just the closing line of the receipt itself — the rest (charges, totals, receipt number) is always computed and can\'t be edited here, for accuracy. Placeholders: {org}', gs.defaultReceiptClosingLine, 2)
+
+    + '<div id="msgtpl-error" style="color:var(--red);font-size:.82rem;min-height:1rem;margin-bottom:.5rem;"></div>'
+    + '<button onclick="saveMessageTemplates()" class="btn-primary" style="width:100%;padding:.75rem;">Save Message Templates</button>';
+}
+async function saveMessageTemplates(){
+  if(!isAdmin()){ showToast('Admins only','error'); return; }
+  const gv = id => { const el=document.getElementById(id); return el ? el.value.trim() : ''; };
+  globalSettings = globalSettings || {};
+  globalSettings.defaultConfirmTemplate      = gv('msgtpl-confirm');
+  globalSettings.defaultPickupInstructions   = gv('msgtpl-pickup');
+  globalSettings.defaultArrivalTemplate      = gv('msgtpl-arrival');
+  globalSettings.defaultDriverChangeTemplate = gv('msgtpl-driverchange');
+  globalSettings.defaultReceiptShareTemplate = gv('msgtpl-receiptshare');
+  globalSettings.defaultReceiptClosingLine   = gv('msgtpl-receiptclosing');
+  try{
+    await storageSet('kat:globalSettings', globalSettings);
+    showToast('✓ Message templates saved');
+  }catch(e){
+    console.warn('saveMessageTemplates failed', e);
+    const err=document.getElementById('msgtpl-error'); if(err) err.textContent='Save failed — check your connection and try again.';
+  }
+}
 function renderAccessControl(){
   if(!(currentUser && currentUser.role==='admin')){
     document.getElementById('access-control-list').innerHTML='<p style="color:var(--mid);">Admins only.</p>';
@@ -14492,7 +14677,7 @@ function showProfileSetupBubble(){
   }catch(e){}
 }
 function switchProfileTab(which, btn){
-  var _panels={me:'profile-panel-me',account:'profile-panel-account',access:'driver-panel-access',pricing:'driver-panel-pricing'};
+  var _panels={me:'profile-panel-me',account:'profile-panel-account',access:'driver-panel-access',pricing:'driver-panel-pricing',templates:'driver-panel-templates'};
   Object.keys(_panels).forEach(function(t){
     var p=document.getElementById(_panels[t]); if(p) p.style.display=(t===which)?'block':'none';
     var b=document.getElementById('mptab-'+t); if(b) b.classList.toggle('active', t===which);
@@ -14501,6 +14686,7 @@ function switchProfileTab(which, btn){
   if(which==='account'){ renderAccountInProfile(); if(typeof renderPushPrefBtn==='function') renderPushPrefBtn(); if(typeof renderNotifPrefs==='function') renderNotifPrefs(); if(typeof renderProfileWaive==='function') renderProfileWaive(); }
   if(which==='access') renderAccessControl();
   if(which==='pricing') renderPricingTracker();
+  if(which==='templates') renderMessageTemplates();
 }
 // Mirror the account/subscription info into the My Profile → Account tab.
 function renderAccountInProfile(){
@@ -18171,6 +18357,17 @@ function _arrivalDriverName(r){
 }
 function buildArrivalText(r){
   var name=_arrivalDriverName(r);
+  // Per-driver custom template, same override pattern as confirmation text/pickup
+  // instructions. Full name (not the first-name-only display used above) is the lookup key,
+  // matching driverSettings everywhere else in the app.
+  var fullName = (r && r.driver && r.driver.trim()) ? r.driver.trim() : (feeOwnerFor(r.createdBy)||'');
+  var _ds = (typeof driverSettings!=='undefined' && driverSettings[fullName]) || {};
+  var _tpl = _ds.arrivalTemplate || (globalSettings&&globalSettings.defaultArrivalTemplate) || '';
+  if(_tpl){
+    return _tpl
+      .replace(/\{driver\}/g, name)
+      .replace(/\{client\}/g, (r && r.client) ? r.client.split(' ')[0] : 'there');
+  }
   return "Hi, this is "+name+", your driver. I see that you've landed\u2014welcome! I'm parked just a few minutes away.\n"+
     "Once you grab your bags and start heading toward the pickup location, please let me know and I will pull right up. "+
     "(If you haven't already, sending a quick description or selfie helps me spot you faster!) See you soon.";
@@ -20150,6 +20347,7 @@ function enterApp(){
   const accessTab = document.getElementById('mptab-access');
   if(accessTab) accessTab.style.display = admin ? 'inline-block' : 'none';
   const pricingTab2=document.getElementById('mptab-pricing'); if(pricingTab2) pricingTab2.style.display=admin?'inline-block':'none';
+  const templatesTab=document.getElementById('mptab-templates'); if(templatesTab) templatesTab.style.display=admin?'inline-block':'none';
 
   // Pre-render admin tools
   if(admin) setTimeout(function(){ renderAccessControl(); }, 100);
