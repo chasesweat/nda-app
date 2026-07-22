@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607221620">
+<meta name="version" content="202607221623">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -14237,13 +14237,17 @@ function renderMessageTemplates(){
   const myName = getMyDriverName();
   const myCustom = (driverSettings && driverSettings[myName]) || {};
   const hasOwnCustomText = !!(myCustom.confTemplate || myCustom.pickupInstructions || myCustom.arrivalTemplate);
-  const admin = isAdmin();
+  // Editing the app-wide DEFAULT messages is Chase-only — not even other admins can touch
+  // these, same restriction as canGrantFreeAccess() elsewhere. Any driver (including other
+  // admins, Kat, Morgan, everyone) still sees and edits their OWN customization below if
+  // they have any — this only gates the shared defaults section specifically.
+  const admin = !!(currentUser && currentUser.name==='Chase');
   if(!admin && !hasOwnCustomText){ panel.innerHTML=''; return; }
 
   const gs = globalSettings || {};
   // Each field is now a collapsible section - collapsed by default, showing the label and
   // a status pill so you can scan which messages are customized without opening every one.
-  function field(scope, key, label, hint, value, rows){
+  function field(scope, key, label, hint, value, rows, extraHtml){
     const id = 'msgtpl-'+scope+'-'+key;
     const bodyId = id+'-body';
     const arrowId = id+'-arrow';
@@ -14260,12 +14264,14 @@ function renderMessageTemplates(){
       +'<span id="'+arrowId+'" style="font-size:.7rem;color:var(--mid);">\u25be</span>'
       +'</span></button>'
       +'<div id="'+bodyId+'" style="display:none;padding:.75rem .8rem;">'
-      +'<div style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:.2rem;">'
+      +'<div style="display:flex;align-items:center;justify-content:'+(isSet?'flex-end':'space-between')+';margin-bottom:.2rem;gap:.5rem;">'
+      +(isSet?'':'<button onclick="startFromDefault(\''+id+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Start from this default</button>')
       +'<button onclick="saveTemplateField(\''+scope+'\',\''+key+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Save</button>'
       +'</div>'
       +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">'+hint+'</div>'
-      +'<textarea id="'+id+'" rows="'+(rows||4)+'" placeholder="'+placeholderText+'" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(value||'')+'</textarea>'
-      +'<div style="font-size:.66rem;color:var(--mid);margin-top:.35rem;line-height:1.4;">Shown above (grayed out, in the box) is the app\'s current built-in default \u2014 leave blank to keep using it.</div>'
+      +'<textarea id="'+id+'" rows="'+(rows||4)+'" placeholder="'+placeholderText+'" data-default="'+escAttr(HARDCODED_MSG_DEFAULTS[key]||'')+'" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(value||'')+'</textarea>'
+      +'<div style="font-size:.66rem;color:var(--mid);margin-top:.35rem;line-height:1.4;">'+(isSet?'This is your current wording, live and editable above.':'Shown above (grayed out, in the box) is the app\'s current built-in default \u2014 leave blank to keep using it, or tap "Start from this default" to copy it in and edit from there.')+'</div>'
+      +(extraHtml||'')
       +'</div>'
       +'</div>';
   }
@@ -14274,12 +14280,9 @@ function renderMessageTemplates(){
 
   if(hasOwnCustomText){
     const _byType = myCustom.pickupInstructionsByType || {};
+    const _byTerm = myCustom.pickupInstructionsByTerminal || {};
     const _typeOn = !!myCustom.useTypeInstructions;
-    html += '<div style="font-size:.72rem;color:var(--mid);margin-bottom:1rem;line-height:1.5;background:#f3eeff;border:1px solid #d9c9f5;border-radius:8px;padding:.7rem .85rem;">'
-      + 'Your own current wording, shown exactly as it\'ll be sent — fix a typo without retyping the whole thing. This always wins over the app-wide default below. Tap a message to open it.</div>'
-      + field('personal','confirm', 'My confirmation text', 'Placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}', myCustom.confTemplate, 5)
-      + field('personal','pickup', 'My pickup instructions', 'Folded into the confirmation text. Same placeholders as above.', myCustom.pickupInstructions, 3)
-      + '<div style="border:1.5px solid var(--light);border-radius:10px;padding:.7rem;margin-bottom:.6rem;">'
+    const _byTypeHtml = '<div style="border-top:1px solid var(--light);margin-top:.6rem;padding-top:.6rem;">'
       + '<label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.4rem;">'
       + '<input type="checkbox" id="msgtpl-pickup-bytype-on"'+(_typeOn?' checked':'')+' onchange="document.getElementById(\'msgtpl-pickup-bytype-fields\').style.display=this.checked?\'block\':\'none\';" style="width:16px;height:16px;accent-color:var(--accent);flex-shrink:0;">'
       + '<span style="font-size:.78rem;font-weight:700;color:var(--black);">Different instructions for AP Run, One Way, or Round Trip</span>'
@@ -14291,6 +14294,18 @@ function renderMessageTemplates(){
       + '<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Round Trip</div><textarea id="msgtpl-pickup-roundtrip" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byType['ROUND TRIP']||'')+'</textarea></div>'
       + '</div>'
       + '<button onclick="savePerTypePickupInstructions()" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Save</button>'
+      + '</div>';
+    html += '<div style="font-size:.72rem;color:var(--mid);margin-bottom:1rem;line-height:1.5;background:#f3eeff;border:1px solid #d9c9f5;border-radius:8px;padding:.7rem .85rem;">'
+      + 'Your own current wording, shown exactly as it\'ll be sent — fix a typo without retyping the whole thing. This always wins over the app-wide default below. Tap a message to open it.</div>'
+      + field('personal','confirm', 'My confirmation text', 'Placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}', myCustom.confTemplate, 5)
+      + field('personal','pickup', 'My pickup instructions', 'For AP Run, One Way, and Round Trip rides only \u2014 AP Pick Up always uses the per-terminal instructions below instead. Folded into the confirmation text. Same placeholders as above.', myCustom.pickupInstructions, 3, _byTypeHtml)
+      + '<div style="border:1.5px solid var(--light);border-radius:10px;padding:.7rem;margin-bottom:.6rem;">'
+      + '<div style="font-size:.78rem;font-weight:700;color:var(--black);margin-bottom:.2rem;">AP Pick Up — per-terminal instructions</div>'
+      + '<div style="font-size:.66rem;color:var(--mid);margin-bottom:.6rem;line-height:1.4;">AP Pick Up rides use ONLY these terminal-specific instructions, never the general pickup instructions above \u2014 that field is for rides that start at the client\'s location instead of the airport. Leave a terminal blank to use the app\'s built-in walkthrough for it.</div>'
+      + '<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">North Domestic</div><textarea id="msgtpl-pickup-term-north" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byTerm['North Domestic']||'')+'</textarea></div>'
+      + '<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">South Domestic</div><textarea id="msgtpl-pickup-term-south" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byTerm['South Domestic']||'')+'</textarea></div>'
+      + '<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">International</div><textarea id="msgtpl-pickup-term-intl" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byTerm['International']||'')+'</textarea></div>'
+      + '<button onclick="savePerTerminalPickupInstructions()" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Save</button>'
       + '</div>'
       + field('personal','arrival', 'My arrival text', 'Placeholders: {driver} {client}', myCustom.arrivalTemplate, 4)
       + '<div id="msgtpl-personal-error" style="color:var(--red);font-size:.82rem;min-height:1rem;margin-bottom:.5rem;"></div>'
@@ -14312,6 +14327,11 @@ function renderMessageTemplates(){
 
   panel.innerHTML = html;
 }
+function startFromDefault(id){
+  const el = document.getElementById(id); if(!el) return;
+  el.value = el.dataset.default || '';
+  el.focus();
+}
 function toggleMsgTplField(id){
   const body = document.getElementById(id+'-body');
   const arrow = document.getElementById(id+'-arrow');
@@ -14328,7 +14348,7 @@ async function saveTemplateField(scope, key){
   const el = document.getElementById('msgtpl-'+scope+'-'+key); if(!el) return;
   const val = el.value.trim();
   if(scope==='global'){
-    if(!isAdmin()){ showToast('Admins only','error'); return; }
+    if(!(currentUser && currentUser.name==='Chase')){ showToast('Only Chase can edit the default messages','error'); return; }
     globalSettings = globalSettings || {};
     globalSettings[map.global] = val;
     try{ await storageSet('kat:globalSettings', globalSettings); showToast('\u2713 Saved'); }
@@ -14343,10 +14363,10 @@ async function saveTemplateField(scope, key){
   }
 }
 async function saveAllTemplateFields(scope){
-  if(scope==='global' && !isAdmin()){ showToast('Admins only','error'); return; }
+  if(scope==='global' && !(currentUser && currentUser.name==='Chase')){ showToast('Only Chase can edit the default messages','error'); return; }
   const keys = scope==='personal' ? ['confirm','pickup','arrival'] : Object.keys(_TEMPLATE_FIELD_MAP);
   for(const key of keys){ await saveTemplateField(scope, key); }
-  if(scope==='personal') await savePerTypePickupInstructions(true);
+  if(scope==='personal'){ await savePerTypePickupInstructions(true); await savePerTerminalPickupInstructions(true); }
   showToast(scope==='personal' ? '\u2713 All your messages saved' : '\u2713 All default messages saved');
 }
 // Per-ride-type pickup instructions (AP Run / One Way / Round Trip) — same opt-in a driver
@@ -14366,6 +14386,24 @@ async function savePerTypePickupInstructions(silent){
   driverSettings[myName].pickupInstructionsByType = byType;
   try{ await saveDriverSettings(); if(!silent) showToast('\u2713 Saved'); }
   catch(e){ console.warn('savePerTypePickupInstructions failed', e); const err=document.getElementById('msgtpl-personal-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
+}
+// AP Pick Up's per-terminal instructions (North/South/International) - the ONLY pickup
+// instructions AP Pick Up rides ever use (see buildConfirmationText: the general pickup
+// instructions field explicitly never applies to AP Pick Up). No on/off toggle here, unlike
+// the per-type instructions above - a terminal left blank just falls back to the app's
+// built-in walkthrough for that terminal, there's no "off" state to opt out of.
+async function savePerTerminalPickupInstructions(silent){
+  const myName = getMyDriverName(); if(!myName) return;
+  const el = document.getElementById('msgtpl-pickup-term-north'); if(!el) return;
+  driverSettings[myName] = driverSettings[myName] || {};
+  const gv = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  const byTerm = {};
+  const n = gv('msgtpl-pickup-term-north'); if(n) byTerm['North Domestic'] = n;
+  const s = gv('msgtpl-pickup-term-south'); if(s) byTerm['South Domestic'] = s;
+  const i = gv('msgtpl-pickup-term-intl');  if(i) byTerm['International'] = i;
+  driverSettings[myName].pickupInstructionsByTerminal = byTerm;
+  try{ await saveDriverSettings(); if(!silent) showToast('\u2713 Saved'); }
+  catch(e){ console.warn('savePerTerminalPickupInstructions failed', e); const err=document.getElementById('msgtpl-personal-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
 }
 // Retained for anything that might still call the old name directly.
 async function saveMessageTemplates(){ await saveAllTemplateFields('global'); }
@@ -20420,7 +20458,8 @@ function enterApp(){
     const _myN=getMyDriverName();
     const _myC=(driverSettings && driverSettings[_myN])||{};
     const _hasCustom=!!(_myC.confTemplate || _myC.pickupInstructions || _myC.arrivalTemplate);
-    templatesTab.style.display=(admin||_hasCustom)?'inline-block':'none';
+    const _isChase=!!(currentUser && currentUser.name==='Chase');
+    templatesTab.style.display=(_isChase||_hasCustom)?'inline-block':'none';
   }
 
   // Pre-render admin tools
