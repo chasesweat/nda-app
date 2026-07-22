@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607221616">
+<meta name="version" content="202607221619">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1064,14 +1064,17 @@ input,select,textarea{font-size:16px;}
         <div class="form-group" id="edit-terminal-group"><label>Terminal</label>
           <select id="edit-terminal"><option value="">—</option><option>North Domestic</option><option>South Domestic</option><option>International</option></select>
         </div>
-        <div class="form-group"><label>Vehicle</label>
-          <select id="edit-vehicle" onchange="_editAutoPrice()"><option>Sedan</option><option value="SUV/Van">XL</option><option>Premium</option><option>Sprinter Van</option></select>
-        </div>
-        <div class="form-group" style="display:flex;align-items:center;">
-          <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
-            <input type="checkbox" id="edit-xxl" onchange="editXXLChanged()" style="width:16px;height:16px;accent-color:#7c3aed;">
-            <span style="font-size:.78rem;font-weight:600;">Double Vehicle (XXL)</span>
-          </label>
+        <div class="form-group" style="grid-column:1/-1;"><label>Vehicle</label>
+          <select id="edit-vehicle" onchange="editVehicleChanged()">
+            <option value="Sedan">Sedan</option>
+            <option value="SUV/Van">XL</option>
+            <option value="Premium">Premium</option>
+            <option value="Sprinter Van">Sprinter Van</option>
+            <option value="Sedan+XXL">Sedan + Double Vehicle (XXL)</option>
+            <option value="SUV/Van+XXL">XL + Double Vehicle (XXL)</option>
+            <option value="Premium+XXL">Premium + Double Vehicle (XXL)</option>
+            <option value="Sprinter Van+XXL">Sprinter Van + Double Vehicle (XXL)</option>
+          </select>
         </div>
         <div id="edit-vehicle2-group" style="display:none;">
           <div class="form-group"><label>2nd Vehicle Driver</label>
@@ -1088,9 +1091,6 @@ input,select,textarea{font-size:16px;}
           <select id="edit-type" onchange="editTypeChanged();_editAutoPrice()"><option>AP ROUND TRIP</option><option>AP RUN</option><option>AP PICK UP</option><option>ROUND TRIP</option><option>ONE WAY</option><option value="MEDICAL">Medical Transport</option></select>
         </div>
         <div class="form-group" id="edit-med-hours-group" style="display:none;"><label>Medical hours</label><input type="number" id="edit-med-hours" min="0" step="0.5" oninput="_editAutoPrice()" /></div>
-        <div class="form-group"><label>Driver</label>
-          <select id="edit-driver"><option value="">Unassigned</option></select>
-        </div>
         <div class="form-group" style="grid-column:1/-1;"><label id="edit-pickup-label">Pickup</label><input type="text" id="edit-pickup" oninput="_editDebounceMileage()" /></div>
         <div class="form-group" style="grid-column:1/-1;"><label>Gate code <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(optional — only the client owner and assigned driver see this)</span></label><input type="text" id="edit-gate-code" placeholder="e.g. #1234" /></div>
         <div class="form-group" style="grid-column:1/-1;"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;"><input type="checkbox" id="edit-private" style="width:auto;margin:0;" /> <span>🔒 Private ride <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(hidden from other drivers — creator, assigned driver, and admins only)</span></span></label></div>
@@ -1104,13 +1104,13 @@ input,select,textarea{font-size:16px;}
         <label>Requested driver <span style="font-weight:600;color:var(--mid);font-size:.72rem;">(private — only you can see this)</span></label>
         <input type="text" id="edit-reqdriver" placeholder="e.g. a driver this client prefers" style="width:100%;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;box-sizing:border-box;" />
       </div>
-      <button id="rm-save-btn" class="btn-primary" onclick="saveRideEdits()" style="display:none;width:100%;padding:.75rem;margin-top:.75rem;font-size:.92rem;">Save Changes</button>
     </div>
     <div class="modal-footer">
+      <button id="rm-save-btn" class="btn-primary" onclick="saveRideEdits()" style="display:none;font-weight:800;">Save Changes</button>
       <button id="rm-delete-btn" class="btn-danger" onclick="deleteRide(activeRideId)" style="background:#dc2626;color:#fff;font-weight:800;">🗑️ Delete Ride</button>
       <button id="rm-cancelride-btn" class="btn-secondary" onclick="cancelRide(activeRideId)" style="background:#b03a2e;display:none;color:#fff;font-weight:800;transition:none;">🚫 Cancel Ride</button>
       <button id="rm-paid-btn" class="btn-secondary" onclick="toggleRidePaid(activeRideId)" style="background:var(--green);color:#fff;font-weight:800;">💰 Mark Paid</button>
-      <button class="btn-secondary" onclick="closeRideModal()" style="background:#6b7280;color:#fff;font-weight:800;">✕ Close</button>
+      <button id="rm-close-btn" class="btn-secondary" onclick="closeRideModal()" style="background:#6b7280;color:#fff;font-weight:800;">✕ Close</button>
     </div>
   </div>
 </div>
@@ -2316,6 +2316,8 @@ async function _loadAppData() {
     loadDriverSettings(),
     loadFeePayments(),
   ]);
+  try{ _migrateLegacyProfileTemplates(); }catch(e){ console.warn('legacy template migration', e); }
+  try{ await _promoteChaseTemplatesToGlobalDefault(); }catch(e){ console.warn('Chase default promotion', e); }
   await loadBiometricCreds();
     // Repair ride IDs: every ride must have a UNIQUE numeric id. Duplicate or
     // non-numeric ids (e.g. from a NaN nextId or repeated imports) caused clicking one
@@ -6992,7 +6994,7 @@ function renderRideView(r){
 //   • Owner drives the ride  → client owes the driver the FULL fare.
 //   • Owner assigns it out   → the assigned driver collects the fare and owes the owner 15% of the fare.
 const RIDE_STAGES = ['scheduled','confirmed','paid'];
-const RIDE_STAGE_LABEL = {scheduled:'Scheduled', confirmed:'Text sent?', completed:'Paid', paid:'Paid'};
+const RIDE_STAGE_LABEL = {scheduled:'Scheduled', confirmed:'Text Sent', completed:'Paid', paid:'Paid'};
 // `nested`=true when the caller already provides the outer detail-row + surface box
 // (the merged Payment section in renderRideView) — otherwise buildRideLifecycle wraps
 // itself, for any other caller that still wants it as a standalone block.
@@ -7810,14 +7812,13 @@ function toggleEditMode(on){
   document.getElementById('edit-carryon-bags').value   = r.carryOnBags||0;
   document.getElementById('edit-flight').value         = r.flight||'';
   document.getElementById('edit-terminal').value = r.terminal||'';
-  document.getElementById('edit-vehicle').value  = r.vehicle||'Sedan';
-  const editXXLCb=document.getElementById('edit-xxl');
-  if(editXXLCb){ editXXLCb.checked=r.xxl||false; editXXLChanged(); }
+  document.getElementById('edit-vehicle').value  = (r.vehicle||'Sedan') + (r.xxl?'+XXL':'');
+  editVehicleChanged();
   const ev2=document.getElementById('edit-vehicle2'); if(ev2&&r.vehicle2) ev2.value=r.vehicle2;
   const ep2=document.getElementById('edit-price2'); if(ep2) ep2.value=r.price2||'';
   const ed2=document.getElementById('edit-driver2');
   if(ed2&&r.xxl){
-    if(ed2.options.length<=1) editXXLChanged();
+    if(ed2.options.length<=1) editVehicleChanged();
     setTimeout(function(){ if(r.driver2) ed2.value=r.driver2; },50);
   }
   document.getElementById('edit-type').value     = r.type||'AP RUN';
@@ -7830,9 +7831,6 @@ function toggleEditMode(on){
   document.getElementById('edit-home').value     = r.home||'';
   document.getElementById('edit-notes').value    = r.notes||'';
   (function(){ var _rd=document.getElementById('edit-reqdriver'); if(_rd){ var _isCreator=(currentUser&&currentUser.name===r.createdBy); _rd.value=(_isCreator&&r.reqDriverNote)?r.reqDriverNote:''; _rd.closest('.form-group').style.display=_isCreator?'block':'none'; } })();
-  // populate driver select
-  const dSel=document.getElementById('edit-driver');
-  dSel.innerHTML=driverOptionsHTML(r.driver, r.date);
 }
 
 async function saveRideEdits(){
@@ -7842,7 +7840,6 @@ async function saveRideEdits(){
   const _seRm=PROXY_MAP[_seMe]||USER_DRIVER_MAP[_seMe]||_seMe;
   const _seRc=PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy;
   if(!(_seRm&&_seRc&&_seRm===_seRc)){ showToast('Only the ride creator can edit this ride','error'); return; }
-  const oldDriver = r.driver;
   // Apply all edits
   r.client    = document.getElementById('edit-client').value.trim()||r.client;
   r.phone     = formatPhoneUS(document.getElementById('edit-phone').value);
@@ -7858,8 +7855,9 @@ async function saveRideEdits(){
   r.carryOnBags = parseInt(document.getElementById('edit-carryon-bags').value)||0;
   r.flight    = document.getElementById('edit-flight').value.trim();
   r.terminal  = document.getElementById('edit-terminal').value;
-  r.vehicle   = document.getElementById('edit-vehicle').value;
-  r.xxl       = document.getElementById('edit-xxl')?.checked||false;
+  var _vSel = document.getElementById('edit-vehicle').value;
+  r.xxl       = _vSel.endsWith('+XXL');
+  r.vehicle   = r.xxl ? _vSel.slice(0, -4) : _vSel;
   r.vehicle2  = r.xxl?(document.getElementById('edit-vehicle2')?.value||''):'';
   r.driver2   = r.xxl?(document.getElementById('edit-driver2')?.value||''):'';
   r.price2    = r.xxl?(parseFloat(document.getElementById('edit-price2')?.value)||0):0;
@@ -7878,15 +7876,7 @@ async function saveRideEdits(){
   var _prevReqNote=r.reqDriverNote||'';
   if(currentUser&&currentUser.name===r.createdBy){ var _rdv=document.getElementById('edit-reqdriver'); if(_rdv){ var _v=_rdv.value.trim(); if(_v) r.reqDriverNote=_v; else delete r.reqDriverNote; } }
   notifyRequestedDriver(r, _prevReqNote);
-  var _newDrv = document.getElementById('edit-driver').value;
-  if(_newDrv && _newDrv!==r.driver && !driverSubActive(_newDrv)){
-    showToast(_newDrv.split(' ')[0]+'\u2019s subscription isn\u2019t active \u2014 they can\u2019t be scheduled','error');
-    return;
-  }
-  r.driver    = _newDrv;
   touchRide(r, 'edited');
-  // Notify new driver if changed
-  if(r.driver && r.driver!==oldDriver) addNotification(r.driver, r, 'assigned');
   await saveRides(); await saveNotifs();
   toggleEditMode(false);
   document.getElementById('rm-title').textContent=(r.private?'\uD83D\uDD12 ':'')+r.client;
@@ -14214,49 +14204,131 @@ function _driverSurchAutoHTML(dName){
 // fallback: admin default -> hardcoded. Regular drivers never see this tab (admin-only, same
 // gating as Access Control and Pricing) -- they can only ever edit THEIR OWN customization,
 // in onboarding, which is unchanged by this feature.
+// Maps a template "key" to where it actually lives for each scope. Personal scope only
+// covers the 3 templates that support per-driver customization at all (confirm/pickup/
+// arrival) — driver-change notice, receipt share text, and receipt closing line are
+// deliberately admin-default-only, no per-driver override exists for those.
+const _TEMPLATE_FIELD_MAP = {
+  confirm:      { global: 'defaultConfirmTemplate',      personal: 'confTemplate' },
+  pickup:       { global: 'defaultPickupInstructions',   personal: 'pickupInstructions' },
+  arrival:      { global: 'defaultArrivalTemplate',       personal: 'arrivalTemplate' },
+  driverchange: { global: 'defaultDriverChangeTemplate',  personal: null },
+  receiptshare: { global: 'defaultReceiptShareTemplate',  personal: null },
+  receiptclosing:{ global: 'defaultReceiptClosingLine',   personal: null },
+};
 function renderMessageTemplates(){
   const panel = document.getElementById('driver-panel-templates');
-  if(!panel || !isAdmin()) return;
+  if(!panel) return;
+  const myName = getMyDriverName();
+  const myCustom = (driverSettings && driverSettings[myName]) || {};
+  const hasOwnCustomText = !!(myCustom.confTemplate || myCustom.pickupInstructions || myCustom.arrivalTemplate);
+  const admin = isAdmin();
+  if(!admin && !hasOwnCustomText){ panel.innerHTML=''; return; }
+
   const gs = globalSettings || {};
-  function field(id, label, hint, value, rows){
-    return '<div style="margin-bottom:1.5rem;">'
-      +'<div style="font-size:.82rem;font-weight:700;color:var(--black);margin-bottom:.2rem;">'+label+'</div>'
+  function field(scope, key, label, hint, value, rows){
+    const id = 'msgtpl-'+scope+'-'+key;
+    return '<div style="margin-bottom:1.25rem;">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.2rem;">'
+      +'<div style="font-size:.82rem;font-weight:700;color:var(--black);">'+label+'</div>'
+      +'<button onclick="saveTemplateField(\''+scope+'\',\''+key+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Save</button>'
+      +'</div>'
       +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">'+hint+'</div>'
       +'<textarea id="'+id+'" rows="'+(rows||4)+'" placeholder="Leave blank to keep the app\'s built-in default" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(value||'')+'</textarea>'
       +'</div>';
   }
-  panel.innerHTML =
-    '<div style="font-size:.72rem;color:var(--mid);margin-bottom:1.25rem;line-height:1.5;background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.7rem .85rem;">'
-    +'Sets the fallback every driver gets unless they\'ve customized their own version in onboarding. A driver\'s own customization always wins over this. Leaving a field blank keeps the app\'s original built-in message.</div>'
 
-    + field('msgtpl-confirm', 'Confirmation text', 'Sent to clients confirming their ride. Placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}', gs.defaultConfirmTemplate, 5)
-    + field('msgtpl-pickup', 'Pickup instructions', 'Folded into the confirmation text. Same placeholders as above.', gs.defaultPickupInstructions, 3)
-    + field('msgtpl-arrival', 'Arrival text', 'Sent when a client lands. Placeholders: {driver} {client}', gs.defaultArrivalTemplate, 4)
-    + field('msgtpl-driverchange', 'Driver-change notice to client', 'Sent to the client when their driver gets reassigned. Placeholders: {client} {date} {time} {driver} {phone}', gs.defaultDriverChangeTemplate, 5)
-    + field('msgtpl-receiptshare', 'Receipt share text', 'The message sent alongside a shared PDF receipt. Placeholders: {date}', gs.defaultReceiptShareTemplate, 3)
-    + field('msgtpl-receiptclosing', 'Receipt closing line', 'Just the closing line of the receipt itself — the rest (charges, totals, receipt number) is always computed and can\'t be edited here, for accuracy. Placeholders: {org}', gs.defaultReceiptClosingLine, 2)
+  let html = '';
 
-    + '<div id="msgtpl-error" style="color:var(--red);font-size:.82rem;min-height:1rem;margin-bottom:.5rem;"></div>'
-    + '<button onclick="saveMessageTemplates()" class="btn-primary" style="width:100%;padding:.75rem;">Save Message Templates</button>';
+  if(hasOwnCustomText){
+    const _byType = myCustom.pickupInstructionsByType || {};
+    const _typeOn = !!myCustom.useTypeInstructions;
+    html += '<div style="font-size:.72rem;color:var(--mid);margin-bottom:1rem;line-height:1.5;background:#f3eeff;border:1px solid #d9c9f5;border-radius:8px;padding:.7rem .85rem;">'
+      + 'Your own current wording, shown exactly as it\'ll be sent — fix a typo without retyping the whole thing. This always wins over the app-wide default below.</div>'
+      + field('personal','confirm', 'My confirmation text', 'Placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}', myCustom.confTemplate, 5)
+      + field('personal','pickup', 'My pickup instructions', 'Folded into the confirmation text. Same placeholders as above.', myCustom.pickupInstructions, 3)
+      + '<div style="border:1.5px solid var(--light);border-radius:10px;padding:.7rem;margin:-.5rem 0 1.25rem;">'
+      + '<label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.4rem;">'
+      + '<input type="checkbox" id="msgtpl-pickup-bytype-on"'+(_typeOn?' checked':'')+' onchange="document.getElementById(\'msgtpl-pickup-bytype-fields\').style.display=this.checked?\'block\':\'none\';" style="width:16px;height:16px;accent-color:var(--accent);flex-shrink:0;">'
+      + '<span style="font-size:.78rem;font-weight:700;color:var(--black);">Different instructions for AP Run, One Way, or Round Trip</span>'
+      + '</label>'
+      + '<div style="font-size:.66rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Optional — leave off and your general pickup instructions above cover those ride types.</div>'
+      + '<div id="msgtpl-pickup-bytype-fields" style="display:'+(_typeOn?'block':'none')+';">'
+      + '<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">AP Run</div><textarea id="msgtpl-pickup-aprun" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byType['AP RUN']||'')+'</textarea></div>'
+      + '<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">One Way</div><textarea id="msgtpl-pickup-oneway" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byType['ONE WAY']||'')+'</textarea></div>'
+      + '<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Round Trip</div><textarea id="msgtpl-pickup-roundtrip" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byType['ROUND TRIP']||'')+'</textarea></div>'
+      + '</div>'
+      + '<button onclick="savePerTypePickupInstructions()" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Save</button>'
+      + '</div>'
+      + field('personal','arrival', 'My arrival text', 'Placeholders: {driver} {client}', myCustom.arrivalTemplate, 4)
+      + '<div id="msgtpl-personal-error" style="color:var(--red);font-size:.82rem;min-height:1rem;margin-bottom:.5rem;"></div>'
+      + '<button onclick="saveAllTemplateFields(\'personal\')" class="btn-primary" style="width:100%;padding:.75rem;margin-bottom:'+(admin?'2rem':'0')+';">Save All My Messages</button>';
+  }
+
+  if(admin){
+    html += '<div style="font-size:.72rem;color:var(--mid);margin-bottom:1.25rem;line-height:1.5;background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.7rem .85rem;">'
+      +'App-wide default \u2014 the fallback every driver gets unless they\'ve customized their own version. A driver\'s own customization always wins over this. Leaving a field blank keeps the app\'s original built-in message.</div>'
+      + field('global','confirm', 'Confirmation text', 'Sent to clients confirming their ride. Placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}', gs.defaultConfirmTemplate, 5)
+      + field('global','pickup', 'Pickup instructions', 'Folded into the confirmation text. Same placeholders as above.', gs.defaultPickupInstructions, 3)
+      + field('global','arrival', 'Arrival text', 'Sent when a client lands. Placeholders: {driver} {client}', gs.defaultArrivalTemplate, 4)
+      + field('global','driverchange', 'Driver-change notice to client', 'Sent to the client when their driver gets reassigned. Placeholders: {client} {date} {time} {driver} {phone}', gs.defaultDriverChangeTemplate, 5)
+      + field('global','receiptshare', 'Receipt share text', 'The message sent alongside a shared PDF receipt. Placeholders: {date}', gs.defaultReceiptShareTemplate, 3)
+      + field('global','receiptclosing', 'Receipt closing line', 'Just the closing line of the receipt itself \u2014 the rest (charges, totals, receipt number) is always computed and can\'t be edited here, for accuracy. Placeholders: {org}', gs.defaultReceiptClosingLine, 2)
+      + '<div id="msgtpl-global-error" style="color:var(--red);font-size:.82rem;min-height:1rem;margin-bottom:.5rem;"></div>'
+      + '<button onclick="saveAllTemplateFields(\'global\')" class="btn-primary" style="width:100%;padding:.75rem;">Save All Default Messages</button>';
+  }
+
+  panel.innerHTML = html;
 }
-async function saveMessageTemplates(){
-  if(!isAdmin()){ showToast('Admins only','error'); return; }
-  const gv = id => { const el=document.getElementById(id); return el ? el.value.trim() : ''; };
-  globalSettings = globalSettings || {};
-  globalSettings.defaultConfirmTemplate      = gv('msgtpl-confirm');
-  globalSettings.defaultPickupInstructions   = gv('msgtpl-pickup');
-  globalSettings.defaultArrivalTemplate      = gv('msgtpl-arrival');
-  globalSettings.defaultDriverChangeTemplate = gv('msgtpl-driverchange');
-  globalSettings.defaultReceiptShareTemplate = gv('msgtpl-receiptshare');
-  globalSettings.defaultReceiptClosingLine   = gv('msgtpl-receiptclosing');
-  try{
-    await storageSet('kat:globalSettings', globalSettings);
-    showToast('✓ Message templates saved');
-  }catch(e){
-    console.warn('saveMessageTemplates failed', e);
-    const err=document.getElementById('msgtpl-error'); if(err) err.textContent='Save failed — check your connection and try again.';
+// Saves a single field, either the admin-wide default or the current user's own
+// customization, depending on scope. One shared function instead of separate per-field
+// handlers for each of the up-to-9 fields across both sections.
+async function saveTemplateField(scope, key){
+  const map = _TEMPLATE_FIELD_MAP[key]; if(!map) return;
+  const el = document.getElementById('msgtpl-'+scope+'-'+key); if(!el) return;
+  const val = el.value.trim();
+  if(scope==='global'){
+    if(!isAdmin()){ showToast('Admins only','error'); return; }
+    globalSettings = globalSettings || {};
+    globalSettings[map.global] = val;
+    try{ await storageSet('kat:globalSettings', globalSettings); showToast('\u2713 Saved'); }
+    catch(e){ console.warn('saveTemplateField (global) failed', e); const err=document.getElementById('msgtpl-global-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
+  } else {
+    if(!map.personal) return; // this template has no per-driver customization
+    const myName = getMyDriverName(); if(!myName) return;
+    driverSettings[myName] = driverSettings[myName] || {};
+    driverSettings[myName][map.personal] = val;
+    try{ await saveDriverSettings(); showToast('\u2713 Saved'); }
+    catch(e){ console.warn('saveTemplateField (personal) failed', e); const err=document.getElementById('msgtpl-personal-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
   }
 }
+async function saveAllTemplateFields(scope){
+  if(scope==='global' && !isAdmin()){ showToast('Admins only','error'); return; }
+  const keys = scope==='personal' ? ['confirm','pickup','arrival'] : Object.keys(_TEMPLATE_FIELD_MAP);
+  for(const key of keys){ await saveTemplateField(scope, key); }
+  if(scope==='personal') await savePerTypePickupInstructions(true);
+  showToast(scope==='personal' ? '\u2713 All your messages saved' : '\u2713 All default messages saved');
+}
+// Per-ride-type pickup instructions (AP Run / One Way / Round Trip) — same opt-in a driver
+// sees during onboarding, editable here anytime afterward since onboarding itself isn't
+// easily revisitable. `silent` skips the individual toast when called from Save All above,
+// so the one combined toast is the only one shown.
+async function savePerTypePickupInstructions(silent){
+  const myName = getMyDriverName(); if(!myName) return;
+  const onEl = document.getElementById('msgtpl-pickup-bytype-on'); if(!onEl) return;
+  driverSettings[myName] = driverSettings[myName] || {};
+  driverSettings[myName].useTypeInstructions = !!onEl.checked;
+  const gv = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  const byType = {};
+  const ar = gv('msgtpl-pickup-aprun');     if(ar) byType['AP RUN'] = ar;
+  const ow = gv('msgtpl-pickup-oneway');    if(ow) byType['ONE WAY'] = ow;
+  const rt = gv('msgtpl-pickup-roundtrip'); if(rt) byType['ROUND TRIP'] = rt;
+  driverSettings[myName].pickupInstructionsByType = byType;
+  try{ await saveDriverSettings(); if(!silent) showToast('\u2713 Saved'); }
+  catch(e){ console.warn('savePerTypePickupInstructions failed', e); const err=document.getElementById('msgtpl-personal-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
+}
+// Retained for anything that might still call the old name directly.
+async function saveMessageTemplates(){ await saveAllTemplateFields('global'); }
 function renderAccessControl(){
   if(!(currentUser && currentUser.role==='admin')){
     document.getElementById('access-control-list').innerHTML='<p style="color:var(--mid);">Admins only.</p>';
@@ -14788,36 +14860,6 @@ function buildMemberCard(d, opts){
           +'</button>'):'')
           +'<div style="margin-bottom:.5rem;">'+'<div style="font-size:.68rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Payment methods accepted</div>'+(function(){  const accepted=(driverSettings[d]&&driverSettings[d].paymentMethods)||[];  return ['Credit Card','Cash','Check','Venmo','Zelle','CashApp','Apple Pay'].map(function(m){    const on=accepted.includes(m);    const mid=d.replace(/ /g,'_')+'-'+m.replace(/ /g,'_');    return '<button id="pay-'+mid+'" onclick="togglePaymentMethod(\''+d+'\',\''+m+'\')" '      +'style="margin:2px;padding:.25rem .55rem;font-size:.72rem;font-weight:600;border-radius:20px;border:1.5px solid '+(on?'#7c3aed':'var(--light)')+';'      +'background:'+(on?'#7c3aed':'var(--white)')+';color:'+(on?'#fff':'var(--black)')+';cursor:pointer;font-family:\'DM Sans\',sans-serif;">'+m+'</button>';  }).join('');}())+'</div>'
           +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;margin-bottom:.45rem;"><span style="font-size:.82rem;font-weight:600;color:var(--black);">\uD83D\uDCC5 Schedule Confirmation</span><button type="button" onclick="toggleConfText(\''+d+'\')" style="padding:.25rem .75rem;border-radius:20px;border:none;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;'+((driverSettings[d]&&driverSettings[d].confEnabled===false)?'background:var(--light);color:var(--mid);':'background:#15803d;color:#fff;')+'">'+((driverSettings[d]&&driverSettings[d].confEnabled===false)?'OFF':'ON')+'</button></div>'+'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;margin-bottom:.45rem;"><span style="font-size:.82rem;font-weight:600;color:var(--black);">\u2708\uFE0F Flight Tracking Link</span><button type="button" onclick="toggleTrackingLink(\''+d+'\')" style="padding:.25rem .75rem;border-radius:20px;border:none;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;'+((driverSettings[d]&&driverSettings[d].trackingLink===false)?'background:var(--light);color:var(--mid);':'background:#15803d;color:#fff;')+'">'+((driverSettings[d]&&driverSettings[d].trackingLink===false)?'OFF':'ON')+'</button></div>'+_autoSurchargeTogglesHTML(d)
-          +'<button type="button" onclick="toggleConfTemplates(\''+dk+'\')" style="width:100%;text-align:left;background:var(--surface);border:2px solid var(--gold);border-radius:8px;padding:.75rem .85rem;font-family:\'DM Sans\',sans-serif;font-size:.9rem;font-weight:800;color:var(--black);cursor:pointer;background:#fef8ec;">✉️ My Confirmation Text & Pickup Instructions <span id="conf-arrow-'+dk+'">▾</span> <span style="font-weight:600;color:var(--mid);font-size:.72rem;">'+((prof.confirmTemplate||prof.pickupInstructions)?'custom set':'using defaults')+'</span></button>'
-          +'<div id="conf-templates-'+dk+'" style="display:none;margin-top:.6rem;">'
-          +'<div style="background:#f3eeff;border:1px solid #d9c9f5;border-radius:8px;padding:.6rem .7rem;margin-bottom:.6rem;">'
-          +'<div style="font-size:.68rem;font-weight:700;color:#6d28d9;margin-bottom:4px;">PLACEHOLDERS — type these and they fill in automatically</div>'
-          +'<div style="font-size:.7rem;color:var(--mid);line-height:1.7;">'
-          +'<code>{client}</code> client name · <code>{date}</code> ride date · <code>{time}</code> pickup time · <code>{pickup}</code> pickup address · <code>{dropoff}</code> drop-off · <code>{driver}</code> assigned driver · <code>{me}</code> your first name · <code>{amount}</code> trip cost · <code>{flight}</code> flight # · <code>{terminal}</code> terminal · <code>{phone}</code> driver phone'
-          +'</div></div>'
-          +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.4rem;margin-bottom:2px;"><span style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;">My confirmation text</span><button type="button" onclick="insertConfExample(\''+dk+'\')" style="font-size:.68rem;padding:2px 8px;background:none;border:1px solid var(--accent);color:var(--accent);border-radius:8px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">Insert example</button></div>'
-          +'<div style="font-size:.66rem;color:var(--mid);margin-bottom:4px;">Leave blank to use the default confirmation text.</div>'
-          +'<textarea id="prof-conftext-'+dk+'" rows="4" placeholder="Leave blank to use the default confirmation text" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(prof.confirmTemplate||'')+'</textarea>'
-          +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.4rem;margin:.5rem 0 2px;"><span style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;">My pickup instructions (airport)</span><button type="button" onclick="insertPickupExample(\''+dk+'\')" style="font-size:.68rem;padding:2px 8px;background:none;border:1px solid var(--accent);color:var(--accent);border-radius:8px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">Insert example</button></div>'
-          +'<div style="font-size:.66rem;color:var(--mid);margin-bottom:4px;">Leave blank to use the default terminal instructions.</div>'
-          +'<textarea id="prof-pickupinstr-'+dk+'" rows="4" placeholder="Leave blank to use the default terminal instructions" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(prof.pickupInstructions||'')+'</textarea>'
-          +(function(){
-             var _dsT=(driverSettings[d]||{}); var _byType=_dsT.pickupInstructionsByType||{}; var _on=!!_dsT.useTypeInstructions;
-             return '<div style="border-top:1px solid var(--light);padding-top:.6rem;margin-top:.6rem;">'
-               +'<label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.4rem;">'
-               +'<input type="checkbox" id="prof-pickup-bytype-on-'+dk+'"'+(_on?' checked':'')+' onchange="document.getElementById(\'prof-pickup-bytype-fields-'+dk+'\').style.display=this.checked?\'block\':\'none\';" style="width:16px;height:16px;accent-color:var(--accent);flex-shrink:0;">'
-               +'<span style="font-size:.78rem;font-weight:700;color:var(--black);">Different instructions for AP Run, One Way, or Round Trip</span>'
-               +'</label>'
-               +'<div style="font-size:.66rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Optional — leave off and your general default above covers those ride types.</div>'
-               +'<div id="prof-pickup-bytype-fields-'+dk+'" style="display:'+(_on?'block':'none')+';">'
-               +'<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">AP Run</div><textarea id="prof-pickup-aprun-'+dk+'" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byType['AP RUN']||'')+'</textarea></div>'
-               +'<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">One Way</div><textarea id="prof-pickup-oneway-'+dk+'" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byType['ONE WAY']||'')+'</textarea></div>'
-               +'<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">Round Trip</div><textarea id="prof-pickup-roundtrip-'+dk+'" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byType['ROUND TRIP']||'')+'</textarea></div>'
-               +'</div>'
-               +'</div>';
-           })()
-          +'<div style="font-size:.66rem;color:var(--mid);margin-top:4px;">Remember to tap “Save My Info” below.</div>'
-          +'</div>'
           +'</div>')
           :''}
         ${canEdit?((function(){var _sp=(driverSettings[d]||{}).sendParts||{};var chk=function(part){return (_sp[part]!==false)?' checked':'';};
@@ -15076,8 +15118,6 @@ async function saveDriverProfile(driverName){
     availableDates:    DRIVER_PROFILES[driverName]?.availableDates||[],
     weeklyOff:        DRIVER_PROFILES[driverName]?.weeklyOff||[],
     homeAddress:      (document.getElementById('prof-homeaddress-'+dk)?.value||'').trim()||DRIVER_PROFILES[driverName]?.homeAddress||'',
-    confirmTemplate:    (document.getElementById('prof-conftext-'+dk)?.value||'').trim(),
-    pickupInstructions: (document.getElementById('prof-pickupinstr-'+dk)?.value||'').trim(),
     businessName: (document.getElementById('prof-bizname-'+dk)?.value||'').trim() || DRIVER_PROFILES[driverName]?.businessName||'',
     logo:         DRIVER_PROFILES[driverName]?.logo||'',
   };
@@ -15090,20 +15130,6 @@ async function saveDriverProfile(driverName){
     } else {
       showToast(_vchk.reason,'error');   // a name/invalid value — don't overwrite the good handle with garbage
     }
-  }
-  // Per-ride-type pickup instructions — same opt-in the driver sees during onboarding,
-  // editable here anytime afterward (onboarding itself isn't easily revisitable).
-  var _pkTypeOnEl=document.getElementById('prof-pickup-bytype-on-'+dk);
-  if(_pkTypeOnEl){
-    if(!driverSettings[driverName]) driverSettings[driverName]={};
-    driverSettings[driverName].useTypeInstructions = !!_pkTypeOnEl.checked;
-    var _gv3=function(id){ var el=document.getElementById(id+'-'+dk); return el?el.value.trim():''; };
-    var _byType3={};
-    var _ar=_gv3('prof-pickup-aprun');     if(_ar) _byType3['AP RUN']=_ar;
-    var _ow=_gv3('prof-pickup-oneway');    if(_ow) _byType3['ONE WAY']=_ow;
-    var _rt=_gv3('prof-pickup-roundtrip'); if(_rt) _byType3['ROUND TRIP']=_rt;
-    driverSettings[driverName].pickupInstructionsByType = _byType3;
-    try{ await saveDriverSettings(); }catch(e){}
   }
   // Per-part "Send everything" toggles — unchecked = leave that part out of the bundle
   var _spEl=function(part){ return document.getElementById('sendpart-'+part+'-'+dk); };
@@ -15191,27 +15217,6 @@ function driverOptionsHTML(selected, dateStr){
   }).join('');
 }
 async function persistDriverProfiles(){ await storageSet('kat:driverProfiles', DRIVER_PROFILES); }
-function toggleConfTemplates(dk){
-  const el = document.getElementById('conf-templates-'+dk);
-  if(!el) return;
-  const opening = (el.style.display==='none' || !el.style.display);
-  el.style.display = opening ? 'block' : 'none';
-  const arrow = document.getElementById('conf-arrow-'+dk);
-  if(arrow) arrow.textContent = opening ? '▴' : '▾';
-}
-function insertConfExample(dk){
-  const el = document.getElementById('prof-conftext-'+dk);
-  if(el && !el.value.trim()){
-    el.value = 'Hi {client}, this is {me} confirming your pickup tomorrow at {time} from {pickup} going to {dropoff}.\n\nYour driver {driver} can be reached at {phone}.\n\nTrip cost: {amount}. Tips are never expected but always appreciated. Thank you!';
-  }
-}
-function insertPickupExample(dk){
-  const el = document.getElementById('prof-pickupinstr-'+dk);
-  if(el && !el.value.trim()){
-    el.value = 'When you land at {terminal}, text {driver} at {phone} once you have your bags. Head to the lower-level pickup area and we\u2019ll meet you curbside.';
-  }
-}
-
 function addUnavailHour(driverName){
   const myDriverName=getMyDriverName();
   if(!(isAdmin()||myDriverName===driverName)){showToast('You can only edit your own availability','error');return;}
@@ -17567,8 +17572,9 @@ function qaXXLChanged(){
   recalcQa();
 }
 
-function editXXLChanged(){
-  const on=document.getElementById('edit-xxl')?.checked;
+function editVehicleChanged(){
+  const sel=document.getElementById('edit-vehicle');
+  const on=!!(sel && sel.value.endsWith('+XXL'));
   const grp=document.getElementById('edit-vehicle2-group');
   if(grp) grp.style.display=on?'block':'none';
   const d2sel=document.getElementById('edit-driver2');
@@ -17577,6 +17583,7 @@ function editXXLChanged(){
       return '<option value="'+d+'">'+d.split(' ')[0]+'</option>';
     }).join('');
   }
+  if(typeof _editAutoPrice==='function') _editAutoPrice();
 }
 
 // ── Driver settings (per-driver selfie + templates) ───────
@@ -17587,6 +17594,49 @@ function editXXLChanged(){
 // (Kat/Morgan were always excluded; everyone else's customization now always wins).
 
 
+// One-time cleanup: DRIVER_PROFILES[d].confirmTemplate / .pickupInstructions were an OLDER
+// storage location for a driver's own customization, from before driverSettings became the
+// primary one. Two entry points (onboarding writing to driverSettings, and the old "My
+// Confirmation Text & Pickup Instructions" card writing to DRIVER_PROFILES) could silently
+// disagree, with driverSettings quietly winning per the existing fallback chain — confusing
+// for anyone editing the card and not seeing it take effect. Consolidates every driver's own
+// legacy value into their own driverSettings (never someone else's), then that becomes the
+// single place going forward. Runs for every driver, Kat/Morgan included — this only ever
+// moves a driver's OWN data into their OWN settings, it doesn't share anyone's text with
+// anyone else.
+function _migrateLegacyProfileTemplates(){
+  try{
+    var changed=false;
+    Object.keys(DRIVER_PROFILES||{}).forEach(function(d){
+      var prof=DRIVER_PROFILES[d]||{};
+      if(!prof.confirmTemplate && !prof.pickupInstructions) return;
+      driverSettings[d]=driverSettings[d]||{};
+      if(prof.confirmTemplate && !driverSettings[d].confTemplate){ driverSettings[d].confTemplate=prof.confirmTemplate; changed=true; }
+      if(prof.pickupInstructions && !driverSettings[d].pickupInstructions){ driverSettings[d].pickupInstructions=prof.pickupInstructions; changed=true; }
+    });
+    if(changed && typeof saveDriverSettings==='function') saveDriverSettings();
+  }catch(e){ console.warn('_migrateLegacyProfileTemplates failed', e); }
+}
+// One-time: promote Chase's CURRENT confirmation text, pickup instructions, and arrival text
+// to be the app-wide default (globalSettings), per explicit request — restoring the spirit of
+// how this used to work (Chase's templates were once auto-propagated to the team) through the
+// current, correct mechanism (the shared default every driver falls back to, rather than
+// literally copying text into everyone's individual settings). Reads whatever is ACTUALLY in
+// Chase's driverSettings at the moment this runs — his real current wording, not anything
+// hardcoded here. Kat and Morgan are deliberately untouched; they keep their own already-seeded
+// templates regardless of what this does. Only fills in a default that's currently empty, and
+// only runs once (flag-gated) so it can never clobber a default an admin sets afterward.
+async function _promoteChaseTemplatesToGlobalDefault(){
+  globalSettings = globalSettings || {};
+  if(globalSettings._chaseDefaultsPromoted) return;
+  var chase = (driverSettings && driverSettings['Chase Sweat']) || {};
+  var changed=false;
+  if(chase.confTemplate && !globalSettings.defaultConfirmTemplate){ globalSettings.defaultConfirmTemplate=chase.confTemplate; changed=true; }
+  if(chase.pickupInstructions && !globalSettings.defaultPickupInstructions){ globalSettings.defaultPickupInstructions=chase.pickupInstructions; changed=true; }
+  if(chase.arrivalTemplate && !globalSettings.defaultArrivalTemplate){ globalSettings.defaultArrivalTemplate=chase.arrivalTemplate; changed=true; }
+  globalSettings._chaseDefaultsPromoted = true;
+  try{ await storageSet('kat:globalSettings', globalSettings); }catch(e){ console.warn('Chase default promotion save failed', e); }
+}
 function _restoreKatTemplatesV2(){
   try{
     var CT={'AP RUN':'I am confirming your pickup scheduled for tomorrow at {time} at {pickup} going to {terminal} Terminal.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)','AP PICK UP':'I am confirming your pickup scheduled for tomorrow at {time} from the Airport, Flight # {flight}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)\n\n\ud83d\udd34 Live Flight Status: https://www.google.com/search?q=flight%20status%20{flight}','ONE WAY':'I am confirming your pickup scheduled for tomorrow at {time} at {pickup}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany Thanks\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (trip fee does not include tip for the driver. Tips are not mandatory but always greatly appreciated)','ROUND TRIP':'I am confirming your pickup scheduled for tomorrow at {time} at {pickup} going to {dropoff}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)'};
@@ -20325,7 +20375,13 @@ function enterApp(){
   const accessTab = document.getElementById('mptab-access');
   if(accessTab) accessTab.style.display = admin ? 'inline-block' : 'none';
   const pricingTab2=document.getElementById('mptab-pricing'); if(pricingTab2) pricingTab2.style.display=admin?'inline-block':'none';
-  const templatesTab=document.getElementById('mptab-templates'); if(templatesTab) templatesTab.style.display=admin?'inline-block':'none';
+  const templatesTab=document.getElementById('mptab-templates');
+  if(templatesTab){
+    const _myN=getMyDriverName();
+    const _myC=(driverSettings && driverSettings[_myN])||{};
+    const _hasCustom=!!(_myC.confTemplate || _myC.pickupInstructions || _myC.arrivalTemplate);
+    templatesTab.style.display=(admin||_hasCustom)?'inline-block':'none';
+  }
 
   // Pre-render admin tools
   if(admin) setTimeout(function(){ renderAccessControl(); }, 100);
