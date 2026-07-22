@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607221625">
+<meta name="version" content="202607221627">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -14274,12 +14274,12 @@ function renderMessageTemplates(){
       +'</span></button>'
       +'<div id="'+bodyId+'" style="display:none;padding:.75rem .8rem;">'
       +'<div style="display:flex;align-items:center;justify-content:'+(isSet?'flex-end':'space-between')+';margin-bottom:.2rem;gap:.5rem;">'
-      +(isSet?'':'<button onclick="startFromDefault(\''+id+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Start from this default</button>')
-      +'<button onclick="saveTemplateField(\''+scope+'\',\''+key+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Save</button>'
+      +(isSet?'<button onclick="clearTemplateField(\''+scope+'\',\''+key+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Clear (use default)</button>':'<button onclick="startFromDefault(\''+id+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Start from this default</button>')
+      +'<button onclick="saveTemplateField(\''+scope+'\',\''+key+'\').then(renderMessageTemplates)" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Save</button>'
       +'</div>'
       +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">'+hint+'</div>'
       +'<textarea id="'+id+'" rows="'+(rows||4)+'" placeholder="'+placeholderText+'" data-default="'+escAttr(HARDCODED_MSG_DEFAULTS[key]||'')+'" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(value||'')+'</textarea>'
-      +'<div style="font-size:.66rem;color:var(--mid);margin-top:.35rem;line-height:1.4;">'+(isSet?'This is your current wording, live and editable above.':'Shown above (grayed out, in the box) is the app\'s current built-in default \u2014 leave blank to keep using it, or tap "Start from this default" to copy it in and edit from there.')+'</div>'
+      +'<div style="font-size:.66rem;color:var(--mid);margin-top:.35rem;line-height:1.4;">'+(isSet?'This is your current wording, live and editable above. "Clear (use default)" empties this field and saves, switching back to whatever the app-wide default or built-in message provides.':'Shown above (grayed out, in the box) is the app\'s current built-in default \u2014 leave blank to keep using it, or tap "Start from this default" to copy it in and edit from there.')+'</div>'
       +(extraHtml||'')
       +'</div>'
       +'</div>';
@@ -14325,6 +14325,7 @@ function renderMessageTemplates(){
           +'<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">North Domestic</div><textarea id="msgtpl-pickup-term-north" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byTerm['North Domestic']||'')+'</textarea></div>'
           +'<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">South Domestic</div><textarea id="msgtpl-pickup-term-south" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byTerm['South Domestic']||'')+'</textarea></div>'
           +'<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">International</div><textarea id="msgtpl-pickup-term-intl" rows="2" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byTerm['International']||'')+'</textarea></div>'
+          +(_termIsSet?'<button onclick="clearPerTerminalPickupInstructions()" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;margin-right:.4rem;">Clear all (use default)</button>':'')
           +'<button onclick="savePerTerminalPickupInstructions()" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Save</button>'
           +'</div>'
           +'</div>';
@@ -14354,6 +14355,13 @@ function startFromDefault(id){
   el.value = el.dataset.default || '';
   el.focus();
 }
+async function clearTemplateField(scope, key){
+  const id = 'msgtpl-'+scope+'-'+key;
+  const el = document.getElementById(id); if(!el) return;
+  el.value = '';
+  await saveTemplateField(scope, key);
+  renderMessageTemplates();
+}
 function toggleMsgTplField(id){
   const body = document.getElementById(id+'-body');
   const arrow = document.getElementById(id+'-arrow');
@@ -14380,7 +14388,26 @@ async function saveTemplateField(scope, key){
     const myName = getMyDriverName(); if(!myName) return;
     driverSettings[myName] = driverSettings[myName] || {};
     driverSettings[myName][map.personal] = val;
-    try{ await saveDriverSettings(); showToast('\u2713 Saved'); }
+    try{
+      await saveDriverSettings();
+      // Chase's own edits to his personal confirm/pickup/arrival text also become the
+      // app-wide default automatically, so he only has to edit one place - the same
+      // relationship the v619 promotion and v622 Chase-only restriction already established,
+      // just kept live instead of one-time. Only a genuinely non-empty edit propagates -
+      // clearing his personal field (val==='') must never cascade into wiping the shared
+      // default as a side effect.
+      if(val && map.global && currentUser && currentUser.name==='Chase'){
+        globalSettings = globalSettings || {};
+        globalSettings[map.global] = val;
+        await storageSet('kat:globalSettings', globalSettings);
+        // Clear the personal copy right after propagating, so it doesn't sit there showing
+        // "Custom set" for text that's now just a duplicate of the default he controls -
+        // exactly the redundant-duplicate confusion the v624 cleanup addressed.
+        driverSettings[myName][map.personal] = '';
+        await saveDriverSettings();
+      }
+      showToast('\u2713 Saved');
+    }
     catch(e){ console.warn('saveTemplateField (personal) failed', e); const err=document.getElementById('msgtpl-personal-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
   }
 }
@@ -14389,6 +14416,7 @@ async function saveAllTemplateFields(scope){
   const keys = scope==='personal' ? ['confirm','pickup','arrival'] : Object.keys(_TEMPLATE_FIELD_MAP);
   for(const key of keys){ await saveTemplateField(scope, key); }
   if(scope==='personal'){ await savePerTypePickupInstructions(true); await savePerTerminalPickupInstructions(true); }
+  renderMessageTemplates();
   showToast(scope==='personal' ? '\u2713 All your messages saved' : '\u2713 All default messages saved');
 }
 // Per-ride-type pickup instructions (AP Run / One Way / Round Trip) — same opt-in a driver
@@ -14426,6 +14454,13 @@ async function savePerTerminalPickupInstructions(silent){
   driverSettings[myName].pickupInstructionsByTerminal = byTerm;
   try{ await saveDriverSettings(); if(!silent) showToast('\u2713 Saved'); }
   catch(e){ console.warn('savePerTerminalPickupInstructions failed', e); const err=document.getElementById('msgtpl-personal-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
+}
+async function clearPerTerminalPickupInstructions(){
+  ['msgtpl-pickup-term-north','msgtpl-pickup-term-south','msgtpl-pickup-term-intl'].forEach(function(id){
+    const el = document.getElementById(id); if(el) el.value = '';
+  });
+  await savePerTerminalPickupInstructions();
+  renderMessageTemplates();
 }
 // Retained for anything that might still call the old name directly.
 async function saveMessageTemplates(){ await saveAllTemplateFields('global'); }

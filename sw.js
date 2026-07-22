@@ -9,11 +9,11 @@
 
 // IMPORTANT: bump this version string on EVERY deploy. Changing sw.js's bytes is what makes
 // the browser reinstall the worker, wipe the old cache, and pull the newest app. (Paired with
-// app build 202607221625.)
+// app build 202607221627.)
 // VERSIONING RULE: the visible build number (hamburger menu, last 3 digits of index.html's
 // <meta name="version"> tag) is always this cache number PLUS 409. Bump both by exactly 1
-// together on every single deploy — never skip, never jump. Current: cache v216 = build 625.
-const CACHE = 'nwda-cache-v216';
+// together on every single deploy — never skip, never jump. Current: cache v218 = build 627.
+const CACHE = 'nwda-cache-v218';
 
 // Take over immediately on install.
 self.addEventListener('install', function (e) {
