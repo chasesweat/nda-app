@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607231631">
+<meta name="version" content="202607231632">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2328,6 +2328,7 @@ async function _loadAppData() {
   try{ await _promoteChaseTemplatesToGlobalDefault(); }catch(e){ console.warn('Chase default promotion', e); }
   try{ await _clearChasePersonalDuplicates(); }catch(e){ console.warn('Chase personal duplicate cleanup', e); }
   try{ await _seedGlobalPickupInstructionsByTerminal(); }catch(e){ console.warn('Global terminal instructions seed', e); }
+  try{ await _seedGlobalPickupInstructionsGeneral(); }catch(e){ console.warn('Global pickup instructions seed', e); }
   await loadBiometricCreds();
     // Repair ride IDs: every ride must have a UNIQUE numeric id. Duplicate or
     // non-numeric ids (e.g. from a NaN nextId or repeated imports) caused clicking one
@@ -17908,6 +17909,22 @@ async function _seedGlobalPickupInstructionsByTerminal(){
   globalSettings._globalTerminalInstructionsSeeded = true;
   try{ await storageSet('kat:globalSettings', globalSettings); }
   catch(e){ console.warn('Global terminal instructions seed failed', e); }
+}
+// Same idea, for the general (non-AP-Pickup) "Pickup instructions" default - AP Run, One Way,
+// and Round Trip rides. Confirmed via v631 that this field genuinely has no hardcoded
+// fallback in the message-building code, so unlike the per-terminal seed above this ISN'T
+// replacing a wrong hardcoded value - it's filling in the first real default that's ever
+// existed for this field. Only fills in if genuinely empty, never overwrites anything already
+// customized, one-time only.
+async function _seedGlobalPickupInstructionsGeneral(){
+  globalSettings = globalSettings || {};
+  if(globalSettings._globalPickupInstructionsSeeded) return;
+  if(!globalSettings.defaultPickupInstructions){
+    globalSettings.defaultPickupInstructions = "\ud83c\udfe0 Home/Hotel Pickup Instructions\n\nStep 1: Your driver will text you when they are 15 minutes away.\nStep 2: Your driver will text again once they have arrived at your door or curb.\nStep 3: Please keep your ringer on!";
+  }
+  globalSettings._globalPickupInstructionsSeeded = true;
+  try{ await storageSet('kat:globalSettings', globalSettings); }
+  catch(e){ console.warn('Global pickup instructions seed failed', e); }
 }
 async function _restoreKatTemplatesV2(){
   try{
