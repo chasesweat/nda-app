@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607221629">
+<meta name="version" content="202607231631">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -6789,7 +6789,7 @@ function renderRideView(r){
   const shareOfferingsBtn = (r.status!=='cancelled' && canPostOfferings)
     ? '<div class="detail-row" style="grid-column:1/-1;margin-top:.25rem;">'+(_alreadyOffered?'<div style="padding:.5rem;text-align:center;font-size:.84rem;color:var(--green);font-weight:600;">\u2705 Posted to Offerings</div>':'<button onclick="shareRideToOfferings('+r.id+')" style="width:100%;padding:.55rem;background:none;border:1.5px solid #7c3aed;color:#7c3aed;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.84rem;font-weight:600;cursor:pointer;">\uD83D\uDCE4 Post to Offerings</button>')+'</div>'
     : '';
-  const _bothAddr = (r.type==='MEDICAL'||r.type==='ROUND TRIP'||r.type==='ONE WAY');
+  const _bothAddr = (r.type==='MEDICAL'||r.type==='ROUND TRIP'||r.type==='ONE WAY'||r.type==='AP PICK UP'||r.type==='AP RUN'||r.type==='AP ROUND TRIP');
   const address = _bothAddr ? '' : (r.pickup||r.home||'');
   // Extra-stop address(es), shared between both possible layouts below (the single-`address`
   // airport-ride layout and the pickup+destination layout) so the parsing/labeling logic lives
@@ -14253,12 +14253,16 @@ const _TEMPLATE_FIELD_MAP = {
 // representative example, noted as such, rather than presenting it as the only possibility.
 const HARDCODED_MSG_DEFAULTS = {
   confirm: '(Varies by ride type - shown here is the AP Run / Local version)\n\nI am confirming your pickup scheduled for tomorrow at {time}.\n\n[driver + contact info]\n\nMany thanks,\n\n[signature]\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)',
-  pickup: '(Varies by terminal for AP Pick Up - shown here is the South Domestic version)\n\nText your driver once you have retrieved your luggage from baggage claim.\n\nTake the escalator or elevator located between Doors S2 and S3 down to the Lower Level Pickup Area (LS1).\n\nText your driver again when you are on your way to the LS1 pickup area.\n\nWait on the curb just before the crosswalk near the curbside baggage check-in.',
+  pickup: '(No built-in default for AP Run, One Way, or Round Trip pickup instructions \u2014 leave this blank and nothing gets sent for that part of the message unless you set one here.)',
   arrival: "Hi, this is {driver}, your driver. I see that you've landed\u2014welcome! I'm parked just a few minutes away.\nOnce you grab your bags and start heading toward the pickup location, please let me know and I will pull right up. (If you haven't already, sending a quick description or selfie helps me spot you faster!) See you soon.",
   driverchange: "Dear {client},\n\nPlease be advised that there has been a change regarding your scheduled pickup on {date} at {time}.\n\nYour new driver will be {driver}. We have attached a photo of your driver and the vehicle for easy identification upon arrival. If you need to reach them directly, they can be contacted at {phone}.\n\nThere are no changes to your scheduled itinerary or pickup location. If you have any questions, please reply to this message.",
   receiptshare: "Here's the receipt for your transportation service on {date}.",
   receiptclosing: 'Thank you for riding with {org}!',
 };
+// Keys with NO genuine hardcoded default to copy from - the placeholder text for these is
+// purely an explanatory note (e.g. "no built-in default exists"), not real usable content,
+// so "Start from this default" must not offer to copy it in as if it were a message.
+const NO_REAL_DEFAULT_KEYS = { pickup: true };
 // The three terminal-specific hardcoded fallbacks AP Pick Up rides use when no terminal
 // override is set - extracted directly from buildConfirmationText's own instructions='...'
 // assignments (North/South/International), so these are guaranteed to match what actually
@@ -14311,12 +14315,12 @@ function renderMessageTemplates(){
       +'</span></button>'
       +'<div id="'+bodyId+'" style="display:none;padding:.75rem .8rem;">'
       +'<div style="display:flex;align-items:center;justify-content:'+(isSet?'flex-end':'space-between')+';margin-bottom:.2rem;gap:.5rem;">'
-      +(isSet?'<button onclick="clearTemplateField(\''+scope+'\',\''+key+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Clear (use default)</button>':'<button onclick="startFromDefault(\''+id+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Start from this default</button>')
+      +(isSet?'<button onclick="clearTemplateField(\''+scope+'\',\''+key+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Clear (use default)</button>':(NO_REAL_DEFAULT_KEYS[key]?'':'<button onclick="startFromDefault(\''+id+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Start from this default</button>'))
       +'<button onclick="saveTemplateField(\''+scope+'\',\''+key+'\').then(renderMessageTemplates)" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Save</button>'
       +'</div>'
       +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">'+hint+'</div>'
       +'<textarea id="'+id+'" rows="'+(rows||4)+'" placeholder="'+placeholderText+'" data-default="'+escAttr(HARDCODED_MSG_DEFAULTS[key]||'')+'" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(value||'')+'</textarea>'
-      +'<div style="font-size:.66rem;color:var(--mid);margin-top:.35rem;line-height:1.4;">'+(isSet?'This is your current wording, live and editable above. "Clear (use default)" empties this field and saves, switching back to whatever the app-wide default or built-in message provides.':'Shown above (grayed out, in the box) is the app\'s current built-in default \u2014 leave blank to keep using it, or tap "Start from this default" to copy it in and edit from there.')+'</div>'
+      +'<div style="font-size:.66rem;color:var(--mid);margin-top:.35rem;line-height:1.4;">'+(isSet?'This is your current wording, live and editable above. "Clear (use default)" empties this field and saves, switching back to whatever the app-wide default or built-in message provides.':(NO_REAL_DEFAULT_KEYS[key]?'The note shown above (grayed out, in the box) is not usable text \u2014 there is genuinely no built-in message for this. Leave blank and nothing gets sent for this part, or type your own.':'Shown above (grayed out, in the box) is the app\'s current built-in default \u2014 leave blank to keep using it, or tap "Start from this default" to copy it in and edit from there.'))+'</div>'
       +(extraHtml||'')
       +'</div>'
       +'</div>';
