@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607241659">
+<meta name="version" content="202607241661">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -457,6 +457,7 @@ input,select,textarea{font-size:16px;}
   <div id="menu-income" onclick="nav('income')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">💰 Income &amp; earnings</div>
   <div style="padding:.6rem 1.1rem .35rem;font-size:.66rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#7c5cbf;">Admin</div>
   <div onclick="nav('drivers')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🚘 Team</div>
+  <div id="menu-fix-rt" onclick="closeMenu(); openFixRoundTripsModal();" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🔧 Fix unsplit round trips</div>
   <div style="padding:.6rem 1.1rem .35rem;font-size:.66rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#7c5cbf;">Help</div>
   <div onclick="closeMenu(); window.open('nwda-tutorial.html','_blank');" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">📚 Driver Tutorial</div>
   <div id="menu-admin-guide" onclick="closeMenu(); window.open('nwda-admin-tutorial.html','_blank');" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:none;align-items:center;gap:.75rem;">Admin Guide</div>
@@ -4544,6 +4545,7 @@ async function saveQuote(){
   if(!client){showToast('Please enter a client name','error');return;}
   if(!window._qOwnerResolved && typeof _maybePromptClientOwner==='function' && _maybePromptClientOwner(client,'quote')){ return; }
   window._qOwnerResolved=false;
+  if(!(await _confirmIfSameAddress('q'))) return;
   const driverVal=document.getElementById('q-driver').value || defaultRideDriver();
   const total=calcQuote();
   const ride={
@@ -4587,6 +4589,14 @@ async function saveQuote(){
   if(repeat==='none' || !baseDate){
     rides.push(ride);
     if(driverVal) addNotification(driverVal, ride, 'assigned');
+    // AP Round Trip booked directly from the live Quote form used to save as ONE record with the
+    // return leg's details tacked on as unread extra fields - no second ride, nothing on the
+    // calendar for the return. Same split Add Ride has always used.
+    if(ride.type==='AP ROUND TRIP'){
+      var _leg2=splitApRoundTripRide(ride);
+      touchRide(_leg2,'created'); rides.push(_leg2);
+      if(_leg2.driver) addNotification(_leg2.driver,_leg2,'assigned');
+    }
   } else {
     const count = Math.max(1, Math.min(52, parseInt(document.getElementById('q-repeat-count')?.value)||1));
     const everyLabel = repeat==='weekly'?'week':repeat==='biweekly'?'2 weeks':'month';
@@ -4926,6 +4936,61 @@ function _comparisonContext(){
 }
 // Gate every send button behind a real vehicle choice. Returns the selection, or null after
 // showing the reason. Split out so Text, PDF and Email cannot drift apart on this check.
+// AP ROUND TRIP: what each leg actually costs, from the REAL computed breakdown rather than
+// price/2. buildRideBreakdown() already knows how to split an AP Round Trip's line items into
+// "Leg 1 (outbound)" and "Leg 2 (return)" - built for the PDF grouping in v654 - so this reuses
+// that instead of re-deriving the pricing formulas a third time.
+//
+// Any manual price adjustment (a scheduler overriding the computed total, like the $130 seen on
+// the Sally Woods ride) shows up as an unlabeled reconciliation line with no leg suffix, so it
+// wouldn't naturally fall into either leg's sum. It's apportioned between the two legs in the
+// same ratio as their natural costs, and leg2 absorbs any final cent of rounding so the two
+// always sum to EXACTLY the saved total - never a penny more or less than what was actually
+// charged.
+function apRoundTripLegSplit(ride){
+  var bd = (typeof buildRideBreakdown==='function') ? buildRideBreakdown(ride) : {lines:[],total:0};
+  var raw1=0, raw2=0;
+  (bd.lines||[]).forEach(function(l){
+    if(/ \u2014 Leg 1 \(outbound\)$/.test(l.label)) raw1+=l.val;
+    else if(/ \u2014 Leg 2 \(return\)$/.test(l.label)) raw2+=l.val;
+  });
+  var total = bd.total || (parseFloat(ride.price)||0);
+  var rawTotal = raw1+raw2;
+  var leg1;
+  if(rawTotal>0){
+    leg1 = Math.round((raw1 + (total-rawTotal)*(raw1/rawTotal)) * 100) / 100;
+  } else {
+    // No computed breakdown to go on at all (e.g. a purely manually-priced ride) - nothing
+    // better available than an even split, but this path should be rare.
+    leg1 = Math.round((total/2) * 100) / 100;
+  }
+  var leg2 = Math.round((total-leg1) * 100) / 100;   // absorbs the remainder - always exact
+  return { leg1: leg1, leg2: leg2 };
+}
+
+// Splits a fully-formed AP ROUND TRIP ride object into its two paired records - the outbound
+// AP Run and the return AP Pick Up - with correctly apportioned per-leg prices. Shared by every
+// path that can schedule a round trip: Add Ride, the live Quote form's "Save as ride", and
+// scheduling a saved quote. One model, one place it can go wrong.
+function splitApRoundTripRide(ride){
+  var split = apRoundTripLegSplit(ride);
+  var pairId = 'pair_'+ride.id;
+  var leg2 = Object.assign({}, ride, {
+    id: nextId++, type:'AP PICK UP', pairId: pairId,
+    date: ride.rtDateAP||ride.date, time: ride.rtTime||'',
+    flight: ride.rtFlight||'', terminal: ride.rtTerminal||'',
+    pickup: (typeof TERMINAL_ADDRESSES!=='undefined' && TERMINAL_ADDRESSES[ride.rtTerminal]) || ride.home || '',
+    home: ride.pickup || '',
+    price: split.leg2,
+    notes: (ride.notes?ride.notes+' ':'')+'Return leg \u2014 AP Round Trip '+ride.date,
+  });
+  ride.type='AP RUN';
+  ride.pairId=pairId;
+  ride.price=split.leg1;
+  ride.notes=(ride.notes?ride.notes+' ':'')+'Outbound leg \u2014 AP Round Trip '+(ride.rtDateAP||ride.date);
+  return leg2;
+}
+
 function _quoteVehicleGate(){
   var vs=getSelectedVehicles();
   if(!vs.length){ showToast('Pick a vehicle first','error'); return null; }
@@ -5101,6 +5166,15 @@ async function scheduleSavedQuote(qid){
   delete ride._quoteId; delete ride.savedAt;
   if(typeof touchRide==='function') touchRide(ride, 'created');
   rides.push(ride);
+  // THE BUG: scheduling a saved AP Round Trip quote produced exactly one ride record, carrying
+  // the full combined price, with no second entry anywhere for the return leg - so the return
+  // simply wasn't on the calendar. Same split as Add Ride and saveQuote(), now shared.
+  if(ride.type==='AP ROUND TRIP' && typeof splitApRoundTripRide==='function'){
+    var _leg2=splitApRoundTripRide(ride);
+    if(typeof touchRide==='function') touchRide(_leg2,'created');
+    rides.push(_leg2);
+    if(_leg2.driver && typeof addNotification==='function') addNotification(_leg2.driver,_leg2,'assigned');
+  }
   savedQuotes.splice(i,1);
   try{ await saveRides(); }catch(e){}
   try{ await saveSavedQuotes(); }catch(e){}
@@ -8457,6 +8531,7 @@ async function saveRideEdits(){
   const _seOwner = getClientOwner(r.client) || feeOwnerFor(r.createdBy);
   const _seIsOwner = !!(_seOwner && _seOwner===_seMyResolvedIdentity);
   if(!_seIsOwner && !_seIsDriver){ showToast('Only the client owner or assigned driver can edit this ride','error'); return; }
+  if(!(await _confirmIfSameAddress('edit'))) return;
   // Apply all edits
   r.client    = document.getElementById('edit-client').value.trim()||r.client;
   r.phone     = formatPhoneUS(document.getElementById('edit-phone').value);
@@ -11081,6 +11156,59 @@ function setupHamburgerMenu(){
   if(inc) inc.style.display = 'block';
   const agd = document.getElementById('menu-admin-guide');
   if(agd) agd.style.display = admin ? 'flex' : 'none';
+  const frt = document.getElementById('menu-fix-rt');
+  if(frt) frt.style.display = admin ? 'flex' : 'none';
+}
+
+// v660 fixed the CODE PATH that let a saved-quote or live-Quote-form AP Round Trip save as one
+// un-split record with no return leg anywhere on the calendar. It did not repair rides already
+// booked before that fix - this is that repair, run once, by hand, with a preview before anything
+// is touched. An AP Round Trip that HAS been through splitApRoundTripRide() is never type
+// 'AP ROUND TRIP' any more (the split rewrites it to 'AP RUN') - so any ride still carrying that
+// exact type, right now, in the live data, IS an unsplit one. That's the whole detection rule.
+function _findUnsplitRoundTrips(){
+  return (rides||[]).filter(function(r){ return r.type==='AP ROUND TRIP'; });
+}
+
+async function openFixRoundTripsModal(){
+  if(!isAdmin()){ showToast('Admin only','error'); return; }
+  const found = _findUnsplitRoundTrips();
+  if(!found.length){
+    await showConfirmModal({ icon:'\u2705', iconColor:'#15803d', iconBg:'#0f2e2b',
+      title:'Nothing to fix', message:'No unsplit AP Round Trips found. Every round trip already has both legs on the calendar.',
+      buttons:[{label:'OK', style:'primary', value:'ok'}] });
+    return;
+  }
+  const rows = found.map(function(r){
+    return '<div style="display:flex;justify-content:space-between;gap:.5rem;padding:.4rem 0;border-bottom:1px solid #eee;font-size:.85rem;">'
+      + '<span>'+escHtml(r.client||'(no name)')+' \u2014 '+escHtml(r.date||'?')+'</span>'
+      + '<span style="font-weight:700;">$'+(parseFloat(r.price)||0).toFixed(2)+'</span></div>';
+  }).join('');
+  const choice = await showConfirmModal({
+    icon:'\uD83D\uDD27', iconColor:'#7c3aed', iconBg:'#2d1b57',
+    title: found.length+' unsplit round trip'+(found.length===1?'':'s')+' found',
+    message: 'Each will become two linked rides (AP Run + AP Pick Up), priced from its real leg breakdown - '
+      +'the exact same split new bookings get. This adds the missing return leg to the calendar for each one. '
+      +'Nothing else about these rides changes.<div style="margin-top:.6rem;max-height:220px;overflow:auto;">'+rows+'</div>',
+    buttons:[ {label:'Cancel', value:'cancel'}, {label:'Split '+found.length+' ride'+(found.length===1?'':'s'), style:'primary', value:'go'} ]
+  });
+  if(choice!=='go') return;
+  await _runFixRoundTrips(found);
+}
+
+async function _runFixRoundTrips(found){
+  var fixed=0;
+  found.forEach(function(r){
+    var leg2 = splitApRoundTripRide(r);   // mutates r into AP RUN, returns the paired AP PICK UP
+    touchRide(leg2,'created');
+    rides.push(leg2);
+    if(leg2.driver) addNotification(leg2.driver, leg2, 'assigned');
+    fixed++;
+  });
+  await saveRides();
+  try{ await saveNotifs(); }catch(e){}
+  try{ refreshDash(); }catch(e){} try{ renderCal(); }catch(e){} try{ updateNotifBadge(); }catch(e){}
+  showToast('\u2713 Fixed '+fixed+' round trip'+(fixed===1?'':'s')+' \u2014 return leg'+(fixed===1?' is':'s are')+' now on the calendar');
 }
 
 async function clearAllNotifications(){
@@ -12850,8 +12978,9 @@ function _clientAddrListByKey(key){
 // convergence step: the two forms name their destination field differently (qa-home vs q-dropoff),
 // which is why the slot names here are neutral ('pickup' / 'dest') and mapped per prefix.
 const ADDR_FIELD_IDS = {
-  qa: { pickup:'qa-pickup', dest:'qa-home'    },
-  q:  { pickup:'q-pickup',  dest:'q-dropoff'  }
+  qa:   { pickup:'qa-pickup',   dest:'qa-home'    },
+  q:    { pickup:'q-pickup',    dest:'q-dropoff'  },
+  edit: { pickup:'edit-pickup', dest:'edit-home'  }
 };
 function _addrFieldId(prefix, slot){ return (ADDR_FIELD_IDS[prefix]||{})[slot] || ''; }
 function _addrModeId(prefix, slot){ return _addrFieldId(prefix,slot) + '-mode'; }
@@ -12861,6 +12990,30 @@ function _addrClientKey(prefix){
 }
 function _addrListFor(prefix){ return _clientAddrListByKey(_addrClientKey(prefix)); }
 
+// Pickup and Destination landing on the SAME address is a real mistake for ONE WAY / ROUND TRIP -
+// Destination IS the venue for those types, and mileage bills as the distance between the two, so
+// an accidental match means the trip is charged for zero miles. AP types are exempt (home vs.
+// airport are never expected to coincide, so equal addresses there would already be a different,
+// more obvious problem) and so is MEDICAL (a same-address round trip - wait at the same facility -
+// is a plausible real booking). A warning, not a hard block: the rare deliberate case (a driver
+// literally waiting at one spot) still needs a way through.
+async function _confirmIfSameAddress(prefix){
+  var type=(document.getElementById(prefix+'-type')||{}).value||'';
+  if(type!=='ONE WAY' && type!=='ROUND TRIP') return true;
+  var pu=((document.getElementById(_addrFieldId(prefix,'pickup'))||{}).value||'').trim().toLowerCase();
+  var de=((document.getElementById(_addrFieldId(prefix,'dest'))||{}).value||'').trim().toLowerCase();
+  if(!pu || !de || pu!==de) return true;
+  if(typeof showConfirmModal!=='function') return true;
+  var choice=await showConfirmModal({
+    icon:'\uD83D\uDCCD', iconColor:'#f5a623', iconBg:'#3a2a10',
+    title:'Pickup and Destination match',
+    message:'Both are set to the same address, so this will be charged for <b>zero miles</b>. '
+      +'If the client is actually going somewhere \u2014 an event, an appointment \u2014 enter that '
+      +'as the Destination. If this is really a same-address booking, Continue is fine.',
+    buttons:[ {label:'Go back and fix it', value:'cancel'}, {label:'Continue anyway', style:'primary', value:'continue'} ]
+  });
+  return choice==='continue';
+}
 function renderAddrPickers(prefix){
   var list=_addrListFor(prefix);
   var type=(document.getElementById(prefix+'-type')||{}).value||'';
@@ -12879,7 +13032,21 @@ function renderAddrPickers(prefix){
     }
     var cur=(inp.value||'').trim();
     var match=list.find(function(a){return a.address===cur;});
-    var selVal = match ? cur : (cur ? '__other__' : (list.find(function(a){return a.isDefault;})||list[0]).address);
+    // THE FOX THEATER BUG: Destination is the actual venue for ONE WAY / ROUND TRIP - mileage is
+    // charged as distance(Pickup, Destination), doubled for a round trip - so Pickup and
+    // Destination silently landing on the SAME saved address (both defaulting to "Home" because
+    // neither field had anything typed yet) meant a real trip got charged for zero miles. Nothing
+    // ever stopped that from happening. When picking a default for Destination, skip whichever
+    // saved address the OTHER slot is currently showing, so the two can never silently collide.
+    var otherId = _addrFieldId(prefix, slot==='pickup'?'dest':'pickup');
+    var otherVal = (slot==='dest' && otherId!==_addrFieldId(prefix,slot))
+      ? ((document.getElementById(otherId)||{}).value||'').trim() : '';
+    var candidates = otherVal ? list.filter(function(a){return a.address!==otherVal;}) : list;
+    var selVal;
+    if(match){ selVal = cur; }
+    else if(cur){ selVal = '__other__'; }
+    else if(candidates.length){ selVal = (candidates.find(function(a){return a.isDefault;})||candidates[0]).address; }
+    else { selVal = '__other__'; } // every saved address is already in use by the other field
     var opts='';
     list.forEach(function(a){
       opts+='<option value="'+escAttr(a.address)+'"'+(a.address===selVal?' selected':'')+'>'
@@ -12937,6 +13104,7 @@ async function saveQuickAddRide(){
   errEl.textContent='';
   if(saveBtn){ saveBtn.disabled=true; saveBtn.style.opacity='0.55'; }
   const qaType = document.getElementById('qa-type').value;
+  if(!(await _confirmIfSameAddress('qa'))){ _reenableBtn(); return; }
   if(qaType==='AP ROUND TRIP'){
     if(!document.getElementById('qa-leg-run')?.checked||!document.getElementById('qa-leg-pickup')?.checked){
       errEl.textContent='Check both leg confirmation boxes before saving.'; _reenableBtn(); return;
@@ -12978,19 +13146,13 @@ async function saveQuickAddRide(){
   if(ride.driver) addNotification(ride.driver,ride,'assigned');
   let ride2=null;
   if(qaType==='AP ROUND TRIP'){
-    const rtDate=document.getElementById('qa-rt-date')?.value||date;
-    const rtTime=document.getElementById('qa-rt-time')?.value||'';
-    const rtFlight=document.getElementById('qa-rt-flight')?.value.trim()||'';
-    const rtTerminal=document.getElementById('qa-rt-terminal')?.value||'';
-    const _pairId='pair_'+ride.id;
-    ride2={...ride,id:nextId++,type:'AP PICK UP',date:rtDate,time:rtTime,
-      flight:rtFlight,terminal:rtTerminal,pairId:_pairId,
-      pickup:(TERMINAL_ADDRESSES[rtTerminal]||ride.home||''),
-      home:(ride.pickup||''),
-      notes:(ride.notes?ride.notes+' ':'')+('Return leg \u2014 AP Round Trip ')+date};
-    ride.type='AP RUN';
-    ride.pairId=_pairId;
-    ride.notes=(ride.notes?ride.notes+' ':'')+('Outbound leg \u2014 AP Round Trip ')+rtDate;
+    ride.rtDateAP=document.getElementById('qa-rt-date')?.value||date;
+    ride.rtTime=document.getElementById('qa-rt-time')?.value||'';
+    ride.rtFlight=document.getElementById('qa-rt-flight')?.value.trim()||'';
+    ride.rtTerminal=document.getElementById('qa-rt-terminal')?.value||'';
+    // splitApRoundTripRide prices each leg from its own real breakdown (not the full total
+    // duplicated onto both) and mutates `ride` in place into the outbound AP Run.
+    ride2=splitApRoundTripRide(ride);
     touchRide(ride2,'created'); rides.push(ride2);
     if(ride2.driver) addNotification(ride2.driver,ride2,'assigned');
   }
