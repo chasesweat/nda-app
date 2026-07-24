@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607231635">
+<meta name="version" content="202607241647">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -620,20 +620,11 @@ input,select,textarea{font-size:16px;}
           <input type="hidden" id="q-ride" value="Sedan" />
         </div>
         <div class="form-group"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;"><input type="checkbox" id="q-xxl" onchange="calcQuote()" style="width:16px;height:16px;accent-color:#7c3aed;"><span style="font-size:.78rem;font-weight:600;">Double Vehicle (XXL)</span></label></div><div id="q-vehicle2-group" style="display:none;"><div class="form-group"><label>2nd Vehicle</label><select id="q-vehicle2" onchange="calcQuote()"><option>Sedan</option><option value="SUV/Van">XL</option><option>Premium</option><option>Sprinter Van</option></select></div><div class="form-group"><label>2nd Vehicle Rate ($)</label><input type="number" id="q-price2" placeholder="105" oninput="calcQuote()" /></div></div><div class="form-group">
-          <label>Date & Time</label>
+          <label>Departing Date &amp; Time</label>
           <div style="display:flex;gap:.5rem;">
             <input type="date" id="q-date" aria-label="Ride date" onchange="onDateChange();checkPriceShopping('q')" style="flex:1;min-width:0;" />
             <input type="time" id="q-time" aria-label="Pickup time" onchange="onTimeChange()" style="flex:1;min-width:0;" />
           </div>
-        </div>
-        <div id="q-ap-rt-fields" style="display:none;">
-          <div class="form-group"><label>Return date</label><input type="date" id="q-rt-date" aria-label="Return date" onchange="calcQuote()" /></div>
-          <div class="form-group"><label>Return pickup time</label><input type="time" id="q-rt-pickup-date" aria-label="Return pickup date" onchange="calcQuote()" /></div>
-          <div class="form-group"><label>Return flight #</label><input type="text" id="q-rt-flight" placeholder="e.g. DL1234" oninput="calcQuote()" /></div>
-          <div class="form-group"><label>Return terminal</label>
-            <select id="q-rt-terminal" aria-label="Return terminal" onchange="calcQuote()"><option value="">—</option><option>North Domestic</option><option>South Domestic</option><option>International</option></select>
-          </div>
-          <div class="form-group"><label>Return time</label><input type="time" id="q-rt-time" aria-label="Return pickup time" onchange="calcQuote()" /></div>
         </div>
         <div class="form-group" id="q-flight-group"><label>Flight #</label><input type="text" id="q-flight" placeholder="e.g. DL1234" oninput="calcQuote()" /></div>
         <div class="form-group" id="q-terminal-group">
@@ -642,10 +633,18 @@ input,select,textarea{font-size:16px;}
             <option value="">—</option><option>North Domestic</option><option>South Domestic</option><option>International</option>
           </select>
         </div>
+        <div id="q-ap-rt-fields" style="display:none;">
+          <div class="form-group"><label>Return date</label><input type="date" id="q-rt-date" aria-label="Return date" onchange="onReturnLegDateTimeChange()" /></div>
+          <div class="form-group"><label>Return flight #</label><input type="text" id="q-rt-flight" placeholder="e.g. DL1234" oninput="calcQuote()" /></div>
+          <div class="form-group"><label>Return terminal</label>
+            <select id="q-rt-terminal" aria-label="Return terminal" onchange="calcQuote()"><option value="">—</option><option>North Domestic</option><option>South Domestic</option><option>International</option></select>
+          </div>
+          <div class="form-group"><label>Return time</label><input type="time" id="q-rt-time" aria-label="Return pickup time" onchange="onReturnLegDateTimeChange()" /></div>
+        </div>
         <div class="form-group"><label>Passengers</label><input type="number" id="q-pax" aria-label="Number of passengers" value="1" min="1" max="14" oninput="calcQuote()" /></div>
         <div class="form-group"><label>Checked Bags</label><input type="number" id="q-checked-bags" aria-label="Checked bags" value="0" min="0" /></div>
         <div class="form-group"><label>Carry-on Bags</label><input type="number" id="q-carryon-bags" aria-label="Carry-on bags" value="0" min="0" /></div>
-        <div class="form-group"><label>Wait time (hrs)</label><input type="number" id="q-wait" aria-label="Wait time in hours" value="0" min="0" step="0.25" oninput="calcQuote()" /></div>
+        <div class="form-group" id="q-wait-group"><label>Wait time (hrs)</label><input type="number" id="q-wait" aria-label="Wait time in hours" value="0" min="0" step="0.25" oninput="calcQuote()" /></div>
         <div class="form-group">
           <label>Additional pickups</label>
           <div style="display:flex;align-items:center;gap:.75rem;">
@@ -659,8 +658,13 @@ input,select,textarea{font-size:16px;}
           </div>
         </div>
         <div class="form-group">
-          <label>Surcharges</label>
+          <label id="q-addons-label">Surcharges</label>
           <div class="addon-grid" id="q-addons"></div>
+        </div>
+        <div class="form-group" id="q-addons-leg2-group" style="display:none;">
+          <label>Surcharges \u2014 Leg 2 (return)</label>
+          <div style="font-size:.68rem;color:var(--mid);margin-bottom:.4rem;">Set independently from the outbound leg above \u2014 auto-filled from the return date/time, adjust as needed.</div>
+          <div class="addon-grid" id="q-addons-leg2"></div>
         </div>
         <div class="form-group">
           <label>Driver</label>
@@ -3013,6 +3017,13 @@ const RATE_PER_MILE  = 2.50;
 const WAIT_RATE      = 60;
 const ADDONS_FLAT    = { premium:30, holiday:30, christmas:35, late:20, traffic:15 };
 let addonState = { premium:false, holiday:false, christmas:false, late:false, fuel:false, traffic:false };
+// AP Round Trip only: the return leg's OWN surcharge selections, independent from the
+// outbound leg's addonState above. Auto-populated from the return date/time (same rules as
+// the outbound leg) but manually toggleable per-surcharge - Chase asked for a way to apply
+// surcharges to one leg but not the other, since e.g. traffic during the outbound drive
+// doesn't mean the return trip hits traffic too.
+let addonStateLeg2 = { premium:false, holiday:false, christmas:false, late:false, fuel:false, traffic:false };
+let _addonTouchedLeg2 = {};
 let _fuelUserTouched = false; // once a driver toggles fuel on the quote, stop auto-forcing it
 let _addonTouched = { premium:false, traffic:false, holiday:false, christmas:false }; // once the scheduler toggles an auto-surcharge, respect it for this quote
 let globalSettings = { fuelEnabled: true }; // admin-controlled global pricing flags
@@ -3230,6 +3241,18 @@ function calcQuote() {
     if(waitFee>0) sl.push({label:`Wait time (${wait}h × $${waitRate()}/hr)`, val:waitFee});
     return sl;
   }
+  function getSurchargeLinesFor(state){
+    const sl=[];
+    Object.keys(ADDONS_FLAT).forEach(k=>{
+      if(k==='fuel') return;
+      if(state[k]){
+        if(k==='holiday'&&state.christmas) return;
+        sl.push({label:lbls[k]+' surcharge', val:surcharge(k)});
+      }
+    });
+    customSurchargeList().forEach(function(c){ if(state[c.key]) sl.push({label:c.label+' surcharge', val:surcharge(c.key)}); });
+    return sl;
+  }
   function sumLines(ls){ return ls.reduce((s,l)=>s+l.val,0); }
 
   // ── AP ROUND TRIP — two separate leg breakdowns ──
@@ -3255,15 +3278,12 @@ function calcQuote() {
     leg2Lines.push({label:`Base rate (${vehicle}) — incl. ${includedMiles()} mi`, val:base});
     if(miles > 0 && miles <= mileageTrigger()) leg2Lines.push({label:`Mileage (${miles} mi — within radius)`, val:0, note:'No overage'});
     if(overage > 0) leg2Lines.push({label:'Mileage overage', val:overage, note:`(${miles} − ${includedMiles()}) = ${overMiles} mi × $${mileageRate().toFixed(2)}`});
-    // Return leg surcharges — check return date/time separately
-    const rtDateEl = document.getElementById('q-rt-date');
-    const rtTimeEl = document.getElementById('q-rt-time');
-    const rtDate = rtDateEl?.value||'';
-    const rtTime = rtTimeEl?.value||'';
-    const leg2Surcharges = getReturnLegSurcharges(rtDate, rtTime);
+    // Return leg surcharges — now the return leg's OWN manual toggle state (addonStateLeg2),
+    // auto-populated from return date/time but independently overridable per surcharge.
+    const leg2Surcharges = getSurchargeLinesFor(addonStateLeg2);
     leg2Surcharges.forEach(s=>leg2Lines.push(s));
     const leg2Sub = base + overage + sumLines(leg2Surcharges);
-    const leg2Fuel = addonState.fuel ? leg2Sub*fuelRate() : 0;
+    const leg2Fuel = addonStateLeg2.fuel ? leg2Sub*fuelRate() : 0;
     if(leg2Fuel>0) leg2Lines.push({label:fuelLabel(), val:leg2Fuel});
     const leg2Total = leg2Sub + leg2Fuel;
 
@@ -3993,6 +4013,13 @@ function updateTripFields(){
   show('q-terminal-group', isAP);
   // AP Round Trip return leg
   show('q-ap-rt-fields', isAPRT);
+  // Wait time doesn't apply to airport rides
+  show('q-wait-group', !isAP);
+  // Per-leg surcharges only make sense for AP Round Trip - everything else has one leg.
+  show('q-addons-leg2-group', isAPRT);
+  var _addonsLbl = document.getElementById('q-addons-label');
+  if(_addonsLbl) _addonsLbl.textContent = isAPRT ? 'Surcharges \u2014 Leg 1 (outbound)' : 'Surcharges';
+  if(isAPRT){ applyReturnLegAutoAddons(); renderAddonsLeg2(); }
   // Drop-off isn't needed for AP RUN/AP PICK UP (terminal auto-fills it) — keep visible but optional
   // Address labels: on AP Pick Up the pickup is the airport and home is the destination.
   // Fields are ALWAYS "Pickup" (top) and "Destination" (bottom) — the type decides what
@@ -4099,6 +4126,57 @@ function applyQuoteAutoAddons(){
     if(!_addonTouched.christmas && !driverAutoOff('christmas')) addonState.christmas = xmas;
     if(!_addonTouched.holiday   && !driverAutoOff('holiday'))   addonState.holiday   = hol && !xmas;
   }
+}
+// Mirrors applyQuoteAutoAddons() exactly, but for the AP Round Trip return leg - reads
+// q-rt-date/q-rt-time instead of q-date/q-time, writes to addonStateLeg2/_addonTouchedLeg2.
+// A manual toggle on the return leg's own chips is independent from the outbound leg's -
+// toggling traffic off for the return trip never affects the outbound leg's traffic chip.
+function applyReturnLegAutoAddons(){
+  const dv=(document.getElementById('q-rt-date')||{}).value||'';
+  const tv=(document.getElementById('q-rt-time')||{}).value||'';
+  let mins=-1;
+  if(tv){ const p=tv.split(':').map(Number); mins=(p[0]||0)*60+(p[1]||0); }
+  if(globalSettings.fuelEnabled !== false && !_addonTouchedLeg2.fuel && !driverAutoOff('fuel')) addonStateLeg2.fuel=true;
+  if(tv && !_addonTouchedLeg2.premium && !driverAutoOff('premium')) addonStateLeg2.premium = isPremiumTime(mins);
+  if(dv && tv && !_addonTouchedLeg2.traffic && !driverAutoOff('traffic')){
+    const dow=new Date(dv+'T12:00:00').getDay();
+    addonStateLeg2.traffic = isTrafficTime(dow,mins);
+  }
+  if(dv){
+    const mmdd=dv.slice(5);
+    const xmas=isChristmasDate(mmdd), hol=isHolidayDate(mmdd);
+    if(!_addonTouchedLeg2.christmas && !driverAutoOff('christmas')) addonStateLeg2.christmas = xmas;
+    if(!_addonTouchedLeg2.holiday   && !driverAutoOff('holiday'))   addonStateLeg2.holiday   = hol && !xmas;
+  }
+}
+function onReturnLegDateTimeChange(){
+  applyReturnLegAutoAddons();
+  renderAddonsLeg2();
+  calcQuote();
+}
+function renderAddonsLeg2(){
+  const box=document.getElementById('q-addons-leg2');
+  if(!box) return;
+  const fuelOff = globalSettings.fuelEnabled === false;
+  box.innerHTML=Object.keys(ADDON_LABELS).map(k=>{
+    const disabled = k==='fuel' && fuelOff;
+    const cls = 'addon-chip'+(addonStateLeg2[k]?' on':'')+(disabled?' disabled':'');
+    const title = disabled ? 'title="Fuel surcharge disabled by admin"' : '';
+    return `<div class="${cls}" onclick="toggleAddonLeg2('${k}')" ${title}>${k==='fuel'?('Fuel ('+fuelPct()+'%)'):ADDON_LABELS[k]}`
+      +(disabled?' <span style="font-size:.65em;opacity:.6;">(off)</span>':'')
+      +'</div>';
+  }).join('') + customSurchargeList().map(function(c){ return '<div class="addon-chip'+(addonStateLeg2[c.key]?' on':'')+'" onclick="toggleAddonLeg2(\''+escAttr(c.key)+'\')">'+escHtml(c.label)+' +$'+(parseFloat(c.amount)||0)+'</div>'; }).join('');
+}
+function toggleAddonLeg2(k){
+  if(k==='fuel' && globalSettings.fuelEnabled===false){
+    showToast('Fuel surcharge is currently disabled by admin','error'); return;
+  }
+  _addonTouchedLeg2[k]=true;
+  addonStateLeg2[k]=!addonStateLeg2[k];
+  if(k==='holiday'&&addonStateLeg2.holiday) addonStateLeg2.christmas=false;
+  if(k==='christmas'&&addonStateLeg2.christmas) addonStateLeg2.holiday=false;
+  renderAddonsLeg2();
+  calcQuote();
 }
 function onDateChange(){
   applyQuoteAutoAddons(); // re-check date AND time rules, not just the date ones
@@ -4344,6 +4422,7 @@ async function saveQuote(){
     extraPhones:formatPhoneList((document.getElementById('q-extra-phones')||{}).value||''),
     email:(document.getElementById('q-email')||{}).value||'',
     ...Object.fromEntries(Object.keys(addonState).map(k=>[k,addonState[k]?'Y':'N'])),
+    ...Object.fromEntries(Object.keys(addonStateLeg2).map(k=>['rt_'+k,addonStateLeg2[k]?'Y':'N'])),
     xstop: extraStops,
     xstopAddr:(document.getElementById('q-xstop-addr')?.value||'').trim(),
     wait:parseFloat(document.getElementById('q-wait').value)||0,
@@ -4421,6 +4500,7 @@ function _gatherQuoteRide(){
     extraPhones:formatPhoneList((document.getElementById('q-extra-phones')||{}).value||''),
     email:(document.getElementById('q-email')||{}).value||'',
     ...Object.fromEntries(Object.keys(addonState).map(k=>[k,addonState[k]?'Y':'N'])),
+    ...Object.fromEntries(Object.keys(addonStateLeg2).map(k=>['rt_'+k,addonStateLeg2[k]?'Y':'N'])),
     xstop: extraStops,
     xstopAddr:(document.getElementById('q-xstop-addr')?.value||'').trim(),
     wait:parseFloat(document.getElementById('q-wait').value)||0,
@@ -4524,7 +4604,7 @@ function buildQuoteHTML(q){
       +'<table style="width:100%;border-collapse:collapse;margin-bottom:16px;">'
         +detail('Date', dateStr+(timeStr?(' at '+timeStr):''))
         +detail('Trip', typeStr)
-        +detail('Vehicle', q.vehicle||'')
+        +detail('Vehicle', (typeof vehTag==='function' ? vehTag(q.vehicle) : q.vehicle)||'')
         +detail('Pickup', q.pickup||'')
         +detail('Destination', q.home||'')
         +(parseFloat(q.miles)?detail('Distance', (parseFloat(q.miles))+' mi'):'')
@@ -4618,6 +4698,59 @@ function renderSavedQuotes(){
   html+='</div>';
   box.innerHTML=html;
 }
+function editSavedQuote(qid){
+  const q=(savedQuotes||[]).find(function(x){return x._quoteId===qid;}); if(!q) return;
+  _closeSqModal();
+  nav('quote');
+  setTimeout(function(){
+    const set=(id,val)=>{ const el=document.getElementById(id); if(el && val!==undefined && val!==null) el.value=val; };
+    set('q-client', q.client||'');
+    set('q-pickup', q.pickup||'');
+    set('q-gate-code', q.gateCode||'');
+    const priv=document.getElementById('q-private'); if(priv) priv.checked=!!q.private;
+    set('q-dropoff', q.home||'');
+    set('q-miles', q.miles||0);
+    set('q-date', q.date||'');
+    set('q-time', q.time||'');
+    set('q-type', q.type||'AP RUN');
+    set('q-flight', q.flight||'');
+    set('q-terminal', q.terminal||'');
+    set('q-rt-date', q.rtDateAP||'');
+    set('q-rt-flight', q.rtFlight||'');
+    set('q-rt-terminal', q.rtTerminal||'');
+    set('q-rt-time', q.rtTime||'');
+    set('q-pax', q.pax||1);
+    set('q-checked-bags', q.checkedBags||0);
+    set('q-carryon-bags', q.carryOnBags||0);
+    set('q-phone', q.phone||'');
+    set('q-extra-phones', q.extraPhones||'');
+    set('q-email', q.email||'');
+    set('q-wait', q.wait||0);
+    set('q-med-hours', q.medHours||0);
+    set('q-driver', q.driver||'');
+    // Vehicle - find and click the matching toggle button so its active state stays in sync
+    const vehVal = q.vehicle||'Sedan';
+    const vehBtn = Array.from(document.querySelectorAll('#page-quote .toggle-group .tog')).find(function(b){
+      return b.getAttribute('onclick') && b.getAttribute('onclick').indexOf("'"+vehVal+"'")>-1;
+    });
+    if(vehBtn) setVehicle(vehVal, vehBtn); else { const el=document.getElementById('q-ride'); if(el) el.value=vehVal; }
+    // Surcharge addon state
+    Object.keys(addonState).forEach(function(k){ addonState[k] = String(q[k])==='Y'; });
+    if(typeof renderAddons==='function') renderAddons();
+    // Extra stops
+    extraStops = q.xstop||0;
+    if(typeof setStops==='function') setStops(extraStops);
+    set('q-xstop-addr', q.xstopAddr||'');
+    if(typeof updateTripFields==='function') updateTripFields();
+    if(typeof calcQuote==='function') calcQuote();
+    // Remove the old saved-quote entry - re-saving now creates a fresh one with the edits
+    // rather than leaving a stale duplicate sitting alongside it.
+    const idx=(savedQuotes||[]).findIndex(function(x){return x._quoteId===qid;});
+    if(idx>=0){ savedQuotes.splice(idx,1); try{ saveSavedQuotes(); }catch(e){} renderSavedQuotes(); }
+    showToast('\u270f\uFE0F Editing quote \u2014 make your changes and save again');
+    const qc=document.getElementById('q-client'); if(qc) qc.scrollIntoView({behavior:'smooth',block:'center'});
+  }, 150);
+}
 function _closeSqModal(){ const h=document.getElementById('sq-modal-host'); if(h) h.remove(); }
 function openSavedQuoteDetail(qid){
   const q=(savedQuotes||[]).find(function(x){return x._quoteId===qid;}); if(!q) return;
@@ -4633,6 +4766,7 @@ function openSavedQuoteDetail(qid){
         +(q.miles?row('Miles', q.miles+' mi'):'')+(q.pax?row('Passengers', q.pax):'')+row('Phone', q.phone)
         +'<div style="display:flex;justify-content:space-between;gap:1rem;padding:.5rem 0 .1rem;"><span style="font-weight:800;color:var(--black);">Total</span><span style="font-weight:800;color:var(--gold);font-size:1.05rem;">$'+(parseFloat(q.price)||0).toFixed(2)+'</span></div>'
       +'</div>'
+      +'<button onclick="editSavedQuote(\''+escAttr(qid)+'\')" style="width:100%;padding:.7rem;margin-bottom:.5rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:9px;font-family:inherit;font-size:.88rem;font-weight:700;cursor:pointer;">\u270f\uFE0F Edit quote</button>'
       +'<button onclick="textSavedQuote(\''+escAttr(qid)+'\')" style="width:100%;padding:.7rem;margin-bottom:.5rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:9px;font-family:inherit;font-size:.88rem;font-weight:700;cursor:pointer;">\uD83D\uDCAC Text quote to client</button>'
       +'<button onclick="openQuoteDocument(\''+escAttr(qid)+'\')" style="width:100%;padding:.7rem;margin-bottom:.5rem;background:none;border:1.5px solid #2d1b57;color:#2d1b57;border-radius:9px;font-family:inherit;font-size:.88rem;font-weight:700;cursor:pointer;">\uD83D\uDCC4 Quote as PDF</button>'
       +'<div style="display:flex;gap:.5rem;">'
@@ -5535,10 +5669,19 @@ function renderMyCal(){
       const c=rideColor(r);
       const driverTag = driverShortName(r.driver);
       const tc=contrastText(c,0.4);
+      // Same gate as the ride modal's own Start Ride button: not paid, within the
+      // 12-hour pre-ride window, and not already being tracked (either shows "Live
+      // tracking" above, or would be redundant to offer starting it again).
+      const _alreadyTracking = _mtWatchId&&_mtRideIds.indexOf(r.id)>=0;
+      const _canStartHere = r.status!=='paid' && _isRideWithinHours(r,12) && !_alreadyTracking && isMyDrivingRide(r);
+      const startBtn = _canStartHere
+        ? `<button onclick="event.stopPropagation();openStartRide(${r.id})" style="flex-shrink:0;padding:.4rem .8rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;white-space:nowrap;">&#128663; Start Ride</button>`
+        : '';
       return `<div style="display:flex;align-items:center;gap:1rem;padding:.75rem 1rem;border-radius:10px;margin-bottom:.5rem;background:${c}66;border:2px solid ${c};cursor:pointer;flex-wrap:wrap;" onclick="openRideModal(${r.id})">
         <div style="width:8px;min-height:36px;border-radius:3px;background:${c};flex-shrink:0;align-self:stretch;"></div>
         <div class="ride-date" style="color:${tc};">${fmtDateShort(r.date)}<br>${fmtTime12(r.time)||'—'}</div>
-        <div class="ride-info"><div class="ride-client" style="color:${tc};">${r.private?'🔒 ':''}${r.client}${r.confirmSent?' <span style="color:var(--green);font-weight:900;">✓</span>':''}</div><div class="ride-detail" style="color:${tc};opacity:.78;">${rideDisplayType(r)} · ${driverTag}</div>${rideReqDriverTag(r)}${(_mtWatchId&&_mtRideIds.indexOf(r.id)>=0)?'<div style="margin-top:3px;"><span style="display:inline-block;font-size:.68rem;background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:8px;padding:1px 7px;font-weight:700;animation:mt-pulse .9s ease-in-out infinite;">&#128205; Live tracking</span></div>':''}</div>
+        <div class="ride-info"><div class="ride-client" style="color:${tc};">${r.private?'🔒 ':''}${r.client}${r.confirmSent?' <span style="color:var(--green);font-weight:900;">✓</span>':''}</div><div class="ride-detail" style="color:${tc};opacity:.78;">${rideDisplayType(r)} · ${driverTag}</div>${rideReqDriverTag(r)}${_alreadyTracking?'<div style="margin-top:3px;"><span style="display:inline-block;font-size:.68rem;background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:8px;padding:1px 7px;font-weight:700;animation:mt-pulse .9s ease-in-out infinite;">&#128205; Live tracking</span></div>':''}</div>
+        ${startBtn}
         <div class="ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}</div>
       </div>`;
     };
@@ -6260,9 +6403,15 @@ function confirmationRecipients(r){
   // Main driver = whoever scheduled/owns the ride (createdBy → driver name)
   const owner = r.createdBy ? USER_DRIVER_MAP[r.createdBy] : null;
   if(owner) add(owner.split(' ')[0], (DRIVER_PROFILES[owner]||{}).phone);
-  // If the sender is Kat or Morgan, loop them both in
+  // Kat/Morgan loop-in: only when this ride's client is actually Kat's (not just because
+  // the sender happens to be one of them - Morgan sending a confirmation for her own,
+  // unrelated client shouldn't pull Kat into that thread). add()'s existing "never text
+  // yourself" check already excludes whichever of the two is actually sending, so this
+  // naturally ends up adding only the OTHER one, never both.
   const sender = currentUser && currentUser.name;
-  if(sender==='Kat' || sender==='Morgan'){
+  const _clientOwnerName = (typeof getClientOwner==='function' ? getClientOwner(r.client) : null) || owner;
+  const _isKatsClient = _clientOwnerName === 'Kathleen Herringdine';
+  if(_isKatsClient && (sender==='Kat' || sender==='Morgan')){
     add('Kat',    (DRIVER_PROFILES['Kathleen Herringdine']||{}).phone);
     add('Morgan', (DRIVER_PROFILES['Morgan Newton']||{}).phone);
   }
@@ -6646,13 +6795,19 @@ function openRideModal(id){
   // ride should be able to cancel it themselves, not just whoever booked it.
   const cancelBtn=document.getElementById('rm-cancelride-btn');
   if(cancelBtn) cancelBtn.style.display=(canAssignOnRide(r)||getMyDriverName()===r.driver)?'inline-block':'none';
-  // edit button — creator (Kat↔Morgan proxy) or the assigned driver
+  // edit button — client owner (Kat↔Morgan proxy-aware) or the assigned driver.
+  // Kept identical to the permission check in saveRideEdits() so what's visible here
+  // always matches what can actually be saved - no more showing Edit to someone who'll
+  // just get silently blocked when they try to save.
   const editBtn=document.getElementById('rm-edit-btn');
   if(editBtn){
-    const _eMe=currentUser&&currentUser.name;
-    const _eRm=PROXY_MAP[_eMe]||USER_DRIVER_MAP[_eMe]||_eMe;
-    const _eRc=PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy;
-    editBtn.style.display=((_eRm&&_eRc&&_eRm===_eRc)||getMyDriverName()===r.driver)?'inline-flex':'none';
+    const _eMyDriverName = getMyDriverName();
+    const _eIsDriver = (_eMyDriverName && (r.driver===_eMyDriverName || r.driver2===_eMyDriverName));
+    const _eMyLogin = currentUser && currentUser.name;
+    const _eMyResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[_eMyLogin]) || _eMyDriverName;
+    const _eOwner = getClientOwner(r.client) || feeOwnerFor(r.createdBy);
+    const _eIsOwner = !!(_eOwner && _eOwner===_eMyResolvedIdentity);
+    editBtn.style.display=(_eIsOwner||_eIsDriver)?'inline-flex':'none';
   }
   setCancelBtn(r.status==='cancelled');
   // build view mode detail grid
@@ -6884,9 +7039,9 @@ function renderRideView(r){
 
     ${_bothAddr && (r.pickup||r.home) ? `<div class="detail-row" style="grid-column:1/-1;">
       <div style="display:flex;flex-direction:column;gap:.4rem;">
-        ${r.pickup?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:58px;margin-top:2px;">PICKUP</span><div style="font-size:.86rem;">${mapsLink(r.pickup,"var(--accent)")}</div></div>`:''}
+        ${r.pickup?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:78px;flex-shrink:0;margin-top:2px;">PICKUP</span><div style="font-size:.86rem;">${mapsLink(r.pickup,"var(--accent)")}</div></div>`:''}
         ${extraStopsHtml}
-        ${r.home?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:58px;margin-top:2px;">DESTINATION</span><div style="font-size:.86rem;">${mapsLink(r.home,"var(--accent)")}</div></div>`:''}
+        ${r.home?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:78px;flex-shrink:0;margin-top:2px;">DESTINATION</span><div style="font-size:.86rem;">${mapsLink(r.home,"var(--accent)")}</div></div>`:''}
       </div>
     </div>` : ''}
 
@@ -6999,10 +7154,10 @@ function renderRideView(r){
       return `<div class="detail-row" style="grid-column:1/-1;">
         <div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Actions</div>
         <div style="display:flex;flex-direction:column;gap:.5rem;">
-          ${(getMyDriverName()===r.driver) ? `<div><button onclick="addRideToCalendar(${r.id})" class="btn-secondary" style="width:100%;padding:.6rem;font-size:.88rem;font-weight:700;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:.4rem;">&#128197; Add to calendar</button>
+          ${(getMyDriverName()===r.driver) ? `<div><button onclick="addRideToCalendar(${r.id})" style="width:100%;padding:.6rem;font-size:.88rem;font-weight:700;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:.4rem;background:none;border:1.5px solid #7c3aed;color:#7c3aed;cursor:pointer;font-family:'DM Sans',sans-serif;">&#128197; Add to calendar</button>
           <div style="font-size:.68rem;color:var(--mid);text-align:center;margin-top:3px;">Opens a file you can add to Apple, Google, Outlook, or Skylight</div></div>` : ''}
           ${canSeeContact&&hasIncomeAccess()&&_slLocalType?'<button onclick="shareLocationToClient('+r.id+')" style="padding:.45rem .75rem;background:#0f172a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;">&#128205; Share Location \u2014 let the client see you coming</button>':''}
-          ${(r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')?`<button onclick="sendArrivalText(${r.id})" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.6rem;background:#1d4ed8;border:none;border-radius:8px;color:#fff;font-weight:700;font-size:.88rem;cursor:pointer;font-family:'DM Sans',sans-serif;">\u2708\uFE0F Send arrival text to ${escHtml((r.client||'client').split(' ')[0])}</button>`:''}
+          ${(r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')?`<button onclick="sendArrivalText(${r.id})" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.6rem;background:none;border:1.5px solid #7c3aed;border-radius:8px;color:#7c3aed;font-weight:700;font-size:.88rem;cursor:pointer;font-family:'DM Sans',sans-serif;">\u2708\uFE0F Send arrival text to ${escHtml((r.client||'client').split(' ')[0])}</button>`:''}
           ${_pairedRideForBtn?`<button onclick="openRideModal(${_pairedRideForBtn.id})" style="width:100%;padding:.6rem;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">${_pairedRideForBtn.type==='AP PICK UP'?'\u2708\ufe0f View return leg \u2192':'\u2708\ufe0f View outbound leg \u2192'}</button>`:''}
           ${shareOfferingsBtn}
         </div>
@@ -7139,6 +7294,91 @@ function buildRideBreakdown(r){
   if(!r) return { lines, total: 0 };
   const vehicle = r.vehicle || 'Sedan';
   const base = (typeof BASE!=='undefined' && BASE[vehicle]) ? BASE[vehicle] : 0;
+
+  // AP ROUND TRIP is genuinely two separate legs with independently-determined surcharges
+  // (premium/traffic/christmas/holiday auto-detect from EACH leg's own date & time, same
+  // logic getReturnLegSurcharges uses when the quote is built) - naively doubling the
+  // outbound leg's flags for both legs, as the code below does for other ride types,
+  // produces a breakdown that doesn't match what was actually charged. That mismatch is
+  // exactly what surfaced as a confusing "Discount" reconciliation line on receipts.
+  if(r.type==='AP ROUND TRIP'){
+    const miles = parseFloat(r.miles||0)||0;
+    const overMiles = miles > mileageTrigger() ? miles - includedMiles() : 0;
+    const overage = overMiles * mileageRate();
+    const flagLabels = {premium:'Premium hours',holiday:'Holiday',christmas:'Christmas',late:'Late notice',traffic:'Traffic'};
+
+    function legTimeSurcharges(dateVal, timeVal){
+      const sl = [];
+      if(!dateVal || !timeVal) return sl;
+      const [h,m] = timeVal.split(':').map(Number); const mins = h*60+m;
+      const date = new Date(dateVal+'T12:00:00'); const dow = date.getDay();
+      const mmdd = dateVal.slice(5);
+      if(isPremiumTime(mins) && surcharge('premium')) sl.push({label:flagLabels.premium+' surcharge', val:surcharge('premium')});
+      if(isTrafficTime(dow,mins) && surcharge('traffic')) sl.push({label:flagLabels.traffic+' surcharge', val:surcharge('traffic')});
+      if(isChristmasDate(mmdd) && surcharge('christmas')) sl.push({label:flagLabels.christmas+' surcharge', val:surcharge('christmas')});
+      else if(isHolidayDate(mmdd) && surcharge('holiday')) sl.push({label:flagLabels.holiday+' surcharge', val:surcharge('holiday')});
+      return sl;
+    }
+    // Rides saved with per-leg manual toggles carry rt_premium/rt_traffic/etc. directly -
+    // that's what was actually selected and charged, so use it as-is. Older rides saved
+    // before this feature existed never got those fields at all, so fall back to
+    // re-deriving from the return date/time the same way the quote form used to.
+    const hasManualLegFlags = r.rt_premium!==undefined || r.rt_traffic!==undefined || r.rt_holiday!==undefined || r.rt_christmas!==undefined;
+    function legManualSurcharges(){
+      const sl = [];
+      ['premium','traffic','christmas','holiday'].forEach(function(k){
+        if(k==='holiday' && String(r.rt_christmas)==='Y') return;
+        if(String(r['rt_'+k])==='Y' && surcharge(k)) sl.push({label:flagLabels[k]+' surcharge', val:surcharge(k)});
+      });
+      return sl;
+    }
+    // Manual-flag surcharges (late notice, custom) apply to both legs equally - only
+    // premium/traffic/christmas/holiday differ per leg.
+    function manualSurcharges(){
+      const sl = [];
+      if(String(r.late)==='Y' && surcharge('late')) sl.push({label:flagLabels.late+' surcharge', val:surcharge('late')});
+      try{
+        customSurchargeList().forEach(function(c){
+          if(String(r[c.key])==='Y' && surcharge(c.key)) sl.push({label:c.label+' surcharge', val:surcharge(c.key)});
+        });
+      }catch(e){}
+      return sl;
+    }
+
+    function buildLeg(label, dateVal, timeVal, isReturnLeg){
+      const legLines = [];
+      if(base>0) legLines.push({label:'Base rate ('+vehicle+', incl. '+includedMiles()+' mi) \u2014 '+label, val: base});
+      if(overage>0) legLines.push({label:'Mileage overage ('+overMiles+' mi \u00d7 $'+mileageRate().toFixed(2)+') \u2014 '+label, val: overage});
+      const timeBased = (isReturnLeg && hasManualLegFlags) ? legManualSurcharges() : legTimeSurcharges(dateVal, timeVal);
+      timeBased.forEach(function(s){ legLines.push({label:s.label+' \u2014 '+label, val:s.val}); });
+      manualSurcharges().forEach(function(s){ legLines.push({label:s.label+' \u2014 '+label, val:s.val}); });
+      const legSub = legLines.reduce((s,l)=>s+l.val,0);
+      const fuelFlag = isReturnLeg ? (hasManualLegFlags ? String(r.rt_fuel)==='Y' : String(r.fuel)==='Y') : String(r.fuel)==='Y';
+      const legFuel = fuelFlag ? legSub*fuelRate() : 0;
+      if(legFuel>0) legLines.push({label:fuelLabel()+' \u2014 '+label, val:legFuel});
+      return legLines;
+    }
+
+    const outboundLines = buildLeg('Leg 1 (outbound)', r.date, r.time, false);
+    const returnLines = buildLeg('Leg 2 (return)', r.rtDateAP, r.rtTime, true);
+    const allLines = outboundLines.concat(returnLines);
+    const exactTotal = allLines.reduce((s,l)=>s+l.val,0);
+    const total = Math.floor(exactTotal);
+    // Same rounding absorption as the general path below: the last line quietly picks up
+    // the sub-cent difference so the displayed rows always sum exactly to the total.
+    const roundDelta = Math.round((total-exactTotal)*100)/100;
+    if(Math.abs(roundDelta)>=0.01 && allLines.length){
+      allLines[allLines.length-1].val = Math.round((allLines[allLines.length-1].val+roundDelta)*100)/100;
+    }
+    const savedTotal = parseFloat(r.price||0)||0;
+    const rebuilt = allLines.reduce((s,l)=>s+l.val,0);
+    const diff = Math.round(((savedTotal||rebuilt)-rebuilt)*100)/100;
+    if(savedTotal>0 && Math.abs(diff)>=0.01){
+      allLines.push({label: diff>0?'Additional charges':'Discount', val: diff});
+    }
+    return { lines: allLines, total: savedTotal>0 ? savedTotal : rebuilt };
+  }
+
   const isAP = typeof isAPRideType==='function' ? isAPRideType(r.type) : /^AP/.test(r.type||'');
   const isRT = /ROUND TRIP/i.test(r.type||'') || !!r.rt;
   const legs = isRT ? 2 : 1;
@@ -7799,7 +8039,25 @@ function toggleEditMode(on){
   document.getElementById('rm-view-mode').style.display  = on?'none':'block';
   document.getElementById('rm-edit-mode').style.display  = on?'block':'none';
   var emg=document.getElementById('edit-miles-group');if(emg)emg.style.display=on&&hasIncomeAccess()?'':'none';
-  document.getElementById('rm-edit-btn').style.display   = on?'none':'inline-flex';
+  // Was unconditionally showing Edit whenever not actively editing, silently overriding
+  // the permission-based visibility set in openRideModal (client owner / assigned driver
+  // only). Recompute the same check here so exiting edit mode doesn't make the button
+  // reappear for someone who was never supposed to see it.
+  (function(){
+    var _r = (typeof activeRideId!=='undefined' && activeRideId!=null) ? rides.find(function(x){return x.id===activeRideId;}) : null;
+    var _show = false;
+    if(on){ _show = false; }
+    else if(_r){
+      var _tMyDriverName = getMyDriverName();
+      var _tIsDriver = (_tMyDriverName && (_r.driver===_tMyDriverName || _r.driver2===_tMyDriverName));
+      var _tMyLogin = currentUser && currentUser.name;
+      var _tMyResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[_tMyLogin]) || _tMyDriverName;
+      var _tOwner = getClientOwner(_r.client) || feeOwnerFor(_r.createdBy);
+      var _tIsOwner = !!(_tOwner && _tOwner===_tMyResolvedIdentity);
+      _show = _tIsOwner || _tIsDriver;
+    }
+    var _eb=document.getElementById('rm-edit-btn'); if(_eb) _eb.style.display = _show?'inline-flex':'none';
+  })();
   document.getElementById('rm-save-btn').style.display   = on?'inline-block':'none';
   document.getElementById('rm-cancel-btn').style.display = on?'inline-block':'none';
   // Mark Paid / Delete / Cancel Ride are irrelevant (and a little risky to have sitting right
@@ -7864,11 +8122,18 @@ function toggleEditMode(on){
 
 async function saveRideEdits(){
   const r=rides.find(x=>x.id===activeRideId); if(!r) return;
-  // Creator-only gate (Kat↔Morgan proxy) — defense in depth
-  const _seMe=currentUser&&currentUser.name;
-  const _seRm=PROXY_MAP[_seMe]||USER_DRIVER_MAP[_seMe]||_seMe;
-  const _seRc=PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy;
-  if(!(_seRm&&_seRc&&_seRm===_seRc)){ showToast('Only the ride creator can edit this ride','error'); return; }
+  // Edit permission: the client owner (Kat/Morgan proxy-aware, same rule that decides who
+  // earns the fee - NOT admin status) or the assigned driver. Mirrors canSeeGateCode's
+  // exact pattern for the same reasoning: the owner manages everything about their client's
+  // rides, and a substitute/assigned driver still needs to fix their own ride's details
+  // even if they don't own the client relationship.
+  const _seMyDriverName = getMyDriverName();
+  const _seIsDriver = (_seMyDriverName && (r.driver===_seMyDriverName || r.driver2===_seMyDriverName));
+  const _seMyLogin = currentUser && currentUser.name;
+  const _seMyResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[_seMyLogin]) || _seMyDriverName;
+  const _seOwner = getClientOwner(r.client) || feeOwnerFor(r.createdBy);
+  const _seIsOwner = !!(_seOwner && _seOwner===_seMyResolvedIdentity);
+  if(!_seIsOwner && !_seIsDriver){ showToast('Only the client owner or assigned driver can edit this ride','error'); return; }
   // Apply all edits
   r.client    = document.getElementById('edit-client').value.trim()||r.client;
   r.phone     = formatPhoneUS(document.getElementById('edit-phone').value);
@@ -9313,7 +9578,20 @@ function _locBtn(label,style,onclick){
 function _mtUpdateBar(){
   try{ if(typeof renderDashGpsBar==='function') renderDashGpsBar(); }catch(e){}
   var bar=document.getElementById('mt-bar');if(!bar)return;
-  bar.className='mt-bar'+((_mtWatchId||_mtAccum>0)?' mt-active':'');
+  // Toggling just the class was never enough - the actual buttons shown (Start Ride/GPS
+  // vs. Pause/Stop GPS) come from mtBarHtml's inner content, which this never rebuilt.
+  // Result: GPS tracking would genuinely start, but the ride modal kept showing the
+  // original Start Ride/GPS buttons as if nothing had happened.
+  var rid = (typeof activeRideId!=='undefined' && activeRideId) ? activeRideId
+    : (_mtRideIds && _mtRideIds.length ? _mtRideIds[_mtRideIds.length-1] : null);
+  if(rid!=null){
+    var wrap = bar.parentElement;
+    var newHtml = mtBarHtml(rid);
+    if(wrap && newHtml){ wrap.innerHTML = newHtml; }
+    else if(!newHtml && wrap){ wrap.innerHTML = ''; } // bar correctly disappears (e.g. now paid)
+  } else {
+    bar.className='mt-bar'+((_mtWatchId||_mtAccum>0)?' mt-active':'');
+  }
 }
 
 // ── STOP POPUP ────────────────────────────────────────────────────────────
@@ -9388,18 +9666,15 @@ async function _mtConfirmSession(){
     var r=rides.find(function(x){return x.id===id;});
     if(!r)continue;
     var miEl=document.getElementById('mt-mi-'+id);
-    var tipEl=document.getElementById('mt-tip-'+id);
     r.drivenMiles=parseFloat(miEl?miEl.value:0)||0;
-    var tipVal=parseFloat(tipEl?tipEl.value:0)||0;
-    if(tipVal>0)r.tip=tipVal;
-    saved.push((r.client||'Ride')+': '+r.miles+' mi'+(tipVal?', $'+tipVal+' tip':''));
+    saved.push((r.client||'Ride')+': '+r.drivenMiles+' mi');
   }
   try{await saveRides();}catch(e){console.warn(e);}
   _mtClosePop();
   _mtClearCheckpoint();
   _mtRideIds=[];_mtAccum=0;_mtLastPos=null;
   _mtUpdateBar();
-  showToast('\uD83D\uDCCD Session saved \u2014 '+saved.length+' ride'+(saved.length!==1?'s':''));
+  showToast('\uD83D\uDCCD Mileage saved \u2014 '+saved.length+' ride'+(saved.length!==1?'s':''));
 }
 
 function _mtShowStopPopup(){
@@ -9420,12 +9695,9 @@ function _mtShowStopPopup(){
       +'<div style="font-size:.72rem;color:#64748b;">'+escHtml((r.date||'')+' '+(fmtTime12(r.time)||''))+'</div></div>'
       +'<div style="font-size:.8rem;font-weight:600;color:#7c3aed;">$'+(r.fare||0)+'</div>'
       +'</div>'
-      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;">'
       +'<div><label style="font-size:.7rem;font-weight:600;color:#64748b;display:block;margin-bottom:2px;">MILES</label>'
       +'<input id="mt-mi-'+id+'" type="number" min="0" step="0.01" value="'+mi+'" style="width:100%;padding:.4rem .5rem;border:1.5px solid #c4b5fd;border-radius:6px;font-family:inherit;font-size:.88rem;box-sizing:border-box;"></div>'
-      +'<div><label style="font-size:.7rem;font-weight:600;color:#64748b;display:block;margin-bottom:2px;">TIP $</label>'
-      +'<input id="mt-tip-'+id+'" type="number" min="0" step="0.01" placeholder="0.00" style="width:100%;padding:.4rem .5rem;border:1.5px solid #d1d5db;border-radius:6px;font-family:inherit;font-size:.88rem;box-sizing:border-box;"></div>'
-      +'</div></div>';
+      +'</div>';
   });
 
   var popup=document.createElement('div');
@@ -9439,7 +9711,7 @@ function _mtShowStopPopup(){
   popup.innerHTML='<div style="background:#fff;border-radius:16px;max-width:480px;width:100%;margin:auto;padding:1.25rem;box-shadow:0 24px 60px rgba(0,0,0,.35);display:flex;flex-direction:column;box-sizing:border-box;">'
     // header
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">'
-    +'<div><div style="font-size:1.05rem;font-weight:800;color:#0f172a;">\uD83D\uDCCD Session Summary</div>'
+    +'<div><div style="font-size:1.05rem;font-weight:800;color:#0f172a;">\uD83D\uDCCD Verify Mileage</div>'
     +'<div style="font-size:.78rem;color:#64748b;margin-top:1px;">'+total+' mi total \u2022 '+cnt+' ride'+(cnt!==1?'s':'')+'</div></div>'
     +'<button onclick="_mtClosePop()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;padding:0 .25rem;">&times;</button>'
     +'</div>'
@@ -9462,7 +9734,7 @@ function _mtShowStopPopup(){
     // buttons
     +'<div style="display:flex;gap:.6rem;">'
     +'<button onclick="_mtClosePop()" style="flex:1;padding:.6rem;background:#f1f5f9;color:#475569;border:none;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:600;cursor:pointer;">Cancel</button>'
-    +'<button onclick="_mtConfirmSession()" style="flex:2;padding:.6rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:700;cursor:pointer;">\uD83D\uDCBE Save Session</button>'
+    +'<button onclick="_mtConfirmSession()" style="flex:2;padding:.6rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:700;cursor:pointer;">\uD83D\uDCBE Save Mileage</button>'
     +'</div>'
     +'</div>';
   document.body.appendChild(popup);
@@ -9616,11 +9888,11 @@ function mtBarHtml(rid){
     )
     +'<div style="display:flex;gap:5px;flex-wrap:wrap;width:100%;">'
     +(on
-      ? '<button onclick="mtPause()" style="padding:.42rem .8rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;border:none;background:#f59e0b;color:#fff;">&#9208; Pause</button>'
-        +'<button onclick="mtStop()" style="padding:.42rem .85rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;border:none;background:#dc2626;color:#fff;">&#9209; Stop GPS</button>'
+      ? '<button onclick="mtPause()" style="flex:1;padding:.7rem .8rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;border:none;background:#f59e0b;color:#fff;">&#9208; Pause</button>'
+        +'<button onclick="mtStop()" style="flex:1;padding:.7rem .85rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;border:none;background:#dc2626;color:#fff;">&#9209; Stop GPS</button>'
       : paused
-      ? '<button onclick="mtResume()" style="padding:.42rem .9rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;border:none;background:#15803d;color:#fff;">&#9654; Resume</button>'
-        +'<button onclick="mtStop()" style="padding:.42rem .85rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;border:none;background:#dc2626;color:#fff;">&#9209; Stop &amp; Save</button>'
+      ? '<button onclick="mtResume()" style="flex:1;padding:.7rem .9rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;border:none;background:#15803d;color:#fff;">&#9654; Resume</button>'
+        +'<button onclick="mtStop()" style="flex:1;padding:.7rem .85rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;border:none;background:#dc2626;color:#fff;">&#9209; Stop &amp; Save</button>'
       : (isRideDay?'<button onclick="openStartRide('+rid+')" style="flex:1;padding:.7rem .9rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;">&#128663; Start Ride</button>':'')
         +(isRideDay?'<button onclick="mtStart('+rid+')" style="flex:1;padding:.7rem .9rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#475569;color:#fff;" title="Track miles by GPS only \u2014 no map handoff. Use when you just want mileage logged.">&#128225; GPS</button>':'')
     )
@@ -9647,17 +9919,23 @@ function openHeartedRides(){ closeHeartedRides(); var back=document.createElemen
 function renderInterest(r){
   const el = document.getElementById('rm-interest');
   if(!el) return;
-  // Once a driver is assigned, "who can take this ride?" no longer applies — the interest
-  // list existed to help find a driver for an OPEN ride, not to track sentiment afterward.
-  if(r.driver){ el.innerHTML=''; el.style.display='none'; return; }
   const interest = r.interest || {};
   const names = Object.keys(interest).sort((a,b)=>interest[a]-interest[b]);
   const me = myInterestKey();
   const iAmIn = !!(me && interest[me]);
   const count = names.length;
+  const iCreated = canSeeInterestList(r);
+  // "Has a driver been assigned" isn't the right signal here - the client owner defaults
+  // into r.driver the moment a ride is created, well before any real dispatch decision, so
+  // gating on r.driver alone was hiding this for rides that were never actually confirmed
+  // to anyone yet. The confirmation text going out is the real point a driver is finalized.
+  // Non-owners lose the box entirely once confirmed - nothing left for them to do here.
+  // The owner (Kat/Morgan-aware) keeps seeing the interest list even after confirmation,
+  // so if a driver change becomes necessary later, they can still see who else was
+  // interested rather than starting from zero.
+  if(r.confirmSent && !iCreated){ el.innerHTML=''; el.style.display='none'; return; }
   // Don't prompt the creator to be "interested" in their own ride. Hide the bubble
   // entirely when nobody else is interested; if others are, still show who (below).
-  const iCreated = canSeeInterestList(r);
   if(iCreated && count===0){ el.innerHTML=''; el.style.display='none'; return; }
   // Non-owners never see the list; without a driver identity there's nothing to show them.
   if(!iCreated && !me){ el.innerHTML=''; el.style.display='none'; return; }
@@ -9679,7 +9957,7 @@ function renderInterest(r){
     <div style="background:var(--gold-pale);border:1px solid var(--light);border-radius:10px;padding:.85rem 1rem;margin-bottom:.75rem;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap;">
         <div style="font-size:.78rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);">
-          ${(count&&iCreated)?`❤️ ${count} interested`:(iAmIn?'❤️ You\'re interested in this ride':(r.driver?'Interested in covering this ride?':'Who can take this ride?'))}
+          ${(count&&iCreated)?`❤️ ${count} interested`:(iAmIn?'❤️ You\'re interested in this ride':'Interested in covering this ride?')}
         </div>
         ${(me && !iCreated)?`<button onclick="toggleInterest(${r.id})" style="display:inline-flex;align-items:center;gap:.4rem;cursor:pointer;border-radius:999px;padding:.45rem .95rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;${iAmIn?'background:#e0245e;color:#fff;border:1.5px solid #e0245e;':'background:transparent;color:#e0245e;border:1.5px solid #e0245e;'}">
             ${iAmIn?'❤️ Interested':'🤍 I\'m interested'}
@@ -12703,6 +12981,13 @@ function refreshDash(){
         <div class="ride-detail" style="color:${tc};opacity:.78;">${r.type} · ${vehTag(r.vehicle)} · ${r.driver?driverShortName(r.driver):'<em>Unassigned</em>'}</div>
       </div>
       <span class="badge ${typeCls}">${r.type}${apVehSuffix(r)}</span>
+      ${(function(){
+        const _alreadyTracking = typeof _mtWatchId!=='undefined' && _mtWatchId && _mtRideIds.indexOf(r.id)>=0;
+        const _canStartHere = r.status!=='paid' && typeof _isRideWithinHours==='function' && _isRideWithinHours(r,12) && !_alreadyTracking;
+        return _canStartHere
+          ? `<button onclick="event.stopPropagation();openStartRide(${r.id})" style="flex-shrink:0;padding:.4rem .8rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;white-space:nowrap;">&#128663; Start Ride</button>`
+          : (_alreadyTracking ? `<span style="flex-shrink:0;display:inline-block;font-size:.68rem;background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:8px;padding:3px 8px;font-weight:700;animation:mt-pulse .9s ease-in-out infinite;">&#128205; Live tracking</span>` : '');
+      })()}
       <div class="ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}</div>
     </div>`;
   }).join(''):'<div style="text-align:center;padding:2rem 1rem;color:var(--mid);"><div style="font-size:2rem;margin-bottom:.4rem;">\uD83D\uDE97</div><div style="font-weight:600;color:var(--black);margin-bottom:.2rem;">No rides yet</div><div style="font-size:.85rem;line-height:1.5;">Nothing\u2019s broken \u2014 you just don\u2019t have any upcoming rides right now. New rides you\u2019re driving will show up here automatically.</div></div>';
@@ -15138,8 +15423,8 @@ function buildMemberCard(d, opts){
            })())
           +'<div style="font-size:.68rem;color:var(--mid);margin-bottom:1px;font-weight:600;">Specific days off</div>'
           +'<div style="font-size:.63rem;color:var(--mid);margin-bottom:4px;line-height:1.4;">Pick a single date you can\u2019t drive (like a vacation day). Each date you add is kept \u2014 adding a new one won\u2019t erase the others.</div>'
-          +'<div style="display:flex;gap:.4rem;margin-bottom:.4rem;">'
-          +'<input type="date" id="avail-date-'+dk+'" style="flex:1;min-width:0;padding:.35rem .5rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
+          +'<div style="display:flex;gap:.4rem;margin-bottom:.4rem;flex-wrap:wrap;">'
+          +'<input type="date" id="avail-date-'+dk+'" style="flex:1;min-width:132px;padding:.35rem .5rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
           +'<select id="avail-repeat-'+dk+'" style="padding:.35rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;"><option value="none">One-time</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select>'
           +'<button onclick="addUnavailDate(\''+d+'\')" style="padding:.35rem .8rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Add</button>'
           +'</div>'
@@ -15151,8 +15436,8 @@ function buildMemberCard(d, opts){
           +'</div>'
           +'<div style="margin-top:.7rem;font-size:.68rem;color:var(--mid);margin-bottom:3px;">Available anyway (override a day off)</div>'
           +'<div style="font-size:.64rem;color:var(--mid);margin-bottom:4px;line-height:1.4;">Mark a single date you <em>can</em> drive even though it&rsquo;s a standing day off &mdash; e.g. a weekday your day job is closed. Doesn&rsquo;t change your regular schedule.</div>'
-          +'<div style="display:flex;gap:.4rem;margin-bottom:.4rem;">'
-          +'<input type="date" id="avail-exc-date-'+dk+'" style="flex:1;min-width:0;padding:.35rem .5rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
+          +'<div style="display:flex;gap:.4rem;margin-bottom:.4rem;flex-wrap:wrap;">'
+          +'<input type="date" id="avail-exc-date-'+dk+'" style="flex:1;min-width:132px;padding:.35rem .5rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
           +'<button onclick="addAvailableDate(\''+d+'\')" style="padding:.35rem .8rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Add</button>'
           +'</div>'
           +'<div style="display:flex;flex-wrap:wrap;gap:4px;">'
@@ -15181,10 +15466,12 @@ function buildMemberCard(d, opts){
             +(prof.unavailHours||[]).map(blk=>{
               const dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
               const label=blk.date?fmtDateShort(blk.date):(blk.days||[]).map(d2=>dayNames[d2]).join('/');
-              return '<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:2px;">'
-                +'<span style="font-size:.72rem;color:var(--black);">'+label+' '+fmtTime12(blk.from)+'\u2013'+fmtTime12(blk.to)+'</span>'
+              return '<div style="display:flex;align-items:flex-start;gap:.4rem;margin-bottom:2px;">'
+                +'<span style="flex:1;min-width:0;font-size:.72rem;color:var(--black);padding-top:1px;">'+label+' '+fmtTime12(blk.from)+'\u2013'+fmtTime12(blk.to)+'</span>'
+                +'<span style="flex-shrink:0;display:flex;gap:.3rem;">'
                 +'<button onclick="openEditHourModal(\''+d+'\',\''+blk.id+'\')" style="padding:1px 4px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:.65rem;cursor:pointer;">\u270f\ufe0f</button>'
                 +'<button onclick="removeUnavailHour(\''+d+'\',\''+blk.id+'\')" style="padding:1px 5px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-size:.65rem;cursor:pointer;">\u00d7</button>'
+                +'</span>'
               +'</div>';
             }).join('')
           :'')
@@ -18373,6 +18660,52 @@ async function copyConfPart(id, partKey){
   }
 }
 
+// Arrival texts are a real-time "I've landed" exchange between whoever's physically
+// driving and the client waiting for them - not a scheduling/coordination message, so
+// unlike confirmationRecipients() (used for the confirmation text, pickup instructions,
+// etc.) this deliberately leaves out the ride's creator/owner and the Kat/Morgan loop-in.
+// Client + assigned driver(s) only.
+function arrivalTextRecipients(r){
+  const seen=new Set();
+  const out=[];
+  const _digits10 = s => (s||'').replace(/\D/g,'').slice(-10);
+  const _meName = (typeof currentUser!=='undefined' && currentUser) ? currentUser.name : null;
+  const _meDriver = _meName ? (USER_DRIVER_MAP[_meName] || _meName) : null;
+  const _mePhone = _digits10(_meDriver ? (DRIVER_PROFILES[_meDriver]||{}).phone : '');
+  const add=(name,raw)=>{
+    if(!_looksLikePhone(raw)) return;
+    const d=(raw||'').replace(/[^0-9+]/g,'');
+    if(!d || seen.has(d)) return;
+    if(_mePhone && _digits10(d)===_mePhone) return; // never text the sender themselves
+    seen.add(d);
+    out.push({ name:(name||d), phone:d });
+  };
+  add(r.client||'Client', clientPhoneFor(r));
+  (r.extraPhones||'').split(/[,;]/).forEach(function(p){
+    p=(p||'').trim(); if(!p) return;
+    const phone=_extractPhone(p);
+    if(!phone) return;
+    const label=p.replace(phone,'').replace(/[()]/g,'').trim().replace(/^[\-–—:,]+|[\-–—:,]+$/g,'').trim();
+    add(label||null, phone);
+  });
+  if(r.driver) add(driverShortName(r.driver), (DRIVER_PROFILES[r.driver]||{}).phone);
+  if(r.xxl && r.driver2) add(r.driver2.split(' ')[0], (DRIVER_PROFILES[r.driver2]||{}).phone);
+  return out;
+}
+function openArrivalThread(id, body){
+  const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
+  const recips=arrivalTextRecipients(r);
+  const nums=recips.map(function(x){ return x.phone; });
+  if(!nums.length){ showToast('\u26a0 No phone numbers found for this ride \u2014 add the client\'s number first'); return; }
+  const cp=(clientPhoneFor(r)||'').replace(/[^0-9+]/g,'');
+  const cp10=cp.replace(/\D/g,'').slice(-10);
+  const clientIn = !!cp10 && recips.some(function(x){ return (x.phone||'').replace(/\D/g,'').slice(-10)===cp10; });
+  if(!clientIn){
+    showToast('\u26a0 '+(r.client||'The client')+' has no phone on file \u2014 this text reaches only the driver. Add their number to the ride, then resend.');
+  }
+  const sep=/iphone|ipad|ipod|mac/i.test(navigator.userAgent)?'&':'?';
+  window.location.href='sms:'+nums.join(',')+sep+'body='+encodeURIComponent(body||'');
+}
 function openGroupThread(id, body){
   const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
   const recips=confirmationRecipients(r);
@@ -18701,10 +19034,11 @@ function sendArrivalText(id){
   if(typeof confirmTextGate==='function' && !confirmTextGate()) return;
   var r=_rideById(id);
   if(!r){ showToast('Ride not found','error'); return; }
-  openGroupThread(id, buildArrivalText(r));
+  openArrivalThread(id, buildArrivalText(r));
   try{ markPartSent(id,'arrival'); }catch(e){}
   r.arrivalSentAt=Date.now(); try{ saveRides(); }catch(e){}
   try{ if(typeof renderDashArrivals==='function') renderDashArrivals(); }catch(e){}
+  try{ if(typeof renderDashFlightTracking==='function') renderDashFlightTracking(); }catch(e){}
   showToast('\u2708\uFE0F Arrival text opened \u2014 tap send in Messages');
 }
 // Dashboard arrival flow: confirm first, then send. 'No' just closes and leaves the row.
@@ -18769,6 +19103,11 @@ function renderDashFlightTracking(){
     // than touch the shared helper — mtBarHtml still legitimately depends on its unbounded
     // lookback — add this widget's own forward-only bound on top of it.
     if(!r || !_isRideWithinHours(r,12) || _hoursUntilRide(r)<0 || r.status==='cancelled' || r.status==='paid' || r.status==='placeholder') return false;
+    // Once the arrival text has gone out, this flight has already been handled - the
+    // driver knows the client landed. Keeping the Track button around after that point
+    // is stale, same reasoning that already hides the ride from "Airport pickups today"
+    // once arrivalSentAt is set.
+    if(r.arrivalSentAt) return false;
     if(r.type!=='AP RUN' && r.type!=='AP PICK UP' && r.type!=='AP ROUND TRIP') return false;
     if(!r.flight) return false;
     // Flights I need to watch = flights I am DRIVING. Same rule as the "Rides you're
