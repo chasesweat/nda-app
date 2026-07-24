@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607241669">
+<meta name="version" content="202607241670">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -11398,11 +11398,23 @@ async function shareRideToOfferings(id){
 
 // \u2500\u2500 TEAM CHAT init
 async function initChat(){
-  const stored = await storageGet('kat:chatLastRead');
+  // Scoped per-user (matches the design comment above: nda/kat/chatLastRead/{userKey} -> that
+  // user's own {channelKey:timestamp} map) - NOT the bare, shared 'kat:chatLastRead' this used
+  // to read, which every user's browser was overwriting with their own read-state on every
+  // channel switch, silently clobbering everyone else's.
+  const _myReadKey = (getMyDriverName() || currentUser?.name || '').replace(/ /g,'_');
+  const stored = _myReadKey ? await storageGet('kat:chatLastRead:'+_myReadKey) : null;
   if(stored) chatLastRead = stored;
   listenAllChat();          // discover ALL channels (group + every DM I'm part of), even ones others started
   listenChatTyping();
   chatChannel = 'offerings';
+  // Landing here on open is not the same as switchChatChannel() - mark it read directly (not by
+  // calling switchChatChannel itself, which also auto-focuses the message input; doing that on
+  // simple page load would pop the keyboard open on mobile from just navigating to the tab).
+  // Without this, the default tab could sit fully visible and still count as unread forever,
+  // since nothing ever marked it read unless the user clicked away and back.
+  chatLastRead['offerings'] = Date.now();
+  if(_myReadKey) storageSet('kat:chatLastRead:'+_myReadKey, chatLastRead);
   renderChatTabs();
   renderChatMessages();
   updateChatBadge();
@@ -11516,9 +11528,11 @@ function switchChatChannel(channelKey){
   chatChannel = channelKey;
   if(channelKey !== 'group' && channelKey !== 'offerings' && channelKey !== 'updates') openedDMs.add(channelKey);
 
-  // Mark as read
+  // Mark as read - saved to MY OWN scoped key, same as the load above, so this can never
+  // overwrite (or be overwritten by) another user's read-state.
   chatLastRead[channelKey] = Date.now();
-  storageSet('kat:chatLastRead', chatLastRead);
+  const _myReadKey = (getMyDriverName() || currentUser?.name || '').replace(/ /g,'_');
+  if(_myReadKey) storageSet('kat:chatLastRead:'+_myReadKey, chatLastRead);
 
   // The global listener (listenAllChat) already keeps every channel in sync,
   // so we just re-render here.
