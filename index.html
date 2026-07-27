@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607241674">
+<meta name="version" content="202607241689">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -548,8 +548,6 @@ input,select,textarea{font-size:16px;}
     <div id="dash-income-overview" style="margin-bottom:1.5rem;"></div>
     <div id="dash-fees" style="margin-bottom:1.5rem;"></div>
     <!-- Action blocks: confirmations to send, then rides to wrap up, then upcoming -->
-    <div id="dash-arrivals" style="margin-bottom:1.5rem;"></div>
-    <div id="dash-flight-tracking" style="margin-bottom:1.5rem;"></div>
     <div id="dash-gate-codes" style="margin-bottom:1.5rem;"></div>
         <div id="dash-confirmations" style="margin-bottom:1.5rem;"></div>
     <div id="dash-needs-attention" style="margin-bottom:1.5rem;"></div>
@@ -882,12 +880,14 @@ input,select,textarea{font-size:16px;}
       <button class="cal-tab active" id="mptab-me" onclick="switchProfileTab('me',this)">My Info</button>
       <button class="cal-tab" id="mptab-account" onclick="switchProfileTab('account',this)">Account Settings</button>
       <button class="cal-tab" id="mptab-access" onclick="switchProfileTab('access',this)" style="display:none;">Access control</button>
+      <button class="cal-tab" id="mptab-archived" onclick="switchProfileTab('archived',this)" style="display:none;">Archived Drivers</button>
       <button class="cal-tab" id="mptab-pricing" onclick="switchProfileTab('pricing',this)" style="display:none;">Pricing</button>
       <button class="cal-tab" id="mptab-templates" onclick="switchProfileTab('templates',this)" style="display:none;">Message Templates</button>
     </div>
     <div id="profile-panel-me">
       <div id="profile-driver-picker"></div>
       <div id="myprofile-card" class="myprofile-card-wrap" style="margin:0 auto;"></div>
+      <div id="booking-link-card" style="margin:0 auto;max-width:520px;"></div>
     </div>
     <div id="profile-panel-account" style="display:none;">
       <div class="myprofile-card-wrap" style="margin:0 auto;">
@@ -907,6 +907,7 @@ input,select,textarea{font-size:16px;}
       </div>
     </div>
     <div id="driver-panel-access" style="display:none;"><div id="access-control-list"></div></div>
+    <div id="driver-panel-archived" style="display:none;"><div id="archived-drivers-list"></div></div>
     <div id="driver-panel-pricing" style="display:none;"></div>
     <div id="driver-panel-templates" style="display:none;"></div>
   </div>
@@ -1376,6 +1377,15 @@ input,select,textarea{font-size:16px;}
 
       <div class="form-group"><label>Payment methods you accept</label>
         <div id="onb-payments" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.3rem;"></div>
+      </div>
+
+      <div class="form-group" style="background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.75rem .85rem;">
+        <div style="font-size:.85rem;font-weight:700;color:var(--black);margin-bottom:.2rem;">Booking your own clients?</div>
+        <div style="font-size:.7rem;color:var(--mid);margin:0 0 .6rem;line-height:1.45;">Some drivers keep their own client list and want a personal link clients can use to request rides directly. If you'd rather just drive and never deal with that, say no — nothing about it will show up in your app.</div>
+        <div style="display:flex;gap:.5rem;">
+          <button type="button" id="onb-books-yes" onclick="_onbSetBooksClients(true)" style="flex:1;padding:.55rem;border-radius:8px;border:1.5px solid var(--light);background:#fff;color:var(--mid);font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;">Yes</button>
+          <button type="button" id="onb-books-no" onclick="_onbSetBooksClients(false)" style="flex:1;padding:.55rem;border-radius:8px;border:1.5px solid var(--light);background:#fff;color:var(--mid);font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;">No</button>
+        </div>
       </div>
 
       <div class="form-group" style="background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.75rem .85rem;">
@@ -2286,6 +2296,7 @@ async function _loadAppData() {
         const storedProfiles = await storageGet('kat:driverProfiles');
         if(storedProfiles) Object.assign(DRIVER_PROFILES, storedProfiles);
         await loadAddedDrivers();
+        await applyArchivedDriverFilter();
         try{
           const _po=await storageGet('kat:driverPhotoOverrides');
           if(_po && typeof DRIVER_PHOTOS!=='undefined'){ Object.keys(_po).forEach(function(k){ if(_po[k]) DRIVER_PHOTOS[k]=_po[k]; }); }
@@ -2611,6 +2622,47 @@ async function checkForActiveSOSOnLogin(){
 }
 
 // Poll for SOS updates every 90 seconds while app is open
+// Poll for new client requests every 60 seconds while the app is open - same pattern as
+// startSOSPolling() for SOS alerts. Only ever looks at requests addressed to the CURRENT
+// logged-in driver's own login name; never touches anyone else's.
+function startClientRequestPolling(){
+  processClientRequests();
+  setInterval(function(){ processClientRequests(); }, 60000);
+}
+
+async function processClientRequests(){
+  if(!currentUser) return;
+  var myDriverName = getMyDriverName();
+  if(!myDriverName) return;
+  if(BOOKING_LINK_ROLLOUT_ALLOWLIST.indexOf(myDriverName) < 0) return; // not eligible - nothing to check
+  var myLogin = _loginForDriver(myDriverName);
+  if(!myLogin) return;
+  try{
+    var reqs = await storageGet('kat:clientRequests');
+    if(!reqs || typeof reqs!=='object') return;
+    var changed = false;
+    for(var id in reqs){
+      var r = reqs[id];
+      if(!r || r.status!=='pending') continue;
+      if((r.loginName||'').toLowerCase() !== myLogin.toLowerCase()) continue;
+      var kind = r.requestType==='quote' ? 'Quote request' : 'Ride request';
+      var msg = kind+' from '+(r.clientName||'a client')+' ('+(r.clientPhone||'no phone given')+') via your booking link \u2014 '
+        +(r.pickup||'?')+' \u2192 '+(r.destination||'?')+(r.date?', '+r.date:'')+(r.time?' '+r.time:'')
+        +(r.notes?'. Notes: '+r.notes:'');
+      if(!notifications[myDriverName]) notifications[myDriverName] = [];
+      notifications[myDriverName].unshift({ rideId:null, type:'client_request', channel:null, read:false, msg:msg, ts:Date.now(), createdBy:'', clientRequestId:id });
+      if(typeof sendPushToDriver==='function') sendPushToDriver(myDriverName, '\ud83d\udccb New request via your booking link', kind+' from '+(r.clientName||'a client'));
+      reqs[id].status = 'processed';
+      changed = true;
+    }
+    if(changed){
+      await saveNotifs();
+      await storageSet('kat:clientRequests', reqs);
+      if(typeof renderNotifPanel==='function') renderNotifPanel();
+    }
+  }catch(e){ console.warn('processClientRequests', e); }
+}
+
 function startSOSPolling(){
   setInterval(async function(){
     if(!currentUser) return;
@@ -7299,6 +7351,11 @@ function renderRideView(r){
   // everything AFTER that call too, silently skipping their own toast/refresh/button updates.
   // Wrapping the whole function turns that into a visible, diagnosable failure instead.
   try{
+  // Keeps the Mark Paid / Paid button correct for whichever ride is actually being shown -
+  // see _syncPaidBtn()'s own comment. Placed first, inside the same try this function already
+  // wraps everything in, so it still runs even if something later in this 250+-line template
+  // throws on a real ride's particular field combination (documented above).
+  _syncPaidBtn(r);
   const driverFirst = driverShortName(r.driver);
   const color = rideColor(r);
   const ink = readableInk(color);
@@ -7383,15 +7440,18 @@ function renderRideView(r){
       const prevFare = parseFloat(prev.price||0);
       const total = thisFare + prevFare;
       const fmt = n => '$'+Number(n).toFixed(2).replace(/\.00$/,'');
-      return `<div style="grid-column:1/-1;background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:.7rem .9rem;margin-bottom:.5rem;">
-        <div style="font-weight:700;color:#b91c1c;font-size:.9rem;margin-bottom:.35rem;">⚠️ Previous ride unpaid</div>
+      return `<div onclick="event.stopPropagation();openRideModal(${prev.id})" style="grid-column:1/-1;background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:.7rem .9rem;margin-bottom:.5rem;cursor:pointer;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.35rem;">
+        <div style="font-weight:700;color:#b91c1c;font-size:.9rem;">⚠️ Previous ride unpaid</div>
+        <span style="font-size:.72rem;font-weight:700;color:#b91c1c;white-space:nowrap;">Tap to open →</span>
+        </div>
         <div style="font-size:.82rem;color:#7f1d1d;line-height:1.5;">${escHtml(prevDriver)} is owed ${fmt(prevFare)} for ${escHtml(r.client)}'s ${fmtDateShort(prev.date)} ride, which hasn't been marked paid yet.</div>
         <div style="margin-top:.5rem;padding-top:.5rem;border-top:1px dashed #fca5a5;font-size:.82rem;color:#7f1d1d;line-height:1.7;">
           Amount owed for this ride: <strong>${fmt(thisFare)}</strong><br>
           Amount owed to ${escHtml(prevDriver)} for previous ride: <strong>${fmt(prevFare)}</strong><br>
           <span style="font-size:.92rem;color:#b91c1c;">Total owed: <strong>${fmt(total)}</strong></span>
         </div>
-        <div style="margin-top:.55rem;"><button onclick="payPrevRideVenmo('${prev.id}')" style="background:#3d95ce;color:#fff;border:none;border-radius:8px;padding:.5rem .9rem;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;">\uD83D\uDCB8 Pay ${escHtml((prevDriver||'').split(' ')[0])} for previous ride</button></div>
+        <div style="margin-top:.55rem;"><button onclick="event.stopPropagation();payPrevRideVenmo('${prev.id}')" style="background:#3d95ce;color:#fff;border:none;border-radius:8px;padding:.5rem .9rem;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;">\uD83D\uDCB8 Pay ${escHtml((prevDriver||'').split(' ')[0])} for previous ride</button></div>
       </div>`;
     })()}
     <div style="grid-column:1/-1;background:${color}66;border-left:5px solid ${color};border-radius:8px;padding:.85rem 1rem;margin-bottom:.5rem;">
@@ -7657,19 +7717,219 @@ async function _repairDuplicateIds(){
   return changed;
 }
 
+// ── COMBINED MARK PAID (miles, tip, gas, payment method, receipt — one form, one save) ──
+// Replaces the old chain (toggleRidePaid -> setRideStatus save -> openLogMiles -> its own
+// save -> 180ms wait -> openPaymentModal -> its own save -> 200ms wait -> fee prompt), which
+// meant 3+ sequential database round-trips and two artificial pauses for what is, from the
+// driver's own perspective, one single action: closing out a finished ride. Chase's own
+// framing: "it all flows together... can we not just save it all at the same time."
+//
+// openLogMiles() itself is untouched and stays fully independent - a driver logging mileage
+// on a ride that isn't being marked paid yet (the whole point of Stop Ride existing separately
+// from Mark Paid, from earlier this session) still needs that standalone path. This is a
+// genuinely different entry point for a genuinely different moment: the ride is actually done.
+function openMarkPaidCombined(rideId){
+  var r=_rideById(rideId);
+  if(!r||r.status==='cancelled'||r.status==='placeholder') return;
+  _mtLoadGasPrice();
+  _payRideId = r.id;
+  _paySelectedMethod = r.payment && PAY_METHODS.indexOf(r.payment)>=0 ? r.payment : (r.payment ? 'Other' : '');
+  var hasAcc = (typeof rideTipReceiptAllowed==='function') ? rideTipReceiptAllowed(r) : true;
+
+  var _stale=document.getElementById('mark-paid-overlay'); if(_stale){ _unpinOverlay(_stale); _stale.remove(); }
+  var ov=document.createElement('div');
+  ov.id='mark-paid-overlay';
+  ov.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,.65);z-index:14000;'
+    +'display:flex;justify-content:center;padding:1rem;overflow-y:auto;box-sizing:border-box;';
+  ov.onclick=function(e){if(e.target===ov)_closeMarkPaidCombined();};
+
+  var methodBtnsHtml = PAY_METHODS.map(function(m){
+    var active = (m===_paySelectedMethod);
+    return '<button type="button" onclick="_paySelectMethodCombined(\''+m+'\')" '
+      +'style="flex:0 0 auto;padding:.45rem .9rem;border:1.5px solid '+(active?'var(--accent)':'var(--light)')
+      +';border-radius:20px;background:'+(active?'var(--accent)':'#fff')+';color:'+(active?'#fff':'#000')
+      +';font-family:inherit;font-size:.82rem;font-weight:600;cursor:pointer;">'+m+'</button>';
+  }).join('');
+
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:400px;width:100%;margin:auto;padding:1.25rem;'
+    +'box-shadow:0 24px 60px rgba(0,0,0,.35);box-sizing:border-box;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.9rem;">'
+    +'<div><div style="font-size:1.05rem;font-weight:800;color:#0f172a;">\ud83d\udcb0 Mark Paid</div>'
+    +'<div style="font-size:.75rem;color:#64748b;margin-top:2px;">'+escHtml(r.client||'')+'</div></div>'
+    +'<button onclick="_closeMarkPaidCombined()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button>'
+    +'</div>'
+    +((r.odoStart!=null && r.odoEnd==null && r.odoStartAt && (Date.now()-r.odoStartAt) > 2*60*60*1000)
+      ? '<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:9px;padding:.6rem .8rem;margin-bottom:.75rem;font-size:.74rem;color:#7c2d12;line-height:1.5;">\u26a0\ufe0f You didn\u2019t log your ending odometer for this ride. Not a problem \u2014 just enter your mileage from Maps below like normal.</div>'
+      : '')
+    +'<div style="font-size:.66rem;color:#94a3b8;margin-bottom:.6rem;line-height:1.4;">Miles: total from Waze / Apple / Google Maps \u2014 include the drive to pick them up, not just the ride itself.</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin-bottom:.75rem;align-items:end;">'
+    +'<div><label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">MILES DRIVEN</label>'
+    +'<input id="mp-miles" type="number" min="0" step="0.1" value="'+(r.drivenMiles||r.miles||'')+'" placeholder="e.g. 41" '
+    +'style="width:100%;padding:.55rem .65rem;border:1.5px solid #c4b5fd;border-radius:9px;font-family:inherit;font-size:1rem;box-sizing:border-box;">'
+    +'</div>'
+    +'<div><label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">TIP RECEIVED $</label>'
+    +'<input id="mp-tip" type="number" min="0" step="0.01" value="'+(r.tip||'')+'" placeholder="0.00" '
+    +'style="width:100%;padding:.55rem .65rem;border:1.5px solid #d1d5db;border-radius:9px;font-family:inherit;font-size:1rem;box-sizing:border-box;">'
+    +'</div>'
+    +'</div>'
+    +'<div style="background:#fefce8;border:1px solid #fde68a;border-radius:9px;padding:.6rem .8rem;margin-bottom:.85rem;">'
+    +'<div style="font-size:.7rem;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.35rem;">\u26fd Gas price / gallon</div>'
+    +'<div style="display:flex;align-items:center;gap:.5rem;">'
+    +'<span style="font-weight:600;color:#78350f;">$</span>'
+    +'<input id="mp-gas" type="number" min="0" step="0.01" value="'+(_mtGasPrice||'')+'" placeholder="e.g. 3.49" '
+    +'style="flex:1;padding:.45rem .6rem;border:1.5px solid #fcd34d;border-radius:7px;font-family:inherit;font-size:.9rem;">'
+    +'</div><div style="font-size:.68rem;color:#92400e;margin-top:.3rem;">Auto-fills next time</div></div>'
+    +'<div style="margin-bottom:.75rem;">'
+    +'<label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:.4rem;">HOW WAS THIS PAID?</label>'
+    +'<div id="mp-method-btns" style="display:flex;flex-wrap:wrap;gap:.5rem;">'+methodBtnsHtml+'</div>'
+    +'</div>'
+    +'<div id="mp-other-wrap" style="margin-bottom:.75rem;'+(_paySelectedMethod==='Other'?'':'display:none;')+'">'
+    +'<label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">WHAT WAS IT?</label>'
+    +'<input type="text" id="mp-other-text" value="'+(r.payment && PAY_METHODS.indexOf(r.payment)<0 ? escHtml(r.payment) : '')+'" placeholder="e.g. Check, Square, CashApp\u2026" '
+    +'style="width:100%;padding:.5rem .65rem;border:1.5px solid #d1d5db;border-radius:9px;font-family:inherit;font-size:.9rem;box-sizing:border-box;">'
+    +'</div>'
+    +'<div style="border-top:1.5px solid #e2d9f3;margin:.9rem 0 .8rem;"></div>'
+    +(hasAcc
+      ? ('<label style="display:flex;align-items:center;gap:.55rem;cursor:pointer;margin-bottom:.75rem;">'
+        +'<input type="checkbox" id="mp-send-receipt" style="width:18px;height:18px;">'
+        +'<span style="font-size:.88rem;font-weight:600;color:#0f172a;">\ud83e\uddfe Send a receipt to the client</span></label>')
+      : ('<div style="background:#faf5ff;border:1.5px solid #c4b5fd;border-radius:10px;padding:.65rem .8rem;text-align:center;margin-bottom:.75rem;">'
+        +'<div style="font-size:.82rem;font-weight:700;color:#7c3aed;margin-bottom:.15rem;">Client receipts</div>'
+        +'<div style="font-size:.7rem;color:#64748b;line-height:1.4;">Send text &amp; downloadable branded receipts, plus tip tracking \u2014 included with Income access.</div></div>'))
+    +'<div style="text-align:center;margin-bottom:.6rem;">'
+    +'<button type="button" onclick="_payFlagCautious()" style="background:none;border:none;color:#b45309;font-size:.76rem;font-weight:600;cursor:pointer;text-decoration:underline;">\u26a0\ufe0f Flag this client as cautious</button>'
+    +'</div>'
+    +'<div style="display:flex;gap:.5rem;">'
+    +'<button onclick="_closeMarkPaidCombined()" style="flex:1;padding:.6rem;background:#f1f5f9;color:#475569;border:none;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:600;cursor:pointer;">Cancel</button>'
+    +'<button id="mp-save-btn" onclick="if(!this.dataset.mpFired){this.dataset.mpFired=\'1\';_saveMarkPaidCombined('+rideId+');}" style="flex:2;padding:.6rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.9rem;font-weight:700;cursor:pointer;">\ud83d\udcbe Save &amp; Mark Paid</button>'
+    +'</div>'
+    +'</div>';
+  document.body.appendChild(ov);
+  ov._vvDetach = _pinToVisualViewport(ov);
+  // Same reliability pattern as Log Miles's Save button, on purpose - that history (multiple
+  // builds, a real cross-platform "tap does nothing" bug) is exactly why this isn't simplified
+  // away just because this is a different popup. See openLogMiles()'s own comment for the full
+  // account of what each layer here is actually defending against.
+  try{
+    var _saveBtn = document.getElementById('mp-save-btn');
+    if(_saveBtn){
+      _saveBtn.addEventListener('touchstart', function(ev){
+        if(this.dataset.mpFired) return;
+        this.dataset.mpFired='1';
+        try{ ev.preventDefault(); }catch(_e){}
+        _saveMarkPaidCombined(rideId);
+      }, {passive:false});
+    }
+  }catch(_e){}
+  setTimeout(function(){ var el=document.getElementById('mp-miles'); if(el)el.focus(); },100);
+}
+
+function _paySelectMethodCombined(m){
+  _paySelectedMethod = m;
+  var box=document.getElementById('mp-method-btns');
+  if(box){
+    box.innerHTML = PAY_METHODS.map(function(x){
+      var active=(x===m);
+      return '<button type="button" onclick="_paySelectMethodCombined(\''+x+'\')" '
+        +'style="flex:0 0 auto;padding:.45rem .9rem;border:1.5px solid '+(active?'var(--accent)':'var(--light)')
+        +';border-radius:20px;background:'+(active?'var(--accent)':'#fff')+';color:'+(active?'#fff':'#000')
+        +';font-family:inherit;font-size:.82rem;font-weight:600;cursor:pointer;">'+x+'</button>';
+    }).join('');
+  }
+  var otherWrap=document.getElementById('mp-other-wrap');
+  if(otherWrap) otherWrap.style.display = (m==='Other') ? 'block' : 'none';
+}
+
+function _closeMarkPaidCombined(){
+  var ov=document.getElementById('mark-paid-overlay');
+  if(ov){ _unpinOverlay(ov); ov.remove(); }
+}
+
+async function _saveMarkPaidCombined(rideId){
+  var r=_rideById(rideId);
+  if(!r){ showToast('\u26A0\uFE0F Could not find that ride \u2014 nothing was saved'); return; }
+  try{
+    var mi=parseFloat(document.getElementById('mp-miles').value)||0;
+    var tip=parseFloat(document.getElementById('mp-tip').value)||0;
+    var gas=parseFloat(document.getElementById('mp-gas').value)||0;
+    var method=_paySelectedMethod;
+    if(method==='Other'){ var t=(document.getElementById('mp-other-text')?.value||'').trim(); method=t||'Other'; }
+    var wantReceipt = !!document.getElementById('mp-send-receipt')?.checked;
+
+    r.drivenMiles=mi;
+    if(tip>0) r.tip=tip;
+    if(method){ r.payment=method; touchRide(r,'set payment method'); }
+    r.status='paid'; r.paidAt=Date.now(); r.paidBy=currentUser?.name||'';
+    touchRide(r,'set status to paid');
+
+    // The two saves below write to genuinely different places (the ride record vs. this
+    // driver's own saved gas price) - no reason to make one wait on the other finishing first.
+    var _saves=[saveRides()];
+    if(gas>0) _saves.push(_mtSaveGasPrice(gas));
+    await Promise.all(_saves);
+
+    // Side effects that don't need to block the driver from moving on - fire them, but don't
+    // make Save feel slower waiting for notifications only other people will ever see.
+    (async function(){
+      try{
+        var prev = previousUnpaidAPRide(r);
+        if(prev && r.carryoverNotified!==prev.id){
+          var prevDriver=prev.driver||''; var owner=getClientOwner(prev.client)||feeOwnerFor(prev.createdBy);
+          var msg=(r.paidBy||'A driver')+' collected payment on '+r.client+"'s "+fmtDateShort(r.date)+' ride. '
+            +"You're owed $"+parseFloat(prev.price||0).toFixed(2)+' for the '+fmtDateShort(prev.date)+' ride \u2014 mark it paid once you\u2019ve received it.';
+          var notified={};
+          [prevDriver, owner].forEach(function(who){
+            if(who && !notified[who]){ notified[who]=1; addNotification(who, prev, 'carryover_paid', msg); sendPushToDriver(who, '\ud83d\udcb0 Payment collected \u2014 NWDA', msg); }
+          });
+          r.carryoverNotified=prev.id;
+          await saveNotifs(); updateNotifBadge();
+        }
+      }catch(e){ console.warn('carryover notify failed', e); }
+      try{
+        var _drv=(r.driver||'').trim(); var _me=(typeof getMyDriverName==='function')?(getMyDriverName()||''):'';
+        var _tipRecorded=(r.tip!=null && r.tip!=='' && parseFloat(r.tip)>0);
+        if(_drv && _drv!==_me && !_tipRecorded){
+          var _tmsg='Your '+(r.client||'client')+' ride on '+fmtDateShort(r.date)+' was marked paid'+(r.paidBy?(' by '+r.paidBy):'')+'. Open it to add the tip you received.';
+          if(_driverPrefFor(_drv,'tipReminders',true)){ addNotification(_drv, r, 'tip_reminder', _tmsg); if(typeof sendPushToDriver==='function') sendPushToDriver(_drv, '\ud83d\udcb0 Add your tip \u2014 NWDA', _tmsg); }
+          await saveNotifs(); updateNotifBadge();
+        }
+      }catch(e){ console.warn('tip reminder notify failed', e); }
+    })();
+
+    _closeMarkPaidCombined();
+    try{ if(document.getElementById('ride-modal')?.classList.contains('show')) renderRideView(r); }catch(e){}
+    try{ var w=document.getElementById('mt-wrap'); if(w)w.innerHTML=rideActionBarHtml(rideId); }catch(e){}
+    try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+    try{ if(typeof renderIncome==='function' && document.getElementById('page-income') && document.getElementById('page-income').classList.contains('active')) renderIncome(); }catch(e){}
+
+    if(wantReceipt){ shareReceiptDocument(r.id); }
+    else{ showToast('\u2713 '+mi+' mi'+(tip?' + $'+tip+' tip':'')+' \u2014 marked paid'+(method?': '+method:'')); }
+
+    // No artificial delay - the save above already fully completed before this runs.
+    var _ridForFee=r.id;
+    try{ _maybeOfferFeeAndPaid(_ridForFee); }catch(e){}
+  }catch(err){
+    try{ console.error('[MarkPaid] save threw:', err && (err.stack||err.message) || err); }catch(_e){}
+    try{ showToast('\u26A0\uFE0F Save error: '+((err&&err.message)||'unknown')+' \u2014 nothing was saved, try again'); }catch(_e){}
+    try{ _closeMarkPaidCombined(); }catch(_e){}
+  }
+}
+
 async function toggleRidePaid(id){
   // Self-heal duplicate ids before acting, so we never flip more than one ride.
   if(_ridesMatchingId(id).length>1){ await _repairDuplicateIds(); }
   const r=_rideById(id); if(!r||r.status==='cancelled'||r.status==='placeholder') return;
-  // One ride-card state: "Completed & Paid" (stored as 'paid') vs not.
-  const nowPaid = r.status!=='paid';
-  await setRideStatus(r.id, nowPaid?'paid':'scheduled');
+  // Every real button that calls this says "Mark Paid" - once a ride IS paid, the ride
+  // detail switches to the "CLIENT PAID" banner instead, whose own "Mark unpaid" link calls
+  // markRideUnpaid() directly, never this function. In real use this only ever runs in the
+  // marking-paid direction; the flip-back branch below is a defensive fallback, not a real path.
+  if(r.status!=='paid'){
+    openMarkPaidCombined(r.id);
+    return;
+  }
+  await setRideStatus(r.id, 'scheduled');
   const btn=document.getElementById('rm-paid-btn');
-  if(btn) btn.style.fontWeight=nowPaid?'700':'400';
-  // When a ride is newly marked paid, always route through Log Miles first — not just
-  // when data is missing — so mileage can be checked/corrected every time, alongside tip,
-  // before moving on to the payment method + receipt.
-  if(nowPaid){ try{ if(typeof openLogMiles==='function'){ window._payAfterMiles=r.id; openLogMiles(r.id); } else { openPaymentModal(r.id); } }catch(e){ console.warn('paid prompt failed', e); } }
+  if(btn) btn.style.fontWeight='400';
 }
 
 // ── PAYMENT METHOD + RECEIPT (on mark-paid) ────────────────────────────────
@@ -8258,6 +8518,25 @@ async function markRideUnpaid(id){
   try{ openRideModal(r.id); }catch(e){}
   showToast('Marked unpaid \u2014 fare and 15% fee reopened');
 }
+// Keeps the ride modal's Mark Paid / Paid button in sync with whichever ride is actually
+// being shown. Called from two places: setRideStatus() (right after toggling, so the button
+// reflects what was JUST done) and renderRideView() (every time ANY ride is displayed, so a
+// ride that was never touched can never show stale styling left over from whatever ride was
+// viewed before it). That second call site was missing entirely until this fix - the button
+// is a single, static DOM element patched in place, never rebuilt fresh per ride, so nothing
+// was resetting it when simply opening a different ride's modal. Chase's own screenshots
+// showed it precisely: an unpaid, not-yet-happened ride displaying the light-green "\u2713 Paid"
+// state, with the actual status pills above it correctly showing "Text Sent" - the underlying
+// data was always right, only this one button's leftover visual state was wrong.
+function _syncPaidBtn(r){
+  var paidBtn=document.getElementById('rm-paid-btn');
+  if(!paidBtn || !r) return;
+  paidBtn.textContent=r.status==='paid'?'\u2713 Paid':'\ud83d\udcb0 Mark Paid';
+  paidBtn.style.fontWeight=r.status==='paid'?'700':'400';
+  paidBtn.style.background=r.status==='paid'?'#f0fdf4':'var(--green)';
+  paidBtn.style.color=r.status==='paid'?'#15803d':'#fff';
+}
+
 async function setRideStatus(id, status){
   // Self-heal duplicate ids before acting, so we only ever change the one ride.
   if(_ridesMatchingId(id).length>1){ await _repairDuplicateIds(); }
@@ -8296,20 +8575,13 @@ async function setRideStatus(id, status){
   renderRideView(r);
   if(typeof refreshDash==='function') refreshDash();
   const paidBtn=document.getElementById('rm-paid-btn');
-  // BUG (reported, v579): renderRideView() just above rebuilds this button from its ORIGINAL
-  // markup — style="background:var(--green);color:#fff;..." — so color:#fff is always present
-  // on the freshly-rendered element. This block used to patch background/fontWeight but never
-  // color. Toggling to unpaid clears the background (falls through to .btn-secondary's
-  // background:transparent) while the white text stays — invisible text on a transparent
-  // button, with only the 💰 visible since emoji glyphs render from the system font and don't
-  // take a CSS color at all. That's the exact bug: "white with nothing but the money emoji."
-  // The paid state had the same gap (white text on the #f0fdf4 pale-mint background used
-  // everywhere else in this file paired with color:#15803d — see the CLIENT PAID banner,
-  // confirmation-sent chip, GPS-live badge) — lower contrast, just not reported yet.
-  if(paidBtn){ paidBtn.textContent=r.status==='paid'?'✓ Paid':'💰 Mark Paid';
-    paidBtn.style.fontWeight=r.status==='paid'?'700':'400';
-    paidBtn.style.background=r.status==='paid'?'#f0fdf4':'var(--green)';
-    paidBtn.style.color=r.status==='paid'?'#15803d':'#fff'; }
+  // Shared with renderRideView() now - see _syncPaidBtn()'s own comment for why that matters.
+  // (Old comment here claimed "renderRideView() just above rebuilds this button from its
+  // ORIGINAL markup" - that was never actually true; renderRideView patches this modal's
+  // pieces individually and never touched this specific button at all, which is exactly what
+  // let it silently show a stale paid/unpaid state left over from whichever ride was viewed
+  // last, on a ride that was never touched. Fixed below, not just described here.)
+  _syncPaidBtn(r);
   if(document.getElementById('page-income')?.classList.contains('active') && typeof renderIncome==='function') renderIncome();
   showToast('Status: '+(RIDE_STAGE_LABEL[status]||status));
 }
@@ -8740,54 +9012,186 @@ function _buildRouteUrlsFrom(r, startAddr, endAddr, linkRide){
 function _closeNavModal(){ var o=document.getElementById('nav-modal-overlay'); if(o)o.remove(); }
 
 function openStartRide(rideId){
+  // Used to ask "where are you starting" first - home or current location - before doing
+  // anything else. Dropped that question entirely (Chase's call): current location is always
+  // the right answer for an actual, real-time ride about to happen, matching how every real
+  // navigation app already behaves by default. _openStartRideFromCurrent()'s own GPS-failure
+  // path already falls back to home automatically if location genuinely can't be obtained -
+  // that safety net stays, it just isn't a manual choice made on every single ride anymore.
   var r=rides.find(function(x){return x.id===rideId;});
   if(!r){ showToast('Ride not found'); return; }
-  var home=_rtGetHome();
-  if(!home){
-    showToast('Add your home address in your Driver profile for full route mileage');
-    _openStartRideWithHome(rideId,'');
+
+  // Independent of the odometer feature entirely - this is what actually drives the
+  // Start/Stop button toggle on the ride card. A driver who's turned odometer prompts off
+  // completely still needs Start Ride to visibly become Stop Ride; that toggle can't depend
+  // on odometer data that a driver with this preference will never generate.
+  r.rideStartedAt = Date.now();
+  try{ saveRides(); }catch(e){}
+  if(typeof refreshDash==='function') refreshDash();
+
+  var dn = getMyDriverName();
+  var skipOdo = dn && driverSettings[dn] && driverSettings[dn].skipOdometerPrompts===true;
+  if(skipOdo){ _openStartRideFromCurrent(rideId); return; }
+
+  // Back-to-back rides: if the last ride THIS driver started still has no ending odometer
+  // reading (Stop Ride was never tapped), this is very likely the same continuous trip -
+  // house to airport to house, one ride marked paid at the drop-off without ever stopping,
+  // then straight into the next leg. Asking for a fresh starting number here would be asking
+  // the driver to re-measure a trip already in progress. Just continue the same chain, no
+  // prompt, straight to navigation - matches how little friction every other choice this
+  // session has favored.
+  var openChain = _findOpenOdometerChain(dn, rideId);
+  if(openChain){
+    r.odoChainId = openChain.odoChainId;
+    r.odoStart = openChain.odoStart;
+    r.odoStartAt = openChain.odoStartAt;
+    try{ saveRides(); }catch(e){}
+    _openStartRideFromCurrent(rideId);
     return;
   }
-  // Offer: start from home OR current location
-  window._srtId=rideId; window._srtHome=home;
+
+  _showOdometerStartPrompt(rideId);
+}
+
+// The most recent ride THIS driver started (has odoStart) that never got an ending reading
+// (no odoEnd) - the signature of a back-to-back trip where Stop Ride was skipped between legs.
+// Excludes the ride being started right now, obviously, and only looks at rides with a real
+// odoStartAt timestamp so a ride with the feature skipped entirely never gets treated as an
+// open chain.
+function _findOpenOdometerChain(dn, excludeRideId){
+  if(!dn) return null;
+  var candidates = (rides||[]).filter(function(x){
+    return x && x.id!==excludeRideId && x.driver===dn && x.odoStart!=null && x.odoEnd==null && x.odoStartAt;
+  }).sort(function(a,b){ return (b.odoStartAt||0)-(a.odoStartAt||0); });
+  return candidates.length ? candidates[0] : null;
+}
+
+function _showOdometerStartPrompt(rideId){
   _closeNavModal();
   var ov=document.createElement('div');
-  ov.id='nav-modal-overlay';
-  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14000;'
+  ov.id='odo-start-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14500;'
     +'display:flex;align-items:center;justify-content:center;padding:1.5rem;';
-  ov.onclick=function(e){if(e.target===ov)_closeNavModal();};
+  ov.onclick=function(e){if(e.target===ov) _skipOdometerStart(rideId);};
   ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:340px;width:100%;padding:1.25rem;'
-    +'box-shadow:0 24px 60px rgba(0,0,0,.35);max-height:85vh;overflow-y:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.9rem;">'
-    +'<div style="font-size:1rem;font-weight:800;color:#0f172a;">Where are you starting?</div>'
-    +'<button onclick="_closeNavModal()" style="background:none;border:none;font-size:1.4rem;color:#94a3b8;cursor:pointer;">&times;</button>'
-    +'</div>'
-    // Home address option
-    +'<button onclick="_closeNavModal();_askReturnDest(window._srtId,window._srtHome)" '
-    +'style="display:flex;align-items:center;gap:.75rem;width:100%;padding:.75rem .9rem;'
-    +'background:#f5f3ff;border:1.5px solid #c4b5fd;border-radius:8px;cursor:pointer;'
-    +'font-family:inherit;text-align:left;margin-bottom:.5rem;">'
-    +'<span style="font-size:1.3rem;flex-shrink:0;">&#127968;</span>'
-    +'<div style="min-width:0;">'
-    +'<div style="font-size:.88rem;font-weight:700;color:#0f172a;">Start from home</div>'
-    +'<div style="font-size:.72rem;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escHtml(home)+'</div>'
-    +'</div>'
-    +'<span style="margin-left:auto;color:#7c3aed;font-size:.85rem;flex-shrink:0;">&#8594;</span>'
-    +'</button>'
-    // Current location option
-    +'<button onclick="_closeNavModal();_openStartRideFromCurrent('+rideId+')" '
-    +'style="display:flex;align-items:center;gap:.75rem;width:100%;padding:.75rem .9rem;'
-    +'background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;cursor:pointer;'
-    +'font-family:inherit;text-align:left;">'
-    +'<span style="font-size:1.3rem;flex-shrink:0;">&#128205;</span>'
-    +'<div>'
-    +'<div style="font-size:.88rem;font-weight:700;color:#0f172a;">Use my current location</div>'
-    +'<div style="font-size:.72rem;color:#64748b;">GPS pin — good if you\'re not at home</div>'
-    +'</div>'
-    +'<span style="margin-left:auto;color:#15803d;font-size:.85rem;flex-shrink:0;">&#8594;</span>'
-    +'</button>'
+    +'box-shadow:0 24px 60px rgba(0,0,0,.35);box-sizing:border-box;">'
+    +'<div style="font-size:1rem;font-weight:800;color:#0f172a;margin-bottom:.4rem;">Starting odometer?</div>'
+    +'<div style="font-size:.78rem;color:#64748b;margin-bottom:.9rem;line-height:1.5;">Log it now, or skip and enter your mileage from Maps later at Mark Paid \u2014 either way works.</div>'
+    +'<input id="odo-start-input" type="number" inputmode="decimal" placeholder="e.g. 48213" style="width:100%;padding:.65rem .8rem;border:1.5px solid #e2d9f3;border-radius:10px;font-family:inherit;font-size:.95rem;margin-bottom:.85rem;box-sizing:border-box;">'
+    +'<button onclick="_saveOdometerStart('+rideId+')" style="width:100%;padding:.75rem;background:#7c3aed;color:#fff;border:none;border-radius:10px;font-family:inherit;font-weight:700;font-size:.88rem;cursor:pointer;margin-bottom:.5rem;">Save &amp; start navigating</button>'
+    +'<button onclick="_skipOdometerStart('+rideId+')" style="width:100%;padding:.6rem;background:none;color:#64748b;border:none;font-family:inherit;font-size:.82rem;cursor:pointer;">Skip for this ride</button>'
+    +'<label style="display:flex;align-items:center;gap:.4rem;margin-top:.6rem;font-size:.74rem;color:#64748b;cursor:pointer;">'
+    +'<input type="checkbox" id="odo-dont-ask" style="width:14px;height:14px;">Don\'t ask me for odometer readings again</label>'
     +'</div>';
   document.body.appendChild(ov);
+  setTimeout(function(){ var el=document.getElementById('odo-start-input'); if(el) el.focus(); }, 50);
+}
+
+async function _maybeSaveDontAskAgain(){
+  var cb = document.getElementById('odo-dont-ask');
+  if(!cb || !cb.checked) return;
+  var dn = getMyDriverName();
+  if(!dn) return;
+  driverSettings[dn] = driverSettings[dn] || {};
+  driverSettings[dn].skipOdometerPrompts = true;
+  try{ await storageSet('kat:driverSettings', driverSettings); }catch(e){}
+}
+
+async function _saveOdometerStart(rideId){
+  var r=rides.find(function(x){return x.id===rideId;});
+  var input = document.getElementById('odo-start-input');
+  var val = input ? parseFloat(input.value) : NaN;
+  // Must read the "don't ask again" checkbox BEFORE removing the overlay it lives inside -
+  // removing it first deletes the checkbox from the DOM, so it always reads as unchecked.
+  await _maybeSaveDontAskAgain();
+  var ov=document.getElementById('odo-start-overlay'); if(ov) ov.remove();
+  if(r && isFinite(val) && val>0){
+    r.odoStart = val;
+    r.odoStartAt = Date.now();
+    r.odoChainId = 'chain_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+    try{ saveRides(); }catch(e){}
+  }
+  _openStartRideFromCurrent(rideId);
+}
+
+async function _skipOdometerStart(rideId){
+  await _maybeSaveDontAskAgain();
+  var ov=document.getElementById('odo-start-overlay'); if(ov) ov.remove();
+  _openStartRideFromCurrent(rideId);
+}
+
+// ── STOP RIDE ────────────────────────────────────────────────────────────
+// Independent of Mark Paid entirely, on purpose - Chase's own concern, and a real one: an
+// invoiced client might not pay for hours, long after the car's been turned off and driven
+// elsewhere. Tying mileage capture to payment would mean measuring a trip that's already over.
+// Stop Ride closes out the odometer the moment the ride itself actually ends, whenever that is
+// relative to payment.
+function openStopRide(rideId){
+  var r=rides.find(function(x){return x.id===rideId;});
+  if(!r){ showToast('Ride not found'); return; }
+
+  // Same reasoning as rideStartedAt in openStartRide - the toggle back to "Start Ride" has
+  // to work for every driver, including one who's opted out of odometer prompts entirely.
+  r.rideStoppedAt = Date.now();
+  try{ saveRides(); }catch(e){}
+
+  var dn = getMyDriverName();
+  var skipOdo = dn && driverSettings[dn] && driverSettings[dn].skipOdometerPrompts===true;
+  if(skipOdo || r.odoStart==null){ showToast('Ride stopped'); if(typeof refreshDash==='function') refreshDash(); return; }
+  _showOdometerStopPrompt(rideId);
+}
+
+function _showOdometerStopPrompt(rideId){
+  var ov=document.createElement('div');
+  ov.id='odo-stop-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14500;'
+    +'display:flex;align-items:center;justify-content:center;padding:1.5rem;';
+  ov.onclick=function(e){if(e.target===ov) _skipOdometerStop(rideId);};
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:340px;width:100%;padding:1.25rem;'
+    +'box-shadow:0 24px 60px rgba(0,0,0,.35);box-sizing:border-box;">'
+    +'<div style="font-size:1rem;font-weight:800;color:#0f172a;margin-bottom:.4rem;">Ending odometer?</div>'
+    +'<div style="font-size:.78rem;color:#64748b;margin-bottom:.9rem;line-height:1.5;">Log it now, or skip and enter your mileage from Maps later at Mark Paid.</div>'
+    +'<input id="odo-stop-input" type="number" inputmode="decimal" placeholder="e.g. 48261" style="width:100%;padding:.65rem .8rem;border:1.5px solid #e2d9f3;border-radius:10px;font-family:inherit;font-size:.95rem;margin-bottom:.85rem;box-sizing:border-box;">'
+    +'<button onclick="_saveOdometerStop('+rideId+')" style="width:100%;padding:.75rem;background:#7c3aed;color:#fff;border:none;border-radius:10px;font-family:inherit;font-weight:700;font-size:.88rem;cursor:pointer;margin-bottom:.5rem;">Save mileage</button>'
+    +'<button onclick="_skipOdometerStop('+rideId+')" style="width:100%;padding:.6rem;background:none;color:#64748b;border:none;font-family:inherit;font-size:.82rem;cursor:pointer;">Skip for now</button>'
+    +'</div>';
+  document.body.appendChild(ov);
+  setTimeout(function(){ var el=document.getElementById('odo-stop-input'); if(el) el.focus(); }, 50);
+}
+
+function _skipOdometerStop(rideId){
+  var ov=document.getElementById('odo-stop-overlay'); if(ov) ov.remove();
+  // Deliberately leaves odoStart/odoChainId untouched - the ride stays "open" so a Mark Paid
+  // nudge can still catch it later, or the next ride the driver starts can still continue the
+  // same chain if that's actually what happens. Skipping means "not right now," not "forget it."
+  showToast('Skipped \u2014 you can still add mileage at Mark Paid');
+  if(typeof refreshDash==='function') refreshDash();
+}
+
+async function _saveOdometerStop(rideId){
+  var r=rides.find(function(x){return x.id===rideId;});
+  var input = document.getElementById('odo-stop-input');
+  var val = input ? parseFloat(input.value) : NaN;
+  var ov=document.getElementById('odo-stop-overlay'); if(ov) ov.remove();
+  if(!r || !r.odoChainId || !isFinite(val)){ if(typeof refreshDash==='function') refreshDash(); return; }
+  if(val <= r.odoStart){ showToast('Ending reading should be higher than the starting one \u2014 not saved','error'); return; }
+
+  var total = parseFloat((val - r.odoStart).toFixed(2));
+  // Every ride still open under this SAME chain - back-to-back legs where Stop Ride never
+  // got tapped in between all share one continuous odometer trip, and split the same total.
+  var chainRides = (rides||[]).filter(function(x){ return x && x.odoChainId===r.odoChainId; });
+  var count = chainRides.length || 1;
+  var each = parseFloat((total/count).toFixed(2));
+  chainRides.forEach(function(x, idx){
+    // Last one absorbs the rounding remainder, same convention the round-trip splitter
+    // already uses elsewhere in the app.
+    x.drivenMiles = (idx===count-1) ? parseFloat((total-each*(count-1)).toFixed(2)) : each;
+  });
+  r.odoEnd = val;
+  r.odoEndAt = Date.now();
+  try{ saveRides(); }catch(e){}
+  showToast(count>1 ? ('\u2705 '+total+' mi split across '+count+' rides') : ('\u2705 '+total+' mi logged'));
+  if(typeof refreshDash==='function') refreshDash();
 }
 
 function _openStartRideFromCurrent(rideId){
@@ -9071,22 +9475,7 @@ function _openStartRideWithHome(rideId, startAddr, endAddr){
 }
 
 // ── LOG MILES MODAL (after the ride) ─────────────────────────────────────
-function _closeLogMiles(){ window._payAfterMiles=null; var o=document.getElementById('log-miles-overlay'); if(o){ _unpinOverlay(o); o.remove(); } }
-// Reported: the Log Miles/tip step should be skippable. Distinct from _closeLogMiles (Cancel),
-// which is a full "back out of this entirely" — it wipes _payAfterMiles, so if this Log Miles
-// was opened as part of marking a ride paid, the queued "then open the payment modal" step
-// gets abandoned along with it. Skip means something narrower: "I don't have mileage/tip
-// info right now, but still finish marking this ride paid" — so it deliberately does NOT wipe
-// that flag, letting the payment-modal continuation still fire if one was queued. No miles or
-// tip value is saved either way; the ride's existing drivenMiles/tip are simply left alone.
-function _skipLogMiles(rideId){
-  var doPayNext = _sameRideId(window._payAfterMiles, rideId);
-  var o=document.getElementById('log-miles-overlay');
-  if(o){ _unpinOverlay(o); o.remove(); }
-  if(doPayNext && typeof openPaymentModal==='function'){
-    setTimeout(function(){ try{ openPaymentModal(rideId); }catch(e){} }, 180);
-  }
-}
+function _closeLogMiles(){ var o=document.getElementById('log-miles-overlay'); if(o){ _unpinOverlay(o); o.remove(); } }
 
 // Find a ride by id, tolerating the type the id arrives as.
 //
@@ -9115,17 +9504,16 @@ function _rideById(id){
   if(id==null || typeof rides==='undefined' || !rides) return null;
   return rides.find(function(x){ return _rideIdMatches(x, id); }) || null;
 }
-function _sameRideId(a,b){
-  if(a==null || b==null) return false;
-  return a===b || String(a)===String(b);
-}
-
 function openLogMiles(rideId){
   var r=_rideById(rideId);
   if(!r){ console.warn('[LogMiles] openLogMiles: no ride for id', rideId, '(type '+(typeof rideId)+')'); showToast('Ride not found'); return; }
-  // Clear any leftover overlay WITHOUT touching _payAfterMiles — going through the full
-  // _closeLogMiles() here would silently wipe out a flag toggleRidePaid may have just set
-  // moments earlier, breaking the mark-paid → verify miles → back-to-payment sequence.
+  // Pre-fill the saved gas price. Used to work by accident - mtStart()/_mtShowStopPopup() (the
+  // GPS tracker, removed in v674) loaded it into memory as a side effect of normal GPS use, and
+  // it just stayed loaded for the rest of the session. _rtShowSplitPopup() got its own explicit
+  // load call when GPS was removed; this one was missed, so the field silently went back to
+  // empty (showing the "e.g. 3.49" placeholder) unless something else happened to load it first.
+  _mtLoadGasPrice();
+  // Clear any leftover overlay from a previous open before building a new one.
   var _stale=document.getElementById('log-miles-overlay'); if(_stale){ _unpinOverlay(_stale); _stale.remove(); }
   var ov=document.createElement('div');
   ov.id='log-miles-overlay';
@@ -9145,6 +9533,13 @@ function openLogMiles(rideId){
     +'<div style="font-size:.75rem;color:#64748b;margin-top:2px;">'+escHtml(r.client||'')+'</div></div>'
     +'<button onclick="_closeLogMiles()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button>'
     +'</div>'
+    // Nudge: only when an odometer trip was actually started for this ride, never got an
+    // ending reading, AND enough time has passed that it's very unlikely still an ordinary,
+    // in-progress ride (which would make the nudge just noise) - two hours is a proxy for
+    // "is this actually useful right now," not an arbitrary number.
+    +((r.odoStart!=null && r.odoEnd==null && r.odoStartAt && (Date.now()-r.odoStartAt) > 2*60*60*1000)
+      ? '<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:9px;padding:.6rem .8rem;margin-bottom:.75rem;font-size:.74rem;color:#7c2d12;line-height:1.5;">\u26a0\ufe0f You didn\u2019t log your ending odometer for this ride. Not a problem \u2014 just enter your mileage from Maps below like normal.</div>'
+      : '')
     +'<div style="font-size:.66rem;color:#94a3b8;margin-bottom:.6rem;line-height:1.4;">Total from Waze / Apple / Google Maps — include the drive to pick them up, not just the ride itself. That’s still deductible business mileage.</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin-bottom:.75rem;align-items:end;">'
     +'<div><label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">MILES DRIVEN</label>'
@@ -9165,9 +9560,7 @@ function openLogMiles(rideId){
     +'</div>'
     +'<div style="font-size:.68rem;color:#92400e;margin-top:.3rem;">Auto-fills next time</div></div>'
     +'<div style="display:flex;gap:.5rem;">'
-    +(_sameRideId(window._payAfterMiles, rideId)
-      ? '<button onclick="_skipLogMiles('+rideId+')" style="flex:1;padding:.6rem;background:#f1f5f9;color:#475569;border:none;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:600;cursor:pointer;">Skip</button>'
-      : '<button onclick="_closeLogMiles()" style="flex:1;padding:.6rem;background:#f1f5f9;color:#475569;border:none;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:600;cursor:pointer;">Cancel</button>')
+    +'<button onclick="_closeLogMiles()" style="flex:1;padding:.6rem;background:#f1f5f9;color:#475569;border:none;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:600;cursor:pointer;">Cancel</button>'
     +'<button id="lm-save-btn" onclick="if(!this.dataset.lmFired){this.dataset.lmFired=\'1\';_saveLogMiles('+rideId+');}" style="flex:2;padding:.6rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.9rem;font-weight:700;cursor:pointer;">&#128190; Save</button>'
     +'</div>'
     +'</div>';
@@ -9295,21 +9688,13 @@ async function _saveLogMiles(rideId){
     try{await saveRides();}catch(e){console.warn(e);}
     if(_r2 && !window._srtTipChained){
       window._srtTipChained=true;
-      // Carry the mark-paid flag over to the second linked ride if it was pointing at this
-      // one — same reasoning as the fix in openLogMiles above.
-      var _carryPayAfter = _sameRideId(window._payAfterMiles, rideId) ? _r2.id : null;
       var _staleOv=document.getElementById('log-miles-overlay'); if(_staleOv) _staleOv.remove();
-      if(_carryPayAfter!=null) window._payAfterMiles=_carryPayAfter;
       var _w0=document.getElementById('mt-wrap'); if(_w0)_w0.innerHTML=rideActionBarHtml(rideId);
       showToast('\uD83D\uDCCD '+r.drivenMiles+' mi (split) saved \u2014 now log the second ride');
       setTimeout(function(){ try{ openLogMiles(_r2.id); }catch(e){} }, 220);
       return;
     }
     window._srtTipChained=false;
-    // _payAfterMiles is assigned from r.id directly (toggleRidePaid), so it keeps the id's real
-    // type, while rideId arrived coerced through the onclick attribute. Strict === compared a
-    // string to a number here and quietly skipped the mark-paid follow-up.
-    var _doPayNext=_sameRideId(window._payAfterMiles, rideId);
     _closeLogMiles();
     // Refresh the mileage bar in the open ride modal
     var w=document.getElementById('mt-wrap'); if(w)w.innerHTML=rideActionBarHtml(rideId);
@@ -9318,7 +9703,6 @@ async function _saveLogMiles(rideId){
     try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
     try{ if(typeof renderIncome==='function' && document.getElementById('page-income') && document.getElementById('page-income').classList.contains('active')) renderIncome(); }catch(e){}
     showToast('\uD83D\uDCCD '+mi+' mi saved'+(tip?' + $'+tip+' tip':''));
-    if(_doPayNext && typeof openPaymentModal==='function'){ setTimeout(function(){ try{ openPaymentModal(rideId); }catch(e){} }, 180); }
   }catch(err){
     // The safety net. Whatever this says next time is the real bug — report it verbatim.
     try{ console.error('[LogMiles] save threw:', err && (err.stack||err.message) || err); }catch(_e){}
@@ -12170,6 +12554,7 @@ function _onbCardUploadPick(input){
 }
 var _onbGeneratedCard = null; // generated driver card (base64) for save
 var _onbLogoData = null;   // holds uploaded business logo (base64) for save
+var _onbBooksClients = null;   // holds the Yes/No selection for "booking your own clients" until save
 function _onbUploadLogo(){
   var inp = document.createElement('input');
   inp.type='file'; inp.accept='image/*'; inp.style.display='none';
@@ -12360,6 +12745,22 @@ function maybeShowOnboarding(){
   }catch(e){ console.warn('onboarding check', e); }
 }
 
+// Toggles the Yes/No "booking your own clients" choice during onboarding. Selection is held
+// in memory (_onbBooksClients) until saveOnboarding() actually persists it - same pattern as
+// _onbLogoData for the logo upload.
+function _onbSetBooksClients(val){
+  _onbBooksClients = val;
+  var yesBtn = document.getElementById('onb-books-yes'), noBtn = document.getElementById('onb-books-no');
+  function paint(btn, active){
+    if(!btn) return;
+    btn.style.background = active ? 'var(--gold)' : '#fff';
+    btn.style.borderColor = active ? 'var(--gold)' : 'var(--light)';
+    btn.style.color = active ? '#fff' : 'var(--mid)';
+  }
+  paint(yesBtn, val===true);
+  paint(noBtn, val===false);
+}
+
 function openOnboarding(){
   var dn = getMyDriverName();
   if(!dn) return;
@@ -12377,6 +12778,10 @@ function openOnboarding(){
   try{ if(Array.isArray(prof.vehicles) && prof.vehicles.length>1){ var _v2=prof.vehicles[1]||{}; _onbVeh2Photo=_v2.photo||''; var _b=document.getElementById('onb-veh2-block'), _t=document.getElementById('onb-veh2-toggle'); if(_b){ _b.style.display='block'; if(_t) _t.textContent='− Remove second vehicle'; } setV('onb-vehicle2',_v2.label||''); setV('onb-vehicleyear2',_v2.year||''); setV('onb-mpg2',_v2.mpg||''); setV('onb-gasprice2',_v2.gasPrice||''); setV('onb-maint2',_v2.maintRate||''); var _pv=document.getElementById('onb-veh2-photo-preview'); if(_pv && _v2.photo) _pv.style.backgroundImage='url('+_v2.photo+')'; } else { _onbVeh2Photo=''; } }catch(e){}
   setV('onb-venmo', (typeof driverVenmo!=='undefined' && driverVenmo[dn]) ? driverVenmo[dn] : '');
   setV('onb-bizname', prof.businessName || '');
+  // Prefill the "booking your own clients" choice from what's already saved, if anything.
+  _onbBooksClients = (typeof driverSettings!=='undefined' && driverSettings[dn] && typeof driverSettings[dn].booksOwnClients==='boolean')
+    ? driverSettings[dn].booksOwnClients : null;
+  if(_onbBooksClients!==null){ _onbSetBooksClients(_onbBooksClients); }
   ['premium','traffic','holiday','christmas','fuel'].forEach(function(t){ var el=document.getElementById('onb-auto-'+t); if(el) el.checked = !driverAutoOffFor(dn,t); });
   // Prefill logo preview from profile if set
   _onbLogoData = prof.logo || null;
@@ -12562,6 +12967,9 @@ async function saveOnboarding(){
   driverSettings[dn].autoOff = driverSettings[dn].autoOff || {};
   ['premium','traffic','holiday','christmas','fuel'].forEach(function(t){ var el=document.getElementById('onb-auto-'+t); if(el) driverSettings[dn].autoOff[t] = !el.checked; });
   delete driverSettings[dn].autoSurchargesOff;
+  // Booking-your-own-clients: only save an actual choice, never overwrite a real yes/no with
+  // "never answered" just because someone re-opened onboarding without touching this question.
+  if(_onbBooksClients===true || _onbBooksClients===false) driverSettings[dn].booksOwnClients = _onbBooksClients;
 
   // Confirmation text: only save if they chose to customize
   var ccMode = document.querySelector('input[name=\'onb-conf-mode\']:checked');
@@ -12644,6 +13052,7 @@ async function saveOnboarding(){
   closeOnboarding(false);
   // Refresh any profile views
   try{ if(typeof renderMyProfileCard==='function') renderMyProfileCard(); }catch(e){}
+  try{ if(typeof syncPublicDriverDirectory==='function') syncPublicDriverDirectory(dn); }catch(e){}
   // Prompt them to set their availability (days off / unavailable dates) — this
   // lives on the profile page, so offer to take them there.
   // availability is offered via the custom post-setup choice + the profile page (no native confirm, which fails in PWAs)
@@ -13227,8 +13636,6 @@ function refreshDash(){
 
   // Confirmations due for tomorrow's rides
   renderDashConfirmations();
-  try{ renderDashArrivals(); }catch(e){}
-  try{ renderDashFlightTracking(); }catch(e){}
   try{ renderDashGateCodes(); }catch(e){}
 
   // 15% finder fees owed / to be paid
@@ -13280,10 +13687,32 @@ function refreshDash(){
       </div>
       <span class="badge ${typeCls}">${r.type}${apVehSuffix(r)}</span>
       ${(function(){
-        const _canStartHere = r.status!=='paid' && typeof _isRideWithinHours==='function' && _isRideWithinHours(r,12);
-        return _canStartHere
-          ? `<button onclick="event.stopPropagation();openStartRide(${r.id})" style="flex-shrink:0;padding:.4rem .8rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;white-space:nowrap;">&#128663; Start Ride</button>`
-          : '';
+        if(r.status==='paid' || typeof _isRideWithinHours!=='function' || !_isRideWithinHours(r,12)) return '';
+        var _btns = [];
+        var _started = r.rideStartedAt && !r.rideStoppedAt;
+        _btns.push(_started
+          ? '<button onclick="event.stopPropagation();openStopRide('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#dc2626;color:#fff;">\u23f9\ufe0f Stop Ride</button>'
+          : '<button onclick="event.stopPropagation();openStartRide('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;">\ud83d\ude97 Start Ride</button>');
+
+        var _isAirport = (r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP');
+        if(r.arrivalSentAt){
+          // Once the client's been told their driver has arrived, tracking the flight or
+          // sending that same text again is stale - the natural next step is closing the
+          // ride out, so this is where Mark Paid takes their place. Down to 2 buttons total
+          // at this point (Stop/Start Ride + Mark Paid) - flex:1 on both means they evenly
+          // split the row rather than sitting at their own content width.
+          _btns.push('<button onclick="event.stopPropagation();toggleRidePaid('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\ud83d\udcb0 Mark Paid</button>');
+        } else if(_isAirport && r.flight){
+          var _flightNum=(r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'').toUpperCase();
+          var _flightUrl='https://www.google.com/search?q='+_flightNum+'+flight+tracking';
+          _btns.push('<a href="'+_flightUrl+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;text-decoration:none;display:flex;align-items:center;justify-content:center;text-align:center;">\u2708\ufe0f Track</a>');
+          _btns.push('<button onclick="event.stopPropagation();dashSendArrival('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#1d4ed8;color:#fff;">\ud83d\udee9\ufe0f Arrived</button>');
+        }
+        // A dedicated row of its own (width:100% forces this onto its own line within the
+        // outer card's flex-wrap layout), buttons laid out with their own flex context so
+        // they evenly split whatever width is available - whether that's 3 buttons or,
+        // once the arrival text is sent, 2.
+        return '<div style="display:flex;gap:.4rem;width:100%;">'+_btns.join('')+'</div>';
       })()}
       <div class="ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}</div>
     </div>`;
@@ -13297,7 +13726,13 @@ function renderDashNeedsAttention(){
   var todayStr=toDateStr(new Date());
   var overdue=(rides||[]).filter(function(r){ return r && isMyDrivingRide(r) && r.status!=='cancelled' && r.status!=='paid' && parseFloat(r.price||0)>0 && ((r.date && r.date<todayStr) || r.status==='completed'); })
     .sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
-  if(!overdue.length){ box.innerHTML=''; return; }
+  // Computed once, up front, rather than only inside the admin button's own markup - an admin
+  // with zero unpaid rides of their own but a team that has plenty shouldn't have this whole
+  // banner (and the one action that matters to them) disappear just because THEIR count is 0.
+  var companyCount = isAdmin()
+    ? (rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && parseFloat(r.price||0)>0 && ((r.status==='completed')||(r.date && r.date<todayStr)); }).length
+    : 0;
+  if(!overdue.length && !companyCount){ box.innerHTML=''; return; }
   var rows=overdue.slice(0,15).map(function(r){
     return '<div onclick="openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem;border-bottom:1px solid #f3c98a;cursor:pointer;">'
       +'<span style="min-width:52px;font-size:.76rem;font-weight:700;color:var(--black);">'+fmtDateShort(r.date)+'</span>'
@@ -13309,8 +13744,9 @@ function renderDashNeedsAttention(){
   }).join('');
   box.innerHTML='<div style="background:#fff8ec;border:1.5px solid #f3c98a;border-radius:12px;padding:1rem;">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.4rem;">'
-    +'<span style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#b5651d;">\u26A0\uFE0F Rides to wrap up \u00b7 '+overdue.length+'</span>'
+    +'<span style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#b5651d;">\u26A0\uFE0F '+(overdue.length ? ('Rides to wrap up \u00b7 '+overdue.length) : 'Team rides to wrap up')+'</span>'
     +(overdue.length>1?'<button onclick="markAllPrevPaid()" style="background:#b5651d;color:#fff;border:none;border-radius:8px;padding:.4rem .8rem;font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;">\u2713 Mark all paid</button>':'')
+    +(isAdmin() && companyCount ? '<button onclick="markAllPastRidesPaidAdmin()" style="margin-left:.4rem;background:none;border:1.5px solid #b91c1c;color:#b91c1c;border-radius:8px;padding:.35rem .7rem;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;">\u26a0\ufe0f Mark ALL '+companyCount+' team rides paid</button>' : '')
     +'</div>'
     +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">Past or completed rides you haven\u2019t marked paid yet. Open one to mark it paid and record how the client paid\u2014or <b>Mark all paid</b> to clear them all at once (this skips miles &amp; tip; add those anytime in Income).</div>'
     +rows
@@ -13666,6 +14102,33 @@ function profileUnwaive(){
 }
 
 
+// Admin-only, company-wide version of markAllPrevPaid() below - that one is deliberately
+// scoped to the current driver's own rides only. This one has no driver filter at all, so the
+// confirmation shows a per-driver breakdown before committing - a bulk action that touches
+// other people's numbers, not just your own, deserves to say exactly whose before it happens.
+async function markAllPastRidesPaidAdmin(){
+  if(!isAdmin()){ showToast('Admins only','error'); return; }
+  var today=toDateStr(new Date());
+  var list=(rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && parseFloat(r.price||0)>0 && ((r.status==='completed')||(r.date && r.date<today)); });
+  if(!list.length){ showToast('Nothing to mark'); return; }
+  var byDriver={};
+  list.forEach(function(r){ var d=r.driver||'Unassigned'; byDriver[d]=(byDriver[d]||0)+1; });
+  var breakdown=Object.keys(byDriver).sort().map(function(d){ return escHtml(d)+': '+byDriver[d]; }).join('<br>');
+  var _choice = await showConfirmModal({
+    icon:'\u26a0\ufe0f', iconColor:'#b91c1c', iconBg:'#450a0a',
+    title:'Mark all '+list.length+' past unpaid rides paid \u2014 every driver?',
+    message:'This marks every past-due or completed ride across the <b>whole team</b> that isn\u2019t paid yet \u2014 not just your own.<div style="margin-top:.5rem;padding-top:.5rem;border-top:1px dashed #fca5a5;font-size:.85rem;line-height:1.6;">'+breakdown+'</div><div style="margin-top:.5rem;">Same as the per-driver version, this won\u2019t ask for miles or tip on each one \u2014 add those anytime from Income.</div>',
+    buttons:[ {label:'Cancel', value:'cancel'}, {label:'Mark all '+list.length+' paid', style:'primary', value:'go'} ]
+  });
+  if(_choice!=='go') return;
+  list.forEach(function(r){ r.status='paid'; });
+  try{ await saveRides(); }catch(e){}
+  showToast('\u2713 Marked '+list.length+' ride'+(list.length>1?'s':'')+' paid across the team');
+  try{ renderDashFees(); }catch(e){}
+  try{ if(typeof renderDashIncome==='function') renderDashIncome(); }catch(e){}
+  try{ if(typeof renderDashNeedsAttention==='function') renderDashNeedsAttention(); }catch(e){}
+}
+
 async function markAllPrevPaid(){
   var dName=getMyDriverName(); var today=toDateStr(new Date());
   var list=(rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && r.driver===dName && parseFloat(r.price||0)>0 && ((r.status==='completed')||(r.date && r.date<today)); });
@@ -13934,6 +14397,185 @@ async function saveAddedDriver(rec){
   if(i>=0) added[i]=rec; else added.push(rec);
   await storageSet('kat:addedDrivers', added);
 }
+
+// ── ARCHIVE A DRIVER ────────────────────────────────────────────────────
+// Different from Deactivate (revokeSubAccess), which just greys someone out for scheduling
+// while leaving their name, profile, and login fully live. Archiving is for someone genuinely
+// no longer needed: it removes them from every live table (DRIVERS, DRIVER_PROFILES, colors,
+// photo, settings, Venmo, login) so they vanish from every dropdown and picker in the app, cuts
+// off their login the same way Deactivate already does (reusing that proven mechanism rather
+// than inventing a second one), and moves their full profile into a separate archive bucket -
+// keyed by a generated ID, not their name, so the name is immediately free for reuse without
+// any risk of a future person's data landing on the archived person's old storage keys.
+//
+// What this deliberately does NOT do: touch any ride record. r.driver stays whatever name was
+// on it when the ride happened - archiving never rewrites history, and past reports that pull
+// from ride records directly (not from the live DRIVERS list) keep showing the archived driver
+// exactly as they did before.
+async function archiveDriver(name){
+  if(!isAdmin()){ showToast('Only admins can archive a driver','error'); return; }
+  if(!name || DRIVERS.indexOf(name)<0){ showToast('Driver not found','error'); return; }
+  if(!confirm('Archive '+name.split(' ')[0]+'?\n\nThey\u2019ll disappear from every driver list and lose app access. Their profile is kept and can be restored later from Archived Drivers.'+(_twoAdminRequired()?'\n\nA second admin must approve before it takes effect.':''))) return;
+
+  await queueAdminAction('driver_archive', {name: name}, 'Archive driver '+name);
+}
+
+// The actual archiving work, moved out of archiveDriver() itself so it can be gated the same
+// way driver_add/driver_edit already are - matches Chase's own reasoning for those: archiving
+// disables someone's login and pulls them off every list in one action, at least as
+// consequential as editing a driver, so it gets the same second-admin requirement now.
+async function _applyDriverArchive(name){
+  const loginEntry = USERS.find(function(u){ return USER_DRIVER_MAP[u.name]===name; });
+  const loginName = loginEntry ? loginEntry.name : null;
+
+  const record = {
+    archiveId: 'arch_'+Date.now()+'_'+Math.random().toString(36).slice(2,8),
+    name: name,
+    archivedAt: Date.now(),
+    archivedBy: (currentUser&&currentUser.name)||'',
+    reactivatedAt: null,
+    data: {
+      profile: DRIVER_PROFILES[name] ? Object.assign({}, DRIVER_PROFILES[name]) : null,
+      color: driverColors[name] || null,
+      colorVault: driverColorVault[name] ? Object.assign({}, driverColorVault[name]) : null,
+      photo: (typeof DRIVER_PHOTOS!=='undefined' && DRIVER_PHOTOS[name]) ? DRIVER_PHOTOS[name] : null,
+      settings: driverSettings[name] ? Object.assign({}, driverSettings[name]) : null,
+      venmo: (typeof driverVenmo!=='undefined' && driverVenmo[name]) ? driverVenmo[name] : null,
+      login: loginEntry ? { name: loginEntry.name, initials: loginEntry.initials, password: loginEntry.password, role: loginEntry.role } : null,
+    }
+  };
+
+  let archived = await storageGet('kat:archivedDrivers');
+  if(!Array.isArray(archived)) archived = [];
+  archived.push(record);
+  await storageSet('kat:archivedDrivers', archived);
+
+  let names = await storageGet('kat:archivedDriverNames');
+  if(!Array.isArray(names)) names = [];
+  if(names.indexOf(name)<0) names.push(name);
+  await storageSet('kat:archivedDriverNames', names);
+
+  // Cut off login the same proven way Deactivate does.
+  if(loginEntry){ loginEntry.disabled = true; await saveDisabled(); }
+
+  // Stop this driver from being re-merged in at next boot if they were admin-added.
+  let added = await storageGet('kat:addedDrivers');
+  if(Array.isArray(added)){
+    const filtered = added.filter(function(x){ return !x || x.driverName!==name; });
+    if(filtered.length!==added.length) await storageSet('kat:addedDrivers', filtered);
+  }
+
+  _stripDriverFromLiveTables(name);
+  showToast('\u2705 '+name.split(' ')[0]+' archived');
+  if(typeof renderAccessControl==='function') renderAccessControl();
+}
+
+// Shared by archiveDriver() and the boot-time filter - removing from every live table is the
+// same operation whether it's happening live (an admin just archived someone) or at boot
+// (an already-archived name should never have entered the live tables to begin with).
+// ── UNIQUE DRIVER NAMES ─────────────────────────────────────────────────
+// Two drivers CAN legitimately share a name (Chase's call: their photo and card color already
+// tell them apart in every real use of the app - the name itself is one of the least useful
+// ways anyone actually distinguishes two people here). What can't happen is two drivers
+// colliding on the same STORAGE key - DRIVER_PROFILES, driverColors, driverSettings, r.driver
+// on every ride record, and about a dozen other tables are all keyed by this exact string, and
+// a second person landing on the same key would silently overwrite the first person's data.
+//
+// The fix: when a name is already taken by a currently-active driver, the new person's actual
+// name - used everywhere, on their card, in messages, on rides, no separate hidden identity -
+// becomes "Name #2", then "#3", and so on. Simple, visible, and it only ever kicks in on the
+// rare real collision; everyone else keeps their name exactly as typed.
+//
+// Checked against DRIVERS only, not archived names - an archived driver's old name is correctly
+// free for reuse (that's the whole point of keying the archive by ID, not name - see
+// archiveDriver() above), so a new person getting that exact name back is fine, not a collision.
+function uniqueDriverName(desiredName){
+  var name = String(desiredName||'').trim();
+  if(!name) return name;
+  if(DRIVERS.indexOf(name)<0) return name;
+  var i = 2;
+  while(DRIVERS.indexOf(name+' #'+i) >= 0) i++;
+  return name+' #'+i;
+}
+
+function _stripDriverFromLiveTables(name){
+  const idx = DRIVERS.indexOf(name);
+  if(idx>=0) DRIVERS.splice(idx,1);
+  delete DRIVER_PROFILES[name];
+  delete driverColors[name];
+  delete driverColorVault[name];
+  if(typeof DRIVER_PHOTOS!=='undefined') delete DRIVER_PHOTOS[name];
+  delete driverSettings[name];
+  if(typeof driverVenmo!=='undefined') delete driverVenmo[name];
+  Object.keys(USER_DRIVER_MAP).forEach(function(loginKey){
+    if(USER_DRIVER_MAP[loginKey]===name) delete USER_DRIVER_MAP[loginKey];
+  });
+}
+
+// Runs once at boot, right after loadAddedDrivers() - strips any archived name out of every
+// live table before anything else in the app gets a chance to read them. This is what makes
+// "invisible everywhere unless explicitly reactivated" actually true for every session, not
+// just the admin who did the archiving.
+async function applyArchivedDriverFilter(){
+  try{
+    const names = await storageGet('kat:archivedDriverNames');
+    if(!Array.isArray(names) || !names.length) return;
+    names.forEach(function(n){ _stripDriverFromLiveTables(n); });
+  }catch(e){ console.warn('archived driver filter', e); }
+}
+
+// ── REACTIVATE AN ARCHIVED DRIVER ───────────────────────────────────────
+async function reactivateDriver(archiveId){
+  if(!isAdmin()){ showToast('Only admins can reactivate a driver','error'); return; }
+  let archived = await storageGet('kat:archivedDrivers');
+  if(!Array.isArray(archived)) archived = [];
+  const rec = archived.find(function(x){ return x && x.archiveId===archiveId; });
+  if(!rec){ showToast('Archived profile not found','error'); return; }
+
+  // Two drivers can share a name now (uniqueDriverName()) - disambiguate instead of blocking
+  // reactivation. The archived record's OWN name never changes (it's the historical truth of
+  // who they were); only the LIVE name they come back under is adjusted if it's currently taken.
+  const liveName = uniqueDriverName(rec.name);
+  if(liveName!==rec.name && !confirm('A driver named '+rec.name+' already exists \u2014 reactivate this one as \u201c'+liveName+'\u201d?')) return;
+  if(liveName===rec.name && !confirm('Reactivate '+rec.name.split(' ')[0]+'? They\u2019ll reappear in every driver list and regain app access.')) return;
+
+  const d = rec.data;
+  DRIVERS.push(liveName);
+  if(d.profile) DRIVER_PROFILES[liveName] = d.profile;
+  if(d.color) driverColors[liveName] = d.color;
+  if(d.colorVault) driverColorVault[liveName] = d.colorVault;
+  if(d.photo && typeof DRIVER_PHOTOS!=='undefined') DRIVER_PHOTOS[liveName] = d.photo;
+  if(d.settings) driverSettings[liveName] = d.settings;
+  if(d.venmo && typeof driverVenmo!=='undefined') driverVenmo[liveName] = d.venmo;
+
+  if(d.login){
+    USER_DRIVER_MAP[d.login.name] = liveName;
+    const existing = USERS.find(function(u){ return u.name===d.login.name; });
+    if(existing){ existing.disabled = false; }
+    else{ USERS.push({ name:d.login.name, initials:d.login.initials, password:d.login.password, role:d.login.role||'driver', disabled:false }); }
+    await saveDisabled();
+    // Restore the addedDrivers record too, so future boots re-merge this driver normally,
+    // exactly like any other admin-added driver - not something reactivation has to special-case.
+    let added = await storageGet('kat:addedDrivers');
+    if(!Array.isArray(added)) added = [];
+    added.push({ driverName: liveName, profile: d.profile||{}, color: d.color||'', photo: d.photo||'', login: d.login.name, password: d.login.password });
+    await storageSet('kat:addedDrivers', added);
+  }
+
+  let names = await storageGet('kat:archivedDriverNames');
+  if(!Array.isArray(names)) names = [];
+  names = names.filter(function(n){ return n!==rec.name; });
+  await storageSet('kat:archivedDriverNames', names);
+
+  // Keep the archive record for audit history rather than deleting it - just stamp it reactivated
+  // so the "browse archived drivers" list knows not to show it as currently archived.
+  rec.reactivatedAt = Date.now();
+  await storageSet('kat:archivedDrivers', archived);
+
+  showToast('\u2705 '+liveName.split(' ')[0]+' reactivated');
+  if(typeof renderAccessControl==='function') renderAccessControl();
+}
+
 let _newDriverPhoto = '';
 function openAddDriverModal(){
   if(!isAdmin()){ showToast('Only admins can add drivers','error'); return; }
@@ -14002,7 +14644,12 @@ async function submitEditDriver(oldName){
   var color=g('ed-color')||driverColor(oldName);
   var _origColor=driverColor(oldName);
   var _colorChanged=!!_normHex(color) && _normHex(color)!==_normHex(_origColor);
-  if(newName!==oldName && DRIVERS.indexOf(newName)>=0){ showToast('A driver named '+newName+' already exists','error'); return; }
+  // Two drivers can share a name (see uniqueDriverName()'s own comment) - disambiguate instead
+  // of blocking the rename outright.
+  if(newName!==oldName){
+    var _uniqueName=uniqueDriverName(newName);
+    if(_uniqueName!==newName){ showToast('A driver named '+newName+' already exists \u2014 saving this one as \u201c'+_uniqueName+'\u201d'); newName=_uniqueName; }
+  }
   var _bits=[];
   if(newName!==oldName) _bits.push('rename to '+newName);
   if(_colorChanged) _bits.push('new colour');
@@ -14014,10 +14661,13 @@ async function submitEditDriver(oldName){
 }
 async function _applyDriverEdit(oldName, newName, p, color, _colorChanged){
   if(newName!==oldName){
-    if(DRIVERS.indexOf(newName)>=0){ showToast('A driver named '+newName+' already exists','error'); return; }
+    // Recomputed fresh here too, same reasoning as driver_add's handler - don't trust a name
+    // that was already validated once at submission time as still being collision-free by the
+    // time this actually applies.
+    newName = uniqueDriverName(newName);
     var idx=DRIVERS.indexOf(oldName); if(idx>=0) DRIVERS[idx]=newName;
     DRIVER_PROFILES[newName]=p; if(newName!==oldName) delete DRIVER_PROFILES[oldName];
-    driverColors[newName]=_colorChanged?color:_origColor; delete driverColors[oldName];
+    driverColors[newName]=_colorChanged?color:driverColors[oldName]; delete driverColors[oldName];
     if(driverColorVault[oldName]){ driverColorVault[newName]=driverColorVault[oldName]; delete driverColorVault[oldName]; saveColorVault(); }
     if(_colorChanged) vaultDriverColor(newName, color);
     if(typeof DRIVER_PHOTOS!=='undefined' && DRIVER_PHOTOS[oldName]){ DRIVER_PHOTOS[newName]=DRIVER_PHOTOS[oldName]; delete DRIVER_PHOTOS[oldName]; }
@@ -14217,16 +14867,20 @@ async function submitNewDriver(){
   if(!name){ showToast('Enter the driver\u2019s full name','error'); return; }
   if(!login){ showToast('Enter a login username','error'); return; }
   if(!password){ showToast('Enter a temporary password','error'); return; }
-  if(DRIVERS.indexOf(name)>=0){ showToast('A driver named '+name+' already exists','error'); return; }
   if(USERS.some(function(u){ return u.name.toLowerCase()===login.toLowerCase(); })){ showToast('That username is taken','error'); return; }
+  // Two drivers CAN share a name (photo + card color already tell them apart everywhere) - what
+  // can't happen is colliding on the same storage key. uniqueDriverName() adjusts only when
+  // there's an actual live match, so this is a silent no-op for every normal, non-colliding name.
+  const finalName = uniqueDriverName(name);
+  if(finalName!==name) showToast('A driver named '+name+' already exists \u2014 saving this one as \u201c'+finalName+'\u201d');
   const profile={
     phone:g('nd-phone'), email:g('nd-email'), vehicleYear:g('nd-vyear'),
     vehicle:g('nd-vehicle'), notes:'', unavailableDates:[], weeklyOff:[]
   };
   const color=g('nd-color')||pickUnusedColor();
-  const rec={ driverName:name, login:login, password:password, profile:profile, color:color, photo:_newDriverPhoto||'' };
+  const rec={ driverName:finalName, login:login, password:password, profile:profile, color:color, photo:_newDriverPhoto||'' };
   const ov=document.getElementById('add-driver-overlay'); if(ov) ov.remove();
-  await queueAdminAction('driver_add', rec, 'Add driver '+name+' (login \u201c'+login+'\u201d)');
+  await queueAdminAction('driver_add', rec, 'Add driver '+finalName+' (login \u201c'+login+'\u201d)');
 }
 
 function switchDriverTab(tab, el){
@@ -14542,7 +15196,11 @@ function renderPricingTracker(){
       if(day<rFrom||day>rTo) return;
       // Pricing is set by the CLIENT OWNER (whoever booked the ride), not the assigned driver.
       const owner = getClientOwner(r.client) || feeOwnerFor(r.createdBy);
-      if(!owner || !driverStats[owner]) return;
+      if(!owner) return;
+      // An archived driver isn't in DRIVERS any more, so they weren't pre-seeded above - but a
+      // ride they owned during this date range still really happened. Archiving must never
+      // rewrite history, so create their row here instead of silently dropping the ride.
+      if(!driverStats[owner]) driverStats[owner]={total:0,under:0,rides:[]};
       const exp=computeExpectedPrice(r);
       const actual=parseFloat(r.price)||0;
       const pct=exp>0?((exp-actual)/exp*100):0;
@@ -14602,7 +15260,7 @@ function renderPricingTracker(){
       <th style="padding:.4rem .6rem;text-align:center;">Under %</th>
     </tr></thead><tbody>`;
 
-  DRIVERS.forEach((d,di)=>{
+  Object.keys(driverStats).forEach((d,di)=>{
     const s=driverStats[d];
     const pct=s.total>0?(s.under/s.total*100):0;
     const color=pct>30?'#dc2626':pct>15?'#d97706':'#15803d';
@@ -14788,6 +15446,12 @@ function _userSubActionsHTML(u){
     + (st.kind==='deactivated'
         ? '<button onclick="reactivateSubAccess(this.dataset.u)" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #15803d;color:#15803d;background:none;font-family:inherit;font-weight:700;cursor:pointer;">Reactivate</button>'
         : '<button onclick="revokeSubAccess(this.dataset.u)" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #dc2626;color:#dc2626;background:none;font-family:inherit;cursor:pointer;">Deactivate</button>')
+    // Archive: a different, bigger step than Deactivate - removes them from every live list
+    // and dropdown, not just scheduling eligibility. Only offered for someone who's actually
+    // in DRIVERS (a pure-login-only admin account, if that ever exists, has nothing to archive).
+    + (DRIVERS.indexOf(USER_DRIVER_MAP[u.name])>=0
+        ? '<button onclick="archiveDriver(USER_DRIVER_MAP[this.dataset.u])" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #78716c;color:#78716c;background:none;font-family:inherit;cursor:pointer;">\ud83d\udce6 Archive</button>'
+        : '')
     + '</div>';
   return h;
 }
@@ -15244,6 +15908,40 @@ async function toggleUserAccess(userName, el){
 // ═══════════════════════════════════════════
 
 // Build the income/earnings summary for one driver (full name), all dates.
+// ── ARCHIVED DRIVERS ─────────────────────────────────────────────────────
+async function renderArchivedDrivers(){
+  const box = document.getElementById('archived-drivers-list');
+  if(!box) return;
+  if(!(currentUser && currentUser.role==='admin')){ box.innerHTML='<p style="color:var(--mid);">Admins only.</p>'; return; }
+  box.innerHTML = '<p style="color:var(--mid);font-size:.85rem;">Loading\u2026</p>';
+
+  let archived = await storageGet('kat:archivedDrivers');
+  if(!Array.isArray(archived)) archived = [];
+  const stillArchived = archived.filter(function(r){ return r && !r.reactivatedAt; });
+
+  if(!stillArchived.length){
+    box.innerHTML = '<p style="color:var(--mid);font-size:.85rem;">No archived drivers. Use the \ud83d\udce6 Archive button on Access Control to move someone here \u2014 they\u2019ll disappear from every driver list until you reactivate them from here.</p>';
+    return;
+  }
+
+  stillArchived.sort(function(a,b){ return (b.archivedAt||0)-(a.archivedAt||0); });
+
+  box.innerHTML = '<div style="font-size:.72rem;color:var(--mid);margin-bottom:.85rem;line-height:1.5;">Archived drivers are removed from every list and picker in the app and can\u2019t log in. Their profile is kept exactly as it was \u2014 reactivating restores everything.</div>'
+    + stillArchived.map(function(r){
+      const d = new Date(r.archivedAt||0);
+      const dateStr = isFinite(d.getTime()) ? (d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear() : '';
+      const initials = r.name.split(' ').map(function(x){return x[0];}).join('').slice(0,2).toUpperCase();
+      const color = (r.data && r.data.color) || '#78716c';
+      return '<div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:.75rem;border:1px solid var(--light);border-radius:10px;margin-bottom:.6rem;flex-wrap:wrap;">'
+        + '<div style="display:flex;align-items:center;gap:.65rem;min-width:0;">'
+        + '<span style="width:32px;height:32px;border-radius:50%;background:'+color+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:.78rem;font-weight:700;flex-shrink:0;">'+initials+'</span>'
+        + '<div><div style="font-weight:700;font-size:.9rem;color:var(--black);">'+escHtml(r.name)+'</div>'
+        + '<div style="font-size:.72rem;color:var(--mid);">Archived '+dateStr+(r.archivedBy?' by '+escHtml(r.archivedBy.split(' ')[0]):'')+'</div></div></div>'
+        + '<button onclick="reactivateDriver(\''+r.archiveId+'\')" style="flex-shrink:0;padding:.45rem .9rem;border-radius:8px;border:1.5px solid #15803d;color:#15803d;background:none;font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.8rem;cursor:pointer;">Reactivate</button>'
+        + '</div>';
+    }).join('');
+}
+
 function buildDriverIncomeData(fullName){
   let dRides = rides.filter(r => r.driver===fullName && r.date && parseFloat(r.price||0)>0);
   // Include their logged outside rides too
@@ -15498,6 +16196,39 @@ function renderProfileDriverPicker(){
     +'</div>';
 }
 
+// Temporary, hardcoded rollout gate - the booking-link feature works for every driver
+// underneath (the link resolves off their stable login name, same as anyone else's would),
+// but only Chase and Morgan actually see this card right now. Remove this allowlist check
+// when the feature is ready to open up to everyone - at that point, driverSettings[name]
+// .booksOwnClients (collected at onboarding) becomes the real, permanent gate instead.
+var BOOKING_LINK_ROLLOUT_ALLOWLIST = ['Chase Sweat', 'Morgan Newton'];
+
+function renderBookingLinkCard(me){
+  var box = document.getElementById('booking-link-card');
+  if(!box) return;
+  if(BOOKING_LINK_ROLLOUT_ALLOWLIST.indexOf(me) < 0){ box.innerHTML=''; return; }
+  var login = _loginForDriver(me);
+  if(!login){ box.innerHTML=''; return; }
+  // The domain here is a placeholder - the real one goes in once this is actually hosted.
+  // The path/query shape is what matters: a stable code (the driver's login name, which
+  // never changes even if their display name does) rather than the display name itself.
+  var link = location.origin + '/book.html?d=' + encodeURIComponent(login.toLowerCase());
+  box.innerHTML = '<div style="background:#fff;border:1.5px solid var(--light);border-radius:14px;padding:1.1rem 1.25rem;margin-top:1rem;">'
+    + '<div style="font-size:.95rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">&#128279; Your booking link</div>'
+    + '<div style="font-size:.76rem;color:var(--mid);line-height:1.5;margin-bottom:.8rem;">Send this to clients who book directly with you. They pick Schedule or Quote, no login \u2014 you get notified the same way you get any other alert.</div>'
+    + '<div style="display:flex;gap:.5rem;align-items:center;">'
+    + '<input readonly value="'+link+'" onclick="this.select()" style="flex:1;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-family:monospace;font-size:.76rem;color:var(--black);background:var(--surface);min-width:0;">'
+    + '<button onclick="_copyBookingLink(\''+link+'\')" style="flex-shrink:0;padding:.55rem .9rem;border-radius:8px;border:none;background:var(--gold);color:#fff;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;">Copy</button>'
+    + '</div>'
+    + '<div style="font-size:.68rem;color:var(--mid);margin-top:.6rem;">Early rollout \u2014 visible to you and Morgan only for now.</div>'
+    + '</div>';
+}
+
+function _copyBookingLink(link){
+  try{ navigator.clipboard.writeText(link); showToast('Link copied'); }
+  catch(e){ showToast('Could not copy \u2014 select and copy manually','error'); }
+}
+
 function renderMyProfileCard(){
   const box=document.getElementById('myprofile-card'); if(!box) return;
   const me=profileDriver();
@@ -15523,6 +16254,7 @@ function renderMyProfileCard(){
       if(_dnGroup && _dnGroup.parentNode){ _dnGroup.parentNode.insertBefore(_availBlk, _dnGroup.nextSibling); }
     }
   }catch(e){}
+  renderBookingLinkCard(me);
 }
 // Persistent welcome banner shown at the top of My Profile on the first login only.
 // Stays after the setup popup closes so the driver can finish the rest of the page.
@@ -15545,7 +16277,7 @@ function showProfileSetupBubble(){
   }catch(e){}
 }
 function switchProfileTab(which, btn){
-  var _panels={me:'profile-panel-me',account:'profile-panel-account',access:'driver-panel-access',pricing:'driver-panel-pricing',templates:'driver-panel-templates'};
+  var _panels={me:'profile-panel-me',account:'profile-panel-account',access:'driver-panel-access',archived:'driver-panel-archived',pricing:'driver-panel-pricing',templates:'driver-panel-templates'};
   Object.keys(_panels).forEach(function(t){
     var p=document.getElementById(_panels[t]); if(p) p.style.display=(t===which)?'block':'none';
     var b=document.getElementById('mptab-'+t); if(b) b.classList.toggle('active', t===which);
@@ -15553,6 +16285,7 @@ function switchProfileTab(which, btn){
   if(which==='me') renderMyProfileCard();
   if(which==='account'){ renderAccountInProfile(); if(typeof renderPushPrefBtn==='function') renderPushPrefBtn(); if(typeof renderNotifPrefs==='function') renderNotifPrefs(); if(typeof renderProfileWaive==='function') renderProfileWaive(); }
   if(which==='access') renderAccessControl();
+  if(which==='archived') renderArchivedDrivers();
   if(which==='pricing') renderPricingTracker();
   if(which==='templates') renderMessageTemplates();
 }
@@ -16003,6 +16736,30 @@ function isDriverAvailable(driverName, dateStr, timeStr){
 }
 // Build assign-dropdown options, greying out drivers who are unavailable on the given date.
 // Login name for a driver's full name (reverse of USER_DRIVER_MAP).
+// ── PUBLIC-SAFE DRIVER DIRECTORY (for the client-facing booking page) ──────
+// A deliberately narrow mirror - display name, business name, logo, nothing else. The full
+// DRIVER_PROFILES object has phone numbers, home addresses, gas prices - none of that belongs
+// anywhere a public, no-login page can read. This is the ONLY driver data the booking page
+// is allowed to see, kept in a completely separate Firebase location for exactly that reason.
+async function syncPublicDriverDirectory(dName){
+  if(!dName) return;
+  if(BOOKING_LINK_ROLLOUT_ALLOWLIST.indexOf(dName) < 0) return; // not eligible yet - nothing to publish
+  var login = _loginForDriver(dName);
+  if(!login) return;
+  var prof = DRIVER_PROFILES[dName] || {};
+  var entry = {
+    displayName: dName,
+    businessName: (prof.businessName||'').trim(),
+    logo: prof.logo || ''
+  };
+  try{
+    var dir = await storageGet('kat:publicDriverDirectory');
+    if(!dir || typeof dir!=='object') dir = {};
+    dir[login.toLowerCase()] = entry;
+    await storageSet('kat:publicDriverDirectory', dir);
+  }catch(e){ console.warn('syncPublicDriverDirectory', e); }
+}
+
 function _loginForDriver(dName){
   if(!dName) return '';
   try{
@@ -16908,7 +17665,6 @@ function renderIncome(){
   try{ var _irsBox=document.getElementById('irs-rate-box');
        if(_irsBox) _irsBox.innerHTML = (typeof hasIncomeAccess!=='function' || hasIncomeAccess()) ? _irsRatesAdminHTML() : '';
   }catch(e){}
-  try{ var _pfb=document.getElementById('pay-filter-bar'); if(_pfb) _pfb.innerHTML=_payFilterBarHTML(); }catch(e){}
   if(!document.getElementById('income-summary-cards')) return;
   if(!hasIncomeAccess()) return;
   try{ renderKmPayCard(); }catch(e){}
@@ -16962,10 +17718,10 @@ function renderIncome(){
   }else{const _old=document.getElementById('income-combine-btn');if(_old)_old.remove();}
   const _incLinked=(window._showCombinedIncome===true&&_myl&&_lp)?_lp:null;
   // Filter rides
-  // Income reflects money actually MADE — completed or paid rides only, not
-  // upcoming/scheduled ones. This matches the dashboard's "earned" logic so the
-  // two pages agree. A ride counts as earned if it's marked completed/paid or
-  // its date has already passed.
+  // Income reflects money actually MADE — paid rides only (or a logged outside ride),
+  // never upcoming/scheduled ones, even if the ride's own date has already passed. A ride
+  // that's driven but unpaid is money owed, not income yet — same principle as the dashboard's
+  // "Rides to wrap up" banner, so the two pages never disagree about what counts as earned.
   const _incToday = toDateStr(new Date());
   const _incEarned = r => r.status!=='cancelled' && (r.status==='paid' || r._outside);
   let filtered = rides.filter(r=>{
@@ -17116,7 +17872,7 @@ function renderIncome(){
             ${totalTips>0?_tl('Tips',totalTips,false):''}
             ${totalVehicleCost>0?_tl('Vehicle cost (gas + maintenance)',totalVehicleCost,true):''}
             ${totalFinderFees>0?_tl('Client fees (15%)',totalFinderFees,true):''}
-            ${proratedExp>0?`<tr${_expCount?' onclick="toggleExpenseRows()" style="cursor:pointer;"':''}><td style="padding:.5rem .75rem;color:#dc2626;">${incomeTab==='monthly'?'Monthly expenses':incomeTab==='yearly'?'Monthly expenses (annualized)':'Monthly expenses (pro-rated)'}${_expToggle}</td><td style="padding:.5rem .75rem;text-align:right;font-weight:600;color:#dc2626;">−$${Math.abs(proratedExp).toFixed(2)}</td></tr>`:''}
+            ${proratedExp>0?`<tr${_expCount?' onclick="toggleExpenseRows()" style="cursor:pointer;"':''}><td style="padding:.5rem .75rem;color:#dc2626;vertical-align:top;">${incomeTab==='monthly'?'Monthly expenses':incomeTab==='yearly'?'Monthly expenses (annualized)':'Monthly expenses (pro-rated)'}${_expToggle}</td><td style="padding:.5rem .75rem;text-align:right;font-weight:600;color:#dc2626;vertical-align:top;">−$${Math.abs(proratedExp).toFixed(2)}</td></tr>`:''}
             ${_expRows}
           </tbody>
           <tfoot>
@@ -17829,8 +18585,15 @@ registerAdminAction('ride_delete', async function(p){
 
 // ── Registered actions: DRIVERS ──
 registerAdminAction('driver_add', async function(rec){
-  var name=rec.driverName, login=rec.login, profile=rec.profile||{}, color=rec.color, password=rec.password;
+  // Recomputed fresh here, not trusted from submission time - the live roster could have
+  // changed in the gap between an admin submitting this and it actually being applied (this
+  // handler previously had NO collision check of its own at all, silently overwriting an
+  // existing same-named driver's profile if one ever slipped through).
+  var name=uniqueDriverName(rec.driverName), login=rec.login, profile=rec.profile||{}, color=rec.color, password=rec.password;
   if(!name||!login) return;
+  rec.driverName = name; // saveAddedDriver(rec) below persists this object as-is - without this,
+                          // the disambiguated name would only live in memory for this session and
+                          // revert to the colliding original on next boot's loadAddedDrivers().
   if(DRIVERS.indexOf(name)<0) DRIVERS.push(name);
   DRIVER_PROFILES[name]=profile;
   driverColors[name]=color;
@@ -17853,6 +18616,9 @@ registerAdminAction('driver_add', async function(rec){
 // ── Registered actions ──
 registerAdminAction('driver_edit', async function(p){
   await _applyDriverEdit(p.oldName, p.newName, p.profile, p.color, !!p.colorChanged);
+});
+registerAdminAction('driver_archive', async function(p){
+  await _applyDriverArchive(p.name);
 });
 registerAdminAction('cautious_remove', async function(p){
   cautiousList=(cautiousList||[]).filter(function(e){ return e.id!==p.id; });
@@ -19332,8 +20098,7 @@ function sendArrivalText(id){
   openArrivalThread(id, buildArrivalText(r));
   try{ markPartSent(id,'arrival'); }catch(e){}
   r.arrivalSentAt=Date.now(); try{ saveRides(); }catch(e){}
-  try{ if(typeof renderDashArrivals==='function') renderDashArrivals(); }catch(e){}
-  try{ if(typeof renderDashFlightTracking==='function') renderDashFlightTracking(); }catch(e){}
+  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
   showToast('\u2708\uFE0F Arrival text opened \u2014 tap send in Messages');
 }
 // Dashboard arrival flow: confirm first, then send. 'No' just closes and leaves the row.
@@ -19345,89 +20110,6 @@ function dashSendArrival(id){
   if(!ok) return;   // stay on the dashboard, row remains
   sendArrivalText(id);
 }
-function renderDashArrivals(){
-  var box=document.getElementById('dash-arrivals');
-  if(!box) return;
-  if(!hasIncomeAccess()){ box.innerHTML=''; return; }
-  if(!confTextEnabled(getMyDriverName())){ box.innerHTML=''; return; }
-  var today=toDateStr(new Date());
-  // TODAY's airport pickups this user is driving (or owns), not yet arrival-texted.
-  var dName=getMyDriverName();
-  var due=rides.filter(function(r){
-    if(!r || r.date!==today || r.status==='cancelled' || r.status==='placeholder') return false;
-    if(r.type!=='AP PICK UP' && r.type!=='AP ROUND TRIP') return false;
-    if(r.arrivalSentAt) return false;
-    // Reported: a dispatcher (Kat) who scheduled a ride for a DIFFERENT driver was being
-    // prompted to send that ride's arrival text, on a day she wasn't driving anything herself.
-    // The arrival text is sent by whoever physically arrives to do the pickup — the assigned
-    // driver — not whoever booked the ride. isMyScheduledRide() answers a different question
-    // ("did I create/own this ride") that's correct for visibility elsewhere (My Rides, fee
-    // ownership) but wrong here. Assignment only.
-    var mine=(r.driver&&dName&&r.driver.trim()===dName);
-    return mine;
-  }).sort(function(a,b){ return (a.time||'').localeCompare(b.time||''); });
-  if(!due.length){ box.innerHTML=''; return; }
-  var rows=due.map(function(r){
-    return '<div style="display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem;border-bottom:1px solid #cfe0ff;">'
-      +'<span style="min-width:58px;font-size:.8rem;font-weight:700;color:var(--black);">'+(fmtTime12(r.time)||'\u2014')+'</span>'
-      +'<span style="flex:1;font-size:.85rem;color:var(--black);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escHtml(r.client||'\u2014')+'</span>'
-      +'<button onclick="dashSendArrival('+r.id+')" style="flex-shrink:0;padding:.4rem .7rem;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.76rem;font-weight:700;cursor:pointer;">\u2708\uFE0F Arrived</button>'
-      +'</div>';
-  }).join('');
-  box.innerHTML='<div style="background:#eff5ff;border:1.5px solid #cfe0ff;border-radius:12px;padding:1rem;">'
-    +'<div style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#1d4ed8;margin-bottom:.5rem;">\u2708\uFE0F Airport pickups today \u00b7 '+due.length+'</div>'
-    +'<div style="font-size:.68rem;color:var(--mid);margin-bottom:.5rem;">Tap Arrived the moment they land to text your client.</div>'
-    +rows+'</div>';
-}
-// Quick flight-status links for today's airport rides — built for exactly the scenario of
-// juggling a drop-off and a pickup back to back and needing a fast status check without
-// digging into each ride individually. Falls away once a ride is paid, same as gate codes —
-// once it's done, there's nothing left to track.
-function renderDashFlightTracking(){
-  var box=document.getElementById('dash-flight-tracking');
-  if(!box) return;
-  var due=rides.filter(function(r){
-    // Same fix as the Start Ride / GPS gate: a flight landing just after midnight was
-    // invisible here until midnight actually hit, giving zero lead time to watch it.
-    // Now the panel opens 12 hours ahead of the ride's scheduled time instead.
-    // Reported: flights from two days ago were still showing under "Flight tracking today."
-    // _isRideWithinHours has NO lower bound by design — see its own comment — specifically so
-    // Start Ride/GPS never cuts off for a driver running late. That's correct there, but this
-    // widget's own label promises "today," and once a flight's scheduled time has passed,
-    // tracking it is no longer useful (you'd already know whether it landed on time). Rather
-    // than touch the shared helper — rideActionBarHtml still legitimately depends on its unbounded
-    // lookback — add this widget's own forward-only bound on top of it.
-    if(!r || !_isRideWithinHours(r,12) || _hoursUntilRide(r)<0 || r.status==='cancelled' || r.status==='paid' || r.status==='placeholder') return false;
-    // Once the arrival text has gone out, this flight has already been handled - the
-    // driver knows the client landed. Keeping the Track button around after that point
-    // is stale, same reasoning that already hides the ride from "Airport pickups today"
-    // once arrivalSentAt is set.
-    if(r.arrivalSentAt) return false;
-    if(r.type!=='AP RUN' && r.type!=='AP PICK UP' && r.type!=='AP ROUND TRIP') return false;
-    if(!r.flight) return false;
-    // Flights I need to watch = flights I am DRIVING. Same rule as the "Rides you're
-    // driving" list this panel sits above (isMyDrivingRide). It previously OR'd in
-    // isAdmin(), which made every ride "mine" for an admin and showed the whole team's
-    // flights. Rides you scheduled for other drivers live in Confirmations, not here.
-    return isMyDrivingRide(r);
-  }).sort(function(a,b){ return (a.time||'').localeCompare(b.time||''); });
-  if(!due.length){ box.innerHTML=''; return; }
-  var rows=due.map(function(r){
-    var flightNum=(r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'').toUpperCase();
-    var url='https://www.google.com/search?q='+flightNum+'+flight+tracking';
-    return '<div style="display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem;border-bottom:1px solid #d8c8f7;">'
-      +'<span style="min-width:58px;font-size:.8rem;font-weight:700;color:var(--black);">'+(fmtTime12(r.time)||'\u2014')+'</span>'
-      +'<span style="flex:1;font-size:.85rem;color:var(--black);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escHtml(r.client||'\u2014')+' <span style="color:var(--mid);font-size:.72rem;">'+escHtml(r.flight||'')+'</span></span>'
-      +'<a href="'+url+'" target="_blank" rel="noopener" style="flex-shrink:0;padding:.4rem .7rem;background:#7c3aed;color:#fff;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.76rem;font-weight:700;cursor:pointer;text-decoration:none;">\u2708\uFE0F Track</a>'
-      +'</div>';
-  }).join('');
-  box.innerHTML='<div style="background:#f5f0ff;border:1.5px solid #d8c8f7;border-radius:12px;padding:1rem;">'
-    +'<div style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#7c3aed;margin-bottom:.5rem;">\u2708\uFE0F Flight tracking today \u00b7 '+due.length+'</div>'
-    +rows+'</div>';
-}
-// Quick gate-code reference for today's rides — same visibility rule as the ride card
-// itself (canSeeGateCode), so nothing shows here that wouldn't already be visible if you
-// opened the ride directly. Falls away once paid, same reasoning as canSeeGateCode itself.
 function renderDashGateCodes(){
   var box=document.getElementById('dash-gate-codes');
   if(!box) return;
@@ -19575,8 +20257,13 @@ async function handleFeeMethodChange(sel){
 function renderFinderFees(dName, start, end){
   const box = document.getElementById('income-finderfees');
   if(!box) return;
+  // Same rule renderDashFees() already enforces (the Dashboard's version of this same
+  // widget): a fee is only real once the client's money has actually been collected. This
+  // widget - the Income page's own copy of the same concept - was never given that same gate,
+  // so it counted a ride as "owed" the moment it had a date and a price, before it was ever
+  // driven or paid. Fixed to match.
   const inRange = (r)=>{
-    if(!r.date || parseFloat(r.price||0)<=0 || r.status==='cancelled' || r.status==='placeholder') return false;
+    if(!r.date || r.status!=='paid' || parseFloat(r.price||0)<=0) return false;
     if(start && end){ const d=new Date(r.date+'T12:00:00'); if(d<start||d>end) return false; }
     return true;
   };
@@ -21273,6 +21960,7 @@ function enterApp(){
   // push tokens so you never get pushes for an account you previously tested.
   setTimeout(function(){ try{ _purgeDeviceTokens(getMyDriverName()); }catch(e){} }, 300);
   setTimeout(function(){ try{ maybeShowOnboarding(); }catch(e){} }, 800);
+  try{ if(typeof syncPublicDriverDirectory==='function') syncPublicDriverDirectory(getMyDriverName()); }catch(e){}
   // Notification tapped while the app was closed: service worker launched us with a
   // deep-link URL — route to that ride/chat once we're in.
   setTimeout(function(){ try{ checkUrlNotifNav(); }catch(e){} }, 600);
@@ -21282,6 +21970,7 @@ function enterApp(){
   setTimeout(function(){ if(typeof checkForActiveSOSOnLogin==='function') checkForActiveSOSOnLogin(); }, 2000);
   const sosBtnEl=document.getElementById('sos-btn'); if(sosBtnEl) sosBtnEl.style.display='flex';
   if(typeof startSOSPolling==='function') startSOSPolling();
+  if(typeof startClientRequestPolling==='function') startClientRequestPolling();
   setTimeout(maybShowTutorialBanner, 1200);
   // Combine income state comes from driverSettings (Firebase), not localStorage
   const _myDS=driverSettings[currentUser?.name||'']||{};
@@ -21305,6 +21994,7 @@ function enterApp(){
   // Access Control tab — admins only
   const accessTab = document.getElementById('mptab-access');
   if(accessTab) accessTab.style.display = admin ? 'inline-block' : 'none';
+  const archivedTab2=document.getElementById('mptab-archived'); if(archivedTab2) archivedTab2.style.display=admin?'inline-block':'none';
   const pricingTab2=document.getElementById('mptab-pricing'); if(pricingTab2) pricingTab2.style.display=admin?'inline-block':'none';
   const templatesTab=document.getElementById('mptab-templates');
   if(templatesTab){
@@ -22088,7 +22778,7 @@ function showPage(id, el){
   }
   if(id==='chat') initChat();
   if(id==='myrides') renderMyCal();
-  if(id==='myprofile'){ window._profileAs=null; var _adm=currentUser&&currentUser.role==='admin'; var _ta=document.getElementById('mptab-access'); if(_ta) _ta.style.display=_adm?'inline-block':'none'; var _tp=document.getElementById('mptab-pricing'); if(_tp) _tp.style.display=_adm?'inline-block':'none'; switchProfileTab('me'); if(typeof renderProfileDriverPicker==='function') renderProfileDriverPicker(); }
+  if(id==='myprofile'){ window._profileAs=null; var _adm=currentUser&&currentUser.role==='admin'; var _ta=document.getElementById('mptab-access'); if(_ta) _ta.style.display=_adm?'inline-block':'none'; var _tar=document.getElementById('mptab-archived'); if(_tar) _tar.style.display=_adm?'inline-block':'none'; var _tp=document.getElementById('mptab-pricing'); if(_tp) _tp.style.display=_adm?'inline-block':'none'; switchProfileTab('me'); if(typeof renderProfileDriverPicker==='function') renderProfileDriverPicker(); }
   if(id==='account') renderAccountPage();
   if(id==='income'){ renderIncome(); renderExpensesView(); }
   document.querySelectorAll('#quicknav .qn').forEach(b=>b.classList.toggle('active', b.dataset.qn===id));
