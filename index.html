@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607241701">
+<meta name="version" content="202607241703">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -5438,7 +5438,7 @@ function addNotification(driverName, ride, action, customMsg){
   notifications[driverName].unshift({ rideId:ride.id, type:action, channel:(ride&&ride.channel)||null, read:false, msg, ts:Date.now(), createdBy:currentUser?.name||'' });
   // Fire push notification to driver's phone
   if(action==='assigned'){
-    sendPushToDriver(driverName, '🚗 New ride assigned — NWDA', `${ride.client} · ${fmtDateShort(ride.date)} ${ride.time||''}`);
+    sendPushToDriver(driverName, '🚗 New ride assigned — NWDA', `${ride.client} · ${fmtDateShort(ride.date)} ${ride.time||''}`, {rideId: ride.id});
   } else if(action==='transfer_request'){
     sendPushToDriver(driverName, '⇄ Client transfer request — NWDA', msg);
   } else if(action==='transfer_approved'||action==='transfer_denied'){
@@ -11495,7 +11495,13 @@ async function assignVolunteer(id, driverName){
   touchRide(r,'assigned via Offerings'); await saveRides();
   try{ refreshDash(); renderCal(); renderMyCal && renderMyCal(); }catch(e){}
   var first=driverName.split(' ')[0];
-  try{ addNotification(driverName, r, 'assigned', 'You were assigned '+(r.client||'a ride')+' on '+fmtDateShort(r.date)+' at '+(r.time||'\u2014')+' ($'+(r.price||0)+')'); if(typeof sendPushToDriver==='function') sendPushToDriver(driverName, '\uD83D\uDE97 Ride assigned \u2014 NWDA', (r.client||'A ride')+' \u00b7 '+fmtDateShort(r.date)); await saveNotifs(); updateNotifBadge(); }catch(e){}
+  // addNotification() already fires its own push for action==='assigned' internally - a
+  // separate, second sendPushToDriver call used to sit right here too, which meant a driver
+  // approved from Offerings got two separate "you were assigned" pushes for the same ride,
+  // worded slightly differently, while every OTHER assignment path in the app (Add Ride,
+  // Dispatch Tools reassign, round-trip legs) correctly relied on addNotification alone.
+  // Removed the duplicate; this now matches that same, already-correct pattern.
+  try{ addNotification(driverName, r, 'assigned', 'You were assigned '+(r.client||'a ride')+' on '+fmtDateShort(r.date)+' at '+(r.time||'\u2014')+' ($'+(r.price||0)+')'); await saveNotifs(); updateNotifBadge(); }catch(e){}
   var cmsg={sender:currentUser?.name||'',text:'\u2705 '+first+' is covering '+(r.client||'this ride')+' on '+fmtDateShort(r.date)+'.',ts:Date.now(),read:false};
   if(fbDB){ try{ await ensureFbAuth(); await fbRef('nda/kat/chat/offerings').push(cmsg); }catch(e){} }
   if(!chatMessages.offerings) chatMessages.offerings=[];
@@ -11894,7 +11900,7 @@ function notifyChatMembers(channelKey, msg){
     const senderDriver=(typeof getMyDriverName==='function' && getMyDriverName()) || (typeof USER_DRIVER_MAP!=='undefined' && USER_DRIVER_MAP[msg.sender]) || msg.sender;
     DRIVERS.forEach(d=>{
       if(d !== msg.sender && d !== senderDriver && _driverPrefFor(d, channelKey==='offerings'?'offeringAlerts':'chatAlerts', true)){
-        addChatBellNotif(d, _cfg.emoji+' '+sFirst+' in '+_cfg.label+': '+(msg.type==='ride_offer'?'\uD83D\uDE97 ride posted':preview), channelKey, _cfg.osNotif); sendPushToDriver(d, _cfg.emoji+' '+_cfg.label, sFirst+': '+(msg.type==='ride_offer'?'\uD83D\uDE97 ride posted':preview));
+        addChatBellNotif(d, _cfg.emoji+' '+sFirst+' in '+_cfg.label+': '+(msg.type==='ride_offer'?'\uD83D\uDE97 ride posted':preview), channelKey, _cfg.osNotif); sendPushToDriver(d, _cfg.emoji+' '+_cfg.label, sFirst+': '+(msg.type==='ride_offer'?'\uD83D\uDE97 ride posted':preview), {type:'chat', channel:channelKey});
       }
     });
     saveNotifs();
@@ -11904,7 +11910,7 @@ function notifyChatMembers(channelKey, msg){
     const other = channelKey.split('__').map(n=>n.replace(/_/g,' ')).find(n=>n!==myDriver);
     if(other){
       const body = msg.text.length > 60 ? msg.text.slice(0,60)+'…' : msg.text;
-      sendPushToDriver(other, `💬 DM from ${msg.sender?.split(' ')[0]||'Someone'}`, body);
+      sendPushToDriver(other, `💬 DM from ${msg.sender?.split(' ')[0]||'Someone'}`, body, {type:'chat', channel:channelKey});
       addChatBellNotif(other, `💬 ${msg.sender?.split(' ')[0]||'Someone'}: ${body}`, channelKey, true);
       saveNotifs();
     }
@@ -24347,7 +24353,11 @@ function setupFCMForeground(){
 // Send push notification via FCM HTTP v1 API (called server-side via Firebase Functions)
 // Since we have no server, we use the Firebase Realtime DB trigger approach:
 // Write a notification request to DB → service worker picks it up
-async function sendPushToDriver(driverName, title, body){
+// navData (optional): {type, rideId, channel} - forwarded into the FCM message's data payload
+// so tapping the notification deep-links straight to the right place, using the exact same
+// notifRoute()/fireLocalNotification() machinery the backend-free notification path already
+// uses correctly. Omit it and the push behaves exactly as before (title/body only).
+async function sendPushToDriver(driverName, title, body, navData){
   if(!fbDB || !driverName) return;
   // Never push to the person who triggered the action.
   // Match the SAME name space the FCM token is stored under (driver name via USER_DRIVER_MAP).
@@ -24359,7 +24369,9 @@ async function sendPushToDriver(driverName, title, body){
   if(_mp && (_mp===_tgtDriver || _mp===driverName)) return;
   try {
     const id = Date.now()+'_'+Math.random().toString(36).slice(2,7);
-    await fbRef('nda/kat/pushQueue/'+id).set({ to: driverName, title, body, ts: Date.now() });
+    const entry = { to: driverName, title, body, ts: Date.now() };
+    if(navData && (navData.rideId!=null || navData.channel || navData.type)) entry.data = navData;
+    await fbRef('nda/kat/pushQueue/'+id).set(entry);
   } catch(e){ console.warn('Push enqueue error:', e); }
 }
 
