@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607241697">
+<meta name="version" content="202607241701">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -354,8 +354,17 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
   #myprofile-card .member-card { max-width: none; }
   /* Give the photo header more presence on desktop */
   #myprofile-card .member-card-photo { height: 240px; }
-  /* Flow the simple edit fields into two columns; complex/full-width blocks stay single.
-     Children 1–7 are Email, Vehicle Year, Make/Model, Home address, Gas+MPG, Maintenance, Notes. */
+  /* Every direct child of member-card-body spans full width by default. The one exception -
+     the collapsible My Information wrapper, which internally lays out its own short fields
+     (Email, Vehicle Year, Make/Model, Home address, Gas+MPG, Maintenance, Notes) in two
+     columns - already sets its own grid-column inline, which takes priority over this rule
+     without needing a special case here.
+     This replaces what used to be a position-based nth-child(n+8) rule, which broke every
+     time a new section got inserted, relocated, or wrapped - confirmed the hard way while
+     building the collapsible My Information section, when it silently broke full-width
+     spanning for Receipt branding, the photo/payment block, the "send everything" checklist,
+     and My Availability all at once, since every one of them shifted position. A rule that
+     doesn't depend on position at all can't break this way again. */
   #myprofile-card .member-card-body {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -363,21 +372,7 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
     row-gap: .1rem;
     align-items: start;
   }
-  /* Phone number line, and everything from Receipt branding onward, span full width */
-  #myprofile-card .member-card-body > *:first-child,
-  #myprofile-card .member-card-body > *:nth-child(n+8) {
-    grid-column: 1 / -1;
-  }
-  /* Home address reads better full-width even in the two-col zone (Notes+below already full via n+8) */
-  #myprofile-card .member-card-body > *:nth-child(5) {
-    grid-column: 1 / -1;
-  }
-  /* My Availability (profile-settings-block-c) is relocated here via JS, right after Display
-     Name, so its position in the child order doesn't match the nth-child assumptions above.
-     Targeted by ID instead of position so it stays correct regardless of where it lands -
-     it's tall and clearly not meant to sit beside a single short field, which left Display
-     Name's column looking mostly empty above it. */
-  #myprofile-card #profile-settings-block-c {
+  #myprofile-card .member-card-body > * {
     grid-column: 1 / -1;
   }
 }
@@ -887,7 +882,7 @@ input,select,textarea{font-size:16px;}
     <div id="profile-panel-me">
       <div id="profile-driver-picker"></div>
       <div id="myprofile-card" class="myprofile-card-wrap" style="margin:0 auto;"></div>
-      <div id="booking-link-card" style="margin:0 auto;max-width:520px;"></div>
+      <div id="booking-link-card" class="myprofile-card-wrap" style="margin:0 auto;"></div>
     </div>
     <div id="profile-panel-account" style="display:none;">
       <div class="myprofile-card-wrap" style="margin:0 auto;">
@@ -15536,19 +15531,23 @@ function _userSubActionsHTML(u){
   if(!canGrantFreeAccess()) return '<div style="font-size:.66rem;color:var(--mid);">Only Chase can grant or remove subscription access</div>';
   var st = appAccessState(u.name);
   var n = escHtml(u.name);
-  var h = '<div style="display:flex;gap:.35rem;flex-wrap:wrap;">'
-    + '<button onclick="confirmSubPayment(this.dataset.u,1)" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #15803d;color:#fff;background:#15803d;font-family:inherit;font-weight:700;cursor:pointer;">Confirm payment (+1mo)</button>'
-    + '<button onclick="confirmSubPayment(this.dataset.u,3)" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #15803d;color:#15803d;background:none;font-family:inherit;cursor:pointer;">+3mo</button>'
-    + '<button onclick="confirmSubPayment(this.dataset.u,12)" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #15803d;color:#15803d;background:none;font-family:inherit;cursor:pointer;">+1yr</button>'
-    + '<button onclick="toggleComp(this.dataset.u)" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #2563eb;color:#2563eb;background:none;font-family:inherit;cursor:pointer;">'+(_isComped(u.name)?'Remove free':'Make free')+'</button>'
+  var nk = n.replace(/ /g,'_');
+  var h = '<div style="display:flex;gap:.35rem;flex-wrap:wrap;align-items:center;">'
+    + '<select id="pay-months-'+nk+'" style="font-size:.68rem;padding:3px 6px;border-radius:8px;border:1px solid #15803d;color:#15803d;background:#fff;font-family:inherit;font-weight:700;cursor:pointer;">'
+      +'<option value="1">1 month</option>'
+      +'<option value="3">3 months</option>'
+      +'<option value="12">1 year</option>'
+    +'</select>'
+    + '<button onclick="confirmSubPayment(this.dataset.u,parseInt(document.getElementById(\'pay-months-\'+this.dataset.nk).value))" data-u="'+n+'" data-nk="'+nk+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #15803d;color:#fff;background:#15803d;font-family:inherit;font-weight:700;cursor:pointer;">Confirm payment</button>'
+    + '<button onclick="toggleComp(this.dataset.u)" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #2563eb;color:#2563eb;background:none;font-family:inherit;font-weight:700;cursor:pointer;">'+(_isComped(u.name)?'Remove free':'Make free')+'</button>'
     + (st.kind==='deactivated'
         ? '<button onclick="reactivateSubAccess(this.dataset.u)" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #15803d;color:#15803d;background:none;font-family:inherit;font-weight:700;cursor:pointer;">Reactivate</button>'
-        : '<button onclick="revokeSubAccess(this.dataset.u)" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #dc2626;color:#dc2626;background:none;font-family:inherit;cursor:pointer;">Deactivate</button>')
+        : '<button onclick="revokeSubAccess(this.dataset.u)" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #dc2626;color:#dc2626;background:none;font-family:inherit;font-weight:700;cursor:pointer;">Deactivate</button>')
     // Archive: a different, bigger step than Deactivate - removes them from every live list
     // and dropdown, not just scheduling eligibility. Only offered for someone who's actually
     // in DRIVERS (a pure-login-only admin account, if that ever exists, has nothing to archive).
     + (DRIVERS.indexOf(USER_DRIVER_MAP[u.name])>=0
-        ? '<button onclick="archiveDriver(USER_DRIVER_MAP[this.dataset.u])" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #78716c;color:#78716c;background:none;font-family:inherit;cursor:pointer;">\ud83d\udce6 Archive</button>'
+        ? '<button onclick="archiveDriver(USER_DRIVER_MAP[this.dataset.u])" data-u="'+n+'" style="font-size:.68rem;padding:3px 9px;border-radius:8px;border:1px solid #78716c;color:#78716c;background:none;font-family:inherit;font-weight:700;cursor:pointer;">\ud83d\udce6 Archive</button>'
         : '')
     + '</div>';
   return h;
@@ -15562,10 +15561,12 @@ function _driverSurchAutoHTML(dName){
   var right = offs.length
     ? offs.map(function(t){ return '<span style="font-size:.66rem;font-weight:700;padding:.12rem .5rem;border-radius:20px;background:var(--light);color:var(--mid);margin:0 6px 4px 0;display:inline-block;">'+t[1]+'</span>'; }).join('')
     : '<span style="font-size:.72rem;color:#15803d;font-weight:700;">All on</span>';
+  var _sk = (dName||'').replace(/ /g,'_');
   return '<div style="margin-top:.7rem;">'
-    +'<div style="font-size:.7rem;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">\u23F0 Auto-add surcharges</div>'
+    +'<div style="display:flex;align-items:center;gap:4px;margin-bottom:.35rem;"><span style="font-size:.7rem;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);">\u23F0 Auto-add surcharges</span>'
+    +'<span onclick="toggleInfoBubble(\'surch-info-'+_sk+'\')" style="cursor:pointer;width:13px;height:13px;border-radius:50%;background:var(--light);color:var(--mid);font-size:.58rem;display:inline-flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0;">i</span></div>'
     +'<div>'+right+'</div>'
-    +'<div style="font-size:.64rem;color:var(--mid);margin-top:.3rem;">A pill means that surcharge\u2019s auto-add is off for this driver \u2014 view-only, they set it themselves.</div>'
+    +'<div id="surch-info-'+_sk+'" style="display:none;font-size:.64rem;color:var(--mid);margin-top:.3rem;background:var(--surface);border-radius:6px;padding:.4rem .5rem;">A pill means that surcharge\u2019s auto-add is off for this driver \u2014 view-only, they set it themselves.</div>'
     +'</div>';
 }
 // Admin-only tab: lets admins set the GLOBAL default for each auto-generated message.
@@ -15940,10 +15941,10 @@ function renderAccessControl(){
     const appToggle = isMe
       ? '<span style="font-size:.72rem;color:var(--mid);padding:.2rem .5rem;">You</span>'
       : isAdmin_u
-        ? '<button onclick="requestAdminRemoval(this.dataset.n)" data-n="'+safeN+'" style="font-size:.72rem;padding:3px 9px;border-radius:8px;border:1px solid #dc2626;color:#dc2626;background:none;cursor:pointer;">'
+        ? '<button onclick="requestAdminRemoval(this.dataset.n)" data-n="'+safeN+'" style="font-size:.72rem;padding:3px 9px;border-radius:8px;border:1px solid #dc2626;color:#dc2626;background:none;font-weight:700;cursor:pointer;">'
           +(iAlreadyRequested ? 'Requested ('+pendingApprovals+'/2)' : 'Remove admin')+'</button>'
         : ('<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;justify-content:flex-end;">'
-          +'<button onclick="requestAdminPromotion(this.dataset.n)" data-n="'+safeN+'" style="font-size:.72rem;padding:3px 9px;border-radius:8px;border:1px solid #7c3aed;color:#7c3aed;background:none;cursor:pointer;">'
+          +'<button onclick="requestAdminPromotion(this.dataset.n)" data-n="'+safeN+'" style="font-size:.72rem;padding:3px 9px;border-radius:8px;border:1px solid #7c3aed;color:#7c3aed;background:none;font-weight:700;cursor:pointer;">'
           +((adminPromotionRequests[u.name]&&adminPromotionRequests[u.name].has(currentUser.name)) ? 'Requested ('+(adminPromotionRequests[u.name].size)+'/2)' : ((adminPromotionRequests[u.name]&&adminPromotionRequests[u.name].size)? 'Make admin ('+adminPromotionRequests[u.name].size+'/2)' : 'Make admin'))+'</button>'
           +'<label class="switch"><input type="checkbox" '+(active?'checked ':'')+' onchange="toggleUserAccess(this.dataset.u,this)" data-u="'+safeN+'" /><span class="slider"></span></label>'
           +'</div>');
@@ -15976,8 +15977,9 @@ function renderAccessControl(){
             +_driverSurchAutoHTML(dName)
           : '')
       +'<div style="margin-top:.7rem;"><div style="font-size:.7rem;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Password</div>'
-      +'<button onclick="openPwModal(this.dataset.u)" data-u="'+safeN+'" style="font-size:.72rem;padding:4px 11px;border-radius:8px;border:1px solid var(--gold);color:var(--gold);background:none;cursor:pointer;font-family:\'DM Sans\',sans-serif;">🔑 Reset password</button>'
-      +'<div style="font-size:.66rem;color:var(--mid);margin-top:.25rem;">Set a new password if they\u2019re locked out — no current password needed.</div></div>'
+      +'<button onclick="openPwModal(this.dataset.u)" data-u="'+safeN+'" style="font-size:.72rem;padding:4px 11px;border-radius:8px;border:1px solid var(--gold);color:var(--gold);background:none;cursor:pointer;font-weight:700;font-family:\'DM Sans\',sans-serif;">🔑 Reset password</button>'
+      +'<span onclick="toggleInfoBubble(\'pw-info-'+safeN+'\')" style="cursor:pointer;width:13px;height:13px;border-radius:50%;background:var(--light);color:var(--mid);font-size:.58rem;display:inline-flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0;margin-left:.35rem;vertical-align:middle;">i</span>'
+      +'<div id="pw-info-'+safeN+'" style="display:none;font-size:.66rem;color:var(--mid);margin-top:.25rem;background:var(--surface);border-radius:6px;padding:.4rem .5rem;">Set a new password if they\u2019re locked out — no current password needed.</div></div>'
       +'</div>'
       +'</div>';
   }).join('') + _onbResetPanel + buildColorVaultPanel();
@@ -16472,10 +16474,16 @@ function buildMemberCard(d, opts){
           <input class="prof-fld" type="text" id="prof-displayname-${dk}" value="${escAttr(prof.displayName||'')}" placeholder="${escAttr((d||'').split(' ')[0])} \u2014 or a nickname" />
           <div style="font-size:.66rem;color:var(--mid);margin-top:3px;line-height:1.4;">The name clients see in your confirmation texts and contact card \u2014 e.g. if you go by a nickname (Kathleen &rarr; Kat) or your name changed. Leave blank to use your full name.</div>
         </div>`:(prof.displayName?`<div class="member-card-field"><span class="member-card-lbl">Goes by</span><span class="member-card-val">${escHtml(prof.displayName)}</span></div>`:'')}
+        ${canEdit?('<div id="profile-settings-block-info" style="grid-column:1/-1;margin:.6rem 0;padding-top:.55rem;border-top:1px solid var(--light);">'
+          +'<div onclick="toggleSectionCollapse(\'infoCollapsed_'+dk+'\',\'myinfo-body-'+dk+'\',\'myinfo-chev-'+dk+'\')" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-bottom:4px;">'
+          +'<span style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;">My information</span>'
+          +'<span id="myinfo-chev-'+dk+'" style="display:inline-block;transition:transform .15s;transform:'+(_sectionCollapsed('infoCollapsed_'+dk,false)?'rotate(-90deg)':'rotate(0deg)')+';color:var(--mid);font-size:.75rem;">\u25be</span>'
+          +'</div>'
+          +'<div id="myinfo-body-'+dk+'" style="display:'+(_sectionCollapsed('infoCollapsed_'+dk,false)?'none':'grid')+';grid-template-columns:1fr 1fr;column-gap:1rem;row-gap:.1rem;align-items:start;">') : ''}
         ${editField('Email',prof.email,'prof-email','email@example.com')}
         ${editField('Vehicle Year',prof.vehicleYear,'prof-vehicleyear','e.g. 2022')}
         ${editField('Vehicle Make/Model',prof.vehicle,'prof-vehicle','e.g. Toyota Camry')}
-        ${canEdit?('<div style="margin-bottom:.45rem;">'
+        ${canEdit?('<div style="margin-bottom:.45rem;grid-column:1/-1;">'
           +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Home address (for driver-distance matching)</div>'+'<input class="prof-fld" type="text" id="prof-homeaddress-'+dk+'" value="'+(prof.homeAddress||'')+'" placeholder="Your home address">'+'</div>'
           +'<div style="margin-bottom:.45rem;">'
           +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Gas price ($/gal) &amp; your MPG</div>'
@@ -16491,6 +16499,7 @@ function buildMemberCard(d, opts){
           +'</div>')
           :''}  
         ${editField('Notes',prof.notes,'prof-notes','Any notes…')}
+        ${canEdit?'</div></div>':''}
         ${canEdit?('<div id="profile-settings-block" style="margin:.6rem 0;padding-top:.55rem;border-top:1px solid var(--light);">'
           +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:.35rem;">\uD83E\uDDFE Receipt branding <span style="text-transform:none;letter-spacing:0;">(shown on receipts you send clients)</span></div>'
           +'<input class="prof-fld" type="text" id="prof-bizname-'+dk+'" value="'+escAttr(prof.businessName||'')+'" placeholder="Your business name (optional)" style="margin-bottom:.45rem;">'
@@ -16532,7 +16541,11 @@ function buildMemberCard(d, opts){
              var _today=toDateStr(new Date());
              var upcoming=(prof.unavailableDates||[]).filter(function(dt){return dt>=_today;}).sort();
              var avExc=(prof.availableDates||[]).filter(function(dt){return dt>=_today;}).sort();
-             var hrs=(prof.unavailHours||[]);
+             // Recurring (day-of-week) blocks never expire and are always kept. A specific-date
+             // block (like "Jul 26 5:30 PM–8:00 PM") is only relevant through the day it's
+             // actually for - once that date has passed, it's just clutter, same reasoning
+             // already applied to unavailableDates/availableDates just above.
+             var hrs=(prof.unavailHours||[]).filter(function(h){ return !h.date || h.date>=_today; });
              var any=weekly.length||upcoming.length||hrs.length||avExc.length;
              return '<div style="background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.55rem .7rem;margin-bottom:.6rem;">'
                +'<div style="font-size:.6rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Currently set</div>'
@@ -16587,9 +16600,19 @@ function buildMemberCard(d, opts){
           +'<div style="font-size:.62rem;color:var(--mid);font-weight:700;margin-bottom:2px;">TO (end)</div>'
           +'<input type="time" id="avail-hto-'+dk+'" aria-label="End time" title="End time (to)" style="padding:.45rem;border:1px solid var(--light);border-radius:6px;font-size:.9rem;box-sizing:border-box;width:100%;margin-bottom:.55rem;"/>'
           +'<button onclick="addUnavailHour(\''+d+'\')" style="width:100%;padding:.5rem .8rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;">Add</button>'
-          +((prof.unavailHours||[]).length?
+          +((function(){
+            // Recurring blocks never expire. A specific-date block that's already passed can
+            // never affect any future ride (isDriverAvailable only matches on exact date
+            // equality) - same reasoning as filtering it from the Currently Set summary above,
+            // applied here too so it actually disappears everywhere, not just the summary.
+            var _todayEdit = toDateStr(new Date());
+            return (prof.unavailHours||[]).filter(function(h){ return !h.date || h.date>=_todayEdit; });
+          })().length?
             '<div style="font-size:.65rem;color:var(--mid);margin-bottom:3px;font-weight:600;">Hours you\u2019ve set (\u270f\uFE0F to change, \u00d7 to remove):</div>'
-            +(prof.unavailHours||[]).map(blk=>{
+            +(function(){
+              var _todayEdit = toDateStr(new Date());
+              return (prof.unavailHours||[]).filter(function(h){ return !h.date || h.date>=_todayEdit; });
+            })().map(blk=>{
               const dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
               const label=blk.date?fmtDateShort(blk.date):(blk.days||[]).map(d2=>dayNames[d2]).join('/');
               return '<div style="display:flex;align-items:flex-start;gap:.4rem;margin-bottom:2px;">'
@@ -16605,7 +16628,7 @@ function buildMemberCard(d, opts){
           +'</div>'
           +'</div>')
           :''}
-        ${venmoLink?('<div style="margin-top:.5rem;">'+venmoLink+'</div>'):''}
+        ${venmoLink?('<div style="margin-top:.5rem;grid-column:1/-1;">'+venmoLink+'</div>'):''}
         <div style="display:flex;gap:.4rem;margin-top:.6rem;">
           <button onclick="shareDriverCard('${d}')" style="flex:1;padding:.45rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">↗ Share Card</button>
           <button onclick="downloadDriverCard('${d}')" style="flex:1;padding:.45rem;background:#f5a623;border:none;color:#fff;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">⬇ Download</button>
