@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607241703">
+<meta name="version" content="202607241706">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -702,10 +702,12 @@ input,select,textarea{font-size:16px;}
         <button id="cal-familywall-btn" onclick="manualICSPaste()" style="background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;padding:.5rem .85rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">⬆ Import from FamilyWall</button>
         <button id="cal-quickadd-btn" onclick="openQuickAddModal()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">+ Add Ride</button>
       </div>
+      <div style="font-size:.7rem;color:var(--mid);text-align:center;margin:.4rem 0 0;">Drop-off &amp; pickup on the same trip? <span class="mtip-dot" id="mtd-cal-multistop" onclick="toggleMtip('cal-multistop')" title="What&#8217;s this?">i</span><div class="mtip-pop" id="mtp-cal-multistop">On the end-location prompt, tap &ldquo;Add another ride&rdquo; to link them &mdash; one combined map route, miles split between the two, and a tip prompt for each.</div></div>
     </div>
     <div id="fw-sync-status" style="font-size:.8rem;color:var(--mid);margin-bottom:.6rem;min-height:1.1rem;"></div>
-    <div style="font-size:.7rem;color:var(--mid);margin:-.4rem 0 .6rem;">Drop-off &amp; pickup on the same trip? <span class="mtip-dot" id="mtd-cal-multistop" onclick="toggleMtip('cal-multistop')" title="What&#8217;s this?">i</span><div class="mtip-pop" id="mtp-cal-multistop">On the end-location prompt, tap &ldquo;Add another ride&rdquo; to link them &mdash; one combined map route, miles split between the two, and a tip prompt for each.</div></div>
-    <div id="cal-driver-tabs" style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.75rem;"></div>
+    <div style="margin-bottom:.75rem;">
+      <select id="cal-driver-select" onchange="switchCalTab(this.value)" style="width:100%;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.9rem;font-weight:600;background:#fff;"></select>
+    </div>
     <input type="text" id="cal-search" name="cal-search-nofill" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="🔍 Search all rides — client, phone, driver, type…" oninput="calSearch()" style="width:100%;padding:.55rem .85rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;margin-bottom:.75rem;box-sizing:border-box;" />
     <div id="cal-controls" style="display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem;flex-wrap:wrap;">
       <button onclick="calPrev()" class="btn-secondary" style="padding:.35rem .75rem;">←</button>
@@ -5926,18 +5928,17 @@ let myTab = 'cal';                    // My Rides: 'cal' | 'list'
 
 function monthLabel(d){ return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`; }
 
-function switchCalTab(driver,el){
+function switchCalTab(driver){
   calDriverFilter=driver;
-  document.querySelectorAll('#cal-driver-tabs .cal-tab').forEach(t=>t.classList.remove('active'));
-  if(el) el.classList.add('active');
   renderCal();
 }
 function buildCalTabs(){
-  const c=document.getElementById('cal-driver-tabs');
-  if(!c) return;
-  const allActive = (!calDriverFilter||calDriverFilter==='group') ? ' active' : '';
-  c.innerHTML=`<button class="cal-tab${allActive}" onclick="switchCalTab('group',this)" style="font-weight:600;">All drivers</button>`
-    +driversForDisplay().map(d=>`<button class="cal-tab${calDriverFilter===d?' active':''}" onclick="switchCalTab('${d}',this)" style="color:${driverColor(d)};font-weight:600;">${d.split(' ')[0]}</button>`).join('');
+  const sel=document.getElementById('cal-driver-select');
+  if(!sel) return;
+  const cur = (!calDriverFilter||calDriverFilter==='group') ? 'group' : calDriverFilter;
+  sel.innerHTML=`<option value="group">All drivers</option>`
+    +driversForDisplay().map(d=>`<option value="${d}">${d}</option>`).join('');
+  sel.value = cur;
 }
 
 // Build the week-view markup for a Sunday-start week into containerId.
@@ -12275,11 +12276,14 @@ function openQuickAddModal(){
   // Ensure address autocomplete is wired for this modal's fields
   if(window.google && google.maps) initAddressAutocomplete();
 
-  // Populate the driver dropdown, defaulting to the creator
+  // Populate the driver dropdown, defaulting to the creator - same availability-aware,
+  // reordered, color-coded logic the Ride Modal and Quote form already use, instead of a
+  // separate, simpler list that didn't account for availability at all.
   const sel=document.getElementById('qa-driver');
   const mine=defaultRideDriver();
   if(sel){
-    sel.innerHTML=`<option value="">Unassigned</option>`+DRIVERS.map(d=>`<option value="${d}"${d===mine?' selected':''}>${d}</option>`).join('');
+    const _qaDateNow=(document.getElementById('qa-date')||{}).value||'';
+    sel.innerHTML=driverOptionsHTML(mine, _qaDateNow);
   }
   qaAddonState={ premium:false, holiday:false, christmas:false, late:false, traffic:false, fuel:false };
   _qaTouched={ premium:false, traffic:false, holiday:false, christmas:false, fuel:false };
@@ -12525,6 +12529,10 @@ function onQaDateTimeChange(){
   {
     const dv=(document.getElementById('qa-date')||{}).value||'';
     const tv=(document.getElementById('qa-time')||{}).value||'';
+    // The driver dropdown's availability/ordering depends on the date - keep it current as
+    // the date changes, without losing whoever's already selected.
+    const _qaDrvSel=document.getElementById('qa-driver');
+    if(_qaDrvSel){ const _cur=_qaDrvSel.value; _qaDrvSel.innerHTML=driverOptionsHTML(_cur, dv); }
     // Keep fuel defaulted on unless the driver explicitly toggled it off this session.
     if(globalSettings.fuelEnabled !== false && !_qaTouched.fuel && !driverAutoOff('fuel')) qaAddonState.fuel=true;
     if(tv){
@@ -16927,12 +16935,21 @@ function driverSubActive(dName){
 }
 
 function driverOptionsHTML(selected, dateStr){
-  return `<option value="">Unassigned</option>` + DRIVERS.map(d=>{
+  // Available drivers first, unavailable/unpaid pushed to the bottom - a stable sort so each
+  // group keeps its own original relative order, it just splits into two blocks instead of
+  // being scattered throughout the list.
+  var sorted = DRIVERS.slice().sort(function(a, b){
+    var aOk = driverSubActive(a) && isDriverAvailable(a, dateStr);
+    var bOk = driverSubActive(b) && isDriverAvailable(b, dateStr);
+    if(aOk === bOk) return 0;
+    return aOk ? -1 : 1;
+  });
+  return `<option value="">Unassigned</option>` + sorted.map(d=>{
     const paid  = driverSubActive(d);
     const avail = isDriverAvailable(d, dateStr);
     // Unpaid outranks unavailable: they can't take work at all until they're paid up.
     const label = !paid ? d+' (subscription inactive)' : (avail ? d : d+' (unavailable)');
-    const style = (!paid || !avail) ? ' style="color:#aaa"' : '';
+    const style = (!paid || !avail) ? ' style="color:#aaa"' : ' style="color:#15803d;font-weight:600;"';
     const sel = d===selected ? ' selected' : '';
     // Keep an already-assigned driver selectable so an existing ride never breaks.
     const dis = (!paid && d!==selected) ? ' disabled' : '';
