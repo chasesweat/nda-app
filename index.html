@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607241707">
+<meta name="version" content="202607241715">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -5913,6 +5913,16 @@ function _hoursUntilRide(r){
 // through any time AFTER it (no cutoff once it starts — a driver running late still needs
 // Start Ride / GPS to work). Replaces same-CALENDAR-DAY gating, which opened these features
 // at an arbitrary midnight boundary instead of a fixed lead time before the actual ride.
+// A genuinely different, SYMMETRIC window - true from N hours before through N hours after,
+// with a real cutoff on both sides. _isRideWithinHours above is deliberately unbounded in the
+// past (a driver running late still needs Start Ride to work); Send Arrival Text is a
+// different situation - there's no reason it should still be tappable a day after a ride's
+// scheduled time has come and gone.
+function _isRideWithinHoursSymmetric(r, hours){
+  var h = _hoursUntilRide(r);
+  if(h===Infinity) return false;
+  return Math.abs(h) <= (hours==null?6:hours);
+}
 function _isRideWithinHours(r, hours){
   return _hoursUntilRide(r) <= (hours==null?12:hours);
 }
@@ -6446,7 +6456,7 @@ function renderConfirmations(){
       const _instSel0=_hasAnyInstr0
         ?'<select id="cinst-'+pid+'" onchange="_setConfInstKey('+pid+',this.value)" style="width:100%;padding:.35rem .5rem;border:1px solid var(--light);border-radius:7px;font-size:.76rem;font-family:\'DM Sans\',sans-serif;color:var(--black);background:var(--white);box-sizing:border-box;">'+_instOpts0+'</select>'
         :'<div style="font-size:.68rem;color:var(--mid);font-style:italic;">No pickup instruction templates set up yet \u2014 add them under Profile.</div>';
-      const buttons='<div style="display:flex;flex-direction:column;gap:.45rem;margin-bottom:.75rem;">'+(_isApPickup0?('<button onclick="sendArrivalText('+pid+')" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.6rem;background:#1d4ed8;border:none;border-radius:8px;color:#fff;font-weight:800;font-size:.88rem;cursor:pointer;font-family:\'DM Sans\',sans-serif;">&#x2708;&#xFE0F; Send arrival text</button>'+'<div style="font-size:.63rem;color:var(--mid);text-align:center;margin:-.15rem 0 .15rem;">Send this the moment they land \u2014 goes straight to '+escHtml(r.client||'the client')+'</div>'):'')
+      const buttons='<div style="display:flex;flex-direction:column;gap:.45rem;margin-bottom:.75rem;">'+((_isApPickup0 && getMyDriverName()===r.driver && typeof _isRideWithinHoursSymmetric==='function' && _isRideWithinHoursSymmetric(r,6))?('<button onclick="dashSendArrival('+pid+')" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.6rem;background:#1d4ed8;border:none;border-radius:8px;color:#fff;font-weight:800;font-size:.88rem;cursor:pointer;font-family:\'DM Sans\',sans-serif;">&#x2708;&#xFE0F; Send arrival text</button>'+'<div style="font-size:.63rem;color:var(--mid);text-align:center;margin:-.15rem 0 .15rem;">Send this the moment they land \u2014 goes straight to '+escHtml(r.client||'the client')+'</div>'):'')
         +'<button onclick="sendAllConf('+pid+')" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.45rem;padding:.65rem;background:#15803d;border:none;border-radius:8px;color:#fff;font-weight:800;font-size:.9rem;cursor:pointer;font-family:\'DM Sans\',sans-serif;">&#x1F4E4; Send checked items in one text</button>'
         +'<div style="font-size:.66rem;color:var(--mid);text-align:center;margin:-.2rem 0 .1rem;">Tick or untick what to include, then send \u2014 or tap any row to send just that piece</div>'
         +chkRow('text','&#x1F4AC; Confirmation text','sendConfText', _sa0.message!==false)
@@ -7457,12 +7467,14 @@ function renderRideView(r){
   const _pairLabel = _pairedRide ? (_pairedRide.type==='AP PICK UP' ? '\u2708\ufe0f View return leg \u2192' : '\u2708\ufe0f View outbound leg \u2192') : null;
   const apType = r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP';
   const _flightNum = (r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'').toUpperCase();
-  // Live flight tracking and TSA wait times live only on the dashboard thumbnail now —
-  // that's the fast, glanceable spot for "is my flight coming in on time" while actively
-  // coordinating a pickup. Duplicating the same links here just added clutter to an
-  // already-busy card. The flight number itself still shows, as plain reference text.
+  // A quick Track link sits right beside the flight number itself, reusing the exact same
+  // Google flight-tracking search the dashboard card's own Track button already uses - so
+  // checking a flight doesn't require leaving the ride detail view to go find the dashboard
+  // thumbnail for it.
   const flightRowHtml = r.flight
-    ? '<div style="font-size:.88rem;margin-bottom:3px;">Flight: ' + escHtml(r.flight) + '</div>'
+    ? '<div style="font-size:.88rem;margin-bottom:3px;display:flex;align-items:center;gap:.5rem;">Flight: ' + escHtml(r.flight)
+      + (_flightNum ? ' <a href="https://www.google.com/search?q='+_flightNum+'+flight+tracking" target="_blank" rel="noopener" style="font-size:.72rem;font-weight:700;color:#7c3aed;text-decoration:none;border:1px solid #7c3aed;border-radius:6px;padding:1px 7px;">\u2708\uFE0F Track</a>' : '')
+      + '</div>'
     : '';
   // Gate code — visible only to this client's owner and whoever's actually assigned to
   // drive this ride (see canSeeGateCode). Never shown to anyone else, and never included
@@ -7700,10 +7712,10 @@ function renderRideView(r){
       return `<div class="detail-row" style="grid-column:1/-1;">
         <div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Actions</div>
         <div style="display:flex;flex-direction:column;gap:.5rem;">
-          ${(getMyDriverName()===r.driver) ? `<div><button onclick="addRideToCalendar(${r.id})" style="width:100%;padding:.6rem;font-size:.88rem;font-weight:700;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:.4rem;background:none;border:1.5px solid #7c3aed;color:#7c3aed;cursor:pointer;font-family:'DM Sans',sans-serif;">&#128197; Add to calendar</button>
-          <div style="font-size:.68rem;color:var(--mid);text-align:center;margin-top:3px;">Opens a file you can add to Apple, Google, Outlook, or Skylight</div></div>` : ''}
+          ${(getMyDriverName()===r.driver) ? `<div><button onclick="addRideToCalendar(${r.id})" style="width:100%;padding:.6rem;font-size:.88rem;font-weight:700;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:.4rem;background:none;border:1.5px solid #7c3aed;color:#7c3aed;cursor:pointer;font-family:'DM Sans',sans-serif;">&#128197; Add to calendar<span onclick="event.stopPropagation();toggleInfoBubble('cal-add-info-${r.id}')" style="cursor:pointer;width:15px;height:15px;border-radius:50%;background:rgba(124,58,237,.15);color:#7c3aed;font-size:.62rem;display:inline-flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0;">i</span></button>
+          <div id="cal-add-info-${r.id}" style="display:none;font-size:.68rem;color:var(--mid);text-align:center;margin-top:3px;background:var(--surface);border-radius:6px;padding:.4rem .5rem;">Opens a file you can add to Apple, Google, Outlook, or Skylight</div></div>` : ''}
           ${canSeeContact&&hasIncomeAccess()&&_slLocalType?'<button onclick="shareLocationToClient('+r.id+')" style="padding:.45rem .75rem;background:#0f172a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;">&#128205; Share Location \u2014 let the client see you coming</button>':''}
-          ${(r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')?`<button onclick="sendArrivalText(${r.id})" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.6rem;background:none;border:1.5px solid #7c3aed;border-radius:8px;color:#7c3aed;font-weight:700;font-size:.88rem;cursor:pointer;font-family:'DM Sans',sans-serif;">\u2708\uFE0F Send arrival text to ${escHtml((r.client||'client').split(' ')[0])}</button>`:''}
+          ${((r.type==='AP PICK UP'||r.type==='AP ROUND TRIP') && getMyDriverName()===r.driver && _isRideWithinHoursSymmetric(r,6))?`<button onclick="dashSendArrival(${r.id})" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.6rem;background:none;border:1.5px solid #7c3aed;border-radius:8px;color:#7c3aed;font-weight:700;font-size:.88rem;cursor:pointer;font-family:'DM Sans',sans-serif;">\u2708\uFE0F Send arrival text to ${escHtml((r.client||'client').split(' ')[0])}</button>`:''}
           ${_pairedRideForBtn?`<button onclick="openRideModal(${_pairedRideForBtn.id})" style="width:100%;padding:.6rem;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">${_pairedRideForBtn.type==='AP PICK UP'?'\u2708\ufe0f View return leg \u2192':'\u2708\ufe0f View outbound leg \u2192'}</button>`:''}
           ${shareOfferingsBtn}
         </div>
@@ -13822,7 +13834,18 @@ function refreshDash(){
           var _flightNum=(r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'').toUpperCase();
           var _flightUrl='https://www.google.com/search?q='+_flightNum+'+flight+tracking';
           _btns.push('<a href="'+_flightUrl+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;text-decoration:none;display:flex;align-items:center;justify-content:center;text-align:center;">\u2708\ufe0f Track</a>');
-          _btns.push('<button onclick="event.stopPropagation();dashSendArrival('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#1d4ed8;color:#fff;">\ud83d\udee9\ufe0f Arrived</button>');
+          // Send Arrival Text specifically (not Track, which stays available the whole time
+          // an airport ride is relevant) only makes sense for the assigned driver, and only in
+          // a tight window around the actual scheduled time - a real 6-hour SYMMETRIC cutoff on
+          // both sides, not the wider, one-directional 12-hour gate this whole button group
+          // already shares above (which intentionally stays open indefinitely once a ride
+          // starts, for Start Ride's own sake). getMyDriverName()===r.driver is already
+          // guaranteed by this card only ever showing isMyDrivingRide() rides in the first
+          // place, but stated explicitly here anyway rather than relying on that being true
+          // from a much earlier, distant filter.
+          if(getMyDriverName()===r.driver && typeof _isRideWithinHoursSymmetric==='function' && _isRideWithinHoursSymmetric(r,6)){
+            _btns.push('<button onclick="event.stopPropagation();dashSendArrival('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#1d4ed8;color:#fff;">\ud83d\udee9\ufe0f Arrived</button>');
+          }
         }
         // A dedicated row of its own (width:100% forces this onto its own line within the
         // outer card's flex-wrap layout), buttons laid out with their own flex context so
@@ -20316,6 +20339,13 @@ function sendArrivalText(id){
   showToast('\u2708\uFE0F Arrival text opened \u2014 tap send in Messages');
 }
 // Dashboard arrival flow: confirm first, then send. 'No' just closes and leaves the row.
+// Confirms before actually sending - originally dashboard-only (hence the name), now also used
+// by the ride detail modal's own Send Arrival Text button, which used to call sendArrivalText()
+// directly with no confirmation at all. Sitting in a tightly-packed vertical stack of buttons
+// (Add to Calendar, Share Location, Send Arrival, View return leg, Post to Offerings), a stray
+// tap there fired the real SMS composer and permanently marked the ride as arrival-sent with
+// zero chance to catch the mistake first - the actual root cause of that happening, not just
+// its symptom. Both paths now share this same confirm-first step.
 function dashSendArrival(id){
   var r=_rideById(id);
   if(!r){ showToast('Ride not found','error'); return; }
