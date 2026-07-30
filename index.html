@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607241715">
+<meta name="version" content="202607241716">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -7716,6 +7716,7 @@ function renderRideView(r){
           <div id="cal-add-info-${r.id}" style="display:none;font-size:.68rem;color:var(--mid);text-align:center;margin-top:3px;background:var(--surface);border-radius:6px;padding:.4rem .5rem;">Opens a file you can add to Apple, Google, Outlook, or Skylight</div></div>` : ''}
           ${canSeeContact&&hasIncomeAccess()&&_slLocalType?'<button onclick="shareLocationToClient('+r.id+')" style="padding:.45rem .75rem;background:#0f172a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;">&#128205; Share Location \u2014 let the client see you coming</button>':''}
           ${((r.type==='AP PICK UP'||r.type==='AP ROUND TRIP') && getMyDriverName()===r.driver && _isRideWithinHoursSymmetric(r,6))?`<button onclick="dashSendArrival(${r.id})" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.6rem;background:none;border:1.5px solid #7c3aed;border-radius:8px;color:#7c3aed;font-weight:700;font-size:.88rem;cursor:pointer;font-family:'DM Sans',sans-serif;">\u2708\uFE0F Send arrival text to ${escHtml((r.client||'client').split(' ')[0])}</button>`:''}
+          ${(r.arrivalSentAt && getMyDriverName()===r.driver)?`<div onclick="resetArrivalSent(${r.id})" style="text-align:center;font-size:.68rem;color:var(--mid);text-decoration:underline;cursor:pointer;margin-top:-.15rem;">Arrival text sent by mistake? Reset</div>`:''}
           ${_pairedRideForBtn?`<button onclick="openRideModal(${_pairedRideForBtn.id})" style="width:100%;padding:.6rem;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">${_pairedRideForBtn.type==='AP PICK UP'?'\u2708\ufe0f View return leg \u2192':'\u2708\ufe0f View outbound leg \u2192'}</button>`:''}
           ${shareOfferingsBtn}
         </div>
@@ -20337,6 +20338,23 @@ function sendArrivalText(id){
   r.arrivalSentAt=Date.now(); try{ saveRides(); }catch(e){}
   try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
   showToast('\u2708\uFE0F Arrival text opened \u2014 tap send in Messages');
+}
+// A real correction tool, not persistent UI clutter - lives only in the ride modal's Actions
+// section, visible only once arrivalSentAt is already set, rather than as an always-present
+// link on every dashboard card (which was tried once already and deliberately removed as
+// unnecessary noise once the actual root cause - the modal's own Send Arrival Text button
+// having no confirmation - was fixed). Still needed for a ride whose arrivalSentAt got set
+// before that fix went in, since there's no other way back to Track Flight + Send Arrival
+// Text on the dashboard card once this flag is set.
+async function resetArrivalSent(id){
+  var r=_rideById(id);
+  if(!r){ showToast('Ride not found','error'); return; }
+  if(!confirm('Reset this ride\u2019s arrival status? Use this only if the arrival text was sent by mistake \u2014 it puts the ride back to showing Send Arrival Text.')) return;
+  delete r.arrivalSentAt;
+  try{ await saveRides(); }catch(e){}
+  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+  try{ if(typeof renderRideView==='function' && activeRideId===id) renderRideView(r); }catch(e){}
+  showToast('Arrival status reset');
 }
 // Dashboard arrival flow: confirm first, then send. 'No' just closes and leaves the row.
 // Confirms before actually sending - originally dashboard-only (hence the name), now also used
