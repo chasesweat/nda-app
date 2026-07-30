@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607241706">
+<meta name="version" content="202607241707">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -5062,14 +5062,23 @@ function apRoundTripLegSplit(ride){
   var total = bd.total || (parseFloat(ride.price)||0);
   var rawTotal = raw1+raw2;
   var leg1;
+  // Floored to a whole dollar, not rounded to the nearest cent - matches the same "fare
+  // always rounds down, never up" rule already applied everywhere else in the app to the
+  // combined total itself. Without this, a proportional split of a whole-dollar total could
+  // still land each individual leg on an odd, unprofessional-looking fractional-cent amount
+  // (e.g. $113.40) even though the two legs together were always a clean whole dollar.
   if(rawTotal>0){
-    leg1 = Math.round((raw1 + (total-rawTotal)*(raw1/rawTotal)) * 100) / 100;
+    leg1 = Math.floor(raw1 + (total-rawTotal)*(raw1/rawTotal));
   } else {
     // No computed breakdown to go on at all (e.g. a purely manually-priced ride) - nothing
     // better available than an even split, but this path should be rare.
-    leg1 = Math.round((total/2) * 100) / 100;
+    leg1 = Math.floor(total/2);
   }
-  var leg2 = Math.round((total-leg1) * 100) / 100;   // absorbs the remainder - always exact
+  // Absorbs the remainder against the FLOORED total (defensive: the combined total should
+  // already be a whole dollar from quote-time flooring, but flooring it again here too means
+  // leg2 is still guaranteed correct even in an edge case where it somehow isn't - a
+  // manually-priced ride, say - rather than silently inheriting stray cents.
+  var leg2 = Math.floor(total)-leg1;
   return { leg1: leg1, leg2: leg2 };
 }
 
