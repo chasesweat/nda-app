@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607241716">
+<meta name="version" content="202607241739">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -543,6 +543,7 @@ input,select,textarea{font-size:16px;}
     <div id="dash-income-overview" style="margin-bottom:1.5rem;"></div>
     <div id="dash-fees" style="margin-bottom:1.5rem;"></div>
     <!-- Action blocks: confirmations to send, then rides to wrap up, then upcoming -->
+    <div id="dash-save-failed" style="margin-bottom:1.5rem;"></div>
     <div id="dash-gate-codes" style="margin-bottom:1.5rem;"></div>
         <div id="dash-confirmations" style="margin-bottom:1.5rem;"></div>
     <div id="dash-needs-attention" style="margin-bottom:1.5rem;"></div>
@@ -702,9 +703,9 @@ input,select,textarea{font-size:16px;}
         <button id="cal-familywall-btn" onclick="manualICSPaste()" style="background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;padding:.5rem .85rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">⬆ Import from FamilyWall</button>
         <button id="cal-quickadd-btn" onclick="openQuickAddModal()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">+ Add Ride</button>
       </div>
-      <div style="font-size:.7rem;color:var(--mid);text-align:center;margin:.4rem 0 0;">Drop-off &amp; pickup on the same trip? <span class="mtip-dot" id="mtd-cal-multistop" onclick="toggleMtip('cal-multistop')" title="What&#8217;s this?">i</span><div class="mtip-pop" id="mtp-cal-multistop">On the end-location prompt, tap &ldquo;Add another ride&rdquo; to link them &mdash; one combined map route, miles split between the two, and a tip prompt for each.</div></div>
     </div>
     <div id="fw-sync-status" style="font-size:.8rem;color:var(--mid);margin-bottom:.6rem;min-height:1.1rem;"></div>
+    <div id="cal-finalize-tomorrow"></div>
     <div style="margin-bottom:.75rem;">
       <select id="cal-driver-select" onchange="switchCalTab(this.value)" style="width:100%;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.9rem;font-weight:600;background:#fff;"></select>
     </div>
@@ -1984,15 +1985,17 @@ function _auditFlush(){
 }
 async function storageSet(key, val) {
   // Write to Firebase
+  var _ok = true;
   if(fbDB){
     await ensureFbAuth();
     try {
       await fbRef('nda/'+key.replace(/:/g,'/')).set(val);
-    } catch(e){ console.warn('Firebase write failed:', e); }
+    } catch(e){ console.warn('Firebase write failed:', e); _ok = false; }
   }
   // Also write to localStorage as backup
   try { localStorage.setItem(key, JSON.stringify(val)); } catch(e) {}
   try{ _auditAdminChange(key); }catch(e){}
+  return _ok;
 }
 
 // Real-time listener — updates rides/comments live across all devices
@@ -2003,8 +2006,24 @@ function setupRealtimeListeners(){
     if(snap.exists()){
       const val = snap.val();
       // Firebase stores arrays as objects — convert back
-      if(Array.isArray(val)) rides = val.filter(function(r){return r&&r.id!=null;});
-      else rides = Object.values(val||{}).filter(function(r){return r&&r.id!=null;});
+      var incoming;
+      if(Array.isArray(val)) incoming = val.filter(function(r){return r&&r.id!=null;});
+      else incoming = Object.values(val||{}).filter(function(r){return r&&r.id!=null;});
+      // Any ride with a save still pending (in-flight or previously failed) keeps its LOCAL,
+      // already-correct version instead of being silently reverted by this snapshot, which
+      // may well be the stale, pre-change data if that save hasn't actually landed yet.
+      if(window._pendingUnsavedRideIds && window._pendingUnsavedRideIds.size){
+        var _localById={}; rides.forEach(function(r){ if(r) _localById[r.id]=r; });
+        incoming = incoming.map(function(r){
+          return (r && window._pendingUnsavedRideIds.has(r.id) && _localById[r.id]) ? _localById[r.id] : r;
+        });
+        // Covers the rarer case too: a pending ride missing from this snapshot entirely
+        // (e.g. a brand-new ride whose very first save never landed).
+        window._pendingUnsavedRideIds.forEach(function(id){
+          if(_localById[id] && !incoming.some(function(r){return r&&r.id===id;})) incoming.push(_localById[id]);
+        });
+      }
+      rides = incoming;
       // A live update replaces `rides` with the live node only, so any temporarily
       // loaded archive is no longer merged in. Keep the flag honest.
       _archiveLoaded = false;
@@ -2153,6 +2172,11 @@ const SEED_RIDES = [
 ];
 let rides = [];
 let _archiveLoaded = false;   // whether the ride archive is currently merged into `rides`
+// Ride ids with a local change applied in memory but not yet confirmed saved to Firebase.
+// Exists so a slow or failed save can show its result immediately (the local state is
+// already correct) without a stale, in-flight Firebase snapshot silently overwriting that
+// change before the save actually lands - see setupRealtimeListeners()'s own use of this set.
+window._pendingUnsavedRideIds = window._pendingUnsavedRideIds || new Set();
 let comments = {};   // { rideId: [{user, text, ts}] }
 let notifications = {}; // { driverName: [{rideId, msg, ts, read}] }
 let nextId = 100;
@@ -2358,24 +2382,7 @@ async function _loadAppData() {
     // non-numeric ids (e.g. from a NaN nextId or repeated imports) caused clicking one
     // ride to open a different one, because find() returned the first matching id.
     // Reassign any colliding/invalid ids, carry that ride's comments to the new id.
-    {
-      let seen={}, maxId=0, changed=false;
-      (rides||[]).forEach(r=>{ let n=Number(r&&r.id); if(isFinite(n)&&n>maxId) maxId=n; });
-      let next=Math.max(maxId, Date.now())+1;
-      (rides||[]).forEach(r=>{
-        if(!r) return;
-        let n=Number(r.id), key=String(r.id);
-        let bad=(r.id==null||r.id===''||!isFinite(n)||Object.prototype.hasOwnProperty.call(seen,key));
-        if(bad){
-          let newId=next++;
-          try{ if(comments && comments[r.id]!==undefined && comments[newId]===undefined) comments[newId]=comments[r.id]; }catch(e){}
-          r.id=newId; key=String(newId); changed=true;
-        }
-        seen[key]=true;
-      });
-      nextId=next;
-      if(changed){ try{ await saveRides(); await saveComments(); }catch(e){ console.warn('ride id repair save failed', e); } }
-    }
+    await _repairDuplicateIds();
     // Migrate clients stored under proxy logins into their owner's list (one-time).
     // Morgan dispatches on Kat's behalf: any client record saved under 'Morgan' belongs
     // on Kat's list. Merge by name (case-insensitive); fill blanks from the moved record.
@@ -3007,7 +3014,7 @@ function showPageTip(pageId){
     +'</div>';
   document.body.appendChild(b);
 }
-async function saveRides()  { await storageSet('kat:rides', rides); }
+async function saveRides()  { return await storageSet('kat:rides', rides); }
 
 // ── SAVED QUOTES ──────────────────────────────────────────────────────────
 // Quotes saved for later (NOT on the calendar) — each is a full ride-shaped object
@@ -3525,6 +3532,27 @@ function _qaDebounceMileage(){
   var st=document.getElementById('qa-mileage-status'); if(st) st.textContent='Calculating\u2026';
   _qaMileageTimer=setTimeout(function(){ _qaCalcMileage(); }, 600);
 }
+// Shared by _qaCalcMileage and _editCalcMileage below - both need the exact same "check for an
+// already-locked route first, else call the real Maps Distance Matrix API and cache the
+// result" core before going on to their own, genuinely different UI updates (mileage display +
+// drive-time text + recalcQa() for Quick Add; just the miles field + _editAutoPrice() for Edit
+// Ride). Throws on a real API failure - callers decide for themselves how to handle that.
+async function _resolveRouteMeters(pu, dp){
+  var locked=getLockedRoute(pu,dp);
+  if(locked) return { meters:locked.meters, seconds:locked.seconds, fresh:false };
+  var result=await new Promise(function(resolve,reject){
+    cachedDistanceMatrix({
+      origins:[pu], destinations:[dp],
+      travelMode:google.maps.TravelMode.DRIVING,
+      unitSystem:google.maps.UnitSystem.IMPERIAL,
+    }, function(resp,status){ if(status==='OK') resolve(resp); else reject(new Error(status)); });
+  });
+  var el=result.rows[0].elements[0];
+  if(el.status!=='OK') throw new Error(el.status);
+  var meters=el.distance.value, seconds=el.duration.value;
+  setLockedRoute(pu,dp,meters,seconds);
+  return { meters:meters, seconds:seconds, fresh:true };
+}
 async function _qaCalcMileage(){
   var pu=((document.getElementById('qa-pickup')||{}).value||'').trim();
   var dp=((document.getElementById('qa-home')||{}).value||'').trim();
@@ -3532,22 +3560,8 @@ async function _qaCalcMileage(){
   var disp=document.getElementById('qa-miles-display');
   var st=document.getElementById('qa-mileage-status');
   try{
-    var locked=getLockedRoute(pu,dp);
-    var meters, seconds, fresh;
-    if(locked){ meters=locked.meters; seconds=locked.seconds; fresh=false; }
-    else{
-      var result=await new Promise(function(resolve,reject){
-        cachedDistanceMatrix({
-          origins:[pu], destinations:[dp],
-          travelMode:google.maps.TravelMode.DRIVING,
-          unitSystem:google.maps.UnitSystem.IMPERIAL,
-        }, function(resp,status){ if(status==='OK') resolve(resp); else reject(new Error(status)); });
-      });
-      var el=result.rows[0].elements[0];
-      if(el.status!=='OK') throw new Error(el.status);
-      meters=el.distance.value; seconds=el.duration.value; fresh=true;
-      setLockedRoute(pu,dp,meters,seconds);
-    }
+    var route=await _resolveRouteMeters(pu, dp);
+    var meters=route.meters, seconds=route.seconds, fresh=route.fresh;
     var miles=Math.floor(meters/1609.344); // rounds DOWN to match the sheet's convention
     var mins=Math.round(seconds/60);
     var hrs=Math.floor(mins/60);
@@ -3581,23 +3595,8 @@ async function _editCalcMileage(){
   var dp=((document.getElementById('edit-home')||{}).value||'').trim();
   if(!pu||!dp) return;
   try{
-    var locked=getLockedRoute(pu,dp);
-    var meters;
-    if(locked){ meters=locked.meters; }
-    else{
-      var result=await new Promise(function(resolve,reject){
-        cachedDistanceMatrix({
-          origins:[pu], destinations:[dp],
-          travelMode:google.maps.TravelMode.DRIVING,
-          unitSystem:google.maps.UnitSystem.IMPERIAL,
-        }, function(resp,status){ if(status==='OK') resolve(resp); else reject(new Error(status)); });
-      });
-      var el=result.rows[0].elements[0];
-      if(el.status!=='OK') return;
-      meters=el.distance.value;
-      setLockedRoute(pu,dp,meters,el.duration.value);
-    }
-    var miles=Math.floor(meters/1609.344); // rounds DOWN to match the sheet's convention
+    var route=await _resolveRouteMeters(pu, dp);
+    var miles=Math.floor(route.meters/1609.344); // rounds DOWN to match the sheet's convention
     var mi=document.getElementById('edit-miles'); if(mi) mi.value=miles;
     _editAutoPrice();
   }catch(e){ console.warn('edit mileage', e); }
@@ -4652,40 +4651,10 @@ async function saveQuote(){
   window._qOwnerResolved=false;
   if(!(await _confirmIfSameAddress('q'))) return;
   const driverVal=document.getElementById('q-driver').value || defaultRideDriver();
-  const total=calcQuote();
-  const ride={
-    id:nextId++, client, driver:driverVal,
-    pickup:document.getElementById('q-pickup').value,gateCode:document.getElementById('q-gate-code')?.value.trim()||'',private:!!document.getElementById('q-private')?.checked,
-    home:document.getElementById('q-dropoff').value,
-    miles:parseFloat(document.getElementById('q-miles').value)||0,
-    date:document.getElementById('q-date').value,
-    time:document.getElementById('q-time').value,
-    rt:(document.getElementById('q-rt-time')||document.getElementById('q-rt-pickup-date')||{}).value||'',
-    rtDate:document.getElementById('q-rt-pickup-date')?.value||'',
-    rtFlight:document.getElementById('q-rt-flight')?.value||'',
-    rtTerminal:document.getElementById('q-rt-terminal')?.value||'',
-    rtTime:document.getElementById('q-rt-time')?.value||'',
-    rtDateAP:document.getElementById('q-rt-date')?.value||'',
-    type:document.getElementById('q-type').value,
-    vehicle:document.getElementById('q-ride').value,
-    price: parseFloat(total.toFixed(2)),
-    flight:document.getElementById('q-flight').value,
-    terminal:document.getElementById('q-terminal').value,
-    pax:document.getElementById('q-pax').value,
-    checkedBags:parseInt(document.getElementById('q-checked-bags')?.value)||0,
-    carryOnBags:parseInt(document.getElementById('q-carryon-bags')?.value)||0,
-    phone:formatPhoneUS(document.getElementById('q-phone').value),
-    extraPhones:formatPhoneList((document.getElementById('q-extra-phones')||{}).value||''),
-    email:(document.getElementById('q-email')||{}).value||'',
-    ...Object.fromEntries(Object.keys(addonState).map(k=>[k,addonState[k]?'Y':'N'])),
-    ...Object.fromEntries(Object.keys(addonStateLeg2).map(k=>['rt_'+k,addonStateLeg2[k]?'Y':'N'])),
-    xstop: stopRows('q').length,
-    xstopAddr: getStopAddresses('q').join('; '),
-    wait:parseFloat(document.getElementById('q-wait').value)||0,
-    medHours:parseFloat(document.getElementById('q-med-hours')?.value)||0,
-    confirmed:false, createdBy:currentUser?.name||'',
-    newClient: !!(document.getElementById('q-new-client')?.checked),
-  };
+  // _gatherQuoteRide() below already builds this exact same object from these exact same form
+  // fields (used elsewhere for saved quotes) - this used to rebuild an identical ~28-line copy
+  // of it manually instead of calling the helper that already existed for it.
+  const ride={ id:nextId++, ..._gatherQuoteRide() };
   touchRide(ride, 'created');
 
   // Recurrence — defaults to a SINGLE ride; only repeats if the user explicitly chose a repeat option
@@ -5440,8 +5409,34 @@ async function _saveNewClientInfo(){
 // ═══════════════════════════════════════════
 // NOTIFICATIONS
 // ═══════════════════════════════════════════
-function addNotification(driverName, ride, action, customMsg){
-  if(action==='assigned'&&currentUser&&driverName===(USER_DRIVER_MAP[currentUser.name]||'')) return;
+// Tomorrow's calendar date - built from today's actual date components (year/month/day),
+// then day+1, letting the Date constructor handle month/year rollover correctly. Deliberately
+// NOT "now + 86400000ms" (a fixed 24-hour duration) - that approach could cross a calendar-day
+// boundary incorrectly right around midnight (pressed at 11:59pm targets one day, 12:01am two
+// minutes later targets the next one), and is technically vulnerable on DST transition days,
+// where a "day" isn't exactly 24 hours. This is genuinely midnight-to-midnight instead.
+function _tomorrowDateStr(){
+  var _now = new Date();
+  return toDateStr(new Date(_now.getFullYear(), _now.getMonth(), _now.getDate()+1));
+}
+function addNotification(driverName, ride, action, customMsg, forceNow){
+  if(!forceNow && action==='assigned'&&currentUser&&driverName===(USER_DRIVER_MAP[currentUser.name]||'')) return;
+  // A driver isn't notified they've been assigned a ride for TOMORROW until whoever scheduled
+  // that ride (the client owner - Kat, Morgan, or anyone else who created it) taps Notify
+  // Drivers on the calendar page. Avoids pinging a driver repeatedly as the owner drafts and
+  // adjusts tomorrow's assignments throughout today, in favor of one consolidated,
+  // genuinely current notification whenever the owner decides the schedule is actually set.
+  // Only the assignment notification itself is held back; everything else (chat, transfers,
+  // etc.) still fires immediately as normal. Today-and-earlier assignments (a same-day
+  // reassignment, or a ride already underway) still notify immediately - there's no "later
+  // today" to wait for.
+  // forceNow=true bypasses this specifically for notifyMyAssignedDrivers()'s own release
+  // step below, reusing this exact same message/push logic rather than a second copy of it.
+  var _tomorrowStr = _tomorrowDateStr();
+  if(!forceNow && action==='assigned' && ride && ride.date===_tomorrowStr){
+    ride.assignNotifyPending = true;
+    return;
+  }
   if(!notifications[driverName]) notifications[driverName]=[];
   const msg = customMsg || (action==='assigned'
     ? `New ride assigned: ${ride.client} on ${fmtDateShort(ride.date)} at ${ride.time||'—'} ($${ride.price})`
@@ -5471,6 +5466,52 @@ function addNotification(driverName, ride, action, customMsg){
   } else if(action==='cautious_approved'||action==='cautious_denied'){
     sendPushToDriver(driverName, '⚠️ Cautious flag update — NWDA', msg);
   }
+}
+
+// How many of the CURRENT USER'S OWN scheduled rides are still sitting on a queued,
+// unreleased assignment notification for tomorrow - drives whether Notify Drivers shows on the
+// calendar page at all. Uses isMyScheduledRide() - the same, already-established function used
+// elsewhere for "which scheduled rides are mine" - rather than a naive createdBy comparison,
+// so this automatically inherits the app's real Kat/Morgan shared-dispatch rule: a ride
+// scheduled by either one shows, and can be notified, by both. Confirmed directly with Chase:
+// anything Kat can do here, Morgan can do too, and vice versa - this is NOT the same
+// distinction as feeOwnerFor()'s fee-attribution resolution (which folds Morgan into Kat only
+// for who EARNS the 15% finder's fee); this is about who can genuinely act on the ride.
+// Zero once there's nothing left to release, same "gone once its job is done" pattern every
+// other action-block banner already follows.
+function myPendingNotifyCount(){
+  if(!currentUser) return 0;
+  var _tomorrowStr = _tomorrowDateStr();
+  return (rides||[]).filter(function(r){
+    return r && isMyScheduledRide(r) && r.date===_tomorrowStr && r.assignNotifyPending===true && r.status!=='cancelled' && r.driver;
+  }).length;
+}
+// Releases the queued assignment notification for every one of the current user's OWN
+// scheduled tomorrow rides (Kat/Morgan shared-dispatch aware, same as above), to WHICHEVER
+// DRIVER IS CURRENTLY ASSIGNED on each one - not to the person pressing the button. If Kat
+// assigned a ride to Morgan, then later reassigned it to Chase before ever pressing this, only
+// Chase gets notified when either Kat OR Morgan finally does; Morgan never hears about an
+// assignment she no longer actually has. Reuses addNotification's own real message/push logic
+// via forceNow=true, rather than a second, separate copy of it that could quietly drift out of
+// sync over time.
+async function notifyMyAssignedDrivers(){
+  if(!currentUser){ showToast('Could not find your account','error'); return; }
+  var _tomorrowStr = _tomorrowDateStr();
+  var pending = (rides||[]).filter(function(r){
+    return r && isMyScheduledRide(r) && r.date===_tomorrowStr && r.assignNotifyPending===true && r.status!=='cancelled' && r.driver;
+  });
+  if(!pending.length){ showToast('Nothing to notify'); return; }
+  pending.forEach(function(r){
+    addNotification(r.driver, r, 'assigned', null, true);
+    delete r.assignNotifyPending;
+  });
+  try{ await saveRides(); }catch(e){}
+  try{ await saveNotifs(); }catch(e){}
+  try{ if(typeof updateNotifBadge==='function') updateNotifBadge(); }catch(e){}
+  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+  try{ if(typeof renderCal==='function') renderCal(); }catch(e){}
+  var _driverCount = new Set(pending.map(function(r){ return r.driver; })).size;
+  showToast('\u2705 '+pending.length+' ride'+(pending.length===1?'':'s')+' \u2014 '+_driverCount+' driver'+(_driverCount===1?'':'s')+' notified');
 }
 
 function updateNotifBadge(){
@@ -6080,6 +6121,7 @@ function renderMonthView(containerId, monthDate, driverFilter, jumpFn){
 function renderCal(){
   if(!document.getElementById('cal-grid')) return;
   buildCalTabs();
+  renderCalFinalizeTomorrow();
   // FamilyWall sync only on the all-drivers view
   const fwBtn=document.getElementById('cal-familywall-btn');
   if(fwBtn) fwBtn.style.display=(!calDriverFilter||calDriverFilter==='group')?'inline-block':'none';
@@ -6909,7 +6951,14 @@ function checkPhoneFieldHint(prefix){
   hint.style.display = looksAddressy ? 'block' : 'none';
 }
 
-function confirmationRecipients(r){
+// Shared by confirmationRecipients() and arrivalTextRecipients() below - both start from the
+// exact same "client + extra phones + assigned driver(s), deduped, never the sender
+// themselves" base. confirmationRecipients() adds the ride's creator/owner and a conditional
+// Kat/Morgan loop-in on top; arrivalTextRecipients() deliberately stops here, since an arrival
+// text is a real-time driver<->client exchange, not a scheduling/coordination message. Returns
+// {out, add} so a caller that needs to keep adding recipients can reuse the same deduping add()
+// function rather than building a second one.
+function _baseRideTextRecipients(r){
   const seen=new Set();
   const out=[];
   // Never text the sender themselves: compute the current user's own number to exclude it.
@@ -6940,6 +6989,10 @@ function confirmationRecipients(r){
   // Assigned driver(s) — include driver2 for XXL bookings
   if(r.driver) add(driverShortName(r.driver), (DRIVER_PROFILES[r.driver]||{}).phone);
   if(r.xxl && r.driver2) add(r.driver2.split(' ')[0], (DRIVER_PROFILES[r.driver2]||{}).phone);
+  return { out, add };
+}
+function confirmationRecipients(r){
+  const { out, add } = _baseRideTextRecipients(r);
   // Main driver = whoever scheduled/owns the ride (createdBy → driver name)
   const owner = r.createdBy ? USER_DRIVER_MAP[r.createdBy] : null;
   if(owner) add(owner.split(' ')[0], (DRIVER_PROFILES[owner]||{}).phone);
@@ -7420,6 +7473,28 @@ function _prevPaySend(withTip){
   if(url) window.open(url,'_blank'); else showToast('Could not build Venmo link','error');
 }
 
+// Fills the gap for a paired ride from before rtLegNumber existed - infers which leg is which
+// using time ordering, since leg 1 always physically happens before leg 2 regardless of which
+// TYPE (AP Run or AP Pickup) actually starts a given round trip. Falls back to id order (lower
+// = created first) only if both rides somehow share the exact same date+time. Never returns
+// anything but a real 1 or 2 when a paired ride is actually passed in - no more raw "?".
+// Same fix as _inferLegNumber above, self-contained for use directly inside a template
+// literal (the dashboard card's ride list has no room for a separate local variable per ride).
+// Returns the full " · Leg X/2" suffix, or '' when the ride isn't paired at all.
+function _pairedLegLabel(r){
+  if(!r.pairId) return '';
+  var paired = (rides||[]).find(function(x){ return x && x.id!==r.id && x.pairId===r.pairId; });
+  if(!paired) return '';
+  return ' · Leg '+_inferLegNumber(r, paired)+'/2';
+}
+function _inferLegNumber(r, pairedRide){
+  if(r.rtLegNumber) return r.rtLegNumber;
+  if(!pairedRide) return r.rtLegNumber || 1;
+  var myKey = (r.date||'')+' '+(r.time||'');
+  var theirKey = (pairedRide.date||'')+' '+(pairedRide.time||'');
+  if(myKey && theirKey && myKey!==theirKey) return myKey < theirKey ? 1 : 2;
+  return r.id < pairedRide.id ? 1 : 2;
+}
 function renderRideView(r){
   // BUG (reported, v581): "mark unpaid the paid banner at the top doesnt reset." This function
   // was called BARE at several sites — including setRideStatus (the function responsible for
@@ -7460,9 +7535,12 @@ function renderRideView(r){
   // Which leg is actually first is now an explicit choice made at scheduling (rtLegNumber),
   // not something inferable from type alone - a round trip can genuinely start with either
   // an AP Run or an AP Pickup, depending on whether the client is departing or arriving first.
+  // A ride paired before rtLegNumber existed won't have it set though, and showing a raw "?"
+  // reads as a glitch rather than genuinely unknown data - _inferLegNumber below fills that
+  // gap using time ordering instead, which IS always physically true regardless of type.
   const _legBadgeHtml = _pairedRide
     ? '<div style="display:inline-block;background:rgba(255,255,255,.35);border-radius:6px;padding:2px 8px;font-size:.7rem;font-weight:700;color:var(--black);margin-top:.3rem;">'
-      + '\u2708\uFE0F '+escHtml(r.type||'')+' \u2014 leg '+(r.rtLegNumber||'?')+' of 2' + '</div>'
+      + '\u2708\uFE0F '+escHtml(r.type||'')+' \u2014 leg '+_inferLegNumber(r,_pairedRide)+' of 2' + '</div>'
     : '';
   const _pairLabel = _pairedRide ? (_pairedRide.type==='AP PICK UP' ? '\u2708\ufe0f View return leg \u2192' : '\u2708\ufe0f View outbound leg \u2192') : null;
   const apType = r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP';
@@ -7809,6 +7887,11 @@ async function _repairDuplicateIds(){
     }
     seen[key]=true;
   });
+  // Always kept in sync with the highest id actually seen - correct and safe whether or not
+  // anything needed fixing this time. Needed so this same function can also cover the
+  // app-load-time case, which used to keep its own separate copy of everything above just to
+  // additionally set this.
+  nextId=next;
   if(changed){ try{ await saveRides(); await saveComments(); }catch(e){ console.warn('dup id repair save failed', e); } }
   return changed;
 }
@@ -7821,15 +7904,22 @@ async function _repairDuplicateIds(){
 // framing: "it all flows together... can we not just save it all at the same time."
 //
 // openLogMiles() itself is untouched and stays fully independent - a driver logging mileage
-// on a ride that isn't being marked paid yet (the whole point of Stop Ride existing separately
-// from Mark Paid, from earlier this session) still needs that standalone path. This is a
-// genuinely different entry point for a genuinely different moment: the ride is actually done.
+// on a ride before it's actually being marked paid (still useful on its own, even with Stop
+// Ride removed entirely) still needs that standalone path. This is a genuinely different entry
+// point for a genuinely different moment: the ride is actually done.
 function openMarkPaidCombined(rideId){
   var r=_rideById(rideId);
   if(!r||r.status==='cancelled'||r.status==='placeholder') return;
   _mtLoadGasPrice();
   _payRideId = r.id;
   _paySelectedMethod = r.payment && PAY_METHODS.indexOf(r.payment)>=0 ? r.payment : (r.payment ? 'Other' : '');
+  // Same idea as the fare's own method, but independent - a card fare with a cash tip is a
+  // completely normal, common case (Chase's own example), and the ride record already has a
+  // dedicated tipPayment field for exactly this, read in receipts and income breakdowns
+  // elsewhere. This was only ever settable from the OLD, separate "Edit payment" flow
+  // (reachable after a ride was already marked paid) - never from Mark Paid itself, which is
+  // the one drivers actually use every time. Fixed here so it works where it's actually needed.
+  _payTipSelectedMethod = r.tipPayment && PAY_METHODS.indexOf(r.tipPayment)>=0 ? r.tipPayment : (r.tipPayment ? 'Other' : '');
   var hasAcc = (typeof rideTipReceiptAllowed==='function') ? rideTipReceiptAllowed(r) : true;
 
   var _stale=document.getElementById('mark-paid-overlay'); if(_stale){ _unpinOverlay(_stale); _stale.remove(); }
@@ -7846,6 +7936,13 @@ function openMarkPaidCombined(rideId){
       +';border-radius:20px;background:'+(active?'var(--accent)':'#fff')+';color:'+(active?'#fff':'#000')
       +';font-family:inherit;font-size:.82rem;font-weight:600;cursor:pointer;">'+m+'</button>';
   }).join('');
+  var tipMethodBtnsHtml = PAY_METHODS.map(function(m){
+    var active = (m===_payTipSelectedMethod);
+    return '<button type="button" onclick="_paySelectTipMethodCombined(\''+m+'\')" '
+      +'style="flex:0 0 auto;padding:.45rem .9rem;border:1.5px solid '+(active?'var(--accent)':'var(--light)')
+      +';border-radius:20px;background:'+(active?'var(--accent)':'#fff')+';color:'+(active?'#fff':'#000')
+      +';font-family:inherit;font-size:.82rem;font-weight:600;cursor:pointer;">'+m+'</button>';
+  }).join('');
 
   ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:400px;width:100%;margin:auto;padding:1.25rem;'
     +'box-shadow:0 24px 60px rgba(0,0,0,.35);box-sizing:border-box;">'
@@ -7854,27 +7951,7 @@ function openMarkPaidCombined(rideId){
     +'<div style="font-size:.75rem;color:#64748b;margin-top:2px;">'+escHtml(r.client||'')+'</div></div>'
     +'<button onclick="_closeMarkPaidCombined()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button>'
     +'</div>'
-    +((r.odoStart!=null && r.odoEnd==null && r.odoStartAt && (Date.now()-r.odoStartAt) > 2*60*60*1000)
-      ? '<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:9px;padding:.6rem .8rem;margin-bottom:.75rem;font-size:.74rem;color:#7c2d12;line-height:1.5;">\u26a0\ufe0f You didn\u2019t log your ending odometer for this ride. Not a problem \u2014 just enter your mileage from Maps below like normal.</div>'
-      : '')
-    +'<div style="font-size:.66rem;color:#94a3b8;margin-bottom:.6rem;line-height:1.4;">Miles: total from Waze / Apple / Google Maps \u2014 include the drive to pick them up, not just the ride itself.</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin-bottom:.75rem;align-items:end;">'
-    +'<div><label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">MILES DRIVEN</label>'
-    +'<input id="mp-miles" type="number" min="0" step="0.1" value="'+(r.drivenMiles||r.miles||'')+'" placeholder="e.g. 41" '
-    +'style="width:100%;padding:.55rem .65rem;border:1.5px solid #c4b5fd;border-radius:9px;font-family:inherit;font-size:1rem;box-sizing:border-box;">'
-    +'</div>'
-    +'<div><label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">TIP RECEIVED $</label>'
-    +'<input id="mp-tip" type="number" min="0" step="0.01" value="'+(r.tip||'')+'" placeholder="0.00" '
-    +'style="width:100%;padding:.55rem .65rem;border:1.5px solid #d1d5db;border-radius:9px;font-family:inherit;font-size:1rem;box-sizing:border-box;">'
-    +'</div>'
-    +'</div>'
-    +'<div style="background:#fefce8;border:1px solid #fde68a;border-radius:9px;padding:.6rem .8rem;margin-bottom:.85rem;">'
-    +'<div style="font-size:.7rem;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.35rem;">\u26fd Gas price / gallon</div>'
-    +'<div style="display:flex;align-items:center;gap:.5rem;">'
-    +'<span style="font-weight:600;color:#78350f;">$</span>'
-    +'<input id="mp-gas" type="number" min="0" step="0.01" value="'+(_mtGasPrice||'')+'" placeholder="e.g. 3.49" '
-    +'style="flex:1;padding:.45rem .6rem;border:1.5px solid #fcd34d;border-radius:7px;font-family:inherit;font-size:.9rem;">'
-    +'</div><div style="font-size:.68rem;color:#92400e;margin-top:.3rem;">Auto-fills next time</div></div>'
+    +_buildOdoMilesTipGasFieldsHtml('mp', r, 'Miles: total from Waze / Apple / Google Maps \u2014 include the drive to pick them up, not just the ride itself.')
     +'<div style="margin-bottom:.75rem;">'
     +'<label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:.4rem;">HOW WAS THIS PAID?</label>'
     +'<div id="mp-method-btns" style="display:flex;flex-wrap:wrap;gap:.5rem;">'+methodBtnsHtml+'</div>'
@@ -7883,6 +7960,17 @@ function openMarkPaidCombined(rideId){
     +'<label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">WHAT WAS IT?</label>'
     +'<input type="text" id="mp-other-text" value="'+(r.payment && PAY_METHODS.indexOf(r.payment)<0 ? escHtml(r.payment) : '')+'" placeholder="e.g. Check, Square, CashApp\u2026" '
     +'style="width:100%;padding:.5rem .65rem;border:1.5px solid #d1d5db;border-radius:9px;font-family:inherit;font-size:.9rem;box-sizing:border-box;">'
+    +'</div>'
+    +'<label style="display:flex;align-items:center;gap:.55rem;cursor:pointer;margin-bottom:.75rem;">'
+    +'<input type="checkbox" id="mp-tip-split" '+(_payTipSelectedMethod?'checked':'')+' onchange="_payTipSplitToggleCombined()" style="width:18px;height:18px;flex-shrink:0;">'
+    +'<span style="font-size:.85rem;color:#0f172a;">Tip paid by a different method than the fare</span></label>'
+    +'<div id="mp-tip-method-wrap" style="margin-bottom:.75rem;'+(_payTipSelectedMethod?'':'display:none;')+'">'
+    +'<label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:.4rem;">TIP PAID VIA</label>'
+    +'<div id="mp-tip-method-btns" style="display:flex;flex-wrap:wrap;gap:.5rem;">'+tipMethodBtnsHtml+'</div>'
+    +'<div id="mp-tip-other-wrap" style="margin-top:.6rem;'+(_payTipSelectedMethod==='Other'?'':'display:none;')+'">'
+    +'<input type="text" id="mp-tip-other-text" value="'+(r.tipPayment && PAY_METHODS.indexOf(r.tipPayment)<0 ? escHtml(r.tipPayment) : '')+'" placeholder="e.g. Cash" '
+    +'style="width:100%;padding:.5rem .65rem;border:1.5px solid #d1d5db;border-radius:9px;font-family:inherit;font-size:.9rem;box-sizing:border-box;">'
+    +'</div>'
     +'</div>'
     +'<div style="border-top:1.5px solid #e2d9f3;margin:.9rem 0 .8rem;"></div>'
     +(hasAcc
@@ -7935,6 +8023,27 @@ function _paySelectMethodCombined(m){
   var otherWrap=document.getElementById('mp-other-wrap');
   if(otherWrap) otherWrap.style.display = (m==='Other') ? 'block' : 'none';
 }
+function _payTipSplitToggleCombined(){
+  var checked = !!document.getElementById('mp-tip-split')?.checked;
+  var wrap = document.getElementById('mp-tip-method-wrap');
+  if(wrap) wrap.style.display = checked ? 'block' : 'none';
+  if(!checked){ _payTipSelectedMethod=''; }
+}
+function _paySelectTipMethodCombined(m){
+  _payTipSelectedMethod = m;
+  var box=document.getElementById('mp-tip-method-btns');
+  if(box){
+    box.innerHTML = PAY_METHODS.map(function(x){
+      var active=(x===m);
+      return '<button type="button" onclick="_paySelectTipMethodCombined(\''+x+'\')" '
+        +'style="flex:0 0 auto;padding:.45rem .9rem;border:1.5px solid '+(active?'var(--accent)':'var(--light)')
+        +';border-radius:20px;background:'+(active?'var(--accent)':'#fff')+';color:'+(active?'#fff':'#000')
+        +';font-family:inherit;font-size:.82rem;font-weight:600;cursor:pointer;">'+x+'</button>';
+    }).join('');
+  }
+  var otherWrap=document.getElementById('mp-tip-other-wrap');
+  if(otherWrap) otherWrap.style.display = (m==='Other') ? 'block' : 'none';
+}
 
 function _closeMarkPaidCombined(){
   var ov=document.getElementById('mark-paid-overlay');
@@ -7944,30 +8053,80 @@ function _closeMarkPaidCombined(){
 async function _saveMarkPaidCombined(rideId){
   var r=_rideById(rideId);
   if(!r){ showToast('\u26A0\uFE0F Could not find that ride \u2014 nothing was saved'); return; }
+  // A genuine round trip that was started with odometer tracking but never paused - the
+  // two-segment math this ride's TYPE is built for never got a chance to run. Warn, don't
+  // block: Chase's own call here, since there are real reasons a round trip might genuinely
+  // have been one continuous drive with no gap worth pausing for.
+  if(r.type==='ROUND TRIP' && r.odoStart!=null && !r.pausedAt){
+    if(!confirm('This round trip was never paused, so mileage will be a single start-to-end span rather than the two separate legs. Continue anyway?')){
+      try{ var _psb=document.getElementById('mp-save-btn'); if(_psb) delete _psb.dataset.mpFired; }catch(_e){}
+      return;
+    }
+  }
   try{
-    var mi=parseFloat(document.getElementById('mp-miles').value)||0;
+    var odoEndInput=document.getElementById('mp-odo-end');
+    var odoEndVal=odoEndInput ? parseFloat(odoEndInput.value) : NaN;
+    var mi;
+    if(odoEndInput && isFinite(odoEndVal)){
+      // A real ending odometer was entered - this is the authoritative calculation (chain
+      // split included), not the raw text currently sitting in mp-miles, which was only ever
+      // a live PREVIEW of this same number as they typed.
+      var odoResult=_applyOdometerEnd(r, odoEndVal);
+      if(!odoResult){
+        // _applyOdometerEnd already showed the error toast itself. The Save button's
+        // fired-once guard was already set by the onclick handler before this function ever
+        // ran - reset it here, or the driver could never successfully retry after fixing the
+        // odometer value; the button would just sit there doing nothing on every next tap.
+        try{ var _sb=document.getElementById('mp-save-btn'); if(_sb) delete _sb.dataset.mpFired; }catch(_e){}
+        return;
+      }
+      mi=odoResult.mine;
+    } else {
+      // No ending odometer offered for this ride, or the driver skipped it and is entering
+      // total mileage directly instead - same manual-entry path this always had.
+      mi=parseFloat(document.getElementById('mp-miles').value)||0;
+    }
     var tip=parseFloat(document.getElementById('mp-tip').value)||0;
     var gas=parseFloat(document.getElementById('mp-gas').value)||0;
     var method=_paySelectedMethod;
     if(method==='Other'){ var t=(document.getElementById('mp-other-text')?.value||'').trim(); method=t||'Other'; }
+    var tipSplitChecked = !!document.getElementById('mp-tip-split')?.checked;
+    var tipMethod=_payTipSelectedMethod;
+    if(tipMethod==='Other'){ var tt=(document.getElementById('mp-tip-other-text')?.value||'').trim(); tipMethod=tt||'Other'; }
     var wantReceipt = !!document.getElementById('mp-send-receipt')?.checked;
 
     r.drivenMiles=mi;
     if(tip>0) r.tip=tip;
     if(method){ r.payment=method; touchRide(r,'set payment method'); }
+    if(tipSplitChecked && tipMethod){ r.tipPayment=tipMethod; } else { delete r.tipPayment; }
     r.status='paid'; r.paidAt=Date.now(); r.paidBy=currentUser?.name||'';
     touchRide(r,'set status to paid');
 
-    // The two saves below write to genuinely different places (the ride record vs. this
-    // driver's own saved gas price) - no reason to make one wait on the other finishing first.
-    var _saves=[saveRides()];
-    if(gas>0) _saves.push(_mtSaveGasPrice(gas));
-    await Promise.all(_saves);
+    // The local ride record above is already fully, correctly updated - everything the
+    // driver actually needs to see (the toast, the Venmo prompt, the dashboard) can show
+    // right now instead of waiting on a network round-trip that was never actually
+    // guaranteeing anything the driver could see anyway (a failed write used to fail
+    // completely silently). The write itself still happens - it just runs in the
+    // background now, tracked as pending so a stale, in-flight Firebase snapshot can't
+    // quietly revert this change before it lands; see setupRealtimeListeners().
+    window._pendingUnsavedRideIds.add(r.id);
+    var _saveDone = saveRides().then(function(ok){
+      if(ok){ window._pendingUnsavedRideIds.delete(r.id); }
+      try{ renderDashSaveFailed(); }catch(e){}
+      if(!ok){ showToast('\u26a0\ufe0f '+(r.client||'Ride')+'\u2019s payment didn\u2019t save \u2014 check your connection'); }
+    }).catch(function(){
+      try{ renderDashSaveFailed(); }catch(e){}
+      showToast('\u26a0\ufe0f '+(r.client||'Ride')+'\u2019s payment didn\u2019t save \u2014 check your connection');
+    });
+    if(gas>0) _mtSaveGasPrice(gas); // independent of the ride save, no reason to wait on it either
 
     // Side effects that don't need to block the driver from moving on - fire them, but don't
     // make Save feel slower waiting for notifications only other people will ever see.
     (async function(){
       try{
+        await _saveDone; // these do their own separate Firebase writes; keep them behind the
+                          // real ride save landing so a carryover/tip-reminder notification
+                          // can't reference a ride record that didn't actually save yet.
         var prev = previousUnpaidAPRide(r);
         if(prev && r.carryoverNotified!==prev.id){
           var prevDriver=prev.driver||''; var owner=getClientOwner(prev.client)||feeOwnerFor(prev.createdBy);
@@ -7999,9 +8158,10 @@ async function _saveMarkPaidCombined(rideId){
     try{ if(typeof renderIncome==='function' && document.getElementById('page-income') && document.getElementById('page-income').classList.contains('active')) renderIncome(); }catch(e){}
 
     if(wantReceipt){ shareReceiptDocument(r.id); }
-    else{ showToast('\u2713 '+mi+' mi'+(tip?' + $'+tip+' tip':'')+' \u2014 marked paid'+(method?': '+method:'')); }
+    else{ showToast('\u2713 '+mi+' mi'+(tip?' + $'+tip+' tip':'')+' \u2014 marked paid'+(method?': '+method:'')+((tipSplitChecked && tipMethod)?' (tip via '+tipMethod+')':'')); }
 
-    // No artificial delay - the save above already fully completed before this runs.
+    // No artificial delay, and no longer waiting on the network round-trip either - the
+    // Venmo prompt only ever needed the LOCAL ride state above, which was already correct.
     var _ridForFee=r.id;
     try{ _maybeOfferFeeAndPaid(_ridForFee); }catch(e){}
   }catch(err){
@@ -8032,6 +8192,7 @@ async function toggleRidePaid(id){
 const PAY_METHODS = ['Credit card','Venmo','Zelle','Cash','Other'];
 let _payRideId = null;
 let _paySelectedMethod = '';
+let _payTipSelectedMethod = '';
 
 // Map a stored terminal value to the wording used in the receipt.
 function _terminalPhrase(t){
@@ -9117,10 +9278,18 @@ function openStartRide(rideId){
   var r=rides.find(function(x){return x.id===rideId;});
   if(!r){ showToast('Ride not found'); return; }
 
-  // Independent of the odometer feature entirely - this is what actually drives the
-  // Start/Stop button toggle on the ride card. A driver who's turned odometer prompts off
-  // completely still needs Start Ride to visibly become Stop Ride; that toggle can't depend
-  // on odometer data that a driver with this preference will never generate.
+  // A stray tap on any of the three places this button lives (dashboard card, ride modal,
+  // upcoming list) used to silently mark the ride started with zero chance to catch the
+  // mistake - the exact same root-cause pattern already found and fixed for Send Arrival Text
+  // in v712, just never applied here too until a driver actually hit it for real.
+  var _when=fmtTime12(r.time)||'the scheduled time';
+  if(!confirm('Start this ride now?\n\n'+(r.client||'This ride')+' \u2014 scheduled at '+_when+'.')) return;
+
+  // Independent of the odometer feature entirely - drives whether the Start Ride button
+  // shows at all on the dashboard card. A driver who's turned odometer prompts off
+  // completely still needs this recorded, so the button correctly disappears once a ride's
+  // underway; that can't depend on odometer data that a driver with this preference will
+  // never generate.
   r.rideStartedAt = Date.now();
   try{ saveRides(); }catch(e){}
   if(typeof refreshDash==='function') refreshDash();
@@ -9129,37 +9298,7 @@ function openStartRide(rideId){
   var skipOdo = dn && driverSettings[dn] && driverSettings[dn].skipOdometerPrompts===true;
   if(skipOdo){ _openStartRideFromCurrent(rideId); return; }
 
-  // Back-to-back rides: if the last ride THIS driver started still has no ending odometer
-  // reading (Stop Ride was never tapped), this is very likely the same continuous trip -
-  // house to airport to house, one ride marked paid at the drop-off without ever stopping,
-  // then straight into the next leg. Asking for a fresh starting number here would be asking
-  // the driver to re-measure a trip already in progress. Just continue the same chain, no
-  // prompt, straight to navigation - matches how little friction every other choice this
-  // session has favored.
-  var openChain = _findOpenOdometerChain(dn, rideId);
-  if(openChain){
-    r.odoChainId = openChain.odoChainId;
-    r.odoStart = openChain.odoStart;
-    r.odoStartAt = openChain.odoStartAt;
-    try{ saveRides(); }catch(e){}
-    _openStartRideFromCurrent(rideId);
-    return;
-  }
-
   _showOdometerStartPrompt(rideId);
-}
-
-// The most recent ride THIS driver started (has odoStart) that never got an ending reading
-// (no odoEnd) - the signature of a back-to-back trip where Stop Ride was skipped between legs.
-// Excludes the ride being started right now, obviously, and only looks at rides with a real
-// odoStartAt timestamp so a ride with the feature skipped entirely never gets treated as an
-// open chain.
-function _findOpenOdometerChain(dn, excludeRideId){
-  if(!dn) return null;
-  var candidates = (rides||[]).filter(function(x){
-    return x && x.id!==excludeRideId && x.driver===dn && x.odoStart!=null && x.odoEnd==null && x.odoStartAt;
-  }).sort(function(a,b){ return (b.odoStartAt||0)-(a.odoStartAt||0); });
-  return candidates.length ? candidates[0] : null;
 }
 
 function _showOdometerStartPrompt(rideId){
@@ -9204,7 +9343,6 @@ async function _saveOdometerStart(rideId){
   if(r && isFinite(val) && val>0){
     r.odoStart = val;
     r.odoStartAt = Date.now();
-    r.odoChainId = 'chain_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
     try{ saveRides(); }catch(e){}
   }
   _openStartRideFromCurrent(rideId);
@@ -9217,77 +9355,255 @@ async function _skipOdometerStart(rideId){
 }
 
 // ── STOP RIDE ────────────────────────────────────────────────────────────
-// Independent of Mark Paid entirely, on purpose - Chase's own concern, and a real one: an
-// invoiced client might not pay for hours, long after the car's been turned off and driven
-// elsewhere. Tying mileage capture to payment would mean measuring a trip that's already over.
-// Stop Ride closes out the odometer the moment the ride itself actually ends, whenever that is
-// relative to payment.
-function openStopRide(rideId){
+// Stop Ride was removed entirely (Chase's explicit request) - its whole job is now folded
+// into Mark Paid, which already prompts for the ending odometer reading right there (see
+// _buildOdoMilesTipGasFieldsHtml below). One less button, one less state to track; closing out
+// a ride's mileage now happens at the one moment that already means "this ride is genuinely
+// done" instead of a separate, earlier step.
+
+// Builds the "ending odometer (if applicable) + miles driven + tip + gas price" field block -
+// identical between openMarkPaidCombined and openLogMiles aside from three things, which stay
+// parameters rather than being unified: the field-id prefix ('mp' or 'lm'), which preview
+// function the odometer field's oninput calls (_mpPreviewOdoMiles vs _lmPreviewOdoMiles - built
+// from the same prefix), and the miles-explanation sentence itself, which genuinely reads
+// differently between the two screens on purpose and stays exactly as each one already had it.
+function _buildOdoMilesTipGasFieldsHtml(prefix, r, milesExplanationText){
+  // A resumed round trip's relevant checkpoint is the resume reading, not the original start -
+  // that's the number the driver would actually recognize and the trip segment that's still
+  // genuinely open. Everything else (no pause at all, or paused/resumed without capturing that
+  // reading) still refers back to the original start, same as before.
+  var _refReading = (r.odoResume!=null) ? r.odoResume : r.odoStart;
+  var _refAt = (r.odoResume!=null) ? r.resumedAt : r.odoStartAt;
+  var _refLabel = (r.odoResume!=null) ? 'resumed this trip' : 'started this trip';
+  var odoPromptHtml = (_refReading!=null && r.odoEnd==null && _refAt && (Date.now()-_refAt) > 2*60*60*1000)
+    ? ('<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:9px;padding:.6rem .8rem;margin-bottom:.75rem;">'
+      +'<div style="font-size:.74rem;color:#7c2d12;line-height:1.5;margin-bottom:.5rem;">You '+_refLabel+' at <strong>'+_refReading+'</strong> but never logged where you ended \u2014 enter it here and the miles below fill in automatically, or skip this and enter your total mileage directly.</div>'
+      +'<label style="font-size:.68rem;font-weight:700;color:#7c2d12;display:block;margin-bottom:3px;">ENDING ODOMETER</label>'
+      +'<input id="'+prefix+'-odo-end" type="number" min="0" step="0.1" placeholder="e.g. 48261" oninput="_'+prefix+'PreviewOdoMiles('+r.id+')" '
+      +'style="width:100%;padding:.5rem .65rem;border:1.5px solid #fdba74;border-radius:8px;font-family:inherit;font-size:.95rem;box-sizing:border-box;">'
+      +'</div>')
+    : '';
+  return odoPromptHtml
+    +'<div style="font-size:.66rem;color:#94a3b8;margin-bottom:.6rem;line-height:1.4;">'+milesExplanationText+'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin-bottom:.75rem;align-items:end;">'
+    +'<div><label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">MILES DRIVEN</label>'
+    +'<input id="'+prefix+'-miles" type="number" min="0" step="0.1" value="'+(r.drivenMiles||r.miles||'')+'" placeholder="e.g. 41" '
+    +'style="width:100%;padding:.55rem .65rem;border:1.5px solid #c4b5fd;border-radius:9px;font-family:inherit;font-size:1rem;box-sizing:border-box;">'
+    +'</div>'
+    +'<div><label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">TIP RECEIVED $</label>'
+    +'<input id="'+prefix+'-tip" type="number" min="0" step="0.01" value="'+(r.tip||'')+'" placeholder="0.00" '
+    +'style="width:100%;padding:.55rem .65rem;border:1.5px solid #d1d5db;border-radius:9px;font-family:inherit;font-size:1rem;box-sizing:border-box;">'
+    +'</div>'
+    +'</div>'
+    +'<div style="background:#fefce8;border:1px solid #fde68a;border-radius:9px;padding:.6rem .8rem;margin-bottom:.85rem;">'
+    +'<div style="font-size:.7rem;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.35rem;">\u26fd Gas price / gallon</div>'
+    +'<div style="display:flex;align-items:center;gap:.5rem;">'
+    +'<span style="font-weight:600;color:#78350f;">$</span>'
+    +'<input id="'+prefix+'-gas" type="number" min="0" step="0.01" value="'+(_mtGasPrice||'')+'" placeholder="e.g. 3.49" '
+    +'style="flex:1;padding:.45rem .6rem;border:1.5px solid #fcd34d;border-radius:7px;font-family:inherit;font-size:.9rem;">'
+    +'</div>'
+    +'<div style="font-size:.68rem;color:#92400e;margin-top:.3rem;">Auto-fills next time</div></div>';
+}
+
+// Shared by openMarkPaidCombined and openLogMiles (their own ending-odometer fields) - one
+// calculation, not two that could quietly drift apart. Validates the ending reading and
+// writes drivenMiles + odoEnd/odoEndAt directly onto this one ride. Every ride stands on its
+// own now - no more splitting a reading across multiple rides sharing one "chain" (removed
+// entirely; see the handoff notes for why). Returns the computed total, or null if the
+// reading wasn't valid to use at all. Mutates real ride data - only ever called at an actual
+// save, never while the person is still just typing.
+function _applyOdometerEnd(r, endingReading){
+  if(!r || r.odoStart==null || !isFinite(endingReading)) return null;
+  // A paused-and-resumed round trip with BOTH segment readings actually captured gets the
+  // real two-segment total: first leg (start to pause) plus second leg (resume to end),
+  // deliberately excluding whatever happened while paused. Anything else - never paused, or
+  // paused/resumed but one or both odometer readings were skipped - falls back to the simple
+  // single start-to-end span, since that's the best available with the data actually on hand.
+  var twoSegment = r.odoPause!=null && r.odoResume!=null;
+  var compareFloor = twoSegment ? r.odoResume : r.odoStart;
+  if(endingReading <= compareFloor){ showToast('Ending reading should be higher than the '+(twoSegment?'resume':'starting')+' one \u2014 not saved','error'); return null; }
+  var total = twoSegment
+    ? parseFloat(((r.odoPause - r.odoStart) + (endingReading - r.odoResume)).toFixed(2))
+    : parseFloat((endingReading - r.odoStart).toFixed(2));
+  r.drivenMiles = total;
+  r.odoEnd = endingReading;
+  r.odoEndAt = Date.now();
+  return { total: total, mine: total, count: 1 };
+}
+// Display-only preview for Mark Paid's ending-odometer field - computes what the miles WOULD
+// be as the person types, without touching any real ride data (no chain writes, no odoEnd).
+// The actual, authoritative calculation only happens via _applyOdometerEnd(), and only at the
+// moment Mark Paid is genuinely saved - never while someone might still cancel out.
+// Shared by both preview functions below - mirrors _applyOdometerEnd's real math exactly
+// (including the two-segment round-trip case) but touches nothing real, same "display-only"
+// contract the individual preview functions already had.
+function _previewOdoTotal(r, val){
+  if(!r || !isFinite(val)) return null;
+  var twoSegment = r.odoPause!=null && r.odoResume!=null;
+  var compareFloor = twoSegment ? r.odoResume : r.odoStart;
+  if(val<=compareFloor) return null;
+  return twoSegment
+    ? parseFloat(((r.odoPause - r.odoStart) + (val - r.odoResume)).toFixed(2))
+    : parseFloat((val - r.odoStart).toFixed(2));
+}
+function _mpPreviewOdoMiles(rideId){
+  var r=_rideById(rideId);
+  var endInput=document.getElementById('mp-odo-end');
+  var milesInput=document.getElementById('mp-miles');
+  if(!r || !endInput || !milesInput) return;
+  var total=_previewOdoTotal(r, parseFloat(endInput.value));
+  if(total==null) return;
+  milesInput.value=total;
+}
+
+// Pause/Resume exist only for genuine ROUND TRIP rides (not AP ROUND TRIP) - Chase's explicit
+// design: Stop Ride is gone everywhere, but a regular round trip has two real driving segments
+// (out to the client, then back for them later) that a single start/end pair can't represent
+// accurately. Pause closes out the first segment's mileage; Resume opens the second and
+// re-triggers navigation, since going back for the client is a real trip needing real
+// directions again, not a continuation of the same one.
+function openPauseRide(rideId){
   var r=rides.find(function(x){return x.id===rideId;});
   if(!r){ showToast('Ride not found'); return; }
-
-  // Same reasoning as rideStartedAt in openStartRide - the toggle back to "Start Ride" has
-  // to work for every driver, including one who's opted out of odometer prompts entirely.
-  r.rideStoppedAt = Date.now();
-  try{ saveRides(); }catch(e){}
-
   var dn = getMyDriverName();
   var skipOdo = dn && driverSettings[dn] && driverSettings[dn].skipOdometerPrompts===true;
-  if(skipOdo || r.odoStart==null){ showToast('Ride stopped'); if(typeof refreshDash==='function') refreshDash(); return; }
-  _showOdometerStopPrompt(rideId);
+  if(skipOdo || r.odoStart==null){
+    r.pausedAt = Date.now();
+    try{ saveRides(); }catch(e){}
+    showToast('Ride paused');
+    if(typeof refreshDash==='function') refreshDash();
+    return;
+  }
+  _showOdometerPausePrompt(rideId);
 }
-
-function _showOdometerStopPrompt(rideId){
+function _showOdometerPausePrompt(rideId){
   var ov=document.createElement('div');
-  ov.id='odo-stop-overlay';
+  ov.id='odo-pause-overlay';
   ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14500;'
     +'display:flex;align-items:center;justify-content:center;padding:1.5rem;';
-  ov.onclick=function(e){if(e.target===ov) _skipOdometerStop(rideId);};
+  ov.onclick=function(e){if(e.target===ov) _skipOdometerPause(rideId);};
   ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:340px;width:100%;padding:1.25rem;'
     +'box-shadow:0 24px 60px rgba(0,0,0,.35);box-sizing:border-box;">'
-    +'<div style="font-size:1rem;font-weight:800;color:#0f172a;margin-bottom:.4rem;">Ending odometer?</div>'
-    +'<div style="font-size:.78rem;color:#64748b;margin-bottom:.9rem;line-height:1.5;">Log it now, or skip and enter your mileage from Maps later at Mark Paid.</div>'
-    +'<input id="odo-stop-input" type="number" inputmode="decimal" placeholder="e.g. 48261" style="width:100%;padding:.65rem .8rem;border:1.5px solid #e2d9f3;border-radius:10px;font-family:inherit;font-size:.95rem;margin-bottom:.85rem;box-sizing:border-box;">'
-    +'<button onclick="_saveOdometerStop('+rideId+')" style="width:100%;padding:.75rem;background:#7c3aed;color:#fff;border:none;border-radius:10px;font-family:inherit;font-weight:700;font-size:.88rem;cursor:pointer;margin-bottom:.5rem;">Save mileage</button>'
-    +'<button onclick="_skipOdometerStop('+rideId+')" style="width:100%;padding:.6rem;background:none;color:#64748b;border:none;font-family:inherit;font-size:.82rem;cursor:pointer;">Skip for now</button>'
+    +'<div style="font-size:1rem;font-weight:800;color:#0f172a;margin-bottom:.4rem;">Odometer at drop-off?</div>'
+    +'<div style="font-size:.78rem;color:#64748b;margin-bottom:.9rem;line-height:1.5;">Closes out the first leg of this round trip. Log it now, or skip and enter your total mileage manually at Mark Paid.</div>'
+    +'<input id="odo-pause-input" type="number" inputmode="decimal" placeholder="e.g. 48261" style="width:100%;padding:.65rem .8rem;border:1.5px solid #e2d9f3;border-radius:10px;font-family:inherit;font-size:.95rem;margin-bottom:.85rem;box-sizing:border-box;">'
+    +'<button onclick="_saveOdometerPause('+rideId+')" style="width:100%;padding:.75rem;background:#7c3aed;color:#fff;border:none;border-radius:10px;font-family:inherit;font-weight:700;font-size:.88rem;cursor:pointer;margin-bottom:.5rem;">Save &amp; pause</button>'
+    +'<button onclick="_skipOdometerPause('+rideId+')" style="width:100%;padding:.6rem;background:none;color:#64748b;border:none;font-family:inherit;font-size:.82rem;cursor:pointer;">Skip for now</button>'
     +'</div>';
   document.body.appendChild(ov);
-  setTimeout(function(){ var el=document.getElementById('odo-stop-input'); if(el) el.focus(); }, 50);
+  setTimeout(function(){ var el=document.getElementById('odo-pause-input'); if(el) el.focus(); }, 50);
 }
-
-function _skipOdometerStop(rideId){
-  var ov=document.getElementById('odo-stop-overlay'); if(ov) ov.remove();
-  // Deliberately leaves odoStart/odoChainId untouched - the ride stays "open" so a Mark Paid
-  // nudge can still catch it later, or the next ride the driver starts can still continue the
-  // same chain if that's actually what happens. Skipping means "not right now," not "forget it."
-  showToast('Skipped \u2014 you can still add mileage at Mark Paid');
-  if(typeof refreshDash==='function') refreshDash();
-}
-
-async function _saveOdometerStop(rideId){
+async function _saveOdometerPause(rideId){
   var r=rides.find(function(x){return x.id===rideId;});
-  var input = document.getElementById('odo-stop-input');
+  var input = document.getElementById('odo-pause-input');
   var val = input ? parseFloat(input.value) : NaN;
-  var ov=document.getElementById('odo-stop-overlay'); if(ov) ov.remove();
-  if(!r || !r.odoChainId || !isFinite(val)){ if(typeof refreshDash==='function') refreshDash(); return; }
-  if(val <= r.odoStart){ showToast('Ending reading should be higher than the starting one \u2014 not saved','error'); return; }
-
-  var total = parseFloat((val - r.odoStart).toFixed(2));
-  // Every ride still open under this SAME chain - back-to-back legs where Stop Ride never
-  // got tapped in between all share one continuous odometer trip, and split the same total.
-  var chainRides = (rides||[]).filter(function(x){ return x && x.odoChainId===r.odoChainId; });
-  var count = chainRides.length || 1;
-  var each = parseFloat((total/count).toFixed(2));
-  chainRides.forEach(function(x, idx){
-    // Last one absorbs the rounding remainder, same convention the round-trip splitter
-    // already uses elsewhere in the app.
-    x.drivenMiles = (idx===count-1) ? parseFloat((total-each*(count-1)).toFixed(2)) : each;
-  });
-  r.odoEnd = val;
-  r.odoEndAt = Date.now();
+  var ov=document.getElementById('odo-pause-overlay'); if(ov) ov.remove();
+  if(!r){ if(typeof refreshDash==='function') refreshDash(); return; }
+  r.pausedAt = Date.now();
+  if(isFinite(val) && r.odoStart!=null && val > r.odoStart){
+    r.odoPause = val;
+  } else if(isFinite(val)){
+    showToast('Reading should be higher than the starting one \u2014 paused, but that reading wasn\u2019t saved','error');
+  }
   try{ saveRides(); }catch(e){}
-  showToast(count>1 ? ('\u2705 '+total+' mi split across '+count+' rides') : ('\u2705 '+total+' mi logged'));
+  showToast(r.odoPause!=null ? ('\u2705 Paused at '+r.odoPause+' mi') : 'Ride paused');
   if(typeof refreshDash==='function') refreshDash();
+}
+function _skipOdometerPause(rideId){
+  var r=rides.find(function(x){return x.id===rideId;});
+  var ov=document.getElementById('odo-pause-overlay'); if(ov) ov.remove();
+  if(r){ r.pausedAt = Date.now(); try{ saveRides(); }catch(e){} }
+  showToast('Paused \u2014 you can still add mileage at Mark Paid');
+  if(typeof refreshDash==='function') refreshDash();
+}
+
+function openResumeRide(rideId){
+  var r=rides.find(function(x){return x.id===rideId;});
+  if(!r){ showToast('Ride not found'); return; }
+  var dn = getMyDriverName();
+  var skipOdo = dn && driverSettings[dn] && driverSettings[dn].skipOdometerPrompts===true;
+  if(skipOdo){
+    r.resumedAt = Date.now();
+    try{ saveRides(); }catch(e){}
+    if(typeof refreshDash==='function') refreshDash();
+    _openResumeRideFromCurrent(rideId);
+    return;
+  }
+  _showOdometerResumePrompt(rideId);
+}
+function _showOdometerResumePrompt(rideId){
+  var ov=document.createElement('div');
+  ov.id='odo-resume-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14500;'
+    +'display:flex;align-items:center;justify-content:center;padding:1.5rem;';
+  ov.onclick=function(e){if(e.target===ov) _skipOdometerResume(rideId);};
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:340px;width:100%;padding:1.25rem;'
+    +'box-shadow:0 24px 60px rgba(0,0,0,.35);box-sizing:border-box;">'
+    +'<div style="font-size:1rem;font-weight:800;color:#0f172a;margin-bottom:.4rem;">Odometer now?</div>'
+    +'<div style="font-size:.78rem;color:#64748b;margin-bottom:.9rem;line-height:1.5;">Starts the second leg of this round trip. Log it now, or skip and enter your total mileage manually at Mark Paid.</div>'
+    +'<input id="odo-resume-input" type="number" inputmode="decimal" placeholder="e.g. 48261" style="width:100%;padding:.65rem .8rem;border:1.5px solid #e2d9f3;border-radius:10px;font-family:inherit;font-size:.95rem;margin-bottom:.85rem;box-sizing:border-box;">'
+    +'<button onclick="_saveOdometerResume('+rideId+')" style="width:100%;padding:.75rem;background:#7c3aed;color:#fff;border:none;border-radius:10px;font-family:inherit;font-weight:700;font-size:.88rem;cursor:pointer;margin-bottom:.5rem;">Save &amp; continue</button>'
+    +'<button onclick="_skipOdometerResume('+rideId+')" style="width:100%;padding:.6rem;background:none;color:#64748b;border:none;font-family:inherit;font-size:.82rem;cursor:pointer;">Skip for now</button>'
+    +'</div>';
+  document.body.appendChild(ov);
+  setTimeout(function(){ var el=document.getElementById('odo-resume-input'); if(el) el.focus(); }, 50);
+}
+async function _saveOdometerResume(rideId){
+  var r=rides.find(function(x){return x.id===rideId;});
+  var input = document.getElementById('odo-resume-input');
+  var val = input ? parseFloat(input.value) : NaN;
+  var ov=document.getElementById('odo-resume-overlay'); if(ov) ov.remove();
+  if(!r){ if(typeof refreshDash==='function') refreshDash(); return; }
+  r.resumedAt = Date.now();
+  if(isFinite(val) && (r.odoPause==null || val > r.odoPause)){
+    r.odoResume = val;
+  } else if(isFinite(val)){
+    showToast('Reading should be higher than the pause reading \u2014 resumed, but that reading wasn\u2019t saved','error');
+  }
+  try{ saveRides(); }catch(e){}
+  if(typeof refreshDash==='function') refreshDash();
+  _openResumeRideFromCurrent(rideId);
+}
+function _skipOdometerResume(rideId){
+  var r=rides.find(function(x){return x.id===rideId;});
+  var ov=document.getElementById('odo-resume-overlay'); if(ov) ov.remove();
+  if(r){ r.resumedAt = Date.now(); try{ saveRides(); }catch(e){} }
+  if(typeof refreshDash==='function') refreshDash();
+  _openResumeRideFromCurrent(rideId);
+}
+// The second GPS handoff for a paused round trip's Resume: current location -> where the
+// client was dropped off (now the pickup) -> where they were originally picked up (now the
+// dropoff) -> back home. Mirrors _openStartRideFromCurrent below, just threading the swap flag
+// through to _openStartRideWithHome, with the end point fixed to home rather than asking -
+// Chase was explicit this ends at home, not another "where does this end" prompt.
+function _openResumeRideFromCurrent(rideId){
+  var ov=document.createElement('div');
+  ov.id='nav-modal-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14000;'
+    +'display:flex;align-items:center;justify-content:center;padding:1.5rem;';
+  ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:300px;width:100%;'
+    +'padding:1.25rem;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.3);">'
+    +'<div style="font-size:1.5rem;margin-bottom:.5rem;">&#128205;</div>'
+    +'<div style="font-size:.95rem;font-weight:700;color:#0f172a;margin-bottom:.35rem;">Getting your location\u2026</div>'
+    +'<div style="font-size:.78rem;color:#64748b;">Just takes a second</div>'
+    +'</div>';
+  document.body.appendChild(ov);
+
+  navigator.geolocation.getCurrentPosition(
+    function(pos){
+      var lat=pos.coords.latitude.toFixed(6);
+      var lng=pos.coords.longitude.toFixed(6);
+      var locStr=lat+','+lng;
+      _closeNavModal();
+      _openStartRideWithHome(rideId, locStr, _rtGetHome(), true);
+    },
+    function(err){
+      _closeNavModal();
+      showToast('Could not get location: '+err.message);
+      _openStartRideWithHome(rideId, _rtGetHome(), _rtGetHome(), true);
+    },
+    {enableHighAccuracy:true, timeout:12000, maximumAge:0}
+  );
 }
 
 function _openStartRideFromCurrent(rideId){
@@ -9377,11 +9693,7 @@ function _askReturnDest(rideId, locStr){
     +'</div>'
     +'<span style="margin-left:auto;color:#ea580c;font-size:.85rem;flex-shrink:0;">&#8594;</span>'
     +'</button>'
-    +((typeof _rideDropAddr==='function'&&_rideDropAddr(rideId))?'<button onclick="_closeNavModal();_openStartRideWithHome(window._srtId,window._srtLoc,_rideDropAddr(window._srtId))" style="width:100%;display:flex;align-items:center;gap:.7rem;padding:.8rem;margin-bottom:.5rem;background:#fffbeb;border:1.5px solid #fde68a;border-radius:11px;cursor:pointer;text-align:left;"><span style="font-size:1.1rem;">\ud83c\udfc1</span><div><div style="font-size:.88rem;font-weight:700;color:#0f172a;">End at the drop-off</div><div style="font-size:.72rem;color:#64748b;">Route ends where you drop the client \u2014 no return leg</div></div><span style="margin-left:auto;color:#d97706;font-size:.85rem;flex-shrink:0;">&#8594;</span></button>':'')+'<button onclick="_srtAddRide()" style="width:100%;display:flex;align-items:center;gap:.7rem;padding:.8rem;margin-bottom:.5rem;background:#f5f3ff;border:1.5px solid #ddd6fe;border-radius:11px;cursor:pointer;text-align:left;">'
-    +'<span style="font-size:1.1rem;">\u2795</span>'
-    +'<div><div style="font-size:.88rem;font-weight:700;color:#0f172a;">Add another ride to this trip</div><div style="font-size:.72rem;color:#64748b;">Drop-off + pickup \u2014 miles split, tip each</div></div>'
-    +'<span style="margin-left:auto;color:#7c3aed;font-size:.85rem;flex-shrink:0;">&#8594;</span>'
-    +'</button>'
+    +((typeof _rideDropAddr==='function'&&_rideDropAddr(rideId))?'<button onclick="_closeNavModal();_openStartRideWithHome(window._srtId,window._srtLoc,_rideDropAddr(window._srtId))" style="width:100%;display:flex;align-items:center;gap:.7rem;padding:.8rem;margin-bottom:.5rem;background:#fffbeb;border:1.5px solid #fde68a;border-radius:11px;cursor:pointer;text-align:left;"><span style="font-size:1.1rem;">\ud83c\udfc1</span><div><div style="font-size:.88rem;font-weight:700;color:#0f172a;">End at the drop-off</div><div style="font-size:.72rem;color:#64748b;">Route ends where you drop the client \u2014 no return leg</div></div><span style="margin-left:auto;color:#d97706;font-size:.85rem;flex-shrink:0;">&#8594;</span></button>':'')
     +'<div id="srt-other-wrap" style="display:none;margin-top:.5rem;">'
     +'<input id="srt-other-input" type="text" placeholder="Enter end address&hellip;" '
     +'style="width:100%;padding:.6rem .7rem;border:1.5px solid #e2e8f0;border-radius:9px;font-family:inherit;font-size:.85rem;box-sizing:border-box;margin-bottom:.4rem;" '
@@ -9394,37 +9706,6 @@ function _askReturnDest(rideId, locStr){
   document.body.appendChild(ov);
 }
 
-function _srtAddRide(){
-  var cur=rides.find(function(x){return x&&x.id===window._srtId;});
-  var today=cur?cur.date:'';
-  var opts=(rides||[]).filter(function(x){ return x && x.id!==window._srtId && x.date===today && x.status!=='cancelled'; })
-    .sort(function(a,b){return (a.time||'').localeCompare(b.time||'');});
-  var pk=document.createElement('div'); pk.id='srt-addride-overlay';
-  pk.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:16050;display:flex;align-items:center;justify-content:center;padding:1.1rem;';
-  pk.onclick=function(e){ if(e.target===pk) pk.remove(); };
-  var rows = opts.length ? opts.map(function(x){
-    return '<button onclick="_srtLinkRide('+x.id+')" style="width:100%;text-align:left;padding:.7rem .8rem;margin-bottom:.4rem;border:1.5px solid #e2e8f0;border-radius:9px;background:#fff;cursor:pointer;font-family:inherit;">'
-      +'<div style="font-size:.85rem;font-weight:700;color:#0f172a;">'+escHtml(x.type||'')+' \u2014 '+escHtml(x.client||'')+'</div>'
-      +'<div style="font-size:.72rem;color:#64748b;">'+((typeof fmtTime12==='function'?fmtTime12(x.time):x.time)||'')+'</div></button>';
-  }).join('') : '<div style="font-size:.82rem;color:#64748b;padding:.5rem 0;">No other rides today to link.</div>';
-  pk.innerHTML='<div style="background:#fff;border-radius:14px;max-width:420px;width:100%;padding:1.1rem;max-height:80vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
-    +'<div style="font-size:.95rem;font-weight:800;color:#0f172a;margin-bottom:.6rem;">Add another ride to this trip</div>'
-    +rows
-    +'<button onclick="var p=document.getElementById(\'srt-addride-overlay\');if(p)p.remove();" style="width:100%;margin-top:.5rem;padding:.55rem;background:#f1f5f9;border:none;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:600;color:#475569;">Cancel</button>'
-    +'</div>';
-  document.body.appendChild(pk);
-}
-async function _srtLinkRide(secondId){
-  await _ensureFresh();
-  var p=document.getElementById('srt-addride-overlay'); if(p) p.remove();
-  var r1=rides.find(function(x){return x&&x.id===window._srtId;});
-  var r2=rides.find(function(x){return x&&x.id===secondId;});
-  if(!r1||!r2){ showToast('Ride not found','error'); return; }
-  r1.linkedRide=r2.id; r2.linkedRide=r1.id;
-  try{ saveRides(); }catch(e){}
-  showToast('Linked with '+(r2.client||'ride')+' \u2014 miles split, tip each');
-  _askReturnDest(window._srtId, window._srtLoc); // now choose where the whole trip ends
-}
 function _srtGoOther(){
   var i=document.getElementById('srt-other-input');
   var v=(i&&i.value||'').trim();
@@ -9469,13 +9750,19 @@ function _navOptimize(){
     showToast('\u2713 Route optimized \u2014 fine-tune with \u2191\u2193 if needed');
   }
 }
-function _openStartRideWithHome(rideId, startAddr, endAddr){
+function _openStartRideWithHome(rideId, startAddr, endAddr, swapPickupDropoff){
   var r=rides.find(function(x){return x.id===rideId;});
   if(!r){ showToast('Ride not found'); return; }
   var _link=(r.linkedRide!=null)?rides.find(function(x){return x&&x.id===r.linkedRide;}):null;
+  // For Resume on a paused ROUND TRIP: the client's being picked up from where they were
+  // dropped off, and taken back to where they originally started - same two addresses, roles
+  // reversed. A shallow clone with pickup/home swapped reuses _buildRouteUrlsFrom exactly as
+  // it already is, rather than risking any change to it - the real ride record itself is never
+  // touched here.
+  var _routeRide = swapPickupDropoff ? Object.assign({}, r, { pickup: r.home, home: r.pickup }) : r;
   // Used to also begin GPS mileage tracking here (mtStart) - removed with the GPS tracker
   // (v674). Start Ride is purely a navigation-app launcher now.
-  var urls=_buildRouteUrlsFrom(r, startAddr, endAddr, _link);
+  var urls=_buildRouteUrlsFrom(_routeRide, startAddr, endAddr, _link);
   var isIos=/iphone|ipad|ipod/i.test(navigator.userAgent);
 
   var stops=urls.stops;
@@ -9557,15 +9844,6 @@ function _openStartRideWithHome(rideId, startAddr, endAddr){
     +'<span style="margin-left:auto;color:#94a3b8;font-size:.8rem;">&#8594;</span>'
     +'</button>'
     +'</div>'
-
-    // Divider
-    +'<div style="border-top:1px solid #f1f5f9;padding-top:.75rem;">'
-    +'<div style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.45rem;">After your ride</div>'
-    +'<button onclick="_closeNavModal();openLogMiles('+rideId+')" '
-    +'style="width:100%;padding:.65rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;'
-    +'font-family:inherit;font-size:.9rem;font-weight:700;cursor:pointer;">'
-    +'&#128205; Log Miles &amp; Tip</button>'
-    +'</div>'
     +'</div>';
   document.body.appendChild(ov);
 }
@@ -9633,28 +9911,7 @@ function openLogMiles(rideId){
     // ending reading, AND enough time has passed that it's very unlikely still an ordinary,
     // in-progress ride (which would make the nudge just noise) - two hours is a proxy for
     // "is this actually useful right now," not an arbitrary number.
-    +((r.odoStart!=null && r.odoEnd==null && r.odoStartAt && (Date.now()-r.odoStartAt) > 2*60*60*1000)
-      ? '<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:9px;padding:.6rem .8rem;margin-bottom:.75rem;font-size:.74rem;color:#7c2d12;line-height:1.5;">\u26a0\ufe0f You didn\u2019t log your ending odometer for this ride. Not a problem \u2014 just enter your mileage from Maps below like normal.</div>'
-      : '')
-    +'<div style="font-size:.66rem;color:#94a3b8;margin-bottom:.6rem;line-height:1.4;">Total from Waze / Apple / Google Maps — include the drive to pick them up, not just the ride itself. That’s still deductible business mileage.</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin-bottom:.75rem;align-items:end;">'
-    +'<div><label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">MILES DRIVEN</label>'
-    +'<input id="lm-miles" type="number" min="0" step="0.1" value="'+(r.drivenMiles||r.miles||'')+'" placeholder="e.g. 41" '
-    +'style="width:100%;padding:.55rem .65rem;border:1.5px solid #c4b5fd;border-radius:9px;font-family:inherit;font-size:1rem;box-sizing:border-box;">'
-    +'</div>'
-    +'<div><label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">TIP RECEIVED $</label>'
-    +'<input id="lm-tip" type="number" min="0" step="0.01" value="'+(r.tip||'')+'" placeholder="0.00" '
-    +'style="width:100%;padding:.55rem .65rem;border:1.5px solid #d1d5db;border-radius:9px;font-family:inherit;font-size:1rem;box-sizing:border-box;">'
-    +'</div>'
-    +'</div>'
-    +'<div style="background:#fefce8;border:1px solid #fde68a;border-radius:9px;padding:.6rem .8rem;margin-bottom:.85rem;">'
-    +'<div style="font-size:.7rem;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.35rem;">&#9981; Gas price / gallon</div>'
-    +'<div style="display:flex;align-items:center;gap:.5rem;">'
-    +'<span style="font-weight:600;color:#78350f;">$</span>'
-    +'<input id="lm-gas" type="number" min="0" step="0.01" value="'+(_mtGasPrice||'')+'" placeholder="e.g. 3.49" '
-    +'style="flex:1;padding:.45rem .6rem;border:1.5px solid #fcd34d;border-radius:7px;font-family:inherit;font-size:.9rem;">'
-    +'</div>'
-    +'<div style="font-size:.68rem;color:#92400e;margin-top:.3rem;">Auto-fills next time</div></div>'
+    +_buildOdoMilesTipGasFieldsHtml('lm', r, 'Total from Waze / Apple / Google Maps \u2014 include the drive to pick them up, not just the ride itself. That\u2019s still deductible business mileage.')
     +'<div style="display:flex;gap:.5rem;">'
     +'<button onclick="_closeLogMiles()" style="flex:1;padding:.6rem;background:#f1f5f9;color:#475569;border:none;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:600;cursor:pointer;">Cancel</button>'
     +'<button id="lm-save-btn" onclick="if(!this.dataset.lmFired){this.dataset.lmFired=\'1\';_saveLogMiles('+rideId+');}" style="flex:2;padding:.6rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.9rem;font-weight:700;cursor:pointer;">&#128190; Save</button>'
@@ -9746,7 +10003,52 @@ function _maybeOfferFeeAndPaid(rideId){
   }
 }
 
+// Re-attempts writing the whole rides array, exactly what saveRides() already always does -
+// one successful write resolves EVERY currently-pending ride at once, not just the one that
+// prompted the retry, since they're all sitting correctly in the same in-memory array already.
+// Nothing to re-enter, nothing to redo - the data was already right, it just hadn't reached
+// Firebase yet.
+async function _retryPendingSaves(){
+  if(!window._pendingUnsavedRideIds || !window._pendingUnsavedRideIds.size){ showToast('Nothing waiting to save'); return; }
+  var _count = window._pendingUnsavedRideIds.size;
+  var ok = await saveRides();
+  if(ok){
+    window._pendingUnsavedRideIds.clear();
+    showToast('\u2705 Saved'+(_count>1?' ('+_count+' rides)':''));
+  } else {
+    showToast('\u26a0\ufe0f Still couldn\u2019t save \u2014 check your connection and try again');
+  }
+  try{ renderDashSaveFailed(); }catch(e){}
+  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+}
+// A ride that failed to save stays visibly flagged until it actually saves - not a toast that
+// can be missed and forgotten, a persistent banner that only goes away once resolved. Lives
+// alongside the dashboard's other action-block banners, same "gone once its job is done"
+// pattern all of them already follow.
+function renderDashSaveFailed(){
+  var box=document.getElementById('dash-save-failed'); if(!box) return;
+  var count = (window._pendingUnsavedRideIds && window._pendingUnsavedRideIds.size) || 0;
+  if(!count){ box.innerHTML=''; return; }
+  box.innerHTML='<div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:12px;padding:1rem;margin-bottom:.75rem;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.4rem;">'
+    +'<span style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#b91c1c;">\u26a0\ufe0f '+count+' ride'+(count===1?'':'s')+' didn\u2019t save</span>'
+    +'<button onclick="_retryPendingSaves()" style="background:#b91c1c;color:#fff;border:none;border-radius:8px;padding:.4rem .8rem;font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;">Retry</button>'
+    +'</div>'
+    +'<div style="font-size:.75rem;color:var(--mid);line-height:1.45;">Your change is safe on this device, but hasn\u2019t reached the server yet \u2014 likely a connection issue. Tap Retry once you\u2019re back online.</div>'
+    +'</div>';
+}
 
+
+// Same idea as _mpPreviewOdoMiles for Mark Paid - display-only, mutates nothing real.
+function _lmPreviewOdoMiles(rideId){
+  var r=_rideById(rideId);
+  var endInput=document.getElementById('lm-odo-end');
+  var milesInput=document.getElementById('lm-miles');
+  if(!r || !endInput || !milesInput) return;
+  var total=_previewOdoTotal(r, parseFloat(endInput.value));
+  if(total==null) return;
+  milesInput.value=total;
+}
 async function _saveLogMiles(rideId){
   // This `if(!r)` used to be a bare `return` — no toast, no throw, no console line. Combined
   // with the id-type coercion described on _rideById, that made Save a button that visibly
@@ -9770,27 +10072,30 @@ async function _saveLogMiles(rideId){
   // No single line here reproduces with synthetic test data, so rather than guess again, the
   // whole body is wrapped: whatever is actually throwing on a real device will now say so.
   try{
-    var mi=parseFloat(document.getElementById('lm-miles').value)||0;
+    var lmOdoEndInput=document.getElementById('lm-odo-end');
+    var lmOdoEndVal=lmOdoEndInput ? parseFloat(lmOdoEndInput.value) : NaN;
+    var mi;
+    if(lmOdoEndInput && isFinite(lmOdoEndVal)){
+      var lmOdoResult=_applyOdometerEnd(r, lmOdoEndVal);
+      if(!lmOdoResult){
+        // Same reasoning as Mark Paid's own save-button guard reset - without this, a driver
+        // fixing a mistyped ending reading would find Save silently unresponsive on retry.
+        try{ var _lsb=document.getElementById('lm-save-btn'); if(_lsb) delete _lsb.dataset.lmFired; }catch(_e){}
+        return;
+      }
+      mi=lmOdoResult.mine;
+    } else {
+      mi=parseFloat(document.getElementById('lm-miles').value)||0;
+    }
     var tip=parseFloat(document.getElementById('lm-tip').value)||0;
     var gas=parseFloat(document.getElementById('lm-gas').value)||0;
     // These are the miles the DRIVER actually drove (e.g. round trip), used only
     // for their gas/maintenance cost and profit. It does NOT change the client's
     // fare, which is based on the originally quoted r.miles.
     r.drivenMiles=mi;
-    var _r2=(r.linkedRide!=null)?_rideById(r.linkedRide):null;
-    if(_r2){ var _m1=parseFloat(r.miles)||0,_m2=parseFloat(_r2.miles)||0,_tot=_m1+_m2; var _s1=_tot>0?Math.round(mi*(_m1/_tot)*10)/10:Math.round(mi/2*10)/10; r.drivenMiles=_s1; _r2.drivenMiles=Math.round((mi-_s1)*10)/10; }
     if(tip>0) r.tip=tip;
     if(gas>0) await _mtSaveGasPrice(gas);
     try{await saveRides();}catch(e){console.warn(e);}
-    if(_r2 && !window._srtTipChained){
-      window._srtTipChained=true;
-      var _staleOv=document.getElementById('log-miles-overlay'); if(_staleOv) _staleOv.remove();
-      var _w0=document.getElementById('mt-wrap'); if(_w0)_w0.innerHTML=rideActionBarHtml(rideId);
-      showToast('\uD83D\uDCCD '+r.drivenMiles+' mi (split) saved \u2014 now log the second ride');
-      setTimeout(function(){ try{ openLogMiles(_r2.id); }catch(e){} }, 220);
-      return;
-    }
-    window._srtTipChained=false;
     _closeLogMiles();
     // Refresh the mileage bar in the open ride modal
     var w=document.getElementById('mt-wrap'); if(w)w.innerHTML=rideActionBarHtml(rideId);
@@ -10323,8 +10628,10 @@ async function _rtSave(){
 }
 
 // rtAddRide removed — confirmed zero callers anywhere in the file (checked full-file, not
-// just <script> content, including static HTML onclick attributes). Fully superseded by
-// _srtAddRide, a real picker UI for linking another ride into a GPS session.
+// just <script> content, including static HTML onclick attributes). Was superseded at the
+// time by _srtAddRide, a picker UI for linking another ride into a GPS session - that feature
+// (the "Add another ride to this trip" flow, and everything backing it) has since been removed
+// entirely too, replaced by the pause/resume system for genuine ROUND TRIP rides.
 function _rtTryRecover(){ /* no persistent state needed for address-based approach */ }
 
 // ── LOCATION SHARE ───────────────────────────────────────────────────────
@@ -12673,13 +12980,24 @@ function _onbCardUploadPick(input){
 var _onbGeneratedCard = null; // generated driver card (base64) for save
 var _onbLogoData = null;   // holds uploaded business logo (base64) for save
 var _onbBooksClients = null;   // holds the Yes/No selection for "booking your own clients" until save
-function _onbUploadLogo(){
+// Shared by all four "pick an image and read it" flows below (onboarding logo, onboarding
+// selfie, profile business logo, profile day-of selfie) - the actual file-picking, reading,
+// and optional canvas resize was identical in all four, each just doing something different
+// with the resulting data URL afterward. Falls back to the unresized data on any canvas
+// failure rather than losing the pick entirely - the safer of the two behaviors that existed
+// before this (one caller already did this, one didn't; now both do).
+function _pickAndReadImage(opts){
+  opts = opts || {};
+  var resize = !!opts.resize;
+  var cleanupDelayMs = opts.cleanupDelayMs != null ? opts.cleanupDelayMs : 1000;
+  var onResult = opts.onResult || function(){};
   var inp = document.createElement('input');
   inp.type='file'; inp.accept='image/*'; inp.style.display='none';
   inp.onchange = function(){
     var file = inp.files[0]; if(!file) return;
     var reader = new FileReader();
     reader.onload = function(e){
+      if(!resize){ onResult(e.target.result); return; }
       var img = new Image();
       img.onload = function(){
         try{
@@ -12687,19 +13005,24 @@ function _onbUploadLogo(){
           if(w>max||h>max){ var s=Math.min(max/w,max/h); w=Math.round(w*s); h=Math.round(h*s); }
           var cv=document.createElement('canvas'); cv.width=w; cv.height=h;
           cv.getContext('2d').drawImage(img,0,0,w,h);
-          _onbLogoData = cv.toDataURL('image/png');
-        }catch(err){ _onbLogoData = e.target.result; }
-        var prev=document.getElementById('onb-logo-preview');
-        if(prev){ prev.style.backgroundImage='url('+_onbLogoData+')'; prev.textContent=''; }
-        var st=document.getElementById('onb-logo-status');
-        if(st) st.textContent='Logo selected \u2713';
+          onResult(cv.toDataURL('image/png'));
+        }catch(err){ onResult(e.target.result); }
       };
       img.src = e.target.result;
     };
     reader.readAsDataURL(file);
   };
   document.body.appendChild(inp); inp.click();
-  setTimeout(function(){ try{ document.body.removeChild(inp); }catch(e){} }, 1000);
+  setTimeout(function(){ try{ document.body.removeChild(inp); }catch(e){} }, cleanupDelayMs);
+}
+function _onbUploadLogo(){
+  _pickAndReadImage({ resize:true, cleanupDelayMs:1000, onResult:function(dataUrl){
+    _onbLogoData = dataUrl;
+    var prev=document.getElementById('onb-logo-preview');
+    if(prev){ prev.style.backgroundImage='url('+_onbLogoData+')'; prev.textContent=''; }
+    var st=document.getElementById('onb-logo-status');
+    if(st) st.textContent='Logo selected \u2713';
+  }});
 }
 function _onbConfMode(){
   var mode = document.querySelector('input[name="onb-conf-mode"]:checked');
@@ -12806,22 +13129,13 @@ function _onbSelfieChoice(){
   if(up) up.style.display = (choice && choice.value==='own') ? 'flex' : 'none';
 }
 function _onbUploadPhoto(){
-  var inp = document.createElement('input');
-  inp.type='file'; inp.accept='image/*'; inp.style.display='none';
-  inp.onchange = function(){
-    var file = inp.files[0]; if(!file) return;
-    var reader = new FileReader();
-    reader.onload = function(e){
-      _onbPhotoData = e.target.result;
-      var prev = document.getElementById('onb-photo-preview');
-      if(prev) prev.style.backgroundImage = 'url('+_onbPhotoData+')';
-      var st = document.getElementById('onb-photo-status');
-      if(st) st.textContent = 'Photo selected \u2713';
-    };
-    reader.readAsDataURL(file);
-  };
-  document.body.appendChild(inp); inp.click();
-  setTimeout(function(){ try{ document.body.removeChild(inp); }catch(e){} }, 1000);
+  _pickAndReadImage({ resize:false, cleanupDelayMs:1000, onResult:function(dataUrl){
+    _onbPhotoData = dataUrl;
+    var prev = document.getElementById('onb-photo-preview');
+    if(prev) prev.style.backgroundImage = 'url('+_onbPhotoData+')';
+    var st = document.getElementById('onb-photo-status');
+    if(st) st.textContent = 'Photo selected \u2713';
+  }});
 }
 function onboardingResetPending(dn){
   // True when an admin has triggered a global "re-prompt everyone" reset that is
@@ -13757,6 +14071,9 @@ function refreshDash(){
   const now=new Date(), todayStr=toDateStr(now);
   document.getElementById('dash-date').textContent=now.toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
 
+  // Anything that didn't actually save yet - the single most urgent thing to surface
+  try{ renderDashSaveFailed(); }catch(e){}
+
   // Morgan dispatch counter
   renderMorganCounter(); try{ renderKmPayCard(); }catch(e){}
 
@@ -13812,16 +14129,27 @@ function refreshDash(){
       <div class="ride-date" style="color:${tc};">${fmtDateShort(r.date)}<br><span style="font-size:.72rem">${fmtTime12(r.time)||''}</span></div>
       <div class="ride-info">
         <div class="ride-client" style="color:${tc};">${_rideIsConfirmed(r)?'<span title="Confirmed" style="color:#15803d;font-weight:700;">&#x2713;</span> ':''}${r.client}</div>
-        <div class="ride-detail" style="color:${tc};opacity:.78;">${r.type} · ${vehTag(r.vehicle)} · ${r.driver?driverShortName(r.driver):'<em>Unassigned</em>'}${r.pairId ? ' · Leg '+(r.rtLegNumber||'?')+'/2' : ''}</div>
+        <div class="ride-detail" style="color:${tc};opacity:.78;">${r.type} · ${vehTag(r.vehicle)} · ${r.driver?driverShortName(r.driver):'<em>Unassigned</em>'}${_pairedLegLabel(r)}</div>
       </div>
       <span class="badge ${typeCls}">${r.type}${apVehSuffix(r)}</span>
       ${(function(){
         if(r.status==='paid' || typeof _isRideWithinHours!=='function' || !_isRideWithinHours(r,12)) return '';
         var _btns = [];
         var _started = r.rideStartedAt && !r.rideStoppedAt;
-        _btns.push(_started
-          ? '<button onclick="event.stopPropagation();openStopRide('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#dc2626;color:#fff;">\u23f9\ufe0f Stop Ride</button>'
-          : '<button onclick="event.stopPropagation();openStartRide('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;">\ud83d\ude97 Start Ride</button>');
+        if(!_started){
+          _btns.push('<button onclick="event.stopPropagation();openStartRide('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;">\ud83d\ude97 Start Ride</button>');
+        } else if(r.type==='ROUND TRIP'){
+          // Genuine round trips (not AP ROUND TRIP) get Pause/Resume instead of nothing once
+          // started - a regular round trip has two real driving segments (out to the client,
+          // then back for them later), which Mark Paid's single ending-odometer prompt alone
+          // can't represent accurately. Once resumed, no more button here - same as every
+          // other ride type, the next real action is Mark Paid.
+          if(!r.pausedAt){
+            _btns.push('<button onclick="event.stopPropagation();openPauseRide('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#d97706;color:#fff;">\u23f8\ufe0f Pause</button>');
+          } else if(!r.resumedAt){
+            _btns.push('<button onclick="event.stopPropagation();openResumeRide('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\u25b6\ufe0f Resume</button>');
+          }
+        }
 
         var _isAirport = (r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP');
         if(r.arrivalSentAt){
@@ -13861,6 +14189,24 @@ function refreshDash(){
 
 // Past rides the driver hasn't marked paid yet — a "wrap these up" nudge on the dashboard.
 // Free for everyone: marking a ride paid / recording how the client paid is a core action.
+// Only shows for whoever actually has something pending to release - disappears the moment
+// they've done it, same "gone once its job is done" pattern the dashboard's own action-block
+// banners already follow. Lives on the Calendar page - the client owner is naturally looking
+// right here when reviewing and settling tomorrow's schedule anyway. This is the OWNER's
+// button (whoever scheduled the ride), not the driver's - see myPendingNotifyCount/
+// notifyMyAssignedDrivers above for why.
+function renderCalFinalizeTomorrow(){
+  var box=document.getElementById('cal-finalize-tomorrow'); if(!box) return;
+  var count = myPendingNotifyCount();
+  if(!count){ box.innerHTML=''; return; }
+  box.innerHTML='<div style="background:#eef2ff;border:1.5px solid #c7d2fe;border-radius:12px;padding:1rem;margin-bottom:.75rem;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.4rem;">'
+    +'<span style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#4338ca;">\ud83d\udccb Tomorrow\u2019s schedule \u00b7 '+count+' ride'+(count===1?'':'s')+' to notify</span>'
+    +'<button onclick="notifyMyAssignedDrivers()" style="background:#4338ca;color:#fff;border:none;border-radius:8px;padding:.4rem .8rem;font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;">Notify Drivers</button>'
+    +'</div>'
+    +'<div style="font-size:.75rem;color:var(--mid);line-height:1.45;">You\u2019ve scheduled '+count+' ride'+(count===1?'':'s')+' for tomorrow \u2014 tap Notify Drivers once it\u2019s set, and whoever\u2019s currently assigned finds out.</div>'
+    +'</div>';
+}
 function renderDashNeedsAttention(){
   var box=document.getElementById('dash-needs-attention'); if(!box) return;
   var todayStr=toDateStr(new Date());
@@ -15955,8 +16301,6 @@ async function clearGlobalPerTerminalPickupInstructions(){
   await saveGlobalPerTerminalPickupInstructions();
   renderMessageTemplates();
 }
-// Retained for anything that might still call the old name directly.
-async function saveMessageTemplates(){ await saveAllTemplateFields('global'); }
 function renderAccessControl(){
   if(!(currentUser && currentUser.role==='admin')){
     document.getElementById('access-control-list').innerHTML='<p style="color:var(--mid);">Admins only.</p>';
@@ -19570,53 +19914,25 @@ function getDriverSelfie(driverName){
 function openBusinessLogoUpload(driverName){
   const myDriverName = profileDriver();
   if(!(isAdmin() || myDriverName===driverName)){ showToast('You can only edit your own profile.','error'); return; }
-  const inp=document.createElement('input');
-  inp.type='file'; inp.accept='image/*'; inp.style.display='none';
-  inp.onchange=async function(){
-    const file=inp.files[0]; if(!file) return;
-    const reader=new FileReader();
-    reader.onload=function(e){
-      const img=new Image();
-      img.onload=async function(){
-        try{
-          const max=300;
-          let w=img.width, h=img.height;
-          if(w>max||h>max){ const s=Math.min(max/w,max/h); w=Math.round(w*s); h=Math.round(h*s); }
-          const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
-          const ctx=cv.getContext('2d'); ctx.drawImage(img,0,0,w,h);
-          const dataUrl=cv.toDataURL('image/png');
-          if(!DRIVER_PROFILES[driverName]) DRIVER_PROFILES[driverName]={};
-          DRIVER_PROFILES[driverName].logo=dataUrl;
-          await storageSet('kat:driverProfiles', DRIVER_PROFILES);
-          if(typeof renderMyProfileCard==='function') renderMyProfileCard();
-          showToast('\u2713 Business logo saved');
-        }catch(err){ console.warn('logo save failed', err); showToast('Could not save logo','error'); }
-      };
-      img.src=e.target.result;
-    };
-    reader.readAsDataURL(file);
-  };
-  document.body.appendChild(inp); inp.click();
-  setTimeout(function(){ try{ document.body.removeChild(inp); }catch(e){} }, 5000);
+  _pickAndReadImage({ resize:true, cleanupDelayMs:5000, onResult: async function(dataUrl){
+    try{
+      if(!DRIVER_PROFILES[driverName]) DRIVER_PROFILES[driverName]={};
+      DRIVER_PROFILES[driverName].logo=dataUrl;
+      await storageSet('kat:driverProfiles', DRIVER_PROFILES);
+      if(typeof renderMyProfileCard==='function') renderMyProfileCard();
+      showToast('\u2713 Business logo saved');
+    }catch(err){ console.warn('logo save failed', err); showToast('Could not save logo','error'); }
+  }});
 }
 
 function openDriverSelfieUpload(driverName){
-  const inp=document.createElement('input');
-  inp.type='file'; inp.accept='image/*'; inp.style.display='none';
-  inp.onchange=async function(){
-    const file=inp.files[0]; if(!file) return;
-    const reader=new FileReader();
-    reader.onload=async function(e){
-      if(!driverSettings[driverName]) driverSettings[driverName]={};
-      driverSettings[driverName].selfie=e.target.result;
-      await saveDriverSettings();
-      renderDriverMembers();
-      showToast('\u2713 Day-of-travel selfie updated for '+driverName.split(' ')[0]);
-    };
-    reader.readAsDataURL(file);
-  };
-  document.body.appendChild(inp); inp.click();
-  setTimeout(function(){ document.body.removeChild(inp); }, 5000);
+  _pickAndReadImage({ resize:false, cleanupDelayMs:5000, onResult: async function(dataUrl){
+    if(!driverSettings[driverName]) driverSettings[driverName]={};
+    driverSettings[driverName].selfie=dataUrl;
+    await saveDriverSettings();
+    renderDriverMembers();
+    showToast('\u2713 Day-of-travel selfie updated for '+driverName.split(' ')[0]);
+  }});
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -19965,31 +20281,7 @@ async function copyConfPart(id, partKey){
 // etc.) this deliberately leaves out the ride's creator/owner and the Kat/Morgan loop-in.
 // Client + assigned driver(s) only.
 function arrivalTextRecipients(r){
-  const seen=new Set();
-  const out=[];
-  const _digits10 = s => (s||'').replace(/\D/g,'').slice(-10);
-  const _meName = (typeof currentUser!=='undefined' && currentUser) ? currentUser.name : null;
-  const _meDriver = _meName ? (USER_DRIVER_MAP[_meName] || _meName) : null;
-  const _mePhone = _digits10(_meDriver ? (DRIVER_PROFILES[_meDriver]||{}).phone : '');
-  const add=(name,raw)=>{
-    if(!_looksLikePhone(raw)) return;
-    const d=(raw||'').replace(/[^0-9+]/g,'');
-    if(!d || seen.has(d)) return;
-    if(_mePhone && _digits10(d)===_mePhone) return; // never text the sender themselves
-    seen.add(d);
-    out.push({ name:(name||d), phone:d });
-  };
-  add(r.client||'Client', clientPhoneFor(r));
-  (r.extraPhones||'').split(/[,;]/).forEach(function(p){
-    p=(p||'').trim(); if(!p) return;
-    const phone=_extractPhone(p);
-    if(!phone) return;
-    const label=p.replace(phone,'').replace(/[()]/g,'').trim().replace(/^[\-–—:,]+|[\-–—:,]+$/g,'').trim();
-    add(label||null, phone);
-  });
-  if(r.driver) add(driverShortName(r.driver), (DRIVER_PROFILES[r.driver]||{}).phone);
-  if(r.xxl && r.driver2) add(r.driver2.split(' ')[0], (DRIVER_PROFILES[r.driver2]||{}).phone);
-  return out;
+  return _baseRideTextRecipients(r).out;
 }
 function openArrivalThread(id, body){
   const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
@@ -20051,18 +20343,29 @@ async function copyImageToClipboard(dataUrl){
 //    native share sheet, clearly labeled with the driver's name, so the sender hands it
 //    directly to the right person \u2014 same trust model this app already uses for every
 //    other file it shares (driver card image, selfie), just never the client this time.
+// The actual mechanical "save this vCard file to the device" step - identical in both
+// sendClientVCardToDriver and sendClientPhone below (each one used it twice: once for saving
+// straight to your own device, once as the fallback if the share sheet isn't available/fails).
+// The comment on sendClientPhone already said it was meant to reuse this exact mechanism from
+// sendClientVCardToDriver - it just hadn't actually happened in the code, so it was
+// copy-pasted four times instead of shared once. Returns true/false so each caller can still
+// show its own specific success/failure message, since those genuinely differ per caller.
+function _downloadVCardFile(vcf){
+  try{
+    const url=URL.createObjectURL(vcf);
+    const a=document.createElement('a'); a.href=url; a.download=vcf.name; a.style.display='none';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1000);
+    return true;
+  }catch(e){ return false; }
+}
 async function sendClientVCardToDriver(id){
   const r=rides.find(function(x){ return x.id===id; }); if(!r||!r.driver||!r.client) return;
   const vcf=(window._confFilesMap&&window._confFilesMap[id]&&window._confFilesMap[id].vcard) || buildClientVCard(r);
   const myDriverName=(typeof getMyDriverName==='function')?getMyDriverName():null;
   if(myDriverName && r.driver===myDriverName){
-    try{
-      const url=URL.createObjectURL(vcf);
-      const a=document.createElement('a'); a.href=url; a.download=vcf.name; a.style.display='none';
-      document.body.appendChild(a); a.click();
-      setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1000);
-      showToast('\uD83D\uDCC7 '+(r.client||'Client')+'\u2019s contact saved');
-    }catch(e){ showToast('Could not save contact','error'); }
+    if(_downloadVCardFile(vcf)) showToast('\uD83D\uDCC7 '+(r.client||'Client')+'\u2019s contact saved');
+    else showToast('Could not save contact','error');
     return;
   }
   if(navigator.canShare){
@@ -20074,13 +20377,8 @@ async function sendClientVCardToDriver(id){
       }
     }catch(e){ if(e && e.name==='AbortError') return; console.warn('client vcard share failed',e); }
   }
-  try{
-    const url=URL.createObjectURL(vcf);
-    const a=document.createElement('a'); a.href=url; a.download=vcf.name; a.style.display='none';
-    document.body.appendChild(a); a.click();
-    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1000);
-    showToast('\uD83D\uDCC7 Saved \u2014 send this to '+driverShortName(r.driver)+' manually');
-  }catch(e){ showToast('Could not prepare contact','error'); }
+  if(_downloadVCardFile(vcf)) showToast('\uD83D\uDCC7 Saved \u2014 send this to '+driverShortName(r.driver)+' manually');
+  else showToast('Could not prepare contact','error');
 }
 
 // Send client's phone number to the assigned driver(s), for a specific ride's context
@@ -20103,13 +20401,8 @@ async function sendClientPhone(id){
   const context='For your '+r.type+' on '+(r.date||'')+(r.time?' at '+fmtTime12(r.time):'');
   const myDriverName=(typeof getMyDriverName==='function')?getMyDriverName():null;
   if(myDriverName && r.driver===myDriverName){
-    try{
-      const url=URL.createObjectURL(vcf);
-      const a=document.createElement('a'); a.href=url; a.download=vcf.name; a.style.display='none';
-      document.body.appendChild(a); a.click();
-      setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1000);
-      showToast('\uD83D\uDCC7 '+(r.client||'Client')+'\u2019s contact saved \u2014 '+context);
-    }catch(e){ showToast('Could not save contact','error'); }
+    if(_downloadVCardFile(vcf)) showToast('\uD83D\uDCC7 '+(r.client||'Client')+'\u2019s contact saved \u2014 '+context);
+    else showToast('Could not save contact','error');
     return;
   }
   if(navigator.canShare){
@@ -20121,13 +20414,8 @@ async function sendClientPhone(id){
       }
     }catch(e){ if(e && e.name==='AbortError') return; console.warn('client phone vcard share failed',e); }
   }
-  try{
-    const url=URL.createObjectURL(vcf);
-    const a=document.createElement('a'); a.href=url; a.download=vcf.name; a.style.display='none';
-    document.body.appendChild(a); a.click();
-    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1000);
-    showToast('\uD83D\uDCC7 Saved \u2014 send this to '+driverShortName(r.driver)+' manually. '+context);
-  }catch(e){ showToast('Could not prepare contact','error'); }
+  if(_downloadVCardFile(vcf)) showToast('\uD83D\uDCC7 Saved \u2014 send this to '+driverShortName(r.driver)+' manually. '+context);
+  else showToast('Could not prepare contact','error');
 }
 
 
@@ -24534,8 +24822,6 @@ function _copyLinkForSafari(btn){
   }
 }
 
-// Car/vehicle photos — keyed by driver full name, same format as DRIVER_PHOTOS
-let VEHICLE_PHOTOS = {};
 // Per-driver customisations: selfie image, confirmTemplate, pickupInstructions
 let driverSettings = {};
 
