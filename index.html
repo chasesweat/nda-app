@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607241744">
+<meta name="version" content="202607241745">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -5589,12 +5589,25 @@ function _checkAutoAcceptRides(){
   return changed;
 }
 
+// Removes any 'assigned' notification for this specific ride from the driver's own bell list,
+// once their response is resolved - whether that resolution came from the dashboard banner,
+// inside the ride itself, or the bell's own inline buttons. Keeps all three surfaces in sync
+// with each other rather than three separate sources of truth.
+function _clearAssignedNotif(driverName, rideId){
+  if(!driverName || !notifications[driverName]) return;
+  var list=notifications[driverName];
+  for(var i=list.length-1;i>=0;i--){ if(list[i] && list[i].type==='assigned' && list[i].rideId===rideId) list.splice(i,1); }
+  try{ saveNotifs(); updateNotifBadge(); }catch(e){}
+  try{ renderNotifPanel(); }catch(e){}
+}
+
 async function acceptAssignedRide(rideId){
   var r=_rideById(rideId);
   if(!r){ showToast('Ride not found','error'); return; }
   r.driverResponse='accepted'; r.driverRespondedAt=Date.now(); delete r.driverAutoAccepted;
   try{ await saveRides(); }catch(e){}
   showToast('\u2705 Ride accepted');
+  _clearAssignedNotif(r.driver, rideId);
   try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
   try{ if(document.getElementById('ride-modal')?.classList.contains('show')) renderRideView(r); }catch(e){}
 }
@@ -5615,6 +5628,7 @@ async function rejectAssignedRide(rideId){
   delete r.driverResponse; delete r.driverNotifiedAt; delete r.driverRespondedAt; delete r.driverAutoAccepted;
   touchRide(r, (_rejectingDriver||'A driver')+' rejected \u2014 reverted to '+(_owner||'owner'));
   try{ await saveRides(); }catch(e){}
+  _clearAssignedNotif(_rejectingDriver, rideId);
   if(_owner){
     var _msg=(_rejectingDriver||'A driver')+' rejected the '+fmtDateShort(r.date)+' ride for '+(r.client||'a client')+' \u2014 it\u2019s back on you to reassign.';
     addNotification(_owner, r, 'ride_rejected', _msg, true);
@@ -5670,6 +5684,24 @@ function updateNotifBadge(){
   }
 }
 
+// Notification types whose stored rideId genuinely refers to a real ride record - these open
+// that ride directly. Every other type's id (if any) is a request id, a flag id, or something
+// else entirely - treating it as a ride id risks opening a totally unrelated, wrong ride if
+// the numbers happen to collide, so those are routed explicitly by type below instead of ever
+// touching rides.find() at all.
+var _NOTIF_RIDE_TYPES = {assigned:1, foreign_schedule:1, ride_rejected:1, carryover_paid:1, tip_reminder:1, cancelled:1, requested:1, volunteer:1, fee_waive_request:1, fee_waive_approved:1, fee_waive_denied:1, driver_inactive:1};
+// Everything else routes to a specific page instead - wherever that notification's own action
+// actually lives, confirmed directly against each one's real UI location rather than guessed:
+// the two-admin approval queue and SOS both live on the dashboard, the combine-income and IRS-
+// rate settings live on Income, subscription status lives on Access.
+var _NOTIF_PAGE_ROUTES = {
+  profile_merge:'clients', merge_approved:'clients', transfer_denied:'clients', transfer_request:'clients', transfer_approved:'clients',
+  avail_override:'clients', avail_denied:'clients', admin_release:'clients', clientUnlock:'clients', clientUnlockGranted:'clients',
+  cautious_review:'clients', cautious_approved:'clients', cautious_denied:'clients',
+  admin_approval:'dashboard', sos:'dashboard', sos_response:'dashboard', sos_clear:'dashboard', payment_claim:'dashboard', km_paid:'dashboard', admin_change:'dashboard',
+  sub_expired:'access',
+  irs_rate:'income', combine_request:'income', combine_approved:'income', combine_denied:'income', combine_off:'income'
+};
 function handleNotifClick(el){
   const driverName=el.dataset.dname;
   const idx=parseInt(el.dataset.nidx);
@@ -5689,10 +5721,13 @@ function handleNotifClick(el){
     if(channel && channel!=='group') setTimeout(function(){ try{ switchChatChannel(channel); }catch(e){} }, 220);
     return;
   }
-  if(typeof rideId==='number'){
+  if(_NOTIF_RIDE_TYPES[type] && typeof rideId==='number'){
     const ride=rides.find(x=>x.id===rideId);
     if(ride){ nav("calendar"); setTimeout(function(){ openRideModal(rideId); },150); return; }
   }
+  if(_NOTIF_PAGE_ROUTES[type]){ nav(_NOTIF_PAGE_ROUTES[type]); return; }
+  // Safety net only, for anything genuinely unrecognized - not the primary routing path
+  // anymore now that every real type above is handled explicitly.
   if(/transfer|release|override|client/i.test(msg)){ nav("clients"); return; }
   if(/chat|message/i.test(msg)){ nav("chat"); return; }
   nav("calendar");
@@ -5704,6 +5739,19 @@ function renderNotifPanel(){
   const dName   = getMyDriverName();
   const myName  = currentUser?.name;
   const myNotifs = dName ? (notifications[dName]||[]).slice() : [];
+  // Pending assignment notifications get their own dedicated section with inline Accept/
+  // Reject, same as transfer requests and the other special sections below - not the generic
+  // click-to-open-the-ride list. A notification only qualifies while the ride itself is still
+  // genuinely awaiting a response; one that's already been accepted/rejected/auto-accepted
+  // (but whose notification entry hasn't been cleared yet for some reason) falls through to
+  // the regular list instead, same as before.
+  const myNotifsIndexed = myNotifs.map(function(n,i){ return {n:n, i:i}; });
+  const myPendingAssignedIndexed = myNotifsIndexed.filter(function(x){
+    if(!x.n || x.n.type!=='assigned' || typeof x.n.rideId!=='number') return false;
+    var r=(rides||[]).find(function(rr){ return rr && rr.id===x.n.rideId; });
+    return !!(r && r.driverResponse==='pending');
+  });
+  const myRegularIndexed = myNotifsIndexed.filter(function(x){ return myPendingAssignedIndexed.indexOf(x)<0; });
 
   // Pending transfer requests (excluding admin_release — shown separately below)
   const myRequests = Object.values(clientRequests||{}).filter(r=>{
@@ -5826,10 +5874,26 @@ function renderNotifPanel(){
     });
   }
 
+  // Ride assignments still awaiting a response - Accept/Reject right here, same treatment
+  // as the other request-style sections above, not a plain click-to-open item.
+  if(myPendingAssignedIndexed.length){
+    html += `<div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#1d4ed8;padding:.5rem .75rem .25rem;border-bottom:1px solid var(--light);">\uD83D\uDE97 Awaiting your response (${myPendingAssignedIndexed.length})</div>`;
+    myPendingAssignedIndexed.forEach(function(x){
+      const n=x.n;
+      html += '<div style="padding:.65rem .75rem;border-bottom:0.5px solid var(--light);background:#eff6ff;">'
+        +'<div style="font-size:.82rem;color:var(--black);margin-bottom:.5rem;">'+(n.msg||n.message||'')+'</div>'
+        +'<div style="display:flex;gap:.4rem;">'
+        +'<button onclick="event.stopPropagation();acceptAssignedRide('+n.rideId+')" style="flex:1;padding:.4rem;background:#15803d;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Accept</button>'
+        +'<button onclick="event.stopPropagation();rejectAssignedRide('+n.rideId+')" style="flex:1;padding:.4rem;background:none;border:1.5px solid #dc2626;color:#dc2626;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Reject</button>'
+        +'</div></div>';
+    });
+  }
+
   // Regular notifications
-  if(myNotifs.length){
+  if(myRegularIndexed.length){
     html += `<div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);padding:.5rem .75rem .25rem;border-bottom:1px solid var(--light);">Notifications</div>`;
-    myNotifs.slice(0,15).forEach((n,idx)=>{
+    myRegularIndexed.slice(0,15).forEach(function(x){
+      const n=x.n, idx=x.i;
       const bg=n.read?'var(--white)':'#fdf4ff';
       html += '<div data-nidx="'+idx+'" data-dname="'+escAttr(dName||'')+'" '
         +'onclick="handleNotifClick(this)" '
@@ -5837,7 +5901,7 @@ function renderNotifPanel(){
         +'><div style="font-size:.82rem;color:var(--black);">'+(n.msg||n.message||'')+'</div>'
         +'<div style="font-size:.72rem;color:var(--mid);margin-top:2px;">'+(n.ts?new Date(n.ts).toLocaleDateString():'')+'</div>'
         +'</div>';
-    });;;
+    });
   }
 
   panel.innerHTML = html ? (_clearBtn + html) : `<div style="padding:2rem 1.25rem;text-align:center;color:var(--mid);"><div style="font-size:2rem;margin-bottom:.4rem;">✅</div><div style="font-size:.9rem;font-weight:600;color:var(--black);margin-bottom:.2rem;">You’re all caught up</div><div style="font-size:.8rem;">No notifications right now.</div></div>`;
@@ -10349,7 +10413,7 @@ async function requestClientUnlock(targetLoginName){
   // Notify other admins
   USERS.filter(function(u){ return u.role==='admin' && u.name!==me && !u.disabled; })
        .forEach(function(u){
-         addNotification(USER_DRIVER_MAP[u.name]||u.name, null, 'clientUnlock',
+         addNotification(USER_DRIVER_MAP[u.name]||u.name, {}, 'clientUnlock',
            me + ' is requesting access to ' + targetLoginName + '\'s client list. Open the Client Directory to approve or deny.');
        });
   updateNotifBadge();
@@ -10377,7 +10441,7 @@ async function approveClientUnlock(reqId){
       expiry: Date.now() + CLIENT_UNLOCK_EXPIRY_MS,
     };
     // Notify the requester
-    addNotification(USER_DRIVER_MAP[req.requester]||req.requester, null, 'clientUnlockGranted',
+    addNotification(USER_DRIVER_MAP[req.requester]||req.requester, {}, 'clientUnlockGranted',
       'Your request to view ' + req.targetLogin + '\'s client list was approved. Access expires in 24 hours.');
     updateNotifBadge();
     showToast('\uD83D\uDD13 Access granted to ' + req.requester + ' for 24 hours');
@@ -14874,7 +14938,15 @@ function renderDashFees(){
         var _fpo=feePayments[name+':recv:'+dName]||{};
         var _pend=_feeRidePending(_fpo, ri.id);
         var _wq=(typeof feeWaiveRequests!=='undefined')?feeWaiveRequests[ri.id]:null;
-        var _waiveBtn=(_wq && _wq.status==='pending')
+        // The "Requested" indicator is deliberately a same-day thing on the REQUESTING
+        // driver's own dashboard - Chase's own call: they already know they asked (they got
+        // a toast confirming it at the time), so it falls away after that calendar day rather
+        // than sitting there indefinitely while the owner still hasn't responded. This is
+        // purely what THIS driver sees - the request itself stays genuinely 'pending' in the
+        // data, and the owner's own approve/deny section (_renderFeeWaiveRequestsHTML above)
+        // is completely unaffected, still showing it until they actually act on it.
+        var _wqIsToday = _wq && _wq.at && (typeof toDateStr==='function') && toDateStr(new Date(_wq.at))===toDateStr(new Date());
+        var _waiveBtn=(_wq && _wq.status==='pending' && _wqIsToday)
           ? '<span style="flex:1;min-width:78px;text-align:center;font-size:.7rem;color:#b45309;font-weight:700;align-self:center;">\u2696\uFE0F Requested</span>'
           : '<button onclick="requestFeeWaive('+_feeIdArg(ri.id)+')" style="flex:1;min-width:78px;padding:.42rem;background:none;border:1.5px dashed var(--gold);color:var(--gold);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:600;cursor:pointer;white-space:nowrap;">\u2696\uFE0F Waive?</button>';
         var _actions = _pend
