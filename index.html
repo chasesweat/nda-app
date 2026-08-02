@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607241739">
+<meta name="version" content="202607241744">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -544,6 +544,7 @@ input,select,textarea{font-size:16px;}
     <div id="dash-fees" style="margin-bottom:1.5rem;"></div>
     <!-- Action blocks: confirmations to send, then rides to wrap up, then upcoming -->
     <div id="dash-save-failed" style="margin-bottom:1.5rem;"></div>
+    <div id="dash-pending-accept" style="margin-bottom:1.5rem;"></div>
     <div id="dash-gate-codes" style="margin-bottom:1.5rem;"></div>
         <div id="dash-confirmations" style="margin-bottom:1.5rem;"></div>
     <div id="dash-needs-attention" style="margin-bottom:1.5rem;"></div>
@@ -740,11 +741,11 @@ input,select,textarea{font-size:16px;}
         style="padding:.5rem 1rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:.9rem;cursor:pointer;font-family:'DM Sans',sans-serif;">Track</button>
     </div>
     <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.5rem;">
-      <a href="https://www.google.com/search?q=ATL+airport+arrivals" target="_blank" rel="noopener"
+      <a href="https://www.google.com/search?q=ATL+airport+arrivals" rel="noopener"
         style="font-size:.72rem;color:#7c3aed;text-decoration:none;padding:.2rem .5rem;border:1px solid #e8d5f5;border-radius:5px;background:#faf5ff;">ATL Arrivals</a>
-      <a href="https://fly.faa.gov/ois/" target="_blank" rel="noopener"
+      <a href="https://fly.faa.gov/ois/" rel="noopener"
         style="font-size:.72rem;color:#7c3aed;text-decoration:none;padding:.2rem .5rem;border:1px solid #e8d5f5;border-radius:5px;background:#faf5ff;">FAA System Status</a>
-      <a href="https://www.atl.com/flight-information/arrivals/" target="_blank" rel="noopener"
+      <a href="https://www.atl.com/flight-information/arrivals/" rel="noopener"
         style="font-size:.72rem;color:#7c3aed;text-decoration:none;padding:.2rem .5rem;border:1px solid #e8d5f5;border-radius:5px;background:#faf5ff;">ATL.com Arrivals</a>
     </div>
   </div>
@@ -760,10 +761,10 @@ input,select,textarea{font-size:16px;}
     </div>
     <div id="tsa-checkpoints" style="display:flex;flex-direction:column;gap:.4rem;"></div>
     <div style="margin-top:.6rem;padding-top:.6rem;border-top:1px solid var(--light);">
-      <a href="https://www.tsa.gov/travel/security-screening" target="_blank" rel="noopener"
+      <a href="https://www.tsa.gov/travel/security-screening" rel="noopener"
         style="font-size:.72rem;color:#7c3aed;text-decoration:none;">View on TSA.gov ↗</a>
       <span style="color:var(--mid);font-size:.72rem;"> · </span>
-      <a href="https://www.google.com/search?q=ATL+TSA+wait+times+today" target="_blank" rel="noopener"
+      <a href="https://www.google.com/search?q=ATL+TSA+wait+times+today" rel="noopener"
         style="font-size:.72rem;color:#7c3aed;text-decoration:none;">Google TSA Times ↗</a>
     </div>
   </div>
@@ -1944,6 +1945,7 @@ const _AUDIT_SKIP = ['kat:rides','kat:ridesArchive','kat:outsideRides','kat:feeP
 const _AUDIT_PERSONAL = ['kat:driverProfiles','kat:driverSettings','kat:driverVenmo','kat:driverPhotoOverrides'];
 const _AUDIT_LABELS = {
   'kat:cautiousList':'the cautious list','kat:clientOwners':'client ownership',
+  'kat:clientTerminalPrefs':'a client\u2019s preferred terminal',
   'kat:clientReqDriver':'client requests','kat:clientRequests':'a client transfer',
   'kat:clientUnlockGrants':'a client-list unlock','kat:clientUnlockRequests':'a client-list unlock request',
   'kat:deceasedClients':'the client list','kat:disabled':'driver access','kat:docFolders':'document folders',
@@ -2248,6 +2250,7 @@ function _cacheHydrateGlobals(d){
   if(d.clientAddressOverrides && typeof d.clientAddressOverrides==='object') clientAddressOverrides = d.clientAddressOverrides;
   if(d.importedClients && typeof d.importedClients==='object') importedClients = d.importedClients;
   if(d.clientOwners && typeof d.clientOwners==='object') clientOwners = d.clientOwners;
+  if(d.clientTerminalPrefs && typeof d.clientTerminalPrefs==='object') clientTerminalPrefs = d.clientTerminalPrefs;
   if(d.globalSettings && typeof d.globalSettings==='object') globalSettings = d.globalSettings;
   if(d.driverSettings && typeof d.driverSettings==='object') driverSettings = d.driverSettings;
   if(d.feePayments && typeof d.feePayments==='object') feePayments = d.feePayments;
@@ -2357,6 +2360,7 @@ async function _loadAppData() {
     loadClientUnlock(),
     loadCautiousList(),
     loadClientOwners(),
+    loadClientTerminalPrefs(),
     loadLockedMileage(),
     loadKmData(),
     loadPendingAdminTutorial(),
@@ -4065,14 +4069,17 @@ const TERMINAL_ADDRESSES = {
   'South Domestic':  '6000 S Terminal Pkwy, Atlanta, GA 30337',
   'International':    '2600 Maynard H Jackson Jr Blvd, Atlanta, GA 30337',
 };
-// Optional precise pickup coordinates per terminal, filled in from real GPS pins
-// at the actual pickup spot. When a terminal has coords here, the route uses
-// them instead of the street address (a lat/lng pin can't be mis-geocoded).
-// Format: 'lat,lng' string, or '' if not set yet.
+// Precise coordinates per terminal, walked and confirmed by Chase directly at each curb
+// (Aug 2026) - each one deliberately covers BOTH directions (AP RUN drop-off and AP PICK UP
+// pickup) at that terminal, not two separate pins. When a terminal has coords here, the route
+// uses them instead of the street address (a lat/lng pin can't be mis-geocoded). These replace
+// an earlier set that was never actually verified for drop-off specifically, and sent at least
+// one AP RUN to the wrong side of the airport entirely - see the handoff notes for the full
+// story. Format: 'lat,lng' string, or '' if not set yet.
 const TERMINAL_COORDS = {
-  'North Domestic':  '33.641888,-84.445453',
-  'South Domestic':  '33.640060,-84.443648',
-  'International':    '33.640580,-84.418729',
+  'North Domestic':  '33.6417292,-84.4476379',
+  'South Domestic':  '33.6389139,-84.4426426',
+  'International':    '33.6409304,-84.4195535',
 };
 // Resolve a stored terminal value to a navigable destination. Prefers a precise
 // GPS coordinate pin (TERMINAL_COORDS) when one is set, else the street address.
@@ -4093,9 +4100,39 @@ function terminalToAddress(term){
   return TERMINAL_ADDRESSES[key]||'';
 }
 
+// Checks whether the client currently entered has a stored terminal preference that differs
+// from what was just selected, and if so, offers to use it instead - never silently overrides.
+// Chase's own design: the person creating the ride always gets the final call.
+function _checkTerminalPrefPopup(clientFieldId, terminalFieldId){
+  var clientEl = document.getElementById(clientFieldId);
+  var termEl = document.getElementById(terminalFieldId);
+  if(!clientEl || !termEl) return;
+  var clientName = (clientEl.value||'').trim();
+  var selected = (termEl.value||'').trim();
+  if(!clientName || !selected) return;
+  var pref = (clientTerminalPrefs[clientName.toLowerCase()]||'').trim();
+  if(!pref || pref===selected) return;
+  var old=document.getElementById('terminal-pref-popup'); if(old) old.remove();
+  var ov=document.createElement('div');
+  ov.id='terminal-pref-popup';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:16500;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+  ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:340px;width:100%;padding:1.15rem;box-shadow:0 20px 50px rgba(0,0,0,.35);">'
+    +'<div style="font-size:.95rem;font-weight:800;color:#0f172a;margin-bottom:.5rem;">\u2708\ufe0f Records show a preference</div>'
+    +'<div style="font-size:.82rem;color:#334155;margin-bottom:1rem;line-height:1.5;">'+escHtml(clientName)+' prefers the <strong>'+pref+'</strong> terminal, regardless of what\u2019s booked. Use it here too?</div>'
+    +'<button onclick="_applyTerminalPref(\''+terminalFieldId+'\',\''+pref+'\')" style="width:100%;padding:.65rem;background:#7c3aed;color:#fff;border:none;border-radius:9px;font-family:inherit;font-weight:700;font-size:.85rem;cursor:pointer;margin-bottom:.5rem;">Use '+pref+'</button>'
+    +'<button onclick="document.getElementById(\'terminal-pref-popup\').remove()" style="width:100%;padding:.55rem;background:none;border:none;color:#64748b;font-family:inherit;font-size:.8rem;cursor:pointer;">Use '+escHtml(selected)+' (as assigned)</button>'
+    +'</div>';
+  document.body.appendChild(ov);
+}
+function _applyTerminalPref(terminalFieldId, pref){
+  var el=document.getElementById(terminalFieldId);
+  if(el){ el.value=pref; el.dispatchEvent(new Event('change')); }
+  var ov=document.getElementById('terminal-pref-popup'); if(ov) ov.remove();
+}
 function autoFillTerminalAddress(){
   const terminal = document.getElementById('q-terminal').value;
   const type     = document.getElementById('q-type').value;
+  _checkTerminalPrefPopup('q-client','q-terminal');
   if(!terminal) return;
   const addr = TERMINAL_ADDRESSES[terminal];
   if(!addr) return;
@@ -4121,6 +4158,7 @@ function autoFillTerminalAddress(){
 function qaAutoFillTerminalAddress(){
   const terminal = (document.getElementById('qa-terminal')||{}).value;
   const type     = (document.getElementById('qa-type')||{}).value;
+  _checkTerminalPrefPopup('qa-client','qa-terminal');
   if(!terminal) return;
   const addr = TERMINAL_ADDRESSES[terminal];
   if(!addr) return;
@@ -4144,6 +4182,7 @@ function qaAutoFillTerminalAddress(){
 function editAutoFillTerminalAddress(){
   var terminal=(document.getElementById('edit-terminal')||{}).value;
   var type=(document.getElementById('edit-type')||{}).value;
+  _checkTerminalPrefPopup('edit-client','edit-terminal');
   if(!terminal) return;
   var addr=TERMINAL_ADDRESSES[terminal];
   if(!addr) return;
@@ -5444,9 +5483,17 @@ function addNotification(driverName, ride, action, customMsg, forceNow){
   notifications[driverName].unshift({ rideId:ride.id, type:action, channel:(ride&&ride.channel)||null, read:false, msg, ts:Date.now(), createdBy:currentUser?.name||'' });
   // Fire push notification to driver's phone
   if(action==='assigned'){
+    // Starts the accept/reject window right here - the one true moment the driver actually
+    // gets told, whether that's immediately (same-day) or only now, after a delayed tomorrow
+    // assignment was finally released via Notify Drivers. A reassignment (this firing again
+    // for the same ride) correctly restarts the clock, since it's a genuinely new ask.
+    ride.driverNotifiedAt = Date.now();
+    ride.driverResponse = 'pending';
     sendPushToDriver(driverName, '🚗 New ride assigned — NWDA', `${ride.client} · ${fmtDateShort(ride.date)} ${ride.time||''}`, {rideId: ride.id});
   } else if(action==='transfer_request'){
     sendPushToDriver(driverName, '⇄ Client transfer request — NWDA', msg);
+  } else if(action==='ride_rejected'){
+    sendPushToDriver(driverName, '\u26a0\ufe0f Ride rejected — needs reassignment — NWDA', msg, {rideId: ride.id});
   } else if(action==='transfer_approved'||action==='transfer_denied'){
     sendPushToDriver(driverName, '✓ Transfer update — NWDA', msg);
   } else if(action==='foreign_schedule'){
@@ -5512,6 +5559,85 @@ async function notifyMyAssignedDrivers(){
   try{ if(typeof renderCal==='function') renderCal(); }catch(e){}
   var _driverCount = new Set(pending.map(function(r){ return r.driver; })).size;
   showToast('\u2705 '+pending.length+' ride'+(pending.length===1?'':'s')+' \u2014 '+_driverCount+' driver'+(_driverCount===1?'':'s')+' notified');
+}
+
+// ── ACCEPT / REJECT ASSIGNED RIDES ──────────────────────────────────────
+// A driver can explicitly accept or reject a ride they've been assigned. If they do nothing
+// for an hour after actually being told (see driverNotifiedAt above), it's treated as accepted
+// automatically - see _checkAutoAcceptRides(). Rejecting reverts the ride to the client owner
+// (whoever scheduled it) rather than leaving it unassigned, and notifies that owner directly
+// so they know to reassign it themselves; it does NOT ask for a reason, by design.
+const ACCEPT_WINDOW_MS = 60*60*1000; // 1 hour
+
+// Any ride still genuinely pending a response, an hour after the driver was actually
+// notified, is assumed accepted - a client-side check, run on load and on every dashboard
+// refresh, since there's no server-side timer in this app's architecture. This means the
+// auto-accept lands the next time anyone's device happens to check, not at the exact minute
+// the hour elapses - an accepted assumption of "good enough," not a live countdown.
+function _checkAutoAcceptRides(){
+  var now = Date.now();
+  var changed = false;
+  (rides||[]).forEach(function(r){
+    if(r && r.driverResponse==='pending' && r.driverNotifiedAt && (now - r.driverNotifiedAt) >= ACCEPT_WINDOW_MS){
+      r.driverResponse = 'accepted';
+      r.driverRespondedAt = now;
+      r.driverAutoAccepted = true;
+      changed = true;
+    }
+  });
+  if(changed){ try{ saveRides(); }catch(e){} }
+  return changed;
+}
+
+async function acceptAssignedRide(rideId){
+  var r=_rideById(rideId);
+  if(!r){ showToast('Ride not found','error'); return; }
+  r.driverResponse='accepted'; r.driverRespondedAt=Date.now(); delete r.driverAutoAccepted;
+  try{ await saveRides(); }catch(e){}
+  showToast('\u2705 Ride accepted');
+  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+  try{ if(document.getElementById('ride-modal')?.classList.contains('show')) renderRideView(r); }catch(e){}
+}
+
+async function rejectAssignedRide(rideId){
+  var r=_rideById(rideId);
+  if(!r){ showToast('Ride not found','error'); return; }
+  if(!confirm('Reject this ride? It will go back to '+(getClientOwner(r.client)||'the client owner')+' to reassign.')) return;
+  var _rejectingDriver = r.driver;
+  // Kept as its own permanent log, separate from the ride's current, ever-changing driver
+  // field - a ride can genuinely be rejected more than once across reassignments, and the
+  // rejection report (see generateRidesReport) needs the full history, not just whoever's
+  // on it now.
+  r.rejectionLog = r.rejectionLog || [];
+  r.rejectionLog.push({driver:_rejectingDriver, at:Date.now()});
+  var _owner = getClientOwner(r.client) || feeOwnerFor(r.createdBy) || '';
+  r.driver = _owner;
+  delete r.driverResponse; delete r.driverNotifiedAt; delete r.driverRespondedAt; delete r.driverAutoAccepted;
+  touchRide(r, (_rejectingDriver||'A driver')+' rejected \u2014 reverted to '+(_owner||'owner'));
+  try{ await saveRides(); }catch(e){}
+  if(_owner){
+    var _msg=(_rejectingDriver||'A driver')+' rejected the '+fmtDateShort(r.date)+' ride for '+(r.client||'a client')+' \u2014 it\u2019s back on you to reassign.';
+    addNotification(_owner, r, 'ride_rejected', _msg, true);
+    try{ await saveNotifs(); updateNotifBadge(); }catch(e){}
+  }
+  showToast('Ride rejected \u2014 back to '+(_owner||'owner'));
+  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+  try{ if(document.getElementById('ride-modal')?.classList.contains('show')) renderRideView(r); }catch(e){}
+}
+
+// The current driver's own rides still genuinely awaiting their response - shared by
+// myPendingAcceptCount() (just the number, for gating whether the banner shows at all) and
+// renderDashPendingAccept() (the actual rides, to build each one's own row), rather than the
+// same filter logic living in both places separately.
+function _myPendingAcceptRides(){
+  var dn = getMyDriverName();
+  if(!dn) return [];
+  return (rides||[]).filter(function(r){
+    return r && r.driver===dn && r.driverResponse==='pending' && r.status!=='cancelled';
+  });
+}
+function myPendingAcceptCount(){
+  return _myPendingAcceptRides().length;
 }
 
 function updateNotifBadge(){
@@ -6059,8 +6185,8 @@ function renderWeekView(containerId, weekStart, driverFilter){
                 <div style="flex:1;min-width:0;">
                   <div class="week-ride-client" style="color:${tc};">${r.confirmSent?'<span style="color:var(--green);font-weight:900;">✓ </span>':''}${r.client}</div>
                   <div class="week-ride-detail" style="color:${tc};opacity:.78;">${vehTag(r.vehicle)} · ${driverShortName(r.driver)}${ic?` · <span style="color:#e0245e;font-weight:700;">❤️${ic}</span>`:''}</div>
-                  ${r.type==='AP PICK UP'&&r.flight?`<a href="https://www.google.com/search?q=${encodeURIComponent((r.flight||"").trim().replace(/\s+/g,"").toUpperCase())}+flight+tracking" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:${tc};text-decoration:underline;opacity:.9;white-space:nowrap;">✈️ Flight Tracking</a>`:''}
-                  ${r.type==='AP RUN'?'<a href="https://www.atl.com/times/" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:'+tc+';text-decoration:underline;opacity:.9;white-space:nowrap;">🔒 TSA Wait Times</a>':''}  
+                  ${r.type==='AP PICK UP'&&r.flight?`<a href="https://www.google.com/search?q=${encodeURIComponent((r.flight||"").trim().replace(/\s+/g,"").toUpperCase())}+flight+tracking" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:${tc};text-decoration:underline;opacity:.9;white-space:nowrap;">✈️ Flight Tracking</a>`:''}
+                  ${r.type==='AP RUN'?'<a href="https://www.atl.com/times/" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:'+tc+';text-decoration:underline;opacity:.9;white-space:nowrap;">🔒 TSA Wait Times</a>':''}  
                 </div>
                 <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
                   <div class="week-ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}</div>
@@ -7521,6 +7647,16 @@ function renderRideView(r){
   const ink = readableInk(color);
   const feeBreak = buildFeeBreakdown(r);
   const _myDName = getMyDriverName();
+  // Shows only to the assigned driver themselves, only while their response is genuinely
+  // still pending - the same "gone once its job is done" rule every other banner follows.
+  const _acceptRejectHtml = (r.driverResponse==='pending' && _myDName && _myDName===r.driver)
+    ? ('<div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:12px;padding:.85rem;margin-bottom:1rem;">'
+      +'<div style="font-size:.82rem;font-weight:700;color:#1d4ed8;margin-bottom:.6rem;">\ud83d\ude97 Awaiting your response</div>'
+      +'<div style="display:flex;gap:.5rem;">'
+      +'<button onclick="acceptAssignedRide('+r.id+')" style="flex:1;padding:.5rem;background:#15803d;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;">Accept</button>'
+      +'<button onclick="rejectAssignedRide('+r.id+')" style="flex:1;padding:.5rem;background:none;border:1.5px solid #dc2626;color:#dc2626;border-radius:8px;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;">Reject</button>'
+      +'</div></div>')
+    : '';
   const canEditMedHours = (_myDName && _myDName===r.driver) || (typeof isAdmin==='function' && isAdmin());
   const _ccRm = currentUser ? (PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name) : null;
   const _ccRc = r.createdBy ? (PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy) : null;
@@ -7551,7 +7687,7 @@ function renderRideView(r){
   // thumbnail for it.
   const flightRowHtml = r.flight
     ? '<div style="font-size:.88rem;margin-bottom:3px;display:flex;align-items:center;gap:.5rem;">Flight: ' + escHtml(r.flight)
-      + (_flightNum ? ' <a href="https://www.google.com/search?q='+_flightNum+'+flight+tracking" target="_blank" rel="noopener" style="font-size:.72rem;font-weight:700;color:#7c3aed;text-decoration:none;border:1px solid #7c3aed;border-radius:6px;padding:1px 7px;">\u2708\uFE0F Track</a>' : '')
+      + (_flightNum ? ' <a href="https://www.google.com/search?q='+_flightNum+'+flight+tracking" rel="noopener" style="font-size:.72rem;font-weight:700;color:#7c3aed;text-decoration:none;border:1px solid #7c3aed;border-radius:6px;padding:1px 7px;">\u2708\uFE0F Track</a>' : '')
       + '</div>'
     : '';
   // Gate code — visible only to this client's owner and whoever's actually assigned to
@@ -7632,7 +7768,7 @@ function renderRideView(r){
       <div style="font-size:.78rem;color:var(--mid);">Created by ${r.createdBy||'—'}</div>
       ${(r.trail&&r.trail.length)?`<div style="font-size:.72rem;color:var(--mid);margin-top:.25rem;">🕒 Last: <strong>${escHtml(r.trail[r.trail.length-1].by.split(' ')[0])}</strong> ${escHtml(r.trail[r.trail.length-1].action)} · ${fmtTs(r.trail[r.trail.length-1].ts)}</div>${r.trail.length>1?`<details style="margin-top:.2rem;"><summary style="font-size:.7rem;color:var(--gold);cursor:pointer;">View full history (${r.trail.length})</summary><div style="font-size:.72rem;color:var(--mid);margin-top:.3rem;line-height:1.6;">${r.trail.slice().reverse().map(t=>`• <strong>${escHtml(t.by.split(' ')[0])}</strong> ${escHtml(t.action)} · ${fmtTs(t.ts)}`).join('<br>')}</div></details>`:''}`:''}
     </div>
-
+    ${_acceptRejectHtml}
     <div class="detail-row" style="grid-column:1/-1;">
       <div style="display:flex;align-items:flex-start;gap:.75rem;">
         <i class="ti ti-clock" style="font-size:18px;color:var(--mid);margin-top:2px;" aria-hidden="true"></i>
@@ -10035,6 +10171,29 @@ function renderDashSaveFailed(){
     +'<button onclick="_retryPendingSaves()" style="background:#b91c1c;color:#fff;border:none;border-radius:8px;padding:.4rem .8rem;font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;">Retry</button>'
     +'</div>'
     +'<div style="font-size:.75rem;color:var(--mid);line-height:1.45;">Your change is safe on this device, but hasn\u2019t reached the server yet \u2014 likely a connection issue. Tap Retry once you\u2019re back online.</div>'
+    +'</div>';
+}
+
+// Lists each of the current driver's own pending assignments individually, each with its own
+// Accept/Reject - a genuine per-ride decision, not one blanket action. Disappears entirely
+// once nothing's left pending, same pattern every other action-block banner already follows.
+function renderDashPendingAccept(){
+  var box=document.getElementById('dash-pending-accept'); if(!box) return;
+  var pending = _myPendingAcceptRides();
+  if(!pending.length){ box.innerHTML=''; return; }
+  var rows = pending.map(function(r){
+    var _mins = r.driverNotifiedAt ? Math.max(0, Math.round((ACCEPT_WINDOW_MS - (Date.now()-r.driverNotifiedAt))/60000)) : 60;
+    return '<div style="background:#fff;border-radius:9px;padding:.6rem .7rem;margin-top:.5rem;">'
+      +'<div style="font-size:.85rem;font-weight:700;color:#0f172a;">'+escHtml(r.client||'Ride')+'</div>'
+      +'<div style="font-size:.72rem;color:var(--mid);margin-bottom:.5rem;">'+fmtDateShort(r.date)+' '+(fmtTime12(r.time)||'')+' \u00b7 auto-accepts in '+(_mins>0?(_mins+' min'):'less than a minute')+' if no response</div>'
+      +'<div style="display:flex;gap:.5rem;">'
+      +'<button onclick="acceptAssignedRide('+r.id+')" style="flex:1;padding:.4rem;background:#15803d;color:#fff;border:none;border-radius:7px;font-family:inherit;font-size:.78rem;font-weight:700;cursor:pointer;">Accept</button>'
+      +'<button onclick="rejectAssignedRide('+r.id+')" style="flex:1;padding:.4rem;background:none;border:1.5px solid #dc2626;color:#dc2626;border-radius:7px;font-family:inherit;font-size:.78rem;font-weight:700;cursor:pointer;">Reject</button>'
+      +'</div></div>';
+  }).join('');
+  box.innerHTML='<div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:12px;padding:1rem;margin-bottom:.75rem;">'
+    +'<span style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#1d4ed8;">\ud83d\ude97 '+pending.length+' ride'+(pending.length===1?'':'s')+' awaiting your response</span>'
+    +rows
     +'</div>';
 }
 
@@ -14074,6 +14233,11 @@ function refreshDash(){
   // Anything that didn't actually save yet - the single most urgent thing to surface
   try{ renderDashSaveFailed(); }catch(e){}
 
+  // No server-side timer in this architecture - this is the closest thing to one: catches
+  // up any ride whose hour has quietly elapsed since the last time anything checked.
+  try{ _checkAutoAcceptRides(); }catch(e){}
+  try{ renderDashPendingAccept(); }catch(e){}
+
   // Morgan dispatch counter
   renderMorganCounter(); try{ renderKmPayCard(); }catch(e){}
 
@@ -14152,17 +14316,18 @@ function refreshDash(){
         }
 
         var _isAirport = (r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP');
-        if(r.arrivalSentAt){
-          // Once the client's been told their driver has arrived, tracking the flight or
-          // sending that same text again is stale - the natural next step is closing the
-          // ride out, so this is where Mark Paid takes their place. Down to 2 buttons total
-          // at this point (Stop/Start Ride + Mark Paid) - flex:1 on both means they evenly
-          // split the row rather than sitting at their own content width.
+        if(r.arrivalSentAt || r.type==='AP RUN'){
+          // AP RUN never has an "arrival" to send a text about at all - it's the driver taking
+          // the client TO the airport, no incoming flight to track. It was previously stuck
+          // behind the same arrivalSentAt gate as AP PICK UP (which genuinely does track an
+          // incoming flight), meaning an AP RUN ride could go started -> nothing -> forever,
+          // with no way to reach Mark Paid from this card at all. Goes straight through once
+          // started, same as every other non-airport ride type already does.
           _btns.push('<button onclick="event.stopPropagation();toggleRidePaid('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\ud83d\udcb0 Mark Paid</button>');
         } else if(_isAirport && r.flight){
           var _flightNum=(r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'').toUpperCase();
           var _flightUrl='https://www.google.com/search?q='+_flightNum+'+flight+tracking';
-          _btns.push('<a href="'+_flightUrl+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;text-decoration:none;display:flex;align-items:center;justify-content:center;text-align:center;">\u2708\ufe0f Track</a>');
+          _btns.push('<a href="'+_flightUrl+'" rel="noopener" onclick="event.stopPropagation()" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;text-decoration:none;display:flex;align-items:center;justify-content:center;text-align:center;">\u2708\ufe0f Track</a>');
           // Send Arrival Text specifically (not Track, which stays available the whole time
           // an airport ride is relevant) only makes sense for the assigned driver, and only in
           // a tight window around the actual scheduled time - a real 6-hour SYMMETRIC cutoff on
@@ -18733,6 +18898,15 @@ async function persistRideTip(rideId,val){
 let feePayments = {};
 async function loadFeePayments(){ const d=await storageGet('kat:feePayments'); if(d) feePayments=d; }
 let cautiousList=[]; let clientOwners={};
+// A client's stored preference for which airport terminal they always want, regardless of
+// what a given flight would otherwise suggest - keyed by lowercased client name, same pattern
+// as clientOwners above. Set at Add Client time, editable later from the client's own detail
+// view. Deliberately NOT inferred from parsing notes text or ride history automatically -
+// Chase's own call: an explicit, deliberate setting is more reliable than guessing intent out
+// of free text or a pattern that might just be coincidence.
+let clientTerminalPrefs={};
+async function saveClientTerminalPrefs(){ try{ await storageSet('kat:clientTerminalPrefs', clientTerminalPrefs); }catch(e){} }
+async function loadClientTerminalPrefs(){ try{ const d=await storageGet('kat:clientTerminalPrefs'); if(d && typeof d==='object') clientTerminalPrefs=d; }catch(e){} }
 // Per-route locked mileage: once a route (origin+destination pair) has been looked up on
 // Google Maps, the result is saved here and reused for every future ride on that same
 // route — same client, any staff member, any device, any day. This is what actually makes
@@ -19342,6 +19516,10 @@ function openClientModal(name){
     +'<div id="ec-addresses" style="margin-bottom:.55rem;"></div>'
     +'<label style="font-size:.7rem;color:var(--mid);display:block;margin-bottom:2px;">Payment method</label>'
     +'<input id="ec-pay" type="text" value="'+escAttr(c.paymentMethod||'')+'" placeholder="e.g. Venmo, Cash, Card" style="width:100%;padding:.35rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;margin-bottom:.5rem;" />'
+    +'<label style="font-size:.7rem;color:var(--mid);display:block;margin-bottom:2px;">Preferred terminal</label>'
+    +'<select id="ec-terminal-pref" style="width:100%;padding:.35rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;margin-bottom:.5rem;">'
+    +'<option value="">No preference</option><option>North Domestic</option><option>South Domestic</option><option>International</option>'
+    +'</select>'
     +'<label style="font-size:.7rem;color:var(--mid);display:block;margin-bottom:2px;">Notes</label>'
     +'<textarea id="ec-notes" rows="2" style="width:100%;padding:.4rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;resize:vertical;box-sizing:border-box;margin-bottom:.5rem;">'+escHtml(c.notes||'')+'</textarea>'
     +'<div id="ec-err" style="font-size:.75rem;color:#dc2626;min-height:1rem;margin-bottom:.4rem;"></div>'
@@ -19350,6 +19528,7 @@ function openClientModal(name){
     +'<button onclick="document.getElementById(\'client-edit-back\').remove()" style="flex:1;padding:.6rem;background:none;border:1.5px solid #ddd;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:600;font-size:.88rem;cursor:pointer;color:#666;">Cancel</button>'
     +'</div></div>';
   document.body.appendChild(back);
+  try{ var _ecTp=document.getElementById('ec-terminal-pref'); if(_ecTp) _ecTp.value = clientTerminalPrefs[name.trim().toLowerCase()]||''; }catch(e){}
   try{ renderClientAddressManager(name.trim().toLowerCase()); }catch(e){}
   back.addEventListener('keydown',function(e){ if(e.key==='Enter' && e.target && e.target.id!=='ec-notes'){ e.preventDefault(); submitEditClient(c.name||name); } });
   setTimeout(function(){ var el=document.getElementById('ec-phone'); if(el) el.focus(); },100);
@@ -19382,9 +19561,11 @@ async function submitEditClient(oldName){
     if(Array.isArray(deceasedClients)) deceasedClients.forEach(function(e){ if(e&&e.owner===me&&e.name&&e.name.trim().toLowerCase()===oldKey) e.name=newName; });
     if(Array.isArray(hiddenClients))  hiddenClients.forEach(function(e){ if(e&&e.owner===me&&e.name&&e.name.trim().toLowerCase()===oldKey) e.name=newName; });
     if(Array.isArray(cautiousList))   cautiousList.forEach(function(e){ if(e&&e.name&&e.name.trim().toLowerCase()===oldKey) e.name=newName; });
+    if(clientTerminalPrefs[oldKey]!=null){ clientTerminalPrefs[newKey]=clientTerminalPrefs[oldKey]; delete clientTerminalPrefs[oldKey]; }
     try{ await saveDeceasedClients(); }catch(_e){}
     try{ await storageSet('kat:hiddenClients',hiddenClients); }catch(_e){}
     try{ await saveCautiousList(); }catch(_e){}
+    try{ await saveClientTerminalPrefs(); }catch(_e){}
   }
 
   // 3) upsert the contact record under the (possibly new) name, merging if one exists
@@ -19402,7 +19583,10 @@ async function submitEditClient(oldName){
   rec.address=(document.getElementById('ec-address')?.value||'').trim();
   rec.paymentMethod=(document.getElementById('ec-pay')?.value||'').trim();
   rec.notes=(document.getElementById('ec-notes')?.value||'').trim();
+  var _termPref=(document.getElementById('ec-terminal-pref')?.value||'').trim();
+  if(_termPref){ clientTerminalPrefs[newKey]=_termPref; } else { delete clientTerminalPrefs[newKey]; }
   await saveImportedClients();
+  try{ await saveClientTerminalPrefs(); }catch(e){}
   var b=document.getElementById('client-edit-back'); if(b) b.remove();
   renderClients(); showToast(renaming?'\u2713 Client updated \u0026 renamed':'\u2713 Client updated');
 }
@@ -20489,7 +20673,11 @@ function togglePaymentMethod(driverName, method){
 function trackFlightSearch(){
   const q=(document.getElementById('flight-search-input')?.value||'').trim().replace(/\s+/g,'').toUpperCase();
   if(!q){ showToast('Enter a flight number first','error'); return; }
-  window.open('https://www.google.com/search?q='+encodeURIComponent(q+' flight tracking'),'_blank','noopener');
+  // A direct navigation to an out-of-scope URL (not window.open, which tends to stay trapped
+  // inside the PWA's own in-app browser context) is what actually gets an installed PWA to
+  // hand off to a real, separate browser - needed so a subsequent tap on the FlightAware
+  // result link can properly hand off to FlightAware's own native app in turn.
+  window.location.href = 'https://www.google.com/search?q='+encodeURIComponent(q+' flight tracking');
 }
 
 // ATL TSA checkpoint data (static structure — live times fetched when possible)
@@ -20548,7 +20736,7 @@ async function loadTSATimes(){
       return '<div style="background:var(--white);border:1px solid var(--light);border-radius:8px;padding:.5rem .65rem;display:flex;justify-content:space-between;align-items:center;">'
         +'<div><div style="font-size:.75rem;font-weight:600;">'+cp.name+'</div>'
         +'<div style="font-size:.65rem;color:var(--mid);">'+cp.desc+'</div></div>'
-        +'<a href="https://www.google.com/search?q=ATL+TSA+wait+times+today" target="_blank" rel="noopener" '
+        +'<a href="https://www.google.com/search?q=ATL+TSA+wait+times+today" rel="noopener" '
         +'style="font-size:.7rem;color:#7c3aed;text-decoration:none;padding:.2rem .4rem;background:#faf5ff;border:1px solid #e8d5f5;border-radius:5px;white-space:nowrap;">Check ↗</a>'
         +'</div>';
     }).join('');
@@ -20584,7 +20772,7 @@ function renderFlightsPage(){
         +'<div style="font-size:.75rem;color:var(--mid);">'+r.type+' · '+escHtml(r.driver||'Unassigned')+'</div>'
         +'</div>'
         +(flNum
-          ?'<a href="'+trackURL+'" target="_blank" rel="noopener" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:.4rem .65rem;background:#f5f0ff;border:1.5px solid #d8b4fe;border-radius:8px;text-decoration:none;">'
+          ?'<a href="'+trackURL+'" rel="noopener" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:.4rem .65rem;background:#f5f0ff;border:1.5px solid #d8b4fe;border-radius:8px;text-decoration:none;">'
             +'<span style="font-size:1.1rem;">✈️</span><span style="font-size:.68rem;font-weight:700;color:#7c3aed;">'+flNum+'</span><span style="font-size:.6rem;color:#7c3aed;">Track</span></a>'
           :'<div style="font-size:.7rem;color:var(--mid);font-style:italic;">No flight #</div>')
         +'</div>';
@@ -21161,30 +21349,44 @@ function generateRidesReport(){
   var byDriver={};
   (rides||[]).forEach(function(r){
     if(!r || r.status==='cancelled' || r.status==='placeholder') return;
-    if(r.createdBy){ byDriver[r.createdBy]=byDriver[r.createdBy]||{sched:0,driven:0}; byDriver[r.createdBy].sched++; }
-    if(r.driver){ byDriver[r.driver]=byDriver[r.driver]||{sched:0,driven:0}; byDriver[r.driver].driven++; }
+    if(r.createdBy){ byDriver[r.createdBy]=byDriver[r.createdBy]||{sched:0,driven:0,rejected:0}; byDriver[r.createdBy].sched++; }
+    if(r.driver){ byDriver[r.driver]=byDriver[r.driver]||{sched:0,driven:0,rejected:0}; byDriver[r.driver].driven++; }
+  });
+  // Rejections are counted separately, from every ride's own permanent log - independent of
+  // the ride's current status, since a rejection already happened regardless of what became
+  // of the ride afterward (reassigned, driven, even later cancelled).
+  (rides||[]).forEach(function(r){
+    if(!r || !r.rejectionLog || !r.rejectionLog.length) return;
+    r.rejectionLog.forEach(function(entry){
+      if(!entry || !entry.driver) return;
+      byDriver[entry.driver]=byDriver[entry.driver]||{sched:0,driven:0,rejected:0};
+      byDriver[entry.driver].rejected++;
+    });
   });
   var drvNames=Object.keys(byDriver).sort(function(a,b){ return (byDriver[b].driven-byDriver[a].driven)||(byDriver[b].sched-byDriver[a].sched)||a.localeCompare(b); });
   var drvTable='';
   if(drvNames.length){
-    var _tSched=0,_tDriven=0;
+    var _tSched=0,_tDriven=0,_tRejected=0;
     var drows=drvNames.map(function(n,idx){
-      _tSched+=byDriver[n].sched; _tDriven+=byDriver[n].driven;
+      _tSched+=byDriver[n].sched; _tDriven+=byDriver[n].driven; _tRejected+=byDriver[n].rejected;
       return '<tr style="border-bottom:1px solid var(--light);'+(idx%2?'background:var(--surface);':'')+'">'
         +'<td style="padding:.4rem .7rem;font-weight:600;">'+escHtml(n)+'</td>'
         +'<td style="padding:.4rem .7rem;text-align:right;color:'+(byDriver[n].sched?'var(--black)':'#cbd5e1')+';">'+byDriver[n].sched+'</td>'
-        +'<td style="padding:.4rem .7rem;text-align:right;color:'+(byDriver[n].driven?'var(--black)':'#cbd5e1')+';">'+byDriver[n].driven+'</td></tr>';
+        +'<td style="padding:.4rem .7rem;text-align:right;color:'+(byDriver[n].driven?'var(--black)':'#cbd5e1')+';">'+byDriver[n].driven+'</td>'
+        +'<td style="padding:.4rem .7rem;text-align:right;color:'+(byDriver[n].rejected?'#b91c1c':'#cbd5e1')+';">'+byDriver[n].rejected+'</td></tr>';
     }).join('');
     drvTable='<div style="margin-top:1.3rem;font-size:1.05rem;font-weight:800;color:#0f172a;margin-bottom:.25rem;">\uD83D\uDC65 By driver</div>'
-      +'<div style="font-size:.78rem;color:var(--mid);margin-bottom:.6rem;line-height:1.4;">All-time counts, cancelled excluded. <b>Scheduled</b> = rides that person booked; <b>Driven</b> = rides assigned to them.</div>'
+      +'<div style="font-size:.78rem;color:var(--mid);margin-bottom:.6rem;line-height:1.4;">All-time counts, cancelled excluded (rejections excepted - those count regardless of what became of the ride). <b>Scheduled</b> = rides that person booked; <b>Driven</b> = rides assigned to them; <b>Rejected</b> = times that driver declined an assignment.</div>'
       +'<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:.85rem;"><thead>'
       +'<tr style="background:var(--black);color:var(--gold);"><th style="padding:.5rem .7rem;text-align:left;font-size:.72rem;letter-spacing:1px;text-transform:uppercase;">Driver</th>'
       +'<th style="padding:.5rem .7rem;text-align:right;font-size:.72rem;">Scheduled</th>'
-      +'<th style="padding:.5rem .7rem;text-align:right;font-size:.72rem;">Driven</th></tr></thead><tbody>'
+      +'<th style="padding:.5rem .7rem;text-align:right;font-size:.72rem;">Driven</th>'
+      +'<th style="padding:.5rem .7rem;text-align:right;font-size:.72rem;">Rejected</th></tr></thead><tbody>'
       +drows
       +'<tr style="background:#f0fdf4;border-top:2px solid var(--green);font-weight:700;"><td style="padding:.55rem .7rem;color:var(--green);">TOTAL</td>'
       +'<td style="padding:.55rem .7rem;text-align:right;color:var(--green);">'+_tSched+'</td>'
-      +'<td style="padding:.55rem .7rem;text-align:right;color:var(--green);">'+_tDriven+'</td></tr>'
+      +'<td style="padding:.55rem .7rem;text-align:right;color:var(--green);">'+_tDriven+'</td>'
+      +'<td style="padding:.55rem .7rem;text-align:right;color:var(--green);">'+_tRejected+'</td></tr>'
       +'</tbody></table></div>';
   }
 
@@ -21209,8 +21411,8 @@ function _exportRidesReportCSV(){
   rows.push(['TOTAL'].concat(d.yrs.map(function(y){return d.yrTotal[y];})).map(_csvCell).join(','));
   if(d.drvNames && d.drvNames.length){
     rows.push('');
-    rows.push(['By driver','Scheduled','Driven'].map(_csvCell).join(','));
-    d.drvNames.forEach(function(n){ rows.push([n, d.byDriver[n].sched, d.byDriver[n].driven].map(_csvCell).join(',')); });
+    rows.push(['By driver','Scheduled','Driven','Rejected'].map(_csvCell).join(','));
+    d.drvNames.forEach(function(n){ rows.push([n, d.byDriver[n].sched, d.byDriver[n].driven, d.byDriver[n].rejected||0].map(_csvCell).join(',')); });
   }
   var csv=rows.join('\n');
   var fname='NWDA-rides-per-month-'+(new Date().toISOString().slice(0,10))+'.csv';
@@ -23367,6 +23569,10 @@ function openAddClientModal(){
     +'<div><label style="font-size:.7rem;color:var(--mid);display:block;margin-bottom:2px;">Email</label>'
     +'<input id="ac-email" type="email" placeholder="client@email.com" style="width:100%;padding:.35rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;" /></div>'
     +'</div>'
+    +'<label style="font-size:.7rem;color:var(--mid);display:block;margin-bottom:2px;">Preferred terminal (optional)</label>'
+    +'<select id="ac-terminal-pref" style="width:100%;padding:.35rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;margin-bottom:.5rem;">'
+    +'<option value="">No preference</option><option>North Domestic</option><option>South Domestic</option><option>International</option>'
+    +'</select>'
     +'<label style="font-size:.7rem;color:var(--mid);display:block;margin-bottom:2px;">Notes (optional)</label>'
     +'<textarea id="ac-notes" rows="2" placeholder="Any notes..." style="width:100%;padding:.4rem .5rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;resize:vertical;box-sizing:border-box;margin-bottom:.5rem;"></textarea>'
     +'<div id="ac-err" style="font-size:.75rem;color:#dc2626;min-height:1rem;margin-bottom:.4rem;"></div>'
@@ -23396,6 +23602,8 @@ async function submitAddClient(){
     source:'client', addedAt:new Date().toISOString()
   });
   try{ if(currentUser && PROXY_MAP[currentUser.name]){ clientOwners[key]=(window._proxyListMode==='mine')?(getMyDriverName()||''):PROXY_MAP[currentUser.name]; await saveClientOwners(); } }catch(e){}
+  var _termPref=(document.getElementById('ac-terminal-pref')?.value||'').trim();
+  if(_termPref){ clientTerminalPrefs[key]=_termPref; await saveClientTerminalPrefs(); }
   await saveImportedClients();
   document.querySelector('[style*="z-index: 12000"],[style*="z-index:12000"]')?.remove();
   renderClients(); showToast('\u2713 Client added');
