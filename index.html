@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607241753">
+<meta name="version" content="202607241754">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -975,6 +975,7 @@ input,select,textarea{font-size:16px;}
       <button id="archive-rides-btn" onclick="archiveOldRides()" title="Move old rides out of the live app to keep it fast (admin)" style="display:none;background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">📦 Archive old</button>
       <button id="sweep-rt-notes-btn" onclick="sweepRoundTripLegNotes()" title="One-time cleanup: removes the auto-added 'Leg N — AP Round Trip' text from ride notes (admin)" style="display:none;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">🧹 Clean up round-trip notes</button>
       <button id="scan-adj-btn" onclick="openManualAdjustmentScan()" title="Review rides created by Kat, Chase, or Morgan whose saved price doesn't match today's pricing formula (admin)" style="display:none;background:none;border:1.5px solid #d97706;color:#d97706;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">⚖️ Review manual adjustments</button>
+      <button id="sweep-adj-trail-btn" onclick="sweepManualAdjTrailEntries()" title="One-time cleanup: removes the 'Manual adjustment reviewed' entry this tool used to add to ride trails (admin)" style="display:none;background:none;border:1.5px solid #d97706;color:#d97706;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">🧹 Clean up adjustment trail entries</button>
     </div>
     <div id="pay-filter-bar" style="margin:.2rem 0 0;"></div>
     <div id="irs-rate-box" style="margin:0 0 1rem;"></div>
@@ -3175,6 +3176,30 @@ function openManualAdjustmentScan(){
   +'</div>';
   document.body.appendChild(back);
   _renderManualAdjustmentScan();
+}
+
+// One-time cleanup for rides that already picked up a "Manual adjustment reviewed" trail entry
+// from this tool before Chase asked for those to stop appearing - strips only entries whose
+// .action exactly matches what touchRide() used to write here (both the Fix and Accept
+// variants), leaving every other, genuine trail entry on the same ride completely untouched.
+// Safe to run more than once - a ride already cleaned simply has no more matching entries to
+// find, so nothing happens to it the second time.
+var _MANUAL_ADJ_TRAIL_PATTERN = /^Manual adjustment reviewed \u2014 /;
+function _ridesWithManualAdjTrailEntry(){
+  return (rides||[]).filter(function(r){
+    return r && Array.isArray(r.trail) && r.trail.some(function(t){ return t && _MANUAL_ADJ_TRAIL_PATTERN.test(t.action||''); });
+  });
+}
+async function sweepManualAdjTrailEntries(){
+  if(!isAdmin()){ showToast('Only admins can run this','error'); return; }
+  var affected = _ridesWithManualAdjTrailEntry();
+  if(!affected.length){ showToast('No rides need cleaning up'); return; }
+  if(!confirm('Remove the "Manual adjustment reviewed" entry from '+affected.length+' ride\u2019s trail'+(affected.length===1?'':'s')+'? Every other entry in each ride\u2019s history is left exactly as it is.')) return;
+  affected.forEach(function(r){ r.trail = r.trail.filter(function(t){ return !(t && _MANUAL_ADJ_TRAIL_PATTERN.test(t.action||'')); }); });
+  try{ await saveRides(); }catch(e){}
+  showToast('\u2705 Cleaned up '+affected.length+' ride\u2019s trail'+(affected.length===1?'':'s'));
+  try{ var _sb=document.getElementById('sweep-adj-trail-btn'); if(_sb) _sb.style.display='none'; }catch(e){}
+  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
 }
 
 // Load the archive and merge it into the live `rides` array so history is visible.
@@ -18873,6 +18898,8 @@ function renderIncome(){
   if(_sweepBtn) _sweepBtn.style.display=(isAdmin() && _ridesNeedingLegNotesCleanup().length>0)?'inline-block':'none';
   var _adjBtn=document.getElementById('scan-adj-btn');
   if(_adjBtn) _adjBtn.style.display=(isAdmin() && _scanManualAdjustmentRides().length>0)?'inline-block':'none';
+  var _adjTrailBtn=document.getElementById('sweep-adj-trail-btn');
+  if(_adjTrailBtn) _adjTrailBtn.style.display=(isAdmin() && _ridesWithManualAdjTrailEntry().length>0)?'inline-block':'none';
   const admin = isAdmin();
   const myName = getMyDriverName();
   // Privacy: everyone — including admins — only ever sees their OWN income.
