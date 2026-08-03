@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607241749">
+<meta name="version" content="202607241751">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -974,6 +974,7 @@ input,select,textarea{font-size:16px;}
       <button onclick="loadRideHistory()" title="Load archived older rides into view" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">🗄 Load history</button>
       <button id="archive-rides-btn" onclick="archiveOldRides()" title="Move old rides out of the live app to keep it fast (admin)" style="display:none;background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">📦 Archive old</button>
       <button id="sweep-rt-notes-btn" onclick="sweepRoundTripLegNotes()" title="One-time cleanup: removes the auto-added 'Leg N — AP Round Trip' text from ride notes (admin)" style="display:none;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">🧹 Clean up round-trip notes</button>
+      <button id="scan-adj-btn" onclick="openManualAdjustmentScan()" title="Review rides created by Kat, Chase, or Morgan whose saved price doesn't match today's pricing formula (admin)" style="display:none;background:none;border:1.5px solid #d97706;color:#d97706;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">⚖️ Review manual adjustments</button>
     </div>
     <div id="pay-filter-bar" style="margin:.2rem 0 0;"></div>
     <div id="irs-rate-box" style="margin:0 0 1rem;"></div>
@@ -3058,26 +3059,118 @@ async function archiveOldRides(){
 }
 
 // One-time cleanup for rides that already went through the old, buggy splitApRoundTripRide -
-// strips only the EXACT, auto-generated "Leg N (TYPE) — AP Round Trip DATE" suffix that used
-// to get appended to notes on every split, leaving any other, genuine notes content on the
-// ride completely untouched (it's a suffix match, not a wholesale notes replacement). Safe to
-// run more than once - a ride already cleaned simply won't match the pattern again, so nothing
-// happens to it the second time. Purely cosmetic text; the actual per-leg PRICING was already
-// correct before this cleanup and remains untouched - see the handoff notes for why.
-var _RT_LEG_NOTES_PATTERN = /\s*Leg [12] \((AP RUN|AP PICK UP)\) \u2014 AP Round Trip \d{4}-\d{2}-\d{2}\s*$/;
+// strips every occurrence of the EXACT, auto-generated "Leg N (TYPE) — AP Round Trip DATE"
+// text anywhere in notes (not just one anchored to the very end - a ride split more than once
+// before the original bug was fixed could accumulate this text twice in the same notes field,
+// and the earlier version of this sweep only ever caught the trailing copy), leaving any other,
+// genuine notes content on the ride completely untouched. Safe to run more than once - a ride
+// already cleaned simply won't match the pattern again, so nothing happens to it the second
+// time. Purely cosmetic text; the actual per-leg PRICING was already correct before this
+// cleanup and remains untouched - see the handoff notes for why.
+var _RT_LEG_NOTES_TEST_PATTERN = /Leg [12] \((AP RUN|AP PICK UP)\) \u2014 AP Round Trip \d{4}-\d{2}-\d{2}/;
+var _RT_LEG_NOTES_STRIP_PATTERN = /\s*Leg [12] \((AP RUN|AP PICK UP)\) \u2014 AP Round Trip \d{4}-\d{2}-\d{2}\s*/g;
 function _ridesNeedingLegNotesCleanup(){
-  return (rides||[]).filter(function(r){ return r && r.notes && _RT_LEG_NOTES_PATTERN.test(r.notes); });
+  return (rides||[]).filter(function(r){ return r && r.notes && _RT_LEG_NOTES_TEST_PATTERN.test(r.notes); });
 }
 async function sweepRoundTripLegNotes(){
   if(!isAdmin()){ showToast('Only admins can run this','error'); return; }
   var affected = _ridesNeedingLegNotesCleanup();
   if(!affected.length){ showToast('No rides need cleaning up'); return; }
   if(!confirm('Clean up the auto-added "Leg N \u2014 AP Round Trip" text from '+affected.length+' ride note'+(affected.length===1?'':'s')+'? Any other notes on those rides are left exactly as they are.')) return;
-  affected.forEach(function(r){ r.notes = r.notes.replace(_RT_LEG_NOTES_PATTERN, '').trim(); });
+  affected.forEach(function(r){ r.notes = r.notes.replace(_RT_LEG_NOTES_STRIP_PATTERN, ' ').trim().replace(/\s+/g,' '); });
   try{ await saveRides(); }catch(e){}
   showToast('\u2705 Cleaned up '+affected.length+' ride note'+(affected.length===1?'':'s'));
   try{ var _sb=document.getElementById('sweep-rt-notes-btn'); if(_sb) _sb.style.display='none'; }catch(e){}
   try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+}
+
+// Finds every ride created by Kat, Chase, or Morgan where the saved price genuinely differs
+// from what _computeFeeRebuild would compute fresh from the ride's own current fields right
+// now - the exact same "Manual adjustment" gap the ride modal's own Fee Breakdown already
+// shows, just surfaced as one list instead of having to open each ride individually to notice
+// it. A ride already reviewed once (r.adjReviewed) is skipped on every future scan, whether it
+// was fixed or explicitly accepted as-is - review is a one-time decision per ride, not
+// something that should keep resurfacing.
+function _scanManualAdjustmentRides(){
+  var creators = {'Kat':1,'Chase':1,'Morgan':1};
+  var out = [];
+  (rides||[]).forEach(function(r){
+    if(!r || !creators[r.createdBy] || r.adjReviewed) return;
+    var price = parseFloat(r.price)||0;
+    if(!price) return;
+    var rebuild; try{ rebuild = _computeFeeRebuild(r); }catch(e){ return; }
+    var diff = Math.round((price - rebuild.total)*100)/100;
+    if(Math.abs(diff) < 0.01) return;
+    out.push({ ride:r, rebuiltTotal:rebuild.total, diff:diff });
+  });
+  return out;
+}
+
+// "Fix" sets the saved price to match the fresh, correct formula total - genuinely changing
+// what's on file for that ride, which is why this asks for confirmation individually rather
+// than as a bulk action. "Accept" leaves the price exactly as it is, permanently, and simply
+// records that this specific gap was reviewed and is fine - most real cases from before the
+// AP ROUND TRIP pricing redesign, where a leg's price was always a deliberate share of a
+// combined total, not an error.
+async function _fixManualAdjustmentRide(rideId){
+  var r=_rideById(rideId); if(!r) return;
+  var rebuild; try{ rebuild = _computeFeeRebuild(r); }catch(e){ showToast('Couldn\u2019t recompute this ride','error'); return; }
+  var oldPrice = parseFloat(r.price)||0;
+  if(!confirm('Change '+(r.client||'this ride')+'\u2019s saved price from $'+oldPrice.toFixed(2)+' to $'+rebuild.total.toFixed(2)+'? This is a real change to what\u2019s on file for this ride.')) return;
+  r.price = rebuild.total;
+  r.adjReviewed = true;
+  touchRide(r, 'Manual adjustment reviewed \u2014 price corrected to $'+rebuild.total.toFixed(2));
+  try{ await saveRides(); }catch(e){}
+  showToast('\u2705 Fixed \u2014 '+(r.client||'ride')+' now $'+rebuild.total.toFixed(2));
+  try{ _renderManualAdjustmentScan(); }catch(e){}
+}
+async function _acceptManualAdjustmentRide(rideId){
+  var r=_rideById(rideId); if(!r) return;
+  r.adjReviewed = true;
+  touchRide(r, 'Manual adjustment reviewed \u2014 accepted as-is');
+  try{ await saveRides(); }catch(e){}
+  showToast('\u2713 Accepted \u2014 won\u2019t be flagged again');
+  try{ _renderManualAdjustmentScan(); }catch(e){}
+}
+function _renderManualAdjustmentScan(){
+  var box=document.getElementById('adj-scan-list'); if(!box) return;
+  var items = _scanManualAdjustmentRides();
+  var countEl=document.getElementById('adj-scan-count'); if(countEl) countEl.textContent=items.length;
+  if(!items.length){
+    box.innerHTML='<div style="text-align:center;padding:2rem 1rem;color:var(--mid);font-size:.88rem;">\u2705 Nothing left to review.</div>';
+    try{ var _sb=document.getElementById('scan-adj-btn'); if(_sb) _sb.style.display='none'; }catch(e){}
+    return;
+  }
+  box.innerHTML = items.map(function(it){
+    var r=it.ride;
+    return '<div style="border:1.5px solid var(--light);border-radius:10px;padding:.75rem .85rem;margin-bottom:.6rem;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem;margin-bottom:.4rem;">'
+        +'<div><div style="font-weight:700;font-size:.9rem;">'+escHtml(r.client||'Ride')+'</div>'
+        +'<div style="font-size:.74rem;color:var(--mid);">'+escHtml(r.type||'')+' \u00b7 '+fmtDateShort(r.date)+' \u00b7 created by '+escHtml(r.createdBy||'')+'</div></div>'
+        +'<button onclick="openRideModal('+r.id+')" style="flex-shrink:0;background:none;border:1.5px solid var(--light);border-radius:8px;padding:.3rem .6rem;font-family:inherit;font-size:.72rem;cursor:pointer;color:var(--mid);">View ride</button>'
+      +'</div>'
+      +'<div style="font-size:.82rem;margin-bottom:.6rem;">Saved: <strong>$'+(parseFloat(r.price)||0).toFixed(2)+'</strong> \u2192 formula says <strong>$'+it.rebuiltTotal.toFixed(2)+'</strong> <span style="color:'+(it.diff>0?'#b45309':'#0369a1')+';">('+(it.diff>0?'+':'')+'$'+it.diff.toFixed(2)+')</span></div>'
+      +'<div style="display:flex;gap:.5rem;">'
+        +'<button onclick="_fixManualAdjustmentRide('+r.id+')" style="flex:1;padding:.45rem;background:#15803d;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;">Fix \u2192 $'+it.rebuiltTotal.toFixed(2)+'</button>'
+        +'<button onclick="_acceptManualAdjustmentRide('+r.id+')" style="flex:1;padding:.45rem;background:none;border:1.5px solid var(--light);border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;color:var(--black);">Accept as-is</button>'
+      +'</div></div>';
+  }).join('');
+}
+function openManualAdjustmentScan(){
+  if(!isAdmin()){ showToast('Only admins can run this','error'); return; }
+  var back=document.createElement('div');
+  back.id='adj-scan-overlay';
+  back.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:16500;display:flex;align-items:center;justify-content:center;padding:1.1rem;';
+  back.innerHTML='<div style="background:#fff;border-radius:14px;max-width:520px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;">'
+    +'<div style="padding:1rem 1.1rem;border-bottom:1px solid var(--light);display:flex;justify-content:space-between;align-items:center;">'
+      +'<div style="font-weight:800;font-size:1rem;">\u2696\ufe0f Manual adjustments to review (<span id="adj-scan-count">0</span>)</div>'
+      +'<button onclick="document.getElementById(\'adj-scan-overlay\').remove()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--mid);line-height:1;">\u00d7</button>'
+    +'</div>'
+    +'<div style="padding:.9rem 1.1rem;font-size:.78rem;color:var(--mid);border-bottom:1px solid var(--light);">Every ride created by Kat, Chase, or Morgan where the saved price doesn\u2019t match what today\u2019s pricing formula would compute. Fix updates the real, saved price. Accept leaves it exactly as-is and won\u2019t ask again.</div>'
+    +'<div id="adj-scan-list" style="padding:1rem 1.1rem;overflow-y:auto;flex:1;"></div>'
+  +'</div>';
+  document.body.appendChild(back);
+  _renderManualAdjustmentScan();
 }
 
 // Load the archive and merge it into the live `rides` array so history is visible.
@@ -11246,7 +11339,11 @@ async function toggleInterest(id){
   else { showToast('Interest removed'); }
 }
 
-function buildFeeMathHTML(r){
+// The core "what SHOULD this ride's fare be, computed fresh from its own current fields"
+// math - shared by buildFeeMathHTML (the ride modal's own Fee Breakdown) and
+// _scanManualAdjustmentRides (the review tool below), so the two always agree exactly on what
+// counts as a manual adjustment, rather than two separate copies of this logic drifting apart.
+function _computeFeeRebuild(r){
   const veh  = r.vehicle || 'Sedan';
   const base = BASE[veh] || 105;
   const on   = v => v==='Y' || v===true;
@@ -11256,9 +11353,8 @@ function buildFeeMathHTML(r){
   // A split leg (r.pairId set - this ride used to be one half of an AP ROUND TRIP) inherited
   // its raw premium/traffic/holiday/christmas flags from the PRE-split ride, which reflect
   // the OUTBOUND leg's own time - not necessarily this leg's own actual time. Re-derive these
-  // specific, genuinely time-dependent flags fresh from THIS ride's own date/time instead -
-  // same fix, same reasoning as buildRideBreakdown above. "late" and any custom surcharge
-  // stay as stored - they're manual choices, not time-derived.
+  // specific, genuinely time-dependent flags fresh from THIS ride's own date/time instead.
+  // "late" and any custom surcharge stay as stored - they're manual choices, not time-derived.
   var _feeLegFlagOverride = null;
   if(r.pairId!=null && r.date && r.time){
     var _flm = r.time.split(':').map(Number); var _flMins = (_flm[0]||0)*60+(_flm[1]||0);
@@ -11299,7 +11395,11 @@ function buildFeeMathHTML(r){
     if(!_absorb) _absorb = rows[0];
     _absorb.val = Math.round((_absorb.val + _roundDelta)*100)/100;
   }
-  sub = _rounded;
+  return { rows: rows, total: _rounded };
+}
+function buildFeeMathHTML(r){
+  var _rebuild = _computeFeeRebuild(r);
+  var rows = _rebuild.rows, sub = _rebuild.total;
   const price = parseFloat(r.price)||0;
   const diff  = Math.round((price - sub)*100)/100;
   if(Math.abs(diff) >= 0.01){
@@ -18765,6 +18865,8 @@ function renderIncome(){
   if(_arBtn) _arBtn.style.display=isAdmin()?'inline-block':'none';
   var _sweepBtn=document.getElementById('sweep-rt-notes-btn');
   if(_sweepBtn) _sweepBtn.style.display=(isAdmin() && _ridesNeedingLegNotesCleanup().length>0)?'inline-block':'none';
+  var _adjBtn=document.getElementById('scan-adj-btn');
+  if(_adjBtn) _adjBtn.style.display=(isAdmin() && _scanManualAdjustmentRides().length>0)?'inline-block':'none';
   const admin = isAdmin();
   const myName = getMyDriverName();
   // Privacy: everyone — including admins — only ever sees their OWN income.
