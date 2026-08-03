@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607241745">
+<meta name="version" content="202607241747">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -973,6 +973,7 @@ input,select,textarea{font-size:16px;}
       <span class="mtip-btn-wrap-inline"><button onclick="exportIncomeCSV()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">⬇ Export CSV</button><span class="mtip-dot mtip-dot-badge" id="mtd-exp-csv" onclick="toggleMtip('exp-csv')" title="What&#8217;s this?">i</span></span><div class="mtip-pop" id="mtp-exp-csv">Respects the &ldquo;Paid by&rdquo; filter above. Choose a plain CSV, or a branded PDF with your logo &amp; business name.</div>
       <button onclick="loadRideHistory()" title="Load archived older rides into view" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">🗄 Load history</button>
       <button id="archive-rides-btn" onclick="archiveOldRides()" title="Move old rides out of the live app to keep it fast (admin)" style="display:none;background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">📦 Archive old</button>
+      <button id="sweep-rt-notes-btn" onclick="sweepRoundTripLegNotes()" title="One-time cleanup: removes the auto-added 'Leg N — AP Round Trip' text from ride notes (admin)" style="display:none;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">🧹 Clean up round-trip notes</button>
     </div>
     <div id="pay-filter-bar" style="margin:.2rem 0 0;"></div>
     <div id="irs-rate-box" style="margin:0 0 1rem;"></div>
@@ -3055,6 +3056,29 @@ async function archiveOldRides(){
   await queueAdminAction('rides_archive', {cutoff:cutoff}, 'Archive '+toArchive.length+' ride(s) dated before '+cutoff);
 }
 
+// One-time cleanup for rides that already went through the old, buggy splitApRoundTripRide -
+// strips only the EXACT, auto-generated "Leg N (TYPE) — AP Round Trip DATE" suffix that used
+// to get appended to notes on every split, leaving any other, genuine notes content on the
+// ride completely untouched (it's a suffix match, not a wholesale notes replacement). Safe to
+// run more than once - a ride already cleaned simply won't match the pattern again, so nothing
+// happens to it the second time. Purely cosmetic text; the actual per-leg PRICING was already
+// correct before this cleanup and remains untouched - see the handoff notes for why.
+var _RT_LEG_NOTES_PATTERN = /\s*Leg [12] \((AP RUN|AP PICK UP)\) \u2014 AP Round Trip \d{4}-\d{2}-\d{2}\s*$/;
+function _ridesNeedingLegNotesCleanup(){
+  return (rides||[]).filter(function(r){ return r && r.notes && _RT_LEG_NOTES_PATTERN.test(r.notes); });
+}
+async function sweepRoundTripLegNotes(){
+  if(!isAdmin()){ showToast('Only admins can run this','error'); return; }
+  var affected = _ridesNeedingLegNotesCleanup();
+  if(!affected.length){ showToast('No rides need cleaning up'); return; }
+  if(!confirm('Clean up the auto-added "Leg N \u2014 AP Round Trip" text from '+affected.length+' ride note'+(affected.length===1?'':'s')+'? Any other notes on those rides are left exactly as they are.')) return;
+  affected.forEach(function(r){ r.notes = r.notes.replace(_RT_LEG_NOTES_PATTERN, '').trim(); });
+  try{ await saveRides(); }catch(e){}
+  showToast('\u2705 Cleaned up '+affected.length+' ride note'+(affected.length===1?'':'s'));
+  try{ var _sb=document.getElementById('sweep-rt-notes-btn'); if(_sb) _sb.style.display='none'; }catch(e){}
+  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+}
+
 // Load the archive and merge it into the live `rides` array so history is visible.
 // This is temporary for the session (until reload); it does not re-save the live node.
 async function loadRideHistory(){
@@ -5124,13 +5148,11 @@ function splitApRoundTripRide(ride){
     pickup: secondType==='AP PICK UP' ? (terminalAddr || ride.home || '') : (ride.home || ''),
     home: secondType==='AP PICK UP' ? (ride.pickup || '') : (terminalAddr || ride.home || ''),
     price: split.leg2,
-    notes: (ride.notes?ride.notes+' ':'')+'Leg 2 ('+secondType+') \u2014 AP Round Trip '+ride.date,
   });
   ride.type=firstType;
   ride.pairId=pairId;
   ride.rtLegNumber=1;
   ride.price=split.leg1;
-  ride.notes=(ride.notes?ride.notes+' ':'')+'Leg 1 ('+firstType+') \u2014 AP Round Trip '+(ride.rtDateAP||ride.date);
   return leg2;
 }
 
@@ -8516,10 +8538,29 @@ function buildRideBreakdown(r){
   // Flat surcharges from the ride's Y/N flags
   const flat = (typeof ADDONS_FLAT!=='undefined') ? ADDONS_FLAT : {premium:30,holiday:30,christmas:35,late:20,traffic:15};
   const flagLabels = {premium:'Premium hours',holiday:'Holiday',christmas:'Christmas',late:'Late night',traffic:'Traffic'};
+  // A split leg (r.pairId set - this ride used to be one half of an AP ROUND TRIP) inherited
+  // its raw premium/traffic/holiday/christmas flags from the PRE-split ride, which reflect
+  // the OUTBOUND leg's own time - not necessarily this leg's own actual time. Re-derive these
+  // specific, genuinely time-dependent flags fresh from THIS ride's own date/time instead of
+  // trusting the possibly-stale, copied value - the same real-time-window helpers the AP
+  // ROUND TRIP branch above already uses, so both paths agree on what actually qualifies.
+  // "late" and any custom surcharge stay as stored - they're manual choices, not time-derived.
+  var _legFlagOverride = null;
+  if(r.pairId!=null && r.date && r.time){
+    var _lm = r.time.split(':').map(Number); var _lMins = (_lm[0]||0)*60+(_lm[1]||0);
+    var _lDate = new Date(r.date+'T12:00:00'); var _lDow = _lDate.getDay(); var _lMmdd = r.date.slice(5);
+    _legFlagOverride = {
+      premium: isPremiumTime(_lMins) ? 'Y' : 'N',
+      traffic: isTrafficTime(_lDow,_lMins) ? 'Y' : 'N',
+      christmas: isChristmasDate(_lMmdd) ? 'Y' : 'N',
+      holiday: isHolidayDate(_lMmdd) ? 'Y' : 'N',
+    };
+  }
   ['premium','holiday','christmas','late','traffic'].forEach(function(k){
+    var _flagVal = (_legFlagOverride && k!=='late') ? _legFlagOverride[k] : r[k];
     // christmas supersedes holiday if both set
-    if(k==='holiday' && String(r.christmas)==='Y') return;
-    if(String(r[k])==='Y' && surcharge(k)){
+    if(k==='holiday' && String(_legFlagOverride?_legFlagOverride.christmas:r.christmas)==='Y') return;
+    if(String(_flagVal)==='Y' && surcharge(k)){
       lines.push({label: flagLabels[k]+' surcharge'+(legs>1?' \u00d7'+legs:''), val: surcharge(k)*legs});
     }
   });
@@ -11115,9 +11156,28 @@ function buildFeeMathHTML(r){
   const rows = [{label:`Base rate (${veh}, incl. ${includedMiles()} mi)`, val:base, add:false}];
   let sub = base;
   const flat = [['premium',30,'Premium hours'],['holiday',30,'Holiday'],['christmas',35,'Christmas'],['late',20,'Late notice'],['traffic',15,'Traffic']];
+  // A split leg (r.pairId set - this ride used to be one half of an AP ROUND TRIP) inherited
+  // its raw premium/traffic/holiday/christmas flags from the PRE-split ride, which reflect
+  // the OUTBOUND leg's own time - not necessarily this leg's own actual time. Re-derive these
+  // specific, genuinely time-dependent flags fresh from THIS ride's own date/time instead -
+  // same fix, same reasoning as buildRideBreakdown above. "late" and any custom surcharge
+  // stay as stored - they're manual choices, not time-derived.
+  var _feeLegFlagOverride = null;
+  if(r.pairId!=null && r.date && r.time){
+    var _flm = r.time.split(':').map(Number); var _flMins = (_flm[0]||0)*60+(_flm[1]||0);
+    var _flDate = new Date(r.date+'T12:00:00'); var _flDow = _flDate.getDay(); var _flMmdd = r.date.slice(5);
+    _feeLegFlagOverride = {
+      premium: isPremiumTime(_flMins),
+      traffic: isTrafficTime(_flDow,_flMins),
+      christmas: isChristmasDate(_flMmdd),
+      holiday: isHolidayDate(_flMmdd),
+    };
+  }
   flat.forEach(([k,amt,lbl])=>{
-    if(k==='holiday' && on(r.christmas)) return; // Christmas replaces Holiday
-    if(on(r[k])){ const a=surcharge(k); rows.push({label:lbl+' surcharge', val:a, add:true}); sub += a; }
+    var _onVal = (_feeLegFlagOverride && k!=='late') ? _feeLegFlagOverride[k] : on(r[k]);
+    var _christmasOnVal = _feeLegFlagOverride ? _feeLegFlagOverride.christmas : on(r.christmas);
+    if(k==='holiday' && _christmasOnVal) return; // Christmas replaces Holiday
+    if(_onVal){ const a=surcharge(k); rows.push({label:lbl+' surcharge', val:a, add:true}); sub += a; }
   });
   customSurchargeList().forEach(function(c){ if(on(r[c.key])){ var a=surcharge(c.key); rows.push({label:c.label+' surcharge', val:a, add:true}); sub+=a; } });
   const xstop = parseInt(r.xstop)||0;
@@ -18493,6 +18553,8 @@ function renderIncome(){
   if(_paBtn) _paBtn.style.display=isAdmin()?'inline-block':'none';
   var _arBtn=document.getElementById('archive-rides-btn');
   if(_arBtn) _arBtn.style.display=isAdmin()?'inline-block':'none';
+  var _sweepBtn=document.getElementById('sweep-rt-notes-btn');
+  if(_sweepBtn) _sweepBtn.style.display=(isAdmin() && _ridesNeedingLegNotesCleanup().length>0)?'inline-block':'none';
   const admin = isAdmin();
   const myName = getMyDriverName();
   // Privacy: everyone — including admins — only ever sees their OWN income.
