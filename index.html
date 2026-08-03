@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607241747">
+<meta name="version" content="202607241749">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2343,6 +2343,7 @@ async function _loadAppData() {
       })(),
     ]);
     try{ await _migrateVenmoHandles(); }catch(e){ console.warn('venmo migration', e); }
+    try{ _backfillLogoAccentColors(); }catch(e){ console.warn('logo accent backfill', e); } // deliberately not awaited - background task
     // Local (non-Firebase) session recovery is cheap — run it immediately. The six Firebase
     // loads that used to sit here (passwords, subscriptions, imported clients, client requests,
     // client-req driver, client unlock) are independent, so they now join the parallel batch below.
@@ -3412,7 +3413,10 @@ function calcQuote() {
     const leg1Sub = base + overage + sumLines(surcharges);
     const leg1Fuel = addonState.fuel ? leg1Sub*fuelRate() : 0;
     if(leg1Fuel>0) leg1Lines.push({label:fuelLabel(), val:leg1Fuel});
-    const leg1Total = leg1Sub + leg1Fuel;
+    // Each leg floors to a whole dollar on its OWN - it's now a genuine, independently-charged
+    // price in its own right (a different driver may collect it), not a subtotal feeding into
+    // one shared floor at the end.
+    const leg1Total = Math.floor(leg1Sub + leg1Fuel);
 
     // Return leg (AP Pick Up) — may have different surcharges depending on return date/time
     // Uses return date/time fields for auto-detection hint
@@ -3427,26 +3431,33 @@ function calcQuote() {
     const leg2Sub = base + overage + sumLines(leg2Surcharges);
     const leg2Fuel = addonStateLeg2.fuel ? leg2Sub*fuelRate() : 0;
     if(leg2Fuel>0) leg2Lines.push({label:fuelLabel(), val:leg2Fuel});
-    const leg2Total = leg2Sub + leg2Fuel;
+    const leg2Total = Math.floor(leg2Sub + leg2Fuel);
 
-    const grandTotal = Math.floor(leg1Total + leg2Total);   // fare rounds DOWN, never up
+    // No further flooring needed here - both legs are already whole dollars on their own, so
+    // their sum already is too. Kept as an explicit sum (not re-floored) so it's clearly just
+    // a reference figure, not a third, independently-rounded price of its own.
+    const grandTotal = leg1Total + leg2Total;
 
     const renderLines = ls => ls.map(l=>`<div class="quote-line"><span style="color:#aaa">${l.label}${l.note?'<br><span style="font-size:.68rem;color:#555">'+l.note+'</span>':''}</span><span style="${l.val===0?'color:#555':''}">$${l.val.toFixed(2)}</span></div>`).join('');
 
     document.getElementById('quote-lines').innerHTML=`
-      <div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#a855f7;margin-bottom:.35rem;">Leg 1 — AP Run (Drop Off)</div>
+      <div data-leg-header="1" style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#a855f7;margin-bottom:.35rem;">Leg 1 — AP Run (Drop Off)</div>
       ${renderLines(leg1Lines)}
-      <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-top:1px solid #4a1d6e;margin-top:.2rem;margin-bottom:.75rem;">
+      <div data-leg-subtotal="1" data-leg-subtotal-val="${leg1Total.toFixed(2)}" style="display:flex;justify-content:space-between;padding:.4rem 0;border-top:1px solid #4a1d6e;margin-top:.2rem;margin-bottom:.75rem;">
         <span style="color:#9b8fb8;font-size:.8rem;">Leg 1 subtotal</span>
         <span style="color:#fff;font-weight:600;">$${leg1Total.toFixed(2)}</span>
       </div>
-      <div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#a855f7;margin-bottom:.35rem;">Leg 2 — AP Pick Up (Return)</div>
+      <div data-leg-header="2" style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#a855f7;margin-bottom:.35rem;">Leg 2 — AP Pick Up (Return)</div>
       ${renderLines(leg2Lines)}
-      <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-top:1px solid #4a1d6e;margin-top:.2rem;">
+      <div data-leg-subtotal="2" data-leg-subtotal-val="${leg2Total.toFixed(2)}" style="display:flex;justify-content:space-between;padding:.4rem 0;border-top:1px solid #4a1d6e;margin-top:.2rem;">
         <span style="color:#9b8fb8;font-size:.8rem;">Leg 2 subtotal</span>
         <span style="color:#fff;font-weight:600;">$${leg2Total.toFixed(2)}</span>
       </div>`;
-    document.getElementById('quote-total').textContent=`$${grandTotal.toFixed(2)}`;
+    // Two separate, independently-charged prices - never combined into one figure, even here
+    // in the admin's own prominent price display. A single driver isn't necessarily collecting
+    // both, so there's no one number that represents "the price" the way there is for every
+    // other trip type.
+    document.getElementById('quote-total').innerHTML=`<span style="font-size:1.1rem;">$${leg1Total.toFixed(2)} <span style="color:#9b8fb8;font-weight:400;font-size:.85rem;">+</span> $${leg2Total.toFixed(2)}</span>`;
     return grandTotal;
   }
 
@@ -4667,9 +4678,17 @@ function textQuoteToClient(){
   { const _vs=_quoteVehicleGate(); if(!_vs) return;
     if(_vs.length>1){ window._lastComparison=_comparisonContext(); return textComparisonToClient(); } }
   const phone=formatPhoneUS(document.getElementById('q-phone').value||'');
-  const total=(document.getElementById('quote-total').textContent||'').trim();
-  if(!total || total==='$0.00'){ showToast('Fill in the trip details first so there’s a quote to send','error'); return; }
   const type=document.getElementById('q-type').value||'';
+  const isAprt = type==='AP ROUND TRIP';
+  // AP ROUND TRIP has no single "the total" - the quote-total slot holds two separate figures
+  // now, not one number, so it can't gate readiness the way every other type's does. Gate on
+  // whether a real leg subtotal actually rendered instead.
+  if(isAprt){
+    if(!document.querySelector('#quote-lines [data-leg-subtotal]')){ showToast('Fill in the trip details first so there’s a quote to send','error'); return; }
+  } else {
+    const total=(document.getElementById('quote-total').textContent||'').trim();
+    if(!total || total==='$0.00'){ showToast('Fill in the trip details first so there’s a quote to send','error'); return; }
+  }
   const date=document.getElementById('q-date').value||'';
   const time=document.getElementById('q-time').value||'';
   const pickup=(document.getElementById('q-pickup').value||'').trim();
@@ -4680,17 +4699,41 @@ function textQuoteToClient(){
   if(date) body+='\n'+fmtDateShort(date)+(time?' at '+((typeof fmtTime12==='function'&&fmtTime12(time))||time):'');
   if(pickup) body+='\nFrom: '+pickup;
   if(dropoff) body+='\nTo: '+dropoff;
-  const lineEls=document.querySelectorAll('#quote-lines .quote-line');
-  if(lineEls.length){
-    body+='\n';
-    lineEls.forEach(el=>{
-      let lbl=((el.children[0]&&el.children[0].childNodes[0]?el.children[0].childNodes[0].textContent:'')||'').trim();
-      lbl=lbl.replace(/\s*\([^)]*[\u00d7x$][^)]*\)/g,'').replace(/\s+/g,' ').trim();
-      const val=((el.children[1]?el.children[1].textContent:'')||'').trim();
-      if(lbl) body+='\n'+lbl+': '+val;
+  if(isAprt){
+    // Two clearly separate leg sections, each with its own line items and its own subtotal -
+    // never combined into one "Total" line. A round trip's two legs may be driven (and paid
+    // for) by two different people, so there's no single number that means "the price" here
+    // the way there is for every other trip type.
+    ['1','2'].forEach(function(legNum){
+      var header = document.querySelector('#quote-lines [data-leg-header="'+legNum+'"]');
+      var subtotalEl = document.querySelector('#quote-lines [data-leg-subtotal="'+legNum+'"]');
+      if(!header || !subtotalEl) return;
+      body += '\n\n'+(header.textContent||'').trim()+':';
+      var el = header.nextElementSibling;
+      while(el && !el.hasAttribute('data-leg-subtotal')){
+        var lbl=((el.children[0]&&el.children[0].childNodes[0]?el.children[0].childNodes[0].textContent:'')||'').trim();
+        lbl=lbl.replace(/\s*\([^)]*[\u00d7x$][^)]*\)/g,'').replace(/\s+/g,' ').trim();
+        var val=((el.children[1]?el.children[1].textContent:'')||'').trim();
+        if(lbl) body+='\n'+lbl+': '+val;
+        el = el.nextElementSibling;
+      }
+      body += '\nLeg '+legNum+' total: $'+(subtotalEl.getAttribute('data-leg-subtotal-val')||'0.00');
     });
+  } else {
+    const lineEls=document.querySelectorAll('#quote-lines .quote-line');
+    if(lineEls.length){
+      body+='\n';
+      lineEls.forEach(el=>{
+        let lbl=((el.children[0]&&el.children[0].childNodes[0]?el.children[0].childNodes[0].textContent:'')||'').trim();
+        lbl=lbl.replace(/\s*\([^)]*[\u00d7x$][^)]*\)/g,'').replace(/\s+/g,' ').trim();
+        const val=((el.children[1]?el.children[1].textContent:'')||'').trim();
+        if(lbl) body+='\n'+lbl+': '+val;
+      });
+    }
   }
-  body+='\n\nTotal: '+total+'\n\nIf all of this is correct and acceptable, please let me know and I’ll get you scheduled. Thank you!\n\nQuotes do not include tip — never required, but always greatly appreciated by your driver.';
+  body += isAprt
+    ? '\n\nEach leg is billed separately, and may be driven by a different member of our team.\n\nIf all of this is correct and acceptable, please let me know and I’ll get you scheduled. Thank you!\n\nQuotes do not include tip — never required, but always greatly appreciated by your driver.'
+    : ('\n\nTotal: '+(document.getElementById('quote-total').textContent||'').trim()+'\n\nIf all of this is correct and acceptable, please let me know and I’ll get you scheduled. Thank you!\n\nQuotes do not include tip — never required, but always greatly appreciated by your driver.');
   // Auto-save this quote to Saved Quotes, marked as sent today (replaces the old "Save as quote" button).
   try{
     if(typeof _gatherQuoteRide==='function' && typeof savedQuotes!=='undefined'){
@@ -4870,6 +4913,13 @@ function buildQuoteHTML(q, cmp){
     if(!_ownerName){ try{ _ownerName = getMyDriverName()||''; }catch(e){} }
   }
   var _ownerProf = (_ownerName && typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[_ownerName]) ? DRIVER_PROFILES[_ownerName] : {};
+  // Themed around the driver's OWN logo color if one was successfully extracted and cached at
+  // upload time (see extractDominantColorFromDataUri) - otherwise a genuinely neutral charcoal,
+  // not NWDA's specific purple, since that's itself a brand choice that could clash with
+  // whatever a given driver's actual logo colors are. Per Chase's own reasoning: a driver's
+  // quote should never visually fight their own branding.
+  const _docAccent = _ownerProf.logoAccentColor || '#2d2d2d';
+  const _docAccentText = _readableTextOn(_docAccent);
   const appLogo = (document.querySelector('img[alt="NWDA Logo"]')||{}).src || '';
   const shownLogo = (_ownerProf.logo||'') || appLogo;
   const logoHtml = shownLogo ? '<img src="'+shownLogo+'" alt="logo" style="max-height:70px;max-width:180px;object-fit:contain;margin-bottom:10px;">' : '';
@@ -4898,44 +4948,49 @@ function buildQuoteHTML(q, cmp){
   }
   const rows = isLegGrouped
     ? legHeaderRow('Leg 1 \u2014 AP Run (Drop Off)') + leg1Lines.map(lineRow).join('')
-      + legSubtotalRow('Leg 1 subtotal', leg1Lines.reduce((s,l)=>s+l.val,0))
+      + legSubtotalRow('Leg 1 total', bd.leg1!=null ? bd.leg1 : leg1Lines.reduce((s,l)=>s+l.val,0))
       + legHeaderRow('Leg 2 \u2014 AP Pick Up (Return)') + leg2Lines.map(lineRow).join('')
-      + legSubtotalRow('Leg 2 subtotal', leg2Lines.reduce((s,l)=>s+l.val,0))
+      + legSubtotalRow('Leg 2 total', bd.leg2!=null ? bd.leg2 : leg2Lines.reduce((s,l)=>s+l.val,0))
       + otherLines.map(lineRow).join('')
     : (bd.lines||[]).map(lineRow).join('');
   const detail=(label,val)=> val ? ('<tr><td style="padding:4px 0;color:#888;font-size:13px;width:38%;">'+esc(label)+'</td><td style="padding:4px 0;color:#111;font-size:13px;">'+esc(val)+'</td></tr>') : '';
-  // Single vehicle: the breakdown and one Total, exactly as before. Multiple: one priced option
-  // per vehicle, each with its own total, and no grand total - a comparison has no single price,
-  // and printing one would be the most dangerous possible thing to put in front of a client.
+  // Single vehicle, single leg: the breakdown and one Total, exactly as before. AP ROUND TRIP:
+  // each leg already shows its own total right in the table above (see legSubtotalRow) - no
+  // combined grand total at all, since a round trip's two legs may be driven, and paid for, by
+  // two different people. Multiple vehicles: one priced option per vehicle, each with its own
+  // total, and no grand total there either - a comparison has no single price, and printing
+  // one would be the most dangerous possible thing to put in front of a client.
   const priceSection = !isCmp
     ? ('<div style="border-top:2px solid #eee;padding-top:14px;">'
         +'<div style="font-size:11px;font-weight:800;letter-spacing:1px;color:#999;margin-bottom:6px;">PRICE BREAKDOWN</div>'
         +'<table style="width:100%;border-collapse:collapse;">'+rows+'</table>'
-        +'<div style="display:flex;justify-content:space-between;align-items:center;border-top:2px solid #2d1b57;margin-top:12px;padding-top:12px;">'
-          +'<span style="font-size:16px;font-weight:800;color:#2d1b57;">Total</span>'
-          +'<span style="font-size:22px;font-weight:800;color:#2d1b57;">'+money(amt)+'</span>'
-        +'</div>'
+        +(isLegGrouped
+          ? '<div style="font-size:12.5px;color:#666;margin-top:10px;">Each leg above is billed separately, and may be driven by a different member of our team.</div>'
+          : ('<div style="display:flex;justify-content:space-between;align-items:center;border-top:2px solid '+_docAccent+';margin-top:12px;padding-top:12px;">'
+              +'<span style="font-size:16px;font-weight:800;color:'+_docAccent+';">Total</span>'
+              +'<span style="font-size:22px;font-weight:800;color:'+_docAccent+';">'+money(amt)+'</span>'
+            +'</div>'))
       +'</div>')
     : ('<div style="border-top:2px solid #eee;padding-top:14px;">'
         +'<div style="font-size:11px;font-weight:800;letter-spacing:1px;color:#999;margin-bottom:10px;">YOUR OPTIONS</div>'
         + cmp.map(function(r){
             return '<div style="border:1px solid #eee;border-radius:10px;padding:12px 14px;margin-bottom:10px;">'
               +'<div style="display:flex;justify-content:space-between;align-items:center;">'
-                +'<span style="font-size:15px;font-weight:800;color:#2d1b57;">'+esc(r.label)+'</span>'
-                +'<span style="font-size:20px;font-weight:800;color:#2d1b57;">'+money(r.total)+'</span>'
+                +'<span style="font-size:15px;font-weight:800;color:'+_docAccent+';">'+esc(r.label)+'</span>'
+                +'<span style="font-size:20px;font-weight:800;color:'+_docAccent+';">'+money(r.total)+'</span>'
               +'</div></div>';
           }).join('')
         +'<div style="font-size:12.5px;color:#666;margin-top:2px;">Same trip, priced for each vehicle. Let us know which you\u2019d like and we\u2019ll book it.</div>'
       +'</div>')
   return '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
     +'<title>'+(isCmp?'Price comparison':'Quote')+' \u2014 '+esc(who)+'</title></head>'
-    +'<body style="margin:0;padding:24px 12px;background:#f4f2f8;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;">'
+    +'<body style="margin:0;padding:24px 12px;background:#f4f4f6;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;">'
     +'<div style="max-width:640px;margin:0 auto 18px;background:#fff;border-radius:14px;padding:28px;box-shadow:0 6px 24px rgba(0,0,0,.08);">'
       +'<div style="text-align:center;border-bottom:2px solid #eee;padding-bottom:18px;margin-bottom:18px;">'
         +logoHtml
-        +'<div style="font-size:19px;font-weight:800;color:#2d1b57;">'+esc(orgName)+'</div>'
+        +'<div style="font-size:19px;font-weight:800;color:'+_docAccent+';">'+esc(orgName)+'</div>'
         +(ownerPhone?'<div style="font-size:13px;color:#777;margin-top:3px;">'+esc(ownerPhone)+'</div>':'')
-        +'<div style="display:inline-block;margin-top:12px;background:#f3eeff;color:#5b3fa0;border:1px solid #d9c9f5;border-radius:20px;padding:5px 16px;font-size:12px;font-weight:800;letter-spacing:1px;">QUOTE</div>'
+        +'<div style="display:inline-block;margin-top:12px;background:'+_tintColor(_docAccent)+';color:'+_docAccent+';border:1px solid '+_tintColor(_docAccent,0.65)+';border-radius:20px;padding:5px 16px;font-size:12px;font-weight:800;letter-spacing:1px;">QUOTE</div>'
       +'</div>'
       +'<div style="font-size:15px;color:#111;margin-bottom:4px;">Prepared for <strong>'+esc(who||'you')+'</strong></div>'
       +'<div style="font-size:13px;color:#888;margin-bottom:16px;">Quoted '+esc(fmtDateShort(new Date().toISOString().slice(0,10)))+'</div>'
@@ -4951,13 +5006,13 @@ function buildQuoteHTML(q, cmp){
         +(q.flight?detail('Flight', q.flight):'')
       +'</table>'
       +priceSection
-      +'<div style="margin-top:18px;background:#faf8ff;border:1px solid #eee;border-radius:10px;padding:12px 14px;font-size:12.5px;color:#666;line-height:1.55;">'
+      +'<div style="margin-top:18px;background:#f7f7f8;border:1px solid #eee;border-radius:10px;padding:12px 14px;font-size:12.5px;color:#666;line-height:1.55;">'
         +'This is a quote, not a booking \u2014 your ride isn\u2019t reserved until you confirm. Prices are held subject to availability and may change if the trip details change.'
         +'<div style="margin-top:8px;">Quotes do not include tip \u2014 never required, but always greatly appreciated by your driver.</div>'
       +'</div>'
     +'</div>'
     +'<div style="max-width:640px;margin:0 auto 30px;text-align:center;" class="no-print">'
-      +'<button onclick="window.print()" style="background:#2d1b57;color:#fff;border:none;border-radius:8px;padding:12px 28px;font-size:15px;font-weight:700;cursor:pointer;">\uD83D\uDCC4 Save as PDF / Print</button>'
+      +'<button onclick="window.print()" style="background:'+_docAccent+';color:'+_docAccentText+';border:none;border-radius:8px;padding:12px 28px;font-size:15px;font-weight:700;cursor:pointer;">\uD83D\uDCC4 Save as PDF / Print</button>'
       +'<div style="font-size:12px;color:#999;margin-top:8px;">Tap to save this quote as a PDF you can email or keep.</div>'
     +'</div>'
     +'<style>@media print{.no-print{display:none!important;}body{background:#fff!important;}}</style>'
@@ -5022,8 +5077,24 @@ function emailQuoteFromForm(){
   if(q.home) lines += 'Destination: '+q.home+'\n';
   if(q.vehicle) lines += 'Vehicle: '+(typeof vehTag==='function'?vehTag(q.vehicle):q.vehicle)+'\n';
   lines += '\n';
-  (bd.lines||[]).forEach(function(l){ lines += l.label+': '+money(l.val)+'\n'; });
-  lines += '\nTotal: '+money(bd.total)+'\n\nThis is a quote, not a booking \u2014 your ride isn\u2019t reserved until you confirm.\n\nQuotes do not include tip \u2014 never required, but always greatly appreciated by your driver.';
+  // AP ROUND TRIP: each leg gets its own clearly labeled section and its own total - never
+  // combined into one figure, since a round trip's two legs may be driven, and paid for, by
+  // two different people.
+  if(q.type==='AP ROUND TRIP' && (bd.leg1!=null || bd.leg2!=null)){
+    var legRe = / \u2014 (Leg \d \((?:outbound|return)\))$/;
+    var leg1Lines = (bd.lines||[]).filter(function(l){ return / \u2014 Leg 1 \(outbound\)$/.test(l.label); });
+    var leg2Lines = (bd.lines||[]).filter(function(l){ return / \u2014 Leg 2 \(return\)$/.test(l.label); });
+    lines += 'Leg 1 \u2014 AP Run (Drop Off):\n';
+    leg1Lines.forEach(function(l){ lines += l.label.replace(legRe,'')+': '+money(l.val)+'\n'; });
+    lines += 'Leg 1 total: '+money(bd.leg1||0)+'\n\n';
+    lines += 'Leg 2 \u2014 AP Pick Up (Return):\n';
+    leg2Lines.forEach(function(l){ lines += l.label.replace(legRe,'')+': '+money(l.val)+'\n'; });
+    lines += 'Leg 2 total: '+money(bd.leg2||0)+'\n';
+    lines += '\nEach leg is billed separately, and may be driven by a different member of our team.\n\nThis is a quote, not a booking \u2014 your ride isn\u2019t reserved until you confirm.\n\nQuotes do not include tip \u2014 never required, but always greatly appreciated by your driver.';
+  } else {
+    (bd.lines||[]).forEach(function(l){ lines += l.label+': '+money(l.val)+'\n'; });
+    lines += '\nTotal: '+money(bd.total)+'\n\nThis is a quote, not a booking \u2014 your ride isn\u2019t reserved until you confirm.\n\nQuotes do not include tip \u2014 never required, but always greatly appreciated by your driver.';
+  }
   var subject='Your quote'+(client.trim()?(' \u2014 '+client.trim()):'');
   var mailto='mailto:'+encodeURIComponent(email.trim())+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(lines);
   try{ openQuoteDocument(null); }catch(e){}
@@ -5084,33 +5155,38 @@ function _comparisonContext(){
 // same ratio as their natural costs, and leg2 absorbs any final cent of rounding so the two
 // always sum to EXACTLY the saved total - never a penny more or less than what was actually
 // charged.
+// Each leg's price now comes directly from buildRideBreakdown's own, independent per-leg
+// calculation (leg1/leg2 on its return object) - no more proportional splitting of a combined
+// total. This used to divide the combined total between legs by each leg's SHARE of the raw,
+// pre-floor breakdown - mathematically reasonable, but it meant a leg's saved price was a
+// derived FRACTION of something else, not its own genuine number, and any small mismatch
+// between how the combined total was computed vs. how each leg's own breakdown later got
+// rebuilt (e.g. for display) surfaced as a confusing "Manual adjustment" line. Now each leg's
+// price simply IS the same, single, independent calculation used everywhere else it's shown -
+// there is nothing left to reconcile.
 function apRoundTripLegSplit(ride){
   var bd = (typeof buildRideBreakdown==='function') ? buildRideBreakdown(ride) : {lines:[],total:0};
-  var raw1=0, raw2=0;
-  (bd.lines||[]).forEach(function(l){
-    if(/ \u2014 Leg 1 \(outbound\)$/.test(l.label)) raw1+=l.val;
-    else if(/ \u2014 Leg 2 \(return\)$/.test(l.label)) raw2+=l.val;
-  });
-  var total = bd.total || (parseFloat(ride.price)||0);
-  var rawTotal = raw1+raw2;
-  var leg1;
-  // Floored to a whole dollar, not rounded to the nearest cent - matches the same "fare
-  // always rounds down, never up" rule already applied everywhere else in the app to the
-  // combined total itself. Without this, a proportional split of a whole-dollar total could
-  // still land each individual leg on an odd, unprofessional-looking fractional-cent amount
-  // (e.g. $113.40) even though the two legs together were always a clean whole dollar.
-  if(rawTotal>0){
-    leg1 = Math.floor(raw1 + (total-rawTotal)*(raw1/rawTotal));
-  } else {
-    // No computed breakdown to go on at all (e.g. a purely manually-priced ride) - nothing
-    // better available than an even split, but this path should be rare.
-    leg1 = Math.floor(total/2);
+  if(bd.leg1==null || bd.leg2==null){
+    // No per-leg breakdown available at all (e.g. a purely manually-priced ride with no real
+    // date/time to compute from) - nothing better than an even split, but this path should be
+    // rare, and only ever applies to data buildRideBreakdown itself couldn't make sense of.
+    var total = bd.total || (parseFloat(ride.price)||0);
+    var leg1e = Math.floor(total/2);
+    return { leg1: leg1e, leg2: Math.floor(total)-leg1e };
   }
-  // Absorbs the remainder against the FLOORED total (defensive: the combined total should
-  // already be a whole dollar from quote-time flooring, but flooring it again here too means
-  // leg2 is still guaranteed correct even in an edge case where it somehow isn't - a
-  // manually-priced ride, say - rather than silently inheriting stray cents.
-  var leg2 = Math.floor(total)-leg1;
+  var formulaTotal = bd.leg1 + bd.leg2;
+  var savedPrice = parseFloat(ride.price)||0;
+  // The normal case: the saved price already matches the pure, independent-per-leg formula
+  // (it always will, coming out of a fresh quote), so each leg is simply its own genuine
+  // number - nothing to reconcile.
+  if(!(savedPrice>0) || Math.abs(savedPrice-formulaTotal)<0.01) return { leg1: bd.leg1, leg2: bd.leg2 };
+  // The saved price has genuinely been overridden to something else (e.g. Quick Add's own
+  // "Final Price" field, a real, reachable way to give a client a discount) - apportion that
+  // difference across both legs proportionally so the override survives the split, rather
+  // than silently reverting to the un-discounted formula price.
+  var diff = savedPrice - formulaTotal;
+  var leg1 = Math.floor(bd.leg1 + diff*(bd.leg1/formulaTotal));
+  var leg2 = Math.floor(savedPrice) - leg1;
   return { leg1: leg1, leg2: leg2 };
 }
 
@@ -5300,7 +5376,16 @@ async function textSavedQuote(qid){
   if(q.type) body+=q.type+'\n';
   if(q.pickup) body+='From: '+q.pickup+'\n';
   if(q.home) body+='To: '+q.home+'\n';
-  body+='\nTotal: $'+(parseFloat(q.price)||0).toFixed(2);
+  // AP ROUND TRIP: two separate, independently-charged leg totals, never combined into one
+  // figure - a round trip's two legs may be driven, and paid for, by two different people.
+  if(q.type==='AP ROUND TRIP'){
+    var bd=(typeof buildRideBreakdown==='function')?buildRideBreakdown(q):{leg1:null,leg2:null};
+    body+='\nLeg 1 (AP Run) total: $'+(bd.leg1!=null?bd.leg1:0).toFixed(2);
+    body+='\nLeg 2 (AP Pick Up) total: $'+(bd.leg2!=null?bd.leg2:0).toFixed(2);
+    body+='\n\nEach leg is billed separately, and may be driven by a different member of our team.';
+  } else {
+    body+='\nTotal: $'+(parseFloat(q.price)||0).toFixed(2);
+  }
   body+='\n\nIf this works for you, let me know and I\u2019ll get you scheduled. Thank you!\n\nQuotes do not include tip \u2014 never required, but always greatly appreciated by your driver.';
   q.sentAt=Date.now();
   try{ await saveSavedQuotes(); }catch(e){}
@@ -8503,22 +8588,30 @@ function buildRideBreakdown(r){
 
     const outboundLines = buildLeg('Leg 1 (outbound)', r.date, r.time, false);
     const returnLines = buildLeg('Leg 2 (return)', r.rtDateAP, r.rtTime, true);
-    const allLines = outboundLines.concat(returnLines);
-    const exactTotal = allLines.reduce((s,l)=>s+l.val,0);
-    const total = Math.floor(exactTotal);
-    // Same rounding absorption as the general path below: the last line quietly picks up
-    // the sub-cent difference so the displayed rows always sum exactly to the total.
-    const roundDelta = Math.round((total-exactTotal)*100)/100;
-    if(Math.abs(roundDelta)>=0.01 && allLines.length){
-      allLines[allLines.length-1].val = Math.round((allLines[allLines.length-1].val+roundDelta)*100)/100;
+    // Each leg floors to a whole dollar independently - it's a genuine, independently-charged
+    // price of its own (a different driver may collect it), not a subtotal feeding into one
+    // shared floor. Any sub-cent remainder is absorbed into that SAME leg's own last line,
+    // never bleeding across into the other leg's numbers.
+    function floorLegInto(legLines){
+      var exact = legLines.reduce((s,l)=>s+l.val,0);
+      var floored = Math.floor(exact);
+      var delta = Math.round((floored-exact)*100)/100;
+      if(Math.abs(delta)>=0.01 && legLines.length){
+        legLines[legLines.length-1].val = Math.round((legLines[legLines.length-1].val+delta)*100)/100;
+      }
+      return floored;
     }
+    const leg1Total = floorLegInto(outboundLines);
+    const leg2Total = floorLegInto(returnLines);
+    const allLines = outboundLines.concat(returnLines);
+    const total = leg1Total + leg2Total;
     const savedTotal = parseFloat(r.price||0)||0;
     const rebuilt = allLines.reduce((s,l)=>s+l.val,0);
     const diff = Math.round(((savedTotal||rebuilt)-rebuilt)*100)/100;
     if(savedTotal>0 && Math.abs(diff)>=0.01){
       allLines.push({label: diff>0?'Additional charges':'Discount', val: diff});
     }
-    return { lines: allLines, total: savedTotal>0 ? savedTotal : rebuilt };
+    return { lines: allLines, total: savedTotal>0 ? savedTotal : rebuilt, leg1: leg1Total, leg2: leg2Total };
   }
 
   const isAP = typeof isAPRideType==='function' ? isAPRideType(r.type) : /^AP/.test(r.type||'');
@@ -8713,6 +8806,10 @@ function buildReceiptHTML(r){
   var _ownerName = (typeof getClientOwner==='function') ? getClientOwner(r.client) : null;
   var _ownerProf = (_ownerName && typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[_ownerName]) ? DRIVER_PROFILES[_ownerName] : {};
   const logo = (_ownerProf.logo||'') || (prof.logo||'');
+  // Same reasoning and same owner-then-driver priority as the logo itself right above -
+  // themed around whichever logo actually got shown, not NWDA's own purple by default.
+  const _docAccent = (_ownerProf.logoAccentColor||'') || (prof.logoAccentColor||'') || '#2d2d2d';
+  const _docAccentText = _readableTextOn(_docAccent);
   const driverPhone = prof.phone||'';
   const rn = _receiptNumber(r);
   const dateStr = _receiptDate(r.date);
@@ -8741,7 +8838,7 @@ function buildReceiptHTML(r){
     + '<body style="margin:0;background:#f4f4f6;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;color:#1a1a1a;">'
     + '<div style="max-width:640px;margin:24px auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,.08);">'
     // Header band
-    + '<div style="background:#2d1b57;color:#fff;padding:26px 30px;">'
+    + '<div style="background:'+_docAccent+';color:'+_docAccentText+';padding:26px 30px;">'
     +   logoHtml
     +   '<div style="font-size:22px;font-weight:800;letter-spacing:.2px;">'+esc(orgName)+'</div>'
     +   '<div style="font-size:13px;opacity:.85;margin-top:3px;">Transportation Service Receipt</div>'
@@ -8769,20 +8866,20 @@ function buildReceiptHTML(r){
     + '<div style="padding:10px 30px 24px;">'
     +   ((_rtip>0)?'<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:14px;color:#333;"><span>Fare</span><span>$'+amt.toFixed(2)+'</span></div>':'')
     +   ((_rtip>0)?'<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:14px;color:#333;"><span>Tip</span><span>$'+_rtip.toFixed(2)+'</span></div>':'')
-    +   ((amt>0||_rtip>0)?'<div style="display:flex;justify-content:space-between;align-items:center;border-top:2px solid #2d1b57;padding-top:12px;margin-top:6px;">'
+    +   ((amt>0||_rtip>0)?'<div style="display:flex;justify-content:space-between;align-items:center;border-top:2px solid '+_docAccent+';padding-top:12px;margin-top:6px;">'
     +     '<div style="font-size:16px;font-weight:800;color:#1a1a1a;">TOTAL PAID</div>'
-    +     '<div style="font-size:20px;font-weight:800;color:#2d1b57;">$'+(amt+_rtip).toFixed(2)+'</div></div>':'')
+    +     '<div style="font-size:20px;font-weight:800;color:'+_docAccent+';">$'+(amt+_rtip).toFixed(2)+'</div></div>':'')
     +   (r.payment?'<div style="margin-top:8px;font-size:13px;color:#2e7d32;font-weight:600;">\u2713 Fare paid via '+esc(r.payment)+'</div>':'')
     +   ((_rtip>0 && _rtipVia && _rtipVia!==r.payment)?'<div style="margin-top:3px;font-size:13px;color:#2e7d32;font-weight:600;">\u2713 Tip paid via '+esc(_rtipVia)+'</div>':'')
     + '</div>'
     // Footer
-    + '<div style="background:#faf9fc;padding:16px 30px;border-top:1px solid #eee;font-size:12px;color:#999;text-align:center;">'
+    + '<div style="background:#f7f7f8;padding:16px 30px;border-top:1px solid #eee;font-size:12px;color:#999;text-align:center;">'
     +   'Thank you for riding with '+esc(bizName||'NWDA')+'. &middot; Keep this receipt for your records.'
     + '</div>'
     + '</div>'
     // Print button (hidden when printed)
     + '<div style="max-width:640px;margin:0 auto 30px;text-align:center;" class="no-print">'
-    +   '<button onclick="window.print()" style="background:#2d1b57;color:#fff;border:none;border-radius:8px;padding:12px 28px;font-size:15px;font-weight:700;cursor:pointer;">\uD83D\uDCC4 Save as PDF / Print</button>'
+    +   '<button onclick="window.print()" style="background:'+_docAccent+';color:'+_docAccentText+';border:none;border-radius:8px;padding:12px 28px;font-size:15px;font-weight:700;cursor:pointer;">\uD83D\uDCC4 Save as PDF / Print</button>'
     +   '<div style="font-size:12px;color:#999;margin-top:8px;">Tap to save this as a PDF you can email or upload for reimbursement.</div>'
     + '</div>'
     + '<style>@media print{.no-print{display:none!important;}body{background:#fff!important;}}</style>'
@@ -13262,6 +13359,7 @@ function _onbCardUploadPick(input){
 }
 var _onbGeneratedCard = null; // generated driver card (base64) for save
 var _onbLogoData = null;   // holds uploaded business logo (base64) for save
+var _onbLogoAccentColor = null;   // extracted brand color from the logo, cached for save (see extractDominantColorFromDataUri)
 var _onbBooksClients = null;   // holds the Yes/No selection for "booking your own clients" until save
 // Shared by all four "pick an image and read it" flows below (onboarding logo, onboarding
 // selfie, profile business logo, profile day-of selfie) - the actual file-picking, reading,
@@ -13269,6 +13367,86 @@ var _onbBooksClients = null;   // holds the Yes/No selection for "booking your o
 // with the resulting data URL afterward. Falls back to the unresized data on any canvas
 // failure rather than losing the pick entirely - the safer of the two behaviors that existed
 // before this (one caller already did this, one didn't; now both do).
+// Extracts a genuine, representative "brand color" from a logo image - used to theme a
+// driver's own quotes and receipts around their actual logo instead of NWDA's fixed purple,
+// so a driver whose branding is a completely different color scheme doesn't get a document
+// that visually clashes with everything else they send a client. Works on any data-URI (which
+// is what every uploaded logo actually is - see onbLogoData below) with zero CORS risk, since
+// a data-URI is never fetched cross-origin at all.
+//
+// Deliberately picks the most frequent SUFFICIENTLY VIVID color, not a flat average of every
+// pixel - a plain average of a logo with white background and one bold accent color would
+// wash out into a muddy, unusable gray. Skips near-white/near-black/near-transparent pixels
+// entirely first (almost always background, not brand color), then quantizes what's left into
+// coarse buckets and picks whichever bucket both appears often AND is actually saturated
+// enough to read as an intentional color choice, not noise.
+function extractDominantColorFromDataUri(dataUri){
+  return new Promise(function(resolve){
+    if(!dataUri || typeof dataUri!=='string' || dataUri.indexOf('data:image')!==0){ resolve(null); return; }
+    try{
+      var img = new Image();
+      img.onload = function(){
+        try{
+          var size = 48; // small and fast - a brand color doesn't need full resolution to find
+          var cv = document.createElement('canvas'); cv.width=size; cv.height=size;
+          var ctx = cv.getContext('2d');
+          ctx.drawImage(img, 0, 0, size, size);
+          var data = ctx.getImageData(0, 0, size, size).data;
+          var buckets = {};
+          for(var i=0; i<data.length; i+=4){
+            var r=data[i], g=data[i+1], b=data[i+2], a=data[i+3];
+            if(a<128) continue; // transparent - not part of the visible mark at all
+            var max=Math.max(r,g,b), min=Math.min(r,g,b);
+            if(max>235 && min>200) continue; // near-white background
+            if(max<25) continue; // near-black - usually outline/text, not the brand color
+            var sat = max===0 ? 0 : (max-min)/max;
+            var key = Math.round(r/24)+','+Math.round(g/24)+','+Math.round(b/24);
+            if(!buckets[key]) buckets[key] = {r:0,g:0,b:0,n:0,satSum:0};
+            buckets[key].r+=r; buckets[key].g+=g; buckets[key].b+=b; buckets[key].n++; buckets[key].satSum+=sat;
+          }
+          var best=null, bestScore=-1;
+          Object.keys(buckets).forEach(function(k){
+            var bk=buckets[k]; var avgSat=bk.satSum/bk.n;
+            // A bucket has to be both common AND at least modestly saturated to count as "the"
+            // brand color - a huge, common but low-saturation bucket (soft gray, cream) is
+            // exactly the kind of near-background color already meant to be screened out.
+            if(avgSat<0.18) return;
+            var score = bk.n*avgSat;
+            if(score>bestScore){ bestScore=score; best=bk; }
+          });
+          if(!best){ resolve(null); return; }
+          var rr=Math.round(best.r/best.n), gg=Math.round(best.g/best.n), bb=Math.round(best.b/best.n);
+          resolve('#'+[rr,gg,bb].map(function(v){ return v.toString(16).padStart(2,'0'); }).join(''));
+        }catch(e){ resolve(null); }
+      };
+      img.onerror = function(){ resolve(null); };
+      img.src = dataUri;
+    }catch(e){ resolve(null); }
+  });
+}
+// WCAG-style relative luminance, used to decide whether white or near-black text stays
+// readable against a given extracted color - an extracted color could just as easily be a
+// bright yellow (needs dark text) as a deep navy (needs white text), so this can't be assumed.
+function _readableTextOn(hex){
+  if(!hex) return '#fff';
+  var m = /^#([0-9a-f]{6})$/i.exec(hex); if(!m) return '#fff';
+  var n = parseInt(m[1],16);
+  var r=(n>>16)&255, g=(n>>8)&255, b=n&255;
+  var lum = (0.299*r+0.587*g+0.114*b)/255;
+  return lum>0.6 ? '#1a1a1a' : '#fff';
+}
+// Blends a color toward white for a light, decorative background tint (e.g. a small badge
+// pill) - so a badge stays visually related to the document's real accent color instead of
+// staying a flat, hardcoded light-purple regardless of what that accent actually is.
+function _tintColor(hex, amount){
+  var m = /^#([0-9a-f]{6})$/i.exec(hex||''); if(!m) return '#f3eeff';
+  var n = parseInt(m[1],16);
+  var r=(n>>16)&255, g=(n>>8)&255, b=n&255;
+  var t = amount==null ? 0.88 : amount;
+  var rr=Math.round(r+(255-r)*t), gg=Math.round(g+(255-g)*t), bb=Math.round(b+(255-b)*t);
+  return '#'+[rr,gg,bb].map(function(v){ return v.toString(16).padStart(2,'0'); }).join('');
+}
+
 function _pickAndReadImage(opts){
   opts = opts || {};
   var resize = !!opts.resize;
@@ -13299,12 +13477,17 @@ function _pickAndReadImage(opts){
   setTimeout(function(){ try{ document.body.removeChild(inp); }catch(e){} }, cleanupDelayMs);
 }
 function _onbUploadLogo(){
-  _pickAndReadImage({ resize:true, cleanupDelayMs:1000, onResult:function(dataUrl){
+  _pickAndReadImage({ resize:true, cleanupDelayMs:1000, onResult: async function(dataUrl){
     _onbLogoData = dataUrl;
     var prev=document.getElementById('onb-logo-preview');
     if(prev){ prev.style.backgroundImage='url('+_onbLogoData+')'; prev.textContent=''; }
     var st=document.getElementById('onb-logo-status');
     if(st) st.textContent='Logo selected \u2713';
+    // Extracted here, not at every quote/receipt generation - a driver's brand color doesn't
+    // change between rides, so there's no reason to redo this work over and over. By the time
+    // they actually tap Save (they still have the rest of the form ahead of them), this has
+    // already finished.
+    try{ _onbLogoAccentColor = await extractDominantColorFromDataUri(dataUrl); }catch(e){ _onbLogoAccentColor = null; }
   }});
 }
 function _onbConfMode(){
@@ -13500,6 +13683,7 @@ function openOnboarding(){
   ['premium','traffic','holiday','christmas','fuel'].forEach(function(t){ var el=document.getElementById('onb-auto-'+t); if(el) el.checked = !driverAutoOffFor(dn,t); });
   // Prefill logo preview from profile if set
   _onbLogoData = prof.logo || null;
+  _onbLogoAccentColor = prof.logoAccentColor || null;
   var _logoPrev = document.getElementById('onb-logo-preview');
   if(_logoPrev){
     if(prof.logo){ _logoPrev.style.backgroundImage='url('+prof.logo+')'; _logoPrev.textContent=''; }
@@ -13671,6 +13855,7 @@ async function saveOnboarding(){
   // Receipt branding (business name + logo) — optional
   if(gv('onb-bizname')) p.businessName = gv('onb-bizname');
   if(_onbLogoData) p.logo = _onbLogoData;
+  if(_onbLogoAccentColor) p.logoAccentColor = _onbLogoAccentColor;
 
   // Payment methods
   var chosen = [];
@@ -15148,6 +15333,31 @@ async function _migrateVenmoHandles(){
     await storageSet('kat:driverVenmo', driverVenmo);
     await storageSet('kat:venmoFix421', true);
   }catch(e){ console.warn('venmo migration failed', e); }
+}
+
+// Backfills a brand accent color for every driver profile that already has a logo uploaded
+// but no cached color yet (which is every profile, until this feature existed) - so existing
+// drivers get themed quotes and receipts without needing to re-upload anything. Self-limiting:
+// once a profile has both logo and logoAccentColor, it's simply skipped on every future run,
+// no separate "already migrated" flag needed at all. Runs in the background after startup,
+// never blocking the app, and never overwrites a color someone's logo already resolved to.
+async function _backfillLogoAccentColors(){
+  try{
+    if(typeof DRIVER_PROFILES!=='object' || !DRIVER_PROFILES) return;
+    var names = Object.keys(DRIVER_PROFILES).filter(function(n){
+      var p=DRIVER_PROFILES[n];
+      return p && p.logo && !p.logoAccentColor;
+    });
+    if(!names.length) return;
+    var changed = false;
+    for(var i=0;i<names.length;i++){
+      try{
+        var color = await extractDominantColorFromDataUri(DRIVER_PROFILES[names[i]].logo);
+        if(color){ DRIVER_PROFILES[names[i]].logoAccentColor = color; changed = true; }
+      }catch(e){ /* skip this one, keep going */ }
+    }
+    if(changed){ await storageSet('kat:driverProfiles', DRIVER_PROFILES); }
+  }catch(e){ console.warn('logo accent color backfill failed', e); }
 }
 
 // ── ADMIN-ADDED DRIVERS ──────────────────────────────────────────────────
