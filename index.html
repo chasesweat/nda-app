@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202607241751">
+<meta name="version" content="202607241753">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -3118,16 +3118,20 @@ async function _fixManualAdjustmentRide(rideId){
   var oldPrice = parseFloat(r.price)||0;
   if(!confirm('Change '+(r.client||'this ride')+'\u2019s saved price from $'+oldPrice.toFixed(2)+' to $'+rebuild.total.toFixed(2)+'? This is a real change to what\u2019s on file for this ride.')) return;
   r.price = rebuild.total;
+  // Deliberately does NOT touchRide() - this is a background admin-review action, not
+  // something meaningful that happened to the ride itself, and per Chase's own call it
+  // doesn't belong in the ride's visible trail/history. adjReviewed still tracks that this
+  // was reviewed (so it isn't flagged again), just silently, not as a "Last: ..." entry.
   r.adjReviewed = true;
-  touchRide(r, 'Manual adjustment reviewed \u2014 price corrected to $'+rebuild.total.toFixed(2));
   try{ await saveRides(); }catch(e){}
   showToast('\u2705 Fixed \u2014 '+(r.client||'ride')+' now $'+rebuild.total.toFixed(2));
   try{ _renderManualAdjustmentScan(); }catch(e){}
 }
 async function _acceptManualAdjustmentRide(rideId){
   var r=_rideById(rideId); if(!r) return;
+  // Same reasoning as _fixManualAdjustmentRide above, even more so here - nothing about the
+  // ride actually changed at all, so there's genuinely nothing worth surfacing in its trail.
   r.adjReviewed = true;
-  touchRide(r, 'Manual adjustment reviewed \u2014 accepted as-is');
   try{ await saveRides(); }catch(e){}
   showToast('\u2713 Accepted \u2014 won\u2019t be flagged again');
   try{ _renderManualAdjustmentScan(); }catch(e){}
@@ -6233,17 +6237,19 @@ function buildColorVaultPanel(){
               : '<span style="font-size:.66rem;color:var(--mid);white-space:nowrap;">'+escHtml(meta)+'</span>'))
       +'</div>';
   }).join('');
-  return '<div style="border:1px solid var(--light);border-radius:10px;padding:.85rem;margin-bottom:1rem;background:var(--surface);">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.35rem;">'
+  return '<details style="border:1px solid var(--light);border-radius:10px;padding:0;margin-bottom:1rem;background:var(--surface);overflow:hidden;">'
+    +'<summary style="cursor:pointer;padding:.85rem;display:flex;align-items:center;justify-content:space-between;gap:.5rem;list-style:none;">'
     +'<div style="font-size:.8rem;font-weight:700;color:var(--black);">\uD83C\uDFA8 Driver color code vault '+mtipDot('color-vault','Each driver\u2019s official saved colour. \u201cNot saved\u201d just means nobody\u2019s locked it in yet \u2014 tap Save on one driver, or Save all to lock in everyone\u2019s current colour at once. A Reset button appears if a live colour ever drifts from its saved code.')+'</div>'
-    +'<div style="display:flex;gap:.35rem;">'
-    +'<button onclick="saveAllColorsToVault()" style="font-size:.7rem;padding:4px 10px;border-radius:8px;border:none;background:var(--gold);color:#fff;font-family:\'DM Sans\',sans-serif;font-weight:700;cursor:pointer;white-space:nowrap;">Save all</button>'
-    +'<button onclick="copyColorVault()" style="font-size:.7rem;padding:4px 10px;border-radius:8px;border:1px solid var(--gold);background:none;color:var(--gold);font-family:\'DM Sans\',sans-serif;font-weight:700;cursor:pointer;white-space:nowrap;">Copy all codes</button>'
+    +'<div style="display:flex;gap:.35rem;flex-shrink:0;">'
+    +'<button onclick="event.stopPropagation();saveAllColorsToVault()" style="font-size:.7rem;padding:4px 10px;border-radius:8px;border:none;background:var(--gold);color:#fff;font-family:\'DM Sans\',sans-serif;font-weight:700;cursor:pointer;white-space:nowrap;">Save all</button>'
+    +'<button onclick="event.stopPropagation();copyColorVault()" style="font-size:.7rem;padding:4px 10px;border-radius:8px;border:1px solid var(--gold);background:none;color:var(--gold);font-family:\'DM Sans\',sans-serif;font-weight:700;cursor:pointer;white-space:nowrap;">Copy all codes</button>'
     +'</div>'
-    +'</div>'
+    +'</summary>'
+    +'<div style="padding:0 .85rem .85rem;">'
     +'<div style="font-size:.72rem;color:var(--mid);line-height:1.5;margin-bottom:.6rem;">The official hex for each driver. A code is saved automatically whenever someone changes a colour on purpose \u2014 for anyone showing <strong>not saved</strong>, the hex beside them is just their current live colour, so tap <strong>Save</strong> (or <strong>Save all</strong>) to lock it in. If a live colour later drifts from its saved code, a <span style="color:#dc2626;font-weight:700;">Reset</span> button appears to restore it.</div>'
     +rows
-    +'</div>';
+    +'</div>'
+    +'</details>';
 }
 
 // Returns '#fff' or a dark color — whichever is actually more readable on the given
