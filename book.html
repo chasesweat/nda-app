@@ -19,9 +19,19 @@
   .screen.active{display:flex;}
   @keyframes fade{from{opacity:0;}to{opacity:1;}}
 
-  .topbar{background:var(--black); color:#fff; padding:1.4rem 1.25rem 1.1rem; flex-shrink:0;}
-  .brand{font-family:Georgia,serif; font-size:1.2rem; color:var(--gold); letter-spacing:.4px;}
-  .sub{font-size:.76rem; color:#b9adcf; margin-top:.2rem;}
+  .topbar{background:var(--black); color:#fff; padding:1.4rem 1.25rem 1.1rem; flex-shrink:0;
+    display:flex; align-items:center; gap:.7rem;}
+  .topbar-logo{flex-shrink:0; width:38px; height:38px; border-radius:9px; overflow:hidden;
+    display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.1);}
+  .topbar-logo img{width:100%; height:100%; object-fit:cover; display:block;}
+  .topbar-logo .ini{font-size:.85rem; font-weight:800; color:#fff; letter-spacing:.5px;}
+  .topbar-text{min-width:0;}
+  /* --brand-on-dark is the accent colour LIGHTENED until it is actually legible against the dark
+     topbar. --gold is the raw accent and stays correct for buttons on white; using it here put
+     dark-on-dark text in the header for any driver whose logo colour happens to be dark. */
+  .brand{font-family:Georgia,serif; font-size:1.2rem; color:var(--brand-on-dark,var(--gold));
+    letter-spacing:.4px; overflow-wrap:anywhere;}
+  .sub{font-size:.76rem; color:#c9c0da; margin-top:.2rem;}
 
   .driver-hero{
     display:flex; flex-direction:column; align-items:center; text-align:center;
@@ -60,6 +70,31 @@
   .field input:focus, .field textarea:focus{outline:none; border-color:var(--gold);}
   .row2{display:flex; gap:.7rem;}
   .row2 .field{flex:1;}
+  .row3{display:flex; gap:.5rem;}
+  .row3 .field{flex:1;}
+  .row3 .field label{font-size:.62rem;}
+  .field select{
+    width:100%; padding:.75rem .85rem; border:1.5px solid var(--light); border-radius:10px;
+    font-family:inherit; font-size:.92rem; color:var(--black); background:#fff; -webkit-appearance:none;
+    appearance:none; background-image:linear-gradient(45deg,transparent 50%,var(--mid) 50%),linear-gradient(135deg,var(--mid) 50%,transparent 50%);
+    background-position:calc(100% - 18px) calc(1em + 2px),calc(100% - 13px) calc(1em + 2px);
+    background-size:5px 5px,5px 5px; background-repeat:no-repeat;
+  }
+  .field select:focus{outline:none; border-color:var(--gold);}
+  .hint{font-size:.68rem; color:var(--mid); margin-top:.3rem; line-height:1.4;}
+  .section-lbl{
+    font-size:.66rem; font-weight:700; color:var(--mid); text-transform:uppercase; letter-spacing:.8px;
+    margin:1.4rem 0 .6rem; padding-bottom:.35rem; border-bottom:1px solid var(--light);
+  }
+  /* Two across on a phone; the labels are short enough to read at this size and it keeps the
+     whole type picker visible without scrolling, which matters because it gates the fields below. */
+  .type-grid{display:grid; grid-template-columns:1fr 1fr; gap:.45rem;}
+  .type-btn{
+    padding:.7rem .5rem; border:1.5px solid var(--light); border-radius:10px; background:#fff;
+    font-family:inherit; font-size:.78rem; font-weight:600; color:var(--black); cursor:pointer;
+    -webkit-tap-highlight-color:transparent; line-height:1.25;
+  }
+  .type-btn.active{background:var(--gold); border-color:var(--gold); color:var(--gold-text,#fff);}
   .field-error{border-color:#dc2626 !important;}
   .field-error-msg{font-size:.7rem; color:#dc2626; margin-top:.3rem;}
 
@@ -98,7 +133,7 @@
   <div class="screen" id="s-loading"><div class="loading-note">Loading…</div></div>
 
   <div class="screen" id="s-invalid">
-    <div class="topbar"><div class="brand">Northwest Drivers Association</div></div>
+    <div class="topbar"><div class="topbar-text"><div class="brand">Northwest Drivers Association</div></div></div>
     <div class="error-note">This booking link isn’t recognized. Please double-check the link, or contact your driver directly.</div>
   </div>
 
@@ -127,21 +162,89 @@
 
   <div class="screen" id="s-form">
     <div class="topbar">
-      <div class="brand" id="form-brandname">Northwest Drivers Association</div>
-      <div class="sub" id="form-sub-line"></div>
+      <div class="topbar-logo" id="form-logo"></div>
+      <div class="topbar-text">
+        <div class="brand" id="form-brandname">Northwest Drivers Association</div>
+        <div class="sub" id="form-sub-line"></div>
+      </div>
     </div>
     <div class="body">
       <div class="h1" id="form-title">Schedule a ride</div>
       <div class="h1-sub" id="form-sub">Fill in what you know — your driver confirms everything.</div>
+
+      <!-- Trip type drives which fields below are relevant, exactly as it does on the app's own
+           Quote page. The VALUES are the app's own strings (AP RUN, ROUND TRIP, ...) so a request
+           maps straight onto a real ride without anyone re-typing or translating it. -->
+      <div class="field">
+        <label>What kind of trip?</label>
+        <div class="type-grid" id="type-grid">
+          <button type="button" class="type-btn active" data-type="AP ROUND TRIP" onclick="pickType(this)">Airport round trip</button>
+          <button type="button" class="type-btn" data-type="AP RUN" onclick="pickType(this)">To the airport</button>
+          <button type="button" class="type-btn" data-type="AP PICK UP" onclick="pickType(this)">From the airport</button>
+          <button type="button" class="type-btn" data-type="ROUND TRIP" onclick="pickType(this)">Round trip</button>
+          <button type="button" class="type-btn" data-type="ONE WAY" onclick="pickType(this)">One way</button>
+          <button type="button" class="type-btn" data-type="MEDICAL" onclick="pickType(this)">Medical transport</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Vehicle preference</label>
+        <select id="f-vehicle">
+          <option value="">No preference</option>
+          <option value="Sedan">Sedan</option>
+          <option value="SUV/Van">SUV / Van</option>
+          <option value="Premium">Premium</option>
+          <option value="Sprinter Van">Sprinter Van</option>
+        </select>
+        <div class="hint">Your driver confirms what's available.</div>
+      </div>
+
       <div class="field"><label>Phone number</label><input id="f-phone" type="tel" placeholder="(770) 555-0134"></div>
       <div class="field"><label>Your name</label><input id="f-name" placeholder="e.g. Taylor Morgan"></div>
-      <div class="row2">
+      <div class="field"><label>Email (optional)</label><input id="f-email" type="email" placeholder="you@example.com"></div>
+
+      <div class="row2" id="datetime-row">
         <div class="field" id="date-field"><label>Date</label><input id="f-date" type="date"></div>
         <div class="field" id="time-field"><label>Time</label><input id="f-time" type="time"></div>
       </div>
-      <div class="field"><label>Pickup</label><input id="f-pickup" placeholder="Address or airport terminal"></div>
-      <div class="field"><label>Where to</label><input id="f-dest" placeholder="Destination"></div>
-      <div class="field"><label>Anything else? (optional)</label><textarea id="f-notes" rows="2" placeholder="Flight number, extra stops, number of passengers…"></textarea></div>
+
+      <!-- Return leg: only meaningful on the two round-trip types. -->
+      <div id="return-block" style="display:none;">
+        <div class="section-lbl">Return trip</div>
+        <div class="row2">
+          <div class="field"><label>Return date</label><input id="f-rt-date" type="date"></div>
+          <div class="field"><label>Return time</label><input id="f-rt-time" type="time"></div>
+        </div>
+      </div>
+
+      <!-- Flight details: only meaningful on the three airport types. -->
+      <div id="flight-block" style="display:none;">
+        <div class="section-lbl">Flight details</div>
+        <div class="row2">
+          <div class="field"><label>Flight #</label><input id="f-flight" placeholder="e.g. DL1234"></div>
+          <div class="field"><label>Terminal</label>
+            <select id="f-terminal">
+              <option value="">Not sure</option>
+              <option>North Domestic</option>
+              <option>South Domestic</option>
+              <option>International</option>
+            </select>
+          </div>
+        </div>
+        <div class="field" id="rt-flight-field" style="display:none;"><label>Return flight # (optional)</label><input id="f-rt-flight" placeholder="e.g. DL5678"></div>
+      </div>
+
+      <div class="field"><label id="pickup-lbl">Pickup</label><input id="f-pickup" placeholder="Address or airport terminal"></div>
+      <div class="field"><label id="dest-lbl">Where to</label><input id="f-dest" placeholder="Destination"></div>
+
+      <div class="section-lbl">Who and what's coming</div>
+      <div class="row3">
+        <div class="field"><label>Passengers</label><input id="f-pax" type="number" value="1" min="1" max="14"></div>
+        <div class="field"><label>Checked bags</label><input id="f-checked" type="number" value="0" min="0"></div>
+        <div class="field"><label>Carry-ons</label><input id="f-carryon" type="number" value="0" min="0"></div>
+      </div>
+
+      <div class="field"><label>Anything else? (optional)</label><textarea id="f-notes" rows="2" placeholder="Extra stops, car seats, wheelchair access, anything your driver should know…"></textarea></div>
       <div id="form-error" class="field-error-msg" style="display:none;margin-bottom:.8rem;"></div>
       <button class="btn-primary" onclick="submitRequest()" id="submit-btn">Send request</button>
       <button class="btn-ghost" onclick="goScreen('s-action')">← Back</button>
@@ -182,6 +285,42 @@ let fbDB = null;
 let driverLogin = '';
 let driverInfo = null;
 let requestType = 'schedule';
+let tripType = 'AP ROUND TRIP';
+
+// Which fields matter depends on the trip type, the same way it does on the app's Quote page.
+// Showing a client "Flight #" on a one-way across town, or a return date on a one-way, is how a
+// form teaches people to ignore it — and an ignored field is worse than an absent one, because
+// the driver then can't tell "blank because not applicable" from "blank because they skipped it".
+const AIRPORT_TYPES = ['AP ROUND TRIP','AP RUN','AP PICK UP'];
+const RETURN_TYPES  = ['AP ROUND TRIP','ROUND TRIP'];
+
+function pickType(btn){
+  tripType = btn.getAttribute('data-type');
+  document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  applyTypeVisibility();
+}
+
+function applyTypeVisibility(){
+  const isAir    = AIRPORT_TYPES.indexOf(tripType) >= 0;
+  const isReturn = RETURN_TYPES.indexOf(tripType) >= 0;
+  const isQuote  = requestType === 'quote';
+
+  document.getElementById('flight-block').style.display  = isAir ? 'block' : 'none';
+  document.getElementById('rt-flight-field').style.display = (isAir && isReturn) ? 'block' : 'none';
+  // A quote doesn't need dates at all, so the return block follows the same rule as the main one.
+  document.getElementById('return-block').style.display  = (isReturn && !isQuote) ? 'block' : 'none';
+  document.getElementById('datetime-row').style.display  = isQuote ? 'none' : 'flex';
+
+  // Name the two address fields for the direction actually being travelled. "Pickup / Where to"
+  // is ambiguous on an airport run — clients routinely put the airport in the wrong one.
+  const pu = document.getElementById('pickup-lbl');
+  const de = document.getElementById('dest-lbl');
+  if(tripType === 'AP RUN'){        pu.textContent = 'Pickup address';    de.textContent = 'Which airport'; }
+  else if(tripType === 'AP PICK UP'){ pu.textContent = 'Which airport';   de.textContent = 'Drop-off address'; }
+  else if(tripType === 'AP ROUND TRIP'){ pu.textContent = 'Home address'; de.textContent = 'Which airport'; }
+  else {                            pu.textContent = 'Pickup';            de.textContent = 'Where to'; }
+}
 
 function goScreen(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
@@ -230,29 +369,62 @@ function renderBranding(){
   // quotes and receipts (see extractDominantColorFromDataUri in the main app, cached on the
   // profile and synced here) - a client's booking page shouldn't look visually disconnected
   // from every other document that same driver sends them.
+  // WCAG relative luminance, and the contrast ratio between two colours. Used below to guarantee
+  // the brand name is legible rather than hoping the driver's logo colour happens to be light.
+  const _lin = (c)=>{ const v=c/255; return v<=0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4); };
+  const _lum = (r,g,b)=> 0.2126*_lin(r) + 0.7152*_lin(g) + 0.0722*_lin(b);
+  const _contrast = (l1,l2)=> (Math.max(l1,l2)+0.05) / (Math.min(l1,l2)+0.05);
+
   const accent = (driverInfo.logoAccentColor||'').trim();
   if(/^#[0-9a-f]{6}$/i.test(accent)){
     const m = /^#([0-9a-f]{6})$/i.exec(accent);
     const n = parseInt(m[1],16), r=(n>>16)&255, g=(n>>8)&255, b=n&255;
     const lum = (0.299*r+0.587*g+0.114*b)/255;
     const readable = lum>0.6 ? '#1a1a1a' : '#fff';
-    const tint = (amt)=>{ const t=amt==null?0.9:amt; const rr=Math.round(r+(255-r)*t), gg=Math.round(g+(255-g)*t), bb=Math.round(b+(255-b)*t); return '#'+[rr,gg,bb].map(v=>v.toString(16).padStart(2,'0')).join(''); };
+    const hex = (rr,gg,bb)=> '#'+[rr,gg,bb].map(v=>Math.round(v).toString(16).padStart(2,'0')).join('');
+    const tint = (amt)=>{ const t=amt==null?0.9:amt; return hex(r+(255-r)*t, g+(255-g)*t, b+(255-b)*t); };
+
+    // The topbar is var(--black) = #1a0d2e, which is very dark. Painting the raw accent on it is
+    // fine for a light logo colour and illegible for a dark one — a deep teal or navy renders as
+    // near-invisible text, which is exactly what happened for No Sweat Transportation Co.
+    // So: mix the accent toward white in small steps until it clears a real 4.5:1 contrast ratio
+    // against the topbar. A driver with a light accent gets their exact colour (the loop exits
+    // immediately); a driver with a dark one gets the lightest shade that still reads as THEIR
+    // colour rather than a flat white fallback that discards their branding entirely.
+    const bgLum = _lum(0x1a, 0x0d, 0x2e);
+    let onDark = accent;
+    for(let t=0; t<=1.001; t+=0.05){
+      const rr=r+(255-r)*t, gg=g+(255-g)*t, bb=b+(255-b)*t;
+      if(_contrast(_lum(rr,gg,bb), bgLum) >= 4.5){ onDark = hex(rr,gg,bb); break; }
+      if(t>=1) onDark = '#ffffff';   // unreachable in practice; white always clears it
+    }
+
     const root = document.documentElement.style;
     root.setProperty('--gold', accent);
     root.setProperty('--gold-pale', tint());
     root.setProperty('--accent', accent);
     root.setProperty('--accent-pale', tint());
     root.setProperty('--gold-text', readable);
+    root.setProperty('--brand-on-dark', onDark);
   }
 
   document.getElementById('hero-brandname').textContent = primary;
   document.getElementById('hero-provided').textContent = providedBy;
   const iconBox = document.getElementById('hero-icon');
+  const initials = displayName.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
   if(driverInfo.logo){
     iconBox.innerHTML = '<img src="'+esc(driverInfo.logo)+'" alt="logo">';
   } else {
-    const initials = displayName.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
     iconBox.innerHTML = '<div class="avatar">'+esc(initials||'?')+'</div>';
+  }
+  // The logo was only ever rendered on the first screen. The form is where a client spends the
+  // most time and where they decide whether this is a real business, so it carries the branding
+  // too — falling back to initials on the same tinted square when no logo is set.
+  const formLogo = document.getElementById('form-logo');
+  if(formLogo){
+    formLogo.innerHTML = driverInfo.logo
+      ? '<img src="'+esc(driverInfo.logo)+'" alt="'+esc(primary)+' logo">'
+      : '<span class="ini">'+esc(initials||'?')+'</span>';
   }
   document.getElementById('action-sub').textContent = 'Both options go straight to '+firstName+' \u2014 no waiting on hold.';
   document.getElementById('form-brandname').textContent = primary;
@@ -266,10 +438,9 @@ function goForm(type){
   document.getElementById('form-sub').textContent = isQuote
     ? 'Just the basics \u2014 your driver will text you pricing.'
     : 'Fill in what you know \u2014 your driver confirms everything.';
-  document.getElementById('date-field').style.display = isQuote ? 'none' : 'block';
-  document.getElementById('time-field').style.display = isQuote ? 'none' : 'block';
   document.getElementById('submit-btn').textContent = isQuote ? 'Request quote' : 'Send request';
   document.getElementById('form-error').style.display = 'none';
+  applyTypeVisibility();   // single source of truth for which fields are relevant
   goScreen('s-form');
 }
 
@@ -287,6 +458,18 @@ async function submitRequest(){
   const date = document.getElementById('f-date').value;
   const time = document.getElementById('f-time').value;
   const notes = document.getElementById('f-notes').value.trim();
+  const email = document.getElementById('f-email').value.trim();
+  const vehicle = document.getElementById('f-vehicle').value;
+  const flight = document.getElementById('f-flight').value.trim();
+  const terminal = document.getElementById('f-terminal').value;
+  const rtFlight = document.getElementById('f-rt-flight').value.trim();
+  const rtDate = document.getElementById('f-rt-date').value;
+  const rtTime = document.getElementById('f-rt-time').value;
+  const pax = parseInt(document.getElementById('f-pax').value) || 1;
+  const checkedBags = parseInt(document.getElementById('f-checked').value) || 0;
+  const carryOnBags = parseInt(document.getElementById('f-carryon').value) || 0;
+  const isAir = AIRPORT_TYPES.indexOf(tripType) >= 0;
+  const isRet = RETURN_TYPES.indexOf(tripType) >= 0;
 
   if(!name || !phone){ showFormError('Please enter your name and phone number.'); return; }
   document.getElementById('form-error').style.display = 'none';
@@ -294,15 +477,32 @@ async function submitRequest(){
   const btn = document.getElementById('submit-btn');
   btn.disabled = true; btn.textContent = 'Sending\u2026';
 
+  // Field names match the app's own ride record (type, vehicle, flight, terminal, pax,
+  // checkedBags, carryOnBags, rtDate, rtTime, rtFlight) so a request drops onto a real ride
+  // without anyone re-keying or translating it. Fields that don't apply to the chosen trip type
+  // are sent empty rather than with stale values from a type the client switched away from —
+  // otherwise picking "airport round trip", typing a flight number, then switching to "one way"
+  // would quietly send a flight number for a trip that has no flight.
   const record = {
     loginName: driverLogin,
     requestType: requestType,
     clientName: name,
     clientPhone: phone,
+    clientEmail: email,
+    type: tripType,
+    vehicle: vehicle,
     pickup: pickup,
     destination: dest,
     date: date,
     time: time,
+    rtDate: isRet ? rtDate : '',
+    rtTime: isRet ? rtTime : '',
+    flight: isAir ? flight : '',
+    terminal: isAir ? terminal : '',
+    rtFlight: (isAir && isRet) ? rtFlight : '',
+    pax: pax,
+    checkedBags: checkedBags,
+    carryOnBags: carryOnBags,
     notes: notes,
     status: 'pending',
     submittedAt: Date.now()
