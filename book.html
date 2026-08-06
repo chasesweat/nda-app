@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Book a Ride</title>
+<style>
+  :root{
+    --black:#1a0d2e; --white:#fdfcff; --gold:#7c3aed; --gold-pale:#f3eeff;
+    --mid:#463c5f; --light:#e2d9f3; --surface:#f7f3ff; --accent:#0f766e; --accent-pale:#e6f5f3;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:'DM Sans',-apple-system,sans-serif; background:var(--white);
+    color:var(--black); min-height:100vh;
+  }
+  .wrap{max-width:480px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column;}
+  .screen{display:none; flex-direction:column; flex:1; animation:fade .2s ease;}
+  .screen.active{display:flex;}
+  @keyframes fade{from{opacity:0;}to{opacity:1;}}
+
+  .topbar{background:var(--black); color:#fff; padding:1.4rem 1.25rem 1.1rem; flex-shrink:0;}
+  .brand{font-family:Georgia,serif; font-size:1.2rem; color:var(--gold); letter-spacing:.4px;}
+  .sub{font-size:.76rem; color:#b9adcf; margin-top:.2rem;}
+
+  .driver-hero{
+    display:flex; flex-direction:column; align-items:center; text-align:center;
+    padding:2rem 1.25rem 1.75rem; background:var(--surface); border-bottom:1px solid var(--light);
+  }
+  .driver-hero img{width:60px; height:60px; border-radius:14px; object-fit:cover; margin-bottom:.7rem; box-shadow:0 6px 16px rgba(0,0,0,.15);}
+  .driver-hero .avatar{
+    width:60px; height:60px; border-radius:50%; background:var(--accent); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-weight:800; font-size:1.3rem;
+    margin-bottom:.7rem; box-shadow:0 6px 16px rgba(0,0,0,.15);
+  }
+  .driver-hero .bname{font-size:1.15rem; font-weight:800; color:var(--black);}
+  .driver-hero .provided{font-size:.78rem; color:var(--mid); margin-top:.25rem;}
+  .driver-hero .tag{font-size:.74rem; color:var(--mid); margin-top:.4rem;}
+
+  .body{padding:1.5rem 1.25rem; flex:1;}
+  .h1{font-size:1.15rem; font-weight:800; margin:0 0 .3rem;}
+  .h1-sub{font-size:.82rem; color:var(--mid); margin:0 0 1.4rem; line-height:1.5;}
+
+  .action-grid{display:flex; flex-direction:column; gap:.8rem;}
+  .action-card{
+    padding:1.15rem; border-radius:16px; border:1.5px solid var(--light); cursor:pointer;
+    display:flex; align-items:center; gap:1rem; -webkit-tap-highlight-color:transparent;
+  }
+  .action-card:active{background:var(--gold-pale); border-color:var(--gold);}
+  .action-icon{font-size:1.7rem;}
+  .action-title{font-weight:800; font-size:1rem;}
+  .action-desc{font-size:.78rem; color:var(--mid); margin-top:2px;}
+
+  .field{margin-bottom:1rem;}
+  .field label{display:block; font-size:.7rem; font-weight:700; color:var(--mid); text-transform:uppercase; letter-spacing:.6px; margin-bottom:.4rem;}
+  .field input, .field textarea{
+    width:100%; padding:.75rem .85rem; border:1.5px solid var(--light); border-radius:10px;
+    font-family:inherit; font-size:.92rem; color:var(--black); background:#fff;
+  }
+  .field input:focus, .field textarea:focus{outline:none; border-color:var(--gold);}
+  .row2{display:flex; gap:.7rem;}
+  .row2 .field{flex:1;}
+  .field-error{border-color:#dc2626 !important;}
+  .field-error-msg{font-size:.7rem; color:#dc2626; margin-top:.3rem;}
+
+  .btn-primary{
+    width:100%; padding:.95rem; background:var(--gold); color:var(--gold-text,#fff); border:none; border-radius:12px;
+    font-family:inherit; font-size:.95rem; font-weight:700; cursor:pointer; margin-top:.5rem;
+  }
+  .btn-primary:disabled{opacity:.6; cursor:default;}
+  .btn-ghost{
+    width:100%; padding:.75rem; background:none; color:var(--mid); border:none;
+    font-family:inherit; font-size:.85rem; cursor:pointer; margin-top:.6rem;
+  }
+
+  .confirm-wrap{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:2rem 1.5rem;}
+  .confirm-check{
+    width:64px; height:64px; border-radius:50%; background:var(--accent-pale); color:var(--accent);
+    display:flex; align-items:center; justify-content:center; font-size:1.8rem; margin-bottom:1.2rem;
+  }
+  .confirm-title{font-size:1.15rem; font-weight:800; margin-bottom:.6rem;}
+  .confirm-body{font-size:.88rem; color:var(--mid); line-height:1.6; max-width:300px;}
+  .confirm-note{
+    margin-top:1.5rem; padding:.8rem 1rem; background:var(--surface); border-radius:10px;
+    font-size:.76rem; color:var(--mid); line-height:1.5; max-width:300px;
+  }
+  .error-note{
+    margin:1.5rem 1.25rem; padding:1rem; background:#fef2f2; border:1.5px solid #fecaca;
+    border-radius:12px; font-size:.85rem; color:#991b1b; line-height:1.5; text-align:center;
+  }
+  .loading-note{padding:3rem 1.5rem; text-align:center; color:var(--mid); font-size:.88rem;}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <div class="screen" id="s-loading"><div class="loading-note">Loading\u2026</div></div>
+
+  <div class="screen" id="s-invalid">
+    <div class="topbar"><div class="brand">Northwest Drivers Association</div></div>
+    <div class="error-note">This booking link isn\u2019t recognized. Please double-check the link, or contact your driver directly.</div>
+  </div>
+
+  <div class="screen" id="s-action">
+    <div class="driver-hero">
+      <div id="hero-icon"></div>
+      <div class="bname" id="hero-brandname"></div>
+      <div class="provided" id="hero-provided"></div>
+      <div class="tag">personal booking link &middot; no account needed</div>
+    </div>
+    <div class="body">
+      <div class="h1">What do you need?</div>
+      <div class="h1-sub" id="action-sub">Both options go straight to your driver \u2014 no waiting on hold.</div>
+      <div class="action-grid">
+        <div class="action-card" onclick="goForm('schedule')">
+          <div class="action-icon">\ud83d\udcc5</div>
+          <div><div class="action-title">Schedule a ride</div><div class="action-desc">I know the date, time, and where I\u2019m going</div></div>
+        </div>
+        <div class="action-card" onclick="goForm('quote')">
+          <div class="action-icon">\ud83d\udcac</div>
+          <div><div class="action-title">Request a quote</div><div class="action-desc">Just want pricing before I decide</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="screen" id="s-form">
+    <div class="topbar">
+      <div class="brand" id="form-brandname">Northwest Drivers Association</div>
+      <div class="sub" id="form-sub-line"></div>
+    </div>
+    <div class="body">
+      <div class="h1" id="form-title">Schedule a ride</div>
+      <div class="h1-sub" id="form-sub">Fill in what you know \u2014 your driver confirms everything.</div>
+      <div class="field"><label>Phone number</label><input id="f-phone" type="tel" placeholder="(770) 555-0134"></div>
+      <div class="field"><label>Your name</label><input id="f-name" placeholder="e.g. Taylor Morgan"></div>
+      <div class="row2">
+        <div class="field" id="date-field"><label>Date</label><input id="f-date" type="date"></div>
+        <div class="field" id="time-field"><label>Time</label><input id="f-time" type="time"></div>
+      </div>
+      <div class="field"><label>Pickup</label><input id="f-pickup" placeholder="Address or airport terminal"></div>
+      <div class="field"><label>Where to</label><input id="f-dest" placeholder="Destination"></div>
+      <div class="field"><label>Anything else? (optional)</label><textarea id="f-notes" rows="2" placeholder="Flight number, extra stops, number of passengers\u2026"></textarea></div>
+      <div id="form-error" class="field-error-msg" style="display:none;margin-bottom:.8rem;"></div>
+      <button class="btn-primary" onclick="submitRequest()" id="submit-btn">Send request</button>
+      <button class="btn-ghost" onclick="goScreen('s-action')">\u2190 Back</button>
+    </div>
+  </div>
+
+  <div class="screen" id="s-confirm">
+    <div class="confirm-wrap">
+      <div class="confirm-check">\u2713</div>
+      <div class="confirm-title" id="confirm-title">Request sent!</div>
+      <div class="confirm-body" id="confirm-body"></div>
+      <div class="confirm-note">This doesn\u2019t book the ride yet \u2014 your driver reviews it and sends you a real confirmation once it\u2019s on the calendar.</div>
+      <button class="btn-ghost" onclick="goScreen('s-action')">Submit another request</button>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script>
+// Same project as the main app - the config itself isn't secret (Firebase security comes from
+// server-side rules, not from hiding these keys). This page only ever WRITES to one narrow,
+// dedicated location (kat/clientRequests) and READS from one narrow, deliberately public-safe
+// one (kat/publicDriverDirectory) - never anything else the real app's data lives in.
+const firebaseConfig = {
+  apiKey: "AIzaSyAfJLWQwemBO2VqxL8RYmvmDZ1LTzTE-g4",
+  authDomain: "nda-transportation.firebaseapp.com",
+  databaseURL: "https://nda-transportation-default-rtdb.firebaseio.com",
+  projectId: "nda-transportation",
+  storageBucket: "nda-transportation.firebasestorage.app",
+  messagingSenderId: "585911670194",
+  appId: "1:585911670194:web:746a9fa4d97a9171cc40ab"
+};
+
+let fbDB = null;
+let driverLogin = '';
+let driverInfo = null;
+let requestType = 'schedule';
+
+function goScreen(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+async function init(){
+  const params = new URLSearchParams(location.search);
+  driverLogin = (params.get('d')||'').trim().toLowerCase();
+  if(!driverLogin){ goScreen('s-invalid'); return; }
+
+  try{
+    firebase.initializeApp(firebaseConfig);
+    fbDB = firebase.database();
+    await firebase.auth().signInAnonymously();
+  }catch(e){
+    console.warn('Firebase init failed:', e.message);
+    goScreen('s-invalid');
+    return;
+  }
+
+  try{
+    const snap = await fbDB.ref('nda/kat/publicDriverDirectory/'+driverLogin).once('value');
+    if(!snap.exists()){ goScreen('s-invalid'); return; }
+    driverInfo = snap.val();
+  }catch(e){
+    console.warn('Directory lookup failed:', e.message);
+    goScreen('s-invalid');
+    return;
+  }
+
+  renderBranding();
+  goScreen('s-action');
+}
+
+function renderBranding(){
+  const displayName = driverInfo.displayName || 'your driver';
+  const bizName = (driverInfo.businessName||'').trim();
+  const primary = bizName || 'Northwest Drivers Association';
+  const providedBy = bizName ? ('Provided by '+displayName) : ('Your driver: '+displayName);
+  const firstName = displayName.split(' ')[0];
+
+  // Themed around the driver's own logo color, same reasoning and same fallback as their
+  // quotes and receipts (see extractDominantColorFromDataUri in the main app, cached on the
+  // profile and synced here) - a client's booking page shouldn't look visually disconnected
+  // from every other document that same driver sends them.
+  const accent = (driverInfo.logoAccentColor||'').trim();
+  if(/^#[0-9a-f]{6}$/i.test(accent)){
+    const m = /^#([0-9a-f]{6})$/i.exec(accent);
+    const n = parseInt(m[1],16), r=(n>>16)&255, g=(n>>8)&255, b=n&255;
+    const lum = (0.299*r+0.587*g+0.114*b)/255;
+    const readable = lum>0.6 ? '#1a1a1a' : '#fff';
+    const tint = (amt)=>{ const t=amt==null?0.9:amt; const rr=Math.round(r+(255-r)*t), gg=Math.round(g+(255-g)*t), bb=Math.round(b+(255-b)*t); return '#'+[rr,gg,bb].map(v=>v.toString(16).padStart(2,'0')).join(''); };
+    const root = document.documentElement.style;
+    root.setProperty('--gold', accent);
+    root.setProperty('--gold-pale', tint());
+    root.setProperty('--accent', accent);
+    root.setProperty('--accent-pale', tint());
+    root.setProperty('--gold-text', readable);
+  }
+
+  document.getElementById('hero-brandname').textContent = primary;
+  document.getElementById('hero-provided').textContent = providedBy;
+  const iconBox = document.getElementById('hero-icon');
+  if(driverInfo.logo){
+    iconBox.innerHTML = '<img src="'+esc(driverInfo.logo)+'" alt="logo">';
+  } else {
+    const initials = displayName.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    iconBox.innerHTML = '<div class="avatar">'+esc(initials||'?')+'</div>';
+  }
+  document.getElementById('action-sub').textContent = 'Both options go straight to '+firstName+' \u2014 no waiting on hold.';
+  document.getElementById('form-brandname').textContent = primary;
+  document.getElementById('form-sub-line').textContent = providedBy;
+}
+
+function goForm(type){
+  requestType = type;
+  const isQuote = type==='quote';
+  document.getElementById('form-title').textContent = isQuote ? 'Request a quote' : 'Schedule a ride';
+  document.getElementById('form-sub').textContent = isQuote
+    ? 'Just the basics \u2014 your driver will text you pricing.'
+    : 'Fill in what you know \u2014 your driver confirms everything.';
+  document.getElementById('date-field').style.display = isQuote ? 'none' : 'block';
+  document.getElementById('time-field').style.display = isQuote ? 'none' : 'block';
+  document.getElementById('submit-btn').textContent = isQuote ? 'Request quote' : 'Send request';
+  document.getElementById('form-error').style.display = 'none';
+  goScreen('s-form');
+}
+
+function showFormError(msg){
+  const el = document.getElementById('form-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+async function submitRequest(){
+  const name = document.getElementById('f-name').value.trim();
+  const phone = document.getElementById('f-phone').value.trim();
+  const pickup = document.getElementById('f-pickup').value.trim();
+  const dest = document.getElementById('f-dest').value.trim();
+  const date = document.getElementById('f-date').value;
+  const time = document.getElementById('f-time').value;
+  const notes = document.getElementById('f-notes').value.trim();
+
+  if(!name || !phone){ showFormError('Please enter your name and phone number.'); return; }
+  document.getElementById('form-error').style.display = 'none';
+
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true; btn.textContent = 'Sending\u2026';
+
+  const record = {
+    loginName: driverLogin,
+    requestType: requestType,
+    clientName: name,
+    clientPhone: phone,
+    pickup: pickup,
+    destination: dest,
+    date: date,
+    time: time,
+    notes: notes,
+    status: 'pending',
+    submittedAt: Date.now()
+  };
+
+  try{
+    // .push() generates its own unique key server-side - this is what makes it safe for many
+    // clients to submit at the same moment with zero risk of overwriting each other.
+    await fbDB.ref('nda/kat/clientRequests').push(record);
+  }catch(e){
+    console.warn('Submit failed:', e.message);
+    btn.disabled = false; btn.textContent = requestType==='quote' ? 'Request quote' : 'Send request';
+    showFormError('Something went wrong sending this \u2014 please try again in a moment.');
+    return;
+  }
+
+  const isQuote = requestType==='quote';
+  const firstName = (driverInfo.displayName||'your driver').split(' ')[0];
+  document.getElementById('confirm-title').textContent = isQuote ? 'Quote requested!' : 'Request sent!';
+  document.getElementById('confirm-body').innerHTML =
+    '<b>'+esc(firstName)+'</b> has been notified and will '+(isQuote ? 'text you pricing' : 'confirm your ride')+' shortly.';
+  goScreen('s-confirm');
+
+  btn.disabled = false; btn.textContent = isQuote ? 'Request quote' : 'Send request';
+}
+
+init();
+</script>
+</body>
+</html>
