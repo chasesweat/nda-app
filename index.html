@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608061759">
+<meta name="version" content="202608061763">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2036,6 +2036,10 @@ function setupRealtimeListeners(){
         });
       }
       rides = incoming;
+      // The server just told us what it holds, so that is the new baseline saveRides() diffs
+      // against. Without this the first save after any inbound update would see a mismatched
+      // baseline and fall back to rewriting the whole node — which is exactly what we removed.
+      _snapshotRidesBaseline(rides);
       // A live update replaces `rides` with the live node only, so any temporarily
       // loaded archive is no longer merged in. Keep the flag honest.
       _archiveLoaded = false;
@@ -2325,6 +2329,11 @@ async function _loadAppData() {
       storageGet('kat:driverColors'),
     ]);
     rides        = storedRides    || SEED_RIDES;
+    // Seed the delta baseline from whatever we just loaded. If this is the SEED_RIDES fallback
+    // (nothing in Firebase or localStorage) the baseline still matches `rides`, so the first
+    // save correctly diffs to "nothing changed" rather than uploading seed data as if it were
+    // real. A genuine first ride changes the array length, which falls back to a full write.
+    _snapshotRidesBaseline(rides);
     comments     = storedComments || {};
     notifications= storedNotifs   || {};
     if(storedColors) driverColors = storedColors;
@@ -3029,7 +3038,68 @@ function showPageTip(pageId){
     +'</div>';
   document.body.appendChild(b);
 }
-async function saveRides()  { return await storageSet('kat:rides', rides); }
+// Snapshot of what the server is believed to hold, one JSON string per slot. Used to work out
+// which rides a save actually changed. Refreshed both when we write and when the realtime
+// listener hands us a fresh copy from the server.
+let _ridesBaseline = [];
+function _snapshotRidesBaseline(arr){
+  try{ _ridesBaseline = (arr||[]).map(function(r){ return JSON.stringify(r); }); }
+  catch(_e){ _ridesBaseline = []; }
+}
+
+// Writing ONE ride used to rewrite EVERY ride.
+//
+// storageSet('kat:rides', rides) does a .set() on the whole node, and there are 67 call sites.
+// Marking a single ride paid therefore uploaded the entire live rides array and made the server
+// broadcast that entire array to every connected phone. That is the app's single largest cost
+// driver at 4 drivers, and it scales with drivers x writes x node size all at once.
+//
+// It is also a correctness bug, and the more serious of the two. A whole-node .set() is
+// last-writer-wins ACROSS ALL RIDES: if two drivers save different rides within the same moment,
+// whoever writes second overwrites the other's ride with their own stale copy of it, and the
+// change is silently gone. Rare at 4 drivers. Routine at 20.
+//
+// So: diff against the baseline and write only the slots that changed, as a single atomic
+// multi-path update(). Untouched rides are not sent, not broadcast, and — critically — not
+// overwritten with stale data by a concurrent save.
+//
+// Falls back to the old whole-node write whenever the shape changed rather than the contents:
+// a different length (ride added, archived, swept) or no usable baseline. Those are rare,
+// deliberate operations where rewriting the node is correct and cheap by comparison.
+async function saveRides(){
+  const arr = rides || [];
+  // localStorage stays a full mirror — it is the offline fallback and costs nothing.
+  try{ localStorage.setItem('kat:rides', JSON.stringify(arr)); }catch(_e){}
+
+  if(!fbDB){ _snapshotRidesBaseline(arr); try{ _auditAdminChange('kat:rides'); }catch(_e){} return true; }
+
+  let changed = null;
+  if(_ridesBaseline.length === arr.length){
+    changed = {};
+    for(let i = 0; i < arr.length; i++){
+      let cur;
+      try{ cur = JSON.stringify(arr[i]); }catch(_e){ changed = null; break; }
+      if(cur !== _ridesBaseline[i]) changed[String(i)] = arr[i];
+    }
+  }
+
+  let ok = true;
+  try{
+    await ensureFbAuth();
+    if(changed && Object.keys(changed).length === 0){
+      // Nothing actually moved. Several call sites save defensively after a no-op edit.
+      _snapshotRidesBaseline(arr);
+      try{ _auditAdminChange('kat:rides'); }catch(_e){}
+      return true;
+    }
+    if(changed){ await fbRef('nda/kat/rides').update(changed); }
+    else       { await fbRef('nda/kat/rides').set(arr); }
+  }catch(e){ console.warn('Firebase write failed:', e); ok = false; }
+
+  if(ok) _snapshotRidesBaseline(arr);
+  try{ _auditAdminChange('kat:rides'); }catch(_e){}
+  return ok;
+}
 
 // ── SAVED QUOTES ──────────────────────────────────────────────────────────
 // Quotes saved for later (NOT on the calendar) — each is a full ride-shaped object
@@ -12245,7 +12315,11 @@ let chatMessages   = {};        // { channelKey: [msgs] }
 let chatLastRead   = {};        // { channelKey: timestamp }
 let chatTypingTimer = null;
 let openedDMs      = new Set(); // DM channels the user has explicitly opened (so empty ones still show a tab)
-let chatAllListenerAttached = false; // guard so the global chat listener attaches only once
+let chatAllListenerAttached = false; // guard so channel subscriptions attach only once
+// Which chat channels this client is currently subscribed to: {channelKey: firebaseRef}.
+// Doubles as the "already subscribed" check, so _subscribeMyChatChannels() is safe to
+// call again whenever the set of channels can grow (new DM, roster change).
+let chatChannelListeners = {};
 
 // ── INIT ──
 // ── CHAT RIDE OFFER helpers ──
@@ -12421,32 +12495,126 @@ async function initChat(){
   renderPresence();
 }
 
-// ── GLOBAL DISCOVERY LISTENER ──
-// A single subscription to the whole chat node so messages other people send me
-// (DMs I never opened myself) are discovered and shown. This is what fixes
-// "I sent a message and they never received it."
+// ── PER-CHANNEL SUBSCRIPTIONS ──
+// This used to be ONE listener on the whole `nda/kat/chat` node: it downloaded every channel
+// in the app — including every DM between every other pair of drivers — and then discarded
+// the ones that weren't mine with a filter at the top of the callback. Three problems with
+// that, in increasing order of seriousness:
+//
+//   1. Cost. The whole node came down again on EVERY message anyone sent, to EVERY connected
+//      phone. With 20 drivers that's 20 full-history downloads per message, and chat has no
+//      retention limit, so each download grew forever.
+//   2. Correctness. Other people's DMs landed in this user's `chatMessages`, which is why
+//      updateChatBadge() below needs an explicit membership filter to stop a conversation the
+//      user can't even open from showing as permanently unread. That workaround treats the
+//      symptom; this removes the cause.
+//   3. Privacy. Messages between two other drivers were sitting in a third driver's browser
+//      memory. Never displayed, but transferred and present.
+//
+// Now each channel is subscribed to individually, so a phone only ever receives channels the
+// user belongs to, and a message in one channel only re-sends THAT channel.
+//
+// Discovery still works — the thing the old comment rightly cared about ("I sent a message and
+// they never received it"). DM channel keys are fully derivable: dmKey() sorts the two names
+// and joins them with '__', so every conversation this user could possibly be part of is
+// computable from DRIVERS without reading the chat node to find out. A DM someone else starts
+// is therefore already subscribed before its first message exists.
+//
+// NOTE ON SCOPE: this stops the client from DOWNLOADING other people's DMs. It does not stop
+// them being readable — that's enforced by Firebase security rules on nda/kat/chat, not here.
+// Anyone determined could still request another channel directly. Tightening the rules is a
+// separate job; this fixes the accidental exposure and the bandwidth, not the permission.
+function _myChatChannelKeys(){
+  const myName = getMyDriverName() || currentUser?.name || '';
+  const myKey  = myName.replace(/ /g,'_');
+  const keys   = ['group','offerings','updates'];   // broadcast channels: everyone is a member
+  try{
+    (typeof DRIVERS !== 'undefined' ? DRIVERS : []).forEach(function(d){
+      if(d && d !== myName) keys.push(dmKey(myName, d));
+    });
+  }catch(_e){}
+  // Also keep any DM already known locally that the roster wouldn't regenerate — a conversation
+  // with a driver who has since been archived, or one restored from the cached snapshot. Without
+  // this, archiving a driver would silently hide the history of talking to them.
+  try{
+    Object.keys(chatMessages||{}).forEach(function(k){
+      if(k && k.split('__').includes(myKey)) keys.push(k);
+    });
+  }catch(_e){}
+  try{ openedDMs.forEach(function(k){ if(k) keys.push(k); }); }catch(_e){}
+  return Array.from(new Set(keys));
+}
+
+// Every subscribed channel fires its own callback, so on first load ~20 of them land at once.
+// Re-rendering the whole chat UI 20 times in a row is pointless work on a phone; coalesce.
+let _chatRenderTimer = null;
+function _chatRenderSoon(){
+  clearTimeout(_chatRenderTimer);
+  _chatRenderTimer = setTimeout(function(){
+    try{ renderChatTabs(); renderChatMessages(); updateChatBadge(); }catch(_e){}
+  }, 40);
+}
+
+// How many recent messages a channel keeps live. See _subscribeMyChatChannels for why this
+// exists at all; 150 is comfortably more than anyone scrolls back through in a working day.
+const CHAT_WINDOW = 150;
+
+// Insert-or-replace one message. Two ways a message can already be present:
+//   - by Firebase key, on a child_changed for something already stored
+//   - as an OPTIMISTIC local copy, pushed by sendChatMessage/volunteerForRide/assignVolunteer
+//     for instant feedback before the server echoes it back. Those have no _fbKey. The old
+//     .on('value') listener overwrote the whole array each time, so the optimistic copy was
+//     silently reconciled away. Nothing overwrites the array now, so the echo would append a
+//     visible duplicate unless matched here.
+function _chatUpsert(key, fbKey, raw){
+  if(!raw || typeof raw !== 'object') return;
+  const msg  = Object.assign({}, raw, { _fbKey: fbKey });
+  const list = chatMessages[key] || (chatMessages[key] = []);
+  let i = list.findIndex(function(x){ return x && x._fbKey === fbKey; });
+  if(i < 0){
+    i = list.findIndex(function(x){
+      return x && !x._fbKey && x.ts === msg.ts && x.sender === msg.sender && x.text === msg.text;
+    });
+  }
+  if(i >= 0) list[i] = msg; else list.push(msg);
+  list.sort(function(a,b){ return (a.ts||0) - (b.ts||0); });
+}
+
+function _chatRemoveMsg(key, fbKey){
+  const list = chatMessages[key];
+  if(!list) return;
+  chatMessages[key] = list.filter(function(x){ return !x || x._fbKey !== fbKey; });
+}
+
+function _subscribeMyChatChannels(){
+  if(!fbDB) return;
+  _myChatChannelKeys().forEach(function(key){
+    if(chatChannelListeners[key]) return;            // already subscribed
+    // BOUNDED + INCREMENTAL. This used to be a plain .on('value') on the channel, which meant
+    // every new message re-downloaded THE ENTIRE CHANNEL HISTORY to every subscribed phone.
+    // Chat has no retention anywhere in the codebase, so that download grew forever: a channel
+    // holding a year of messages re-sent a year of messages every time somebody typed "ok".
+    //
+    // limitToLast(N) caps what a cold start pulls no matter how large the channel has grown,
+    // and child_added/child_changed/child_removed then deliver ONLY the deltas — one message's
+    // worth of traffic per message, instead of the whole channel's. Together those change the
+    // cost curve from "grows with history, forever" to flat.
+    //
+    // child_removed also fires when an old message falls out of the window as a new one
+    // arrives. Dropping it locally is correct: the live list stays at the last N.
+    const q = fbRef('nda/kat/chat/'+key).limitToLast(CHAT_WINDOW);
+    q.on('child_added',   function(s){ _chatUpsert(key, s.key, s.val()); _chatRenderSoon(); });
+    q.on('child_changed', function(s){ _chatUpsert(key, s.key, s.val()); _chatRenderSoon(); });
+    q.on('child_removed', function(s){ _chatRemoveMsg(key, s.key);       _chatRenderSoon(); });
+    chatChannelListeners[key] = q;
+  });
+}
+
 function listenAllChat(){
   if(!fbDB) return;               // localStorage-only mode has nothing to subscribe to
   if(chatAllListenerAttached) return;
   chatAllListenerAttached = true;
-  const myName = getMyDriverName() || currentUser?.name || '';
-  const myKey  = myName.replace(/ /g,'_');
-  fbRef('nda/kat/chat').on('value', snap=>{
-    const all = snap.exists() ? (snap.val()||{}) : {};
-    Object.keys(all).forEach(key=>{
-      // Keep the group channel and any DM channel that includes my name
-      if(key !== 'group' && key !== 'offerings' && key !== 'updates' && !key.split('__').includes(myKey)) return;
-      const val = all[key];
-      let arr = Array.isArray(val) ? val.slice()
-        : Object.entries(val||{}).map(([fk,m])=>m&&typeof m==='object'?Object.assign({},m,{_fbKey:fk}):null).filter(Boolean);
-      arr = arr.filter(m => m && typeof m === 'object');
-      arr.sort((a,b)=>(a.ts||0)-(b.ts||0));
-      chatMessages[key] = arr;
-    });
-    renderChatTabs();
-    renderChatMessages();
-    updateChatBadge();
-  });
+  _subscribeMyChatChannels();
 }
 
 // ── CHANNEL TABS ──
@@ -12732,6 +12900,9 @@ function startDM(otherDriverName){
   const key = dmKey(myDriver, otherDriverName);
   openedDMs.add(key);
   if(!chatMessages[key]) chatMessages[key] = [];
+  // Subscribe right away. The roster-derived list already covers every current driver, but this
+  // also catches a DM with someone not in DRIVERS, and costs nothing when already subscribed.
+  try{ _subscribeMyChatChannels(); }catch(_e){}
   switchChatChannel(key);
   renderChatTabs();
 }
