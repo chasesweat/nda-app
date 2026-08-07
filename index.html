@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608061768">
+<meta name="version" content="202608071770">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -13735,6 +13735,28 @@ function recalcQa(){
 // ── ONBOARDING / WELCOME SETUP ────────────────────────────────────────────
 var _ONB_PAYMENT_OPTIONS = ['Credit Card','Cash','Check','Venmo','Zelle','CashApp','Apple Pay'];
 
+// Has this driver already dismissed OR completed onboarding?
+//
+// TWO SOURCES, ON PURPOSE. The localStorage flag is per-device: "Don't show again" on a phone
+// said nothing to the same driver's tablet or desktop, so the popup kept reappearing on every
+// other device they own. prof.onboardedAt IS synced (closeOnboarding and saveOnboarding both
+// write it through storageSet to Firebase), so it is the cross-device signal — and it was
+// already being written on every dismissal. Nothing was reading it except the admin-reset
+// comparison. The data to fix this has been there the whole time.
+//
+// Either source counts. Local dismissal still works offline; the synced one carries the choice
+// to every other device the moment profiles load.
+function _onboardingDismissed(dn){
+  try{
+    if(localStorage.getItem(_onbDismissKey()) === 'forever') return true;
+  }catch(_e){}
+  try{
+    var prof = (typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[dn]) || {};
+    if(prof.onboardedAt) return true;
+  }catch(_e){}
+  return false;
+}
+
 function _onbDismissKey(){
   var dn = getMyDriverName() || (currentUser && currentUser.name) || 'unknown';
   return 'nda_onboarding_dismissed_' + dn.replace(/\s/g,'_');
@@ -14025,10 +14047,10 @@ function maybeShowOnboarding(){
       // after they save — this only fired for brand-new first-logins before.
       window._profileIntroThisSession=true;
       window._profileIntroChoiceShown=false;
-      openOnboarding(); return;
+      openOnboarding(true); return;   // admin reset overrides a previous dismissal
     }
     // dismissed forever?
-    if(localStorage.getItem(_onbDismissKey()) === 'forever') return;
+    if(_onboardingDismissed(dn)) return;   // localStorage OR the synced profile flag
     // already has the essentials? skip
     var prof = DRIVER_PROFILES[dn] || {};
     var hasBasics = (prof.homeAddress || (DRIVER_PROFILES[dn] && DRIVER_PROFILES[dn].homeAddress))
@@ -14054,9 +14076,21 @@ function _onbSetBooksClients(val){
   paint(noBtn, val===false);
 }
 
-function openOnboarding(){
+function openOnboarding(force){
   var dn = getMyDriverName();
   if(!dn) return;
+  // THE GATE LIVES HERE, not only in maybeShowOnboarding().
+  //
+  // openOnboarding() is called from four places. Only one of them went through
+  // maybeShowOnboarding()'s dismissal check — _postSetupFinish() and the first-login profile
+  // flow both called this directly, so a driver who had clicked "Don't show again" got the
+  // popup anyway the moment either path ran. That is the "dismissed it multiple times on the
+  // same device" half of the report.
+  //
+  // Checking at each call site would fix today's four and miss the fifth someone adds later.
+  // Checking here cannot be bypassed by accident. An admin reset still forces it through, and
+  // any deliberate "run setup again" action can pass force=true.
+  if(!force && _onboardingDismissed(dn) && !onboardingResetPending(dn)) return;
   var prof = DRIVER_PROFILES[dn] || {};
   // Prefill from any existing data
   var setV = function(id,val){ var el=document.getElementById(id); if(el) el.value = val||''; };
@@ -19954,13 +19988,97 @@ async function denyAdminAction(id){
   showToast('Declined');
 }
 // Dashboard panel of pending 2-admin requests (shown to admins only).
+// Format the decision metadata that every approve/deny path already writes.
+//
+// approvedAt, deniedBy, deniedAt, decidedAt, cancelRequestedAt and paymentSubmittedAt are all
+// written faithfully and were read by NOTHING. That is not six wiring oversights — it is one
+// missing feature. Every request list in the app filters to status==='pending', so the moment a
+// request is decided it vanishes from every screen, taking its decision record with it. The data
+// was being kept for a history view that was never built.
+//
+// approvedBy IS displayed elsewhere; deniedBy never was. So you could see who approved something
+// and not who refused it, which is the asymmetry worth closing first.
+//
+// Tolerant of both timestamp formats on purpose: these fields are written as ISO strings in some
+// paths and Date.now() milliseconds in others, and a history view that silently rendered "Invalid
+// Date" for half the records would be worse than none.
+// Recently decided admin actions. Collapsed by default and capped, because this is a reference
+// panel, not a feed - an unbounded decision log on the same screen as the things still needing
+// attention would bury the actionable list under the settled one.
+function _renderDecisionHistoryHTML(){
+  try{
+    var me=currentUser&&currentUser.name;
+    if(!_isAdminLogin(me)) return '';
+    var done=Object.keys(adminActions||{}).map(function(k){return adminActions[k];})
+      .filter(function(r){ return r && r.status && r.status!=='pending'; });
+    if(!done.length) return '';
+    done.sort(function(a,b){
+      var av=new Date(a.deniedAt||a.approvedAt||a.decidedAt||a.resolvedAt||0).getTime()||0;
+      var bv=new Date(b.deniedAt||b.approvedAt||b.decidedAt||b.resolvedAt||0).getTime()||0;
+      return bv-av;   // newest first
+    });
+    var shown=done.slice(0,10);
+    var h='<details style="margin:.6rem 0 1rem;">'
+      +'<summary style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);cursor:pointer;list-style:none;">'
+      +'\uD83D\uDCDC Recently decided ('+done.length+')</summary>'
+      +'<div style="background:#fafafa;border:1.5px solid var(--light);border-radius:12px;overflow:hidden;margin-top:.5rem;">';
+    shown.forEach(function(r){
+      var who=(USER_DRIVER_MAP[r.requester]||r.requester||'Someone');
+      var col=(r.status==='denied')?'#b91c1c':'#15803d';
+      h+='<div style="padding:.6rem .85rem;border-bottom:1px solid var(--light);">'
+        +'<div style="font-size:.8rem;color:var(--black);line-height:1.35;"><b>'+escHtml(who)+'</b> \u2014 '+escHtml(r.label||r.type||'')+'</div>'
+        +'<div style="font-size:.7rem;color:'+col+';font-weight:600;margin-top:2px;">'+escHtml(_decisionSummary(r))+'</div>'
+        +'</div>';
+    });
+    if(done.length>shown.length){
+      h+='<div style="padding:.5rem .85rem;font-size:.68rem;color:var(--mid);">Showing the '+shown.length+' most recent of '+done.length+'.</div>';
+    }
+    return h+'</div></details>';
+  }catch(e){ return ''; }
+}
+
+function _decisionStamp(v){
+  // Falsy covers 0 as well as null/undefined/''. A missing timestamp stored as 0 would
+  // otherwise render as 1 Jan 1970, which reads as a real decision date and is worse than
+  // showing nothing — a history panel that invents dates is not a history panel.
+  if(!v) return '';
+  try{
+    var d = (typeof v === 'number') ? new Date(v) : new Date(String(v));
+    if(isNaN(d.getTime())) return '';
+    return d.toLocaleDateString(undefined,{month:'short',day:'numeric'})
+      +' '+d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+  }catch(_e){ return ''; }
+}
+
+function _decisionSummary(r){
+  if(!r) return '';
+  var when = _decisionStamp(r.deniedAt || r.approvedAt || r.decidedAt || r.resolvedAt);
+  if(r.status==='denied'){
+    var by = (r.deniedBy||'').trim();
+    return 'Denied' + (by ? ' by '+by : '') + (when ? ' \u00b7 '+when : '');
+  }
+  if(r.status==='approved'){
+    var ab = (r.approvedBy||'').trim();
+    return 'Approved' + (ab ? ' by '+ab : '') + (when ? ' \u00b7 '+when : '');
+  }
+  if(r.cancelRequestedAt){
+    var cw=_decisionStamp(r.cancelRequestedAt);
+    return 'Cancellation requested' + (cw ? ' \u00b7 '+cw : '');
+  }
+  if(r.paymentSubmittedAt){
+    var pw=_decisionStamp(r.paymentSubmittedAt);
+    return 'Payment submitted' + (pw ? ' \u00b7 '+pw : '');
+  }
+  return '';
+}
+
 function _renderAdminApprovalsHTML(){
   try{
     var me=currentUser&&currentUser.name;
     if(!_isAdminLogin(me)) return '';
     var pend=Object.keys(adminActions||{}).map(function(k){return adminActions[k];})
       .filter(function(r){ return r && r.status==='pending'; });
-    if(!pend.length) return '';
+    if(!pend.length) return _renderDecisionHistoryHTML();
     pend.sort(function(a,b){ return (a.at||0)-(b.at||0); });
     var h='<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#7c3aed;margin:1rem 0 .5rem;">\uD83D\uDD10 Needs a second admin \u00b7 '+pend.length+' '+mtipDot('two-admin','Pricing, the client fee, surcharges, archiving rides, access changes, deleting someone else\u2019s ride \u2014 all queue here instead of applying instantly. Whoever asked can\u2019t approve their own request. Your own rides &amp; live dispatch stay instant.')+'</div>'
       +'<div style="background:#f6f2ff;border:1.5px solid #d9c9f5;border-radius:12px;overflow:hidden;">';
@@ -19982,6 +20100,7 @@ function _renderAdminApprovalsHTML(){
       h+='</div>';
     });
     h+='</div>';
+    h+=_renderDecisionHistoryHTML();
     return h;
   }catch(e){ return ''; }
 }
