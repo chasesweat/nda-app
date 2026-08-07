@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608071770">
+<meta name="version" content="202608071771">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -834,6 +834,7 @@ input,select,textarea{font-size:16px;}
         <button onclick="openAddClientModal()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:.5rem .9rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">+ Add Client</button>
         <span class="mtip-btn-wrap-inline"><button onclick="document.getElementById('client-csv-input').click()" style="background:#15803d;color:#fff;border:none;border-radius:8px;padding:.5rem .9rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">⬆ Import CSV</button><span class="mtip-dot mtip-dot-badge" id="mtd-cl-import" onclick="toggleMtip('cl-import')" title="What&#8217;s this?">i</span></span><div class="mtip-pop" id="mtp-cl-import">Any column order works &mdash; it sorts names, phones, emails, and addresses into the right fields automatically.</div>
         <span class="mtip-btn-wrap-inline"><button onclick="repairImportedClients()" title="Fix imported contacts (misfiled phone/email/address) and strip leftover ride labels from client names" style="background:none;border:1.5px solid #15803d;border-radius:8px;padding:.5rem .9rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;color:#15803d;">&#x1F527; Clean up</button><span class="mtip-dot mtip-dot-badge" id="mtd-cl-cleanup" onclick="toggleMtip('cl-cleanup')" title="What&#8217;s this?">i</span></span><div class="mtip-pop" id="mtp-cl-cleanup">Fixes misfiled contact info, strips leftover ride labels (like &ldquo;2XL &hellip; 1 of 2&rdquo;) from names, and merges duplicates.</div>
+        <button onclick="shareMyBookingLink()" id="share-booking-link-btn" title="Send your booking link to a client" style="background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;padding:.5rem .9rem;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;">&#128279; Share booking link</button>
         <button onclick="exportClientsToCSV()" style="background:none;border:1.5px solid var(--light);border-radius:8px;padding:.5rem .9rem;font-family:'DM Sans',sans-serif;font-size:.82rem;cursor:pointer;color:var(--black);">⬇ Export</button>
       </div>
     </div>
@@ -11836,6 +11837,24 @@ function openClientActions(name, ev){
   var safe=name.replace(/'/g,"\\'").replace(/"/g,'&quot;');
   var html='';
   html+=item('\u270F\uFE0F Edit details','var(--black)',"_caFromMenu();openClientModal(&quot;"+safe+"&quot;);");
+  // Booking link first: it is what a driver reaches for while actually talking to this client,
+  // unlike the admin actions below it. Text and email are offered as SEPARATE entries rather than
+  // one share sheet, because by this point the driver already knows who they are sending to - the
+  // only open question is which app, and sms:/mailto: hand that to their own default handler.
+  (function(){
+    var _bl = (typeof myBookingLink==='function') ? myBookingLink() : '';
+    if(!_bl) return;
+    // Same accessor openClientModal uses, including the proxy resolution - a proxy dispatcher
+    // viewing the owner's list must read that list's contact details, not their own.
+    var _va = (currentUser && PROXY_MAP[currentUser.name]) || getMyDriverName();
+    var _db = (typeof buildClientDB==='function') ? (buildClientDB(_va)||{}) : {};
+    var _c  = _db[name.trim().toLowerCase()] || {};
+    var _cp = (_c.phone||'').replace(/["']/g,'');
+    var _ce = (_c.email||'').replace(/["']/g,'');
+    if(_cp) html+=item('\uD83D\uDCAC Text booking link','var(--black)',"_caFromMenu();_sendBookingLinkVia('sms','',&quot;"+safe+"&quot;,&quot;"+_cp+"&quot;,'');");
+    if(_ce) html+=item('\u2709\uFE0F Email booking link','var(--black)',"_caFromMenu();_sendBookingLinkVia('mail','',&quot;"+safe+"&quot;,'',&quot;"+_ce+"&quot;);");
+    if(!_cp && !_ce) html+=item('\uD83D\uDD17 Share booking link','var(--black)',"_caFromMenu();_shareBookingLink('',&quot;"+safe+"&quot;);");
+  })();
   html+=item('Release / Transfer','var(--black)',"_caFromMenu();openReleaseModal();");
   html+=item('Mark as cautious','#b45309',"_caFromMenu();openCautiousForClient(&quot;"+safe+"&quot;);");
   if(deceased){
@@ -17660,6 +17679,64 @@ function renderBookingLinkCard(me){
     + '</div>'
     + '<div style="font-size:.68rem;color:var(--mid);margin-top:.6rem;">Early rollout \u2014 visible to you and Morgan only for now.</div>'
     + '</div>';
+}
+
+// The driver's own booking URL, derived the same way renderBookingLinkCard does.
+//
+// Extracted so the Clients page and the per-client menu cannot drift from the card's version of
+// the URL — the basePath derivation below exists because GitHub Pages serves a non-root repo
+// under /repo-name/, and a second hand-built copy of this line is exactly how that bug comes back.
+function myBookingLink(){
+  try{
+    var login = (currentUser && currentUser.name) ? String(currentUser.name).trim() : '';
+    if(!login) return '';
+    var basePath = location.pathname.replace(/[^/]*$/, '');
+    return location.origin + basePath + 'book.html?d=' + encodeURIComponent(login.toLowerCase());
+  }catch(e){ return ''; }
+}
+
+// Hand off to the OS share sheet so the DRIVER picks the app - Messages, WhatsApp, Mail, whatever
+// they already use with that client. Copy-to-clipboard was four steps (copy, leave the app, find
+// the person, paste); this is two. Clipboard stays as the fallback for desktop browsers with no
+// navigator.share, and a share the user CANCELS throws AbortError, which must not be reported as
+// a failure or every dismissed sheet looks like a bug.
+async function _shareBookingLink(link, clientName){
+  link = link || myBookingLink();
+  if(!link) return;
+  var who  = (clientName||'').trim();
+  var text = who
+    ? 'Hi '+who.split(' ')[0]+' \u2014 you can book directly with me here: '+link
+    : 'You can book a ride with me here: '+link;
+  if(navigator.share){
+    try{ await navigator.share({ title:'Book a ride', text:text, url:link }); return; }
+    catch(e){ if(e && e.name==='AbortError') return; }
+  }
+  _copyBookingLink(link);
+}
+
+function shareMyBookingLink(){ _shareBookingLink(myBookingLink(), ''); }
+
+// Deliberate channel choice, for the per-client menu. sms: and mailto: hand off to whichever app
+// the driver has set as their default handler - we never pick one for them and never send
+// anything ourselves; the message is pre-filled and the driver still presses send.
+function _sendBookingLinkVia(channel, link, clientName, phone, email){
+  link = link || myBookingLink();
+  if(!link) return;
+  var first=(clientName||'').trim().split(' ')[0];
+  var body=(first?'Hi '+first+' \u2014 ':'')+'you can book directly with me here: '+link;
+  var href;
+  if(channel==='sms'){
+    var num=(phone||'').replace(/[^0-9+]/g,'');
+    // iOS wants &body=, Android wants ?body= - the separator is the whole difference, and
+    // getting it wrong opens Messages with an empty message and no explanation.
+    var sep=/iPhone|iPad|iPod|Macintosh/i.test(navigator.userAgent) ? '&' : '?';
+    href='sms:'+num+sep+'body='+encodeURIComponent(body);
+  } else {
+    href='mailto:'+encodeURIComponent(email||'')
+      +'?subject='+encodeURIComponent('Book a ride with me')
+      +'&body='+encodeURIComponent(body);
+  }
+  try{ window.location.href=href; }catch(e){ _copyBookingLink(link); }
 }
 
 function _copyBookingLink(link){
