@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608071774">
+<meta name="version" content="202608071775">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2923,6 +2923,14 @@ async function unlinkProfiles(driverName){
 }
 
 function maybShowTutorialBanner(){
+  // WAIT for the synced prefs instead of racing them.
+  //
+  // This is fired by setTimeout(..., 1200). loadUiPrefs() is a Firebase round-trip; on cell data
+  // it routinely takes longer than 1.2s. When it does, uiPrefs is still {} when this runs,
+  // isUiDismissed() finds nothing, and the banner appears — no matter how many times it has been
+  // dismissed. That is the whole bug: a fixed timer racing a network call, which always looks
+  // fine on wifi and fails on a phone.
+  if(!_uiPrefsLoaded){ setTimeout(maybShowTutorialBanner, 400); return; }
   if(isUiDismissed('tutorial')) return;
   // On the first-login setup session we ask about the tutorial AFTER setup instead,
   // so the setup popup isn't competing with this banner.
@@ -3110,6 +3118,9 @@ document.addEventListener('click', function(e){
 })();
 
 function showPageTip(pageId){
+  // Same race as the tutorial banner: page tips can fire on navigation before the synced
+  // prefs have arrived. Retry rather than show something the user already dismissed.
+  if(!_uiPrefsLoaded){ setTimeout(function(){ showPageTip(pageId); }, 400); return; }
   if(isUiDismissed('tips')) return;
   if(_shownTips.has(pageId)) return;
   const tip=TIP_DATA[pageId]; if(!tip) return;
@@ -3465,7 +3476,10 @@ function driverAutoOff(type){ try{ var nm=(typeof getMyDriverName==='function')?
 // Per-LOGIN-NAME UI preferences (tutorial/tips dismissals), synced across devices so
 // dismissing on one device carries over to another. Keyed by login username.
 let uiPrefs = {};
-async function loadUiPrefs(){ try{ var d=await storageGet('kat:uiPrefs'); uiPrefs=(d&&typeof d==='object')?d:{}; }catch(e){ uiPrefs={}; } }
+// Set once the synced prefs have actually arrived. Anything that decides whether to SHOW
+// something based on a stored dismissal must wait for this — see maybShowTutorialBanner.
+let _uiPrefsLoaded = false;
+async function loadUiPrefs(){ try{ var d=await storageGet('kat:uiPrefs'); uiPrefs=(d&&typeof d==='object')?d:{}; }catch(e){ uiPrefs={}; } finally { _uiPrefsLoaded=true; } }
 async function saveUiPrefs(){ try{ await storageSet('kat:uiPrefs', uiPrefs); }catch(e){} }
 function _uiPrefUser(){ return (currentUser&&currentUser.name)||(function(){try{return localStorage.getItem('nda-session')||'';}catch(e){return '';}})(); }
 
@@ -3498,8 +3512,30 @@ function toggleSectionCollapse(key, bodyId, chevronId){
   var chev = document.getElementById(chevronId);
   if(chev) chev.style.transform = nowCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
 }
-function isUiDismissed(key){ var u=_uiPrefUser(); return !!(u && uiPrefs[u] && uiPrefs[u][key]==='forever'); }
-function setUiDismissed(key){ var u=_uiPrefUser(); if(!u) return; if(!uiPrefs[u]) uiPrefs[u]={}; uiPrefs[u][key]='forever'; saveUiPrefs(); }
+// Checks BOTH identities this user could have been recorded under.
+//
+// _uiPrefUser() returns currentUser.name, falling back to the raw nda-session string. Those are
+// not always the same value, and which one you get depends on WHEN you ask — before sign-in
+// resolves you get the session string, after it you get the display name. So a dismissal saved
+// early was stored under one key and looked up later under the other, and simply never matched.
+// That is invisible in testing on a fast connection, where sign-in always wins the race.
+function _uiPrefKeys(){
+  var keys=[], n=(currentUser&&currentUser.name)||'';
+  if(n) keys.push(n);
+  try{ var sess=localStorage.getItem('nda-session')||''; if(sess && sess!==n) keys.push(sess); }catch(e){}
+  return keys;
+}
+function isUiDismissed(key){
+  return _uiPrefKeys().some(function(u){ return uiPrefs[u] && uiPrefs[u][key]==='forever'; });
+}
+// Writes under EVERY identity this user could later be read as, so a dismissal made before
+// sign-in resolves is still found afterwards. Cheap - two short keys - and it removes the race
+// entirely rather than hoping the timing works out.
+function setUiDismissed(key){
+  var keys=_uiPrefKeys(); if(!keys.length) return;
+  keys.forEach(function(u){ if(!uiPrefs[u]) uiPrefs[u]={}; uiPrefs[u][key]='forever'; });
+  saveUiPrefs();
+}
 async function loadGlobalSettings(){
   const d=await storageGet('kat:globalSettings');
   if(d&&typeof d==='object'){
