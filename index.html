@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608071775">
+<meta name="version" content="202608091779">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -6743,7 +6743,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
                 <div style="flex:1;min-width:0;">
                   <div class="week-ride-client" style="color:${tc};">${r.confirmSent?'<span style="color:var(--green);font-weight:900;">✓ </span>':''}${r.client}</div>
                   <div class="week-ride-detail" style="color:${tc};opacity:.78;">${vehTag(r.vehicle)} · ${driverShortName(r.driver)}${ic?` · <span style="color:#e0245e;font-weight:700;">❤️${ic}</span>`:''}</div>
-                  ${r.type==='AP PICK UP'&&r.flight?`<a href="https://www.google.com/search?q=${encodeURIComponent((r.flight||"").trim().replace(/\s+/g,"").toUpperCase())}+flight+tracking" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:${tc};text-decoration:underline;opacity:.9;white-space:nowrap;">✈️ Flight Tracking</a>`:''}
+                  ${r.type==='AP PICK UP'&&r.flight?`<a href="${flightTrackUrl(r.flight)}" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:${tc};text-decoration:underline;opacity:.9;white-space:nowrap;">✈️ Flight Tracking</a>`:''}
                   ${r.type==='AP RUN'?'<a href="https://www.atl.com/times/" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:'+tc+';text-decoration:underline;opacity:.9;white-space:nowrap;">🔒 TSA Wait Times</a>':''}  
                 </div>
                 <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
@@ -7339,7 +7339,7 @@ function buildConfirmationText(r){
   // AP RUN = going TO airport, no tracking needed
   const type          = (r.type||'').toUpperCase();
   const isPickupType  = type==='AP PICK UP'||type==='AP ROUND TRIP';
-  const flightLink    = (flightNum&&isPickupType&&trackingLinkEnabled(sender)) ? '\u2708\uFE0F Track your flight live:\nhttps://www.google.com/search?q='+flightNum+'+flight+tracking\n\n' : '';
+  const flightLink    = (flightNum&&isPickupType&&trackingLinkEnabled(sender)) ? '\u2708\uFE0F Track your flight live:\n'+flightTrackUrl(flightNum)+'\n\n' : '';
   const terminalVal   = (r.terminal||'').trim();
   // r.pickup and r.home directly represent the client's true pickup/dropoff — filled
   // correctly per ride type at entry, so no swap needed here.
@@ -7506,7 +7506,7 @@ function fillConfTemplate(tpl, r, sender, assigned){
     flight:  r.flight||'',
     terminal:r.terminal||'',
     phone:   (DRIVER_PROFILES[assigned]||{}).phone||'',
-    flightlink: (r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'') ? '\u2708\uFE0F Track your flight live:\nhttps://www.google.com/search?q='+(r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'').toUpperCase()+'+flight+tracking' : '',
+    flightlink: (r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'') ? '\u2708\uFE0F Track your flight live:\n'+flightTrackUrl(r.flight) : '',
   };
   return String(tpl).replace(/\{(\w+)\}/g, (m,k)=> (k in map) ? map[k] : m);
 }
@@ -8215,6 +8215,47 @@ function renderRideView(r){
       +'<button onclick="rejectAssignedRide('+r.id+')" style="flex:1;padding:.5rem;background:none;border:1.5px solid #dc2626;color:#dc2626;border-radius:8px;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;">Reject</button>'
       +'</div></div>')
     : '';
+
+  // WHAT HAPPENED TO THAT REQUEST — once the banner above has done its job and vanished.
+  //
+  // driverRespondedAt and driverAutoAccepted were both written and read by NOTHING. The second
+  // is the one that matters: when the acceptance window expires the app AUTO-ACCEPTS on the
+  // driver's behalf and sets driverAutoAccepted, and the result was indistinguishable from a
+  // driver who deliberately tapped Accept. A dispatcher looking at the card saw "assigned" either
+  // way, with no way to tell whether anyone had actually acknowledged the ride.
+  //
+  // Shown to anyone who can see the card, not just the assigned driver — knowing nobody has
+  // actually confirmed is dispatch information, not personal information.
+  let _respLine = '';
+  if(r.driverResponse === 'accepted' || r.driverResponse === 'rejected'){
+    let _w = '';
+    try{
+      if(r.driverRespondedAt){
+        const d = new Date(r.driverRespondedAt);
+        if(!isNaN(d.getTime())){
+          _w = d.toLocaleDateString(undefined,{month:'short',day:'numeric'})
+             + ' ' + d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+        }
+      }
+    }catch(_e){}
+    const _who = r.driver ? (typeof driverShortName==='function' ? driverShortName(r.driver) : r.driver) : 'driver';
+    let _txt, _col, _bg, _bd;
+    if(r.driverResponse === 'rejected'){
+      _txt = '\u2717 Declined by ' + _who;           _col='#b91c1c'; _bg='#fef2f2'; _bd='#fecaca';
+    } else if(r.driverAutoAccepted){
+      // Deliberately worded as what it IS, not as an acceptance. "Auto-accepted" alone reads
+      // like a feature; the point is that nobody replied.
+      _txt = '\u23F1 Auto-accepted \u2014 ' + _who + ' did not respond in time';
+      _col='#92400e'; _bg='#fffbeb'; _bd='#fde68a';
+    } else {
+      _txt = '\u2713 Accepted by ' + _who;           _col='#15803d'; _bg='#f0fdf4'; _bd='#86efac';
+    }
+    _respLine = '<div style="background:'+_bg+';border:1.5px solid '+_bd+';border-radius:10px;'
+      + 'padding:.5rem .75rem;margin-bottom:1rem;font-size:.75rem;font-weight:700;color:'+_col+';">'
+      + escHtml(_txt) + (_w ? '<span style="font-weight:600;opacity:.8;"> \u00b7 ' + escHtml(_w) + '</span>' : '')
+      + '</div>';
+  }
+
   const canEditMedHours = (_myDName && _myDName===r.driver) || (typeof isAdmin==='function' && isAdmin());
   const _ccRm = currentUser ? (PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name) : null;
   const _ccRc = r.createdBy ? (PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy) : null;
@@ -8245,7 +8286,7 @@ function renderRideView(r){
   // thumbnail for it.
   const flightRowHtml = r.flight
     ? '<div style="font-size:.88rem;margin-bottom:3px;display:flex;align-items:center;gap:.5rem;">Flight: ' + escHtml(r.flight)
-      + (_flightNum ? ' <a href="https://www.google.com/search?q='+_flightNum+'+flight+tracking" rel="noopener" style="font-size:.72rem;font-weight:700;color:#7c3aed;text-decoration:none;border:1px solid #7c3aed;border-radius:6px;padding:1px 7px;">\u2708\uFE0F Track</a>' : '')
+      + (_flightNum ? ' <a href="'+flightTrackUrl(_flightNum)+'" rel="noopener" style="font-size:.72rem;font-weight:700;color:#7c3aed;text-decoration:none;border:1px solid #7c3aed;border-radius:6px;padding:1px 7px;">\u2708\uFE0F Track</a>' : '')
       + '</div>'
     : '';
   // Gate code — visible only to this client's owner and whoever's actually assigned to
@@ -8326,7 +8367,7 @@ function renderRideView(r){
       <div style="font-size:.78rem;color:var(--mid);">Created by ${r.createdBy||'—'}</div>
       ${(r.trail&&r.trail.length)?`<div style="font-size:.72rem;color:var(--mid);margin-top:.25rem;">🕒 Last: <strong>${escHtml(r.trail[r.trail.length-1].by.split(' ')[0])}</strong> ${escHtml(r.trail[r.trail.length-1].action)} · ${fmtTs(r.trail[r.trail.length-1].ts)}</div>${r.trail.length>1?`<details style="margin-top:.2rem;"><summary style="font-size:.7rem;color:var(--gold);cursor:pointer;">View full history (${r.trail.length})</summary><div style="font-size:.72rem;color:var(--mid);margin-top:.3rem;line-height:1.6;">${r.trail.slice().reverse().map(t=>`• <strong>${escHtml(t.by.split(' ')[0])}</strong> ${escHtml(t.action)} · ${fmtTs(t.ts)}`).join('<br>')}</div></details>`:''}`:''}
     </div>
-    ${_acceptRejectHtml}
+    ${_acceptRejectHtml}${_respLine}
     <div class="detail-row" style="grid-column:1/-1;">
       <div style="display:flex;align-items:flex-start;gap:.75rem;">
         <i class="ti ti-clock" style="font-size:18px;color:var(--mid);margin-top:2px;" aria-hidden="true"></i>
@@ -8526,6 +8567,41 @@ function buildRideLifecycle(r, nested){
     return `<div style="flex:1;min-width:72px;padding:.4rem .3rem;border:1.5px solid ${active?'var(--gold)':'var(--light)'};border-radius:8px;background:${bg};color:${col};font-family:'DM Sans',sans-serif;font-size:.74rem;font-weight:600;cursor:default;text-align:center;">${RIDE_STAGE_LABEL[s]}</div>`;
   }).join('');
 
+  // WHO sent the confirmation, and WHEN.
+  //
+  // toggleConfirmSent() has always recorded confirmSentBy and confirmSentAt, and NOTHING read
+  // either one. The "Text Sent" chip above is driven by r.status, so the card could tell you
+  // that a confirmation went out and not who sent it or when — which on a shared ride is the
+  // part that actually matters, since "Text Sent" does not distinguish your text from your
+  // partner's. Same class of gap as rideStartedAt in v777.
+  //
+  // Rendered under the chips rather than inside one: it is attribution for a state the chips
+  // already show, not a fourth state.
+  let confLine = '';
+  if(r.confirmSentAt || r.confirmSentBy){
+    let when = '';
+    try{
+      if(r.confirmSentAt){
+        const d = new Date(r.confirmSentAt);
+        if(!isNaN(d.getTime())){
+          when = d.toLocaleDateString(undefined,{month:'short',day:'numeric'})
+               + ' ' + d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+        }
+      }
+    }catch(_e){}
+    // "you" rather than the driver's own name — the card is being read by that person.
+    const me = (typeof getMyDriverName==='function') ? getMyDriverName() : '';
+    const rawBy = (r.confirmSentBy||'').trim();
+    const by = rawBy ? (rawBy===me ? 'you' : (typeof driverShortName==='function' ? driverShortName(rawBy) : rawBy)) : '';
+    const parts = [];
+    if(by)   parts.push('by ' + by);
+    if(when) parts.push(when);
+    if(parts.length){
+      confLine = '<div style="font-size:.68rem;color:var(--mid);margin-top:.35rem;text-align:center;">'
+        + '\u2709\uFE0F Confirmation sent ' + escHtml(parts.join(' \u00b7 ')) + '</div>';
+    }
+  }
+
   const fare = parseFloat(r.price)||0;
   // Driver-as-client rides owe no fee; otherwise resolve owner proxy-aware.
   const owner  = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
@@ -8548,7 +8624,8 @@ function buildRideLifecycle(r, nested){
   }
 
   const inner = `<div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Ride status</div>
-    <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.75rem;">${chips}</div>
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.35rem;">${chips}</div>
+    ${confLine}
     <div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Payment owed</div>
     ${payHtml}`;
   if(nested) return inner;
@@ -11516,6 +11593,36 @@ function rideActionBarHtml(rid){
   var isRideDay=r&&_isRideWithinHours(r,12);
   if(hasMiles || r.status==='paid') return '';
   if(!isRideDay) return '';
+
+  // REFLECT THAT THE RIDE WAS ALREADY STARTED.
+  //
+  // openStartRide() sets r.rideStartedAt, and one other place reads it — but this gate never
+  // did. So a driver who tapped Start Ride from the dashboard came back into the ride card and
+  // saw an identical, untouched "Start Ride" button, with nothing anywhere saying it had already
+  // happened. Reported exactly that way.
+  //
+  // The button is NOT removed. Start Ride is purely a navigation-app launcher (v674), so tapping
+  // it again to re-open directions is a legitimate thing to want mid-trip — removing it would
+  // strand a driver who closed their maps app. What changes is that it stops CLAIMING the ride
+  // has not started: it becomes a secondary "Resume navigation" next to a plain statement of when
+  // the ride began.
+  var _startedAt = r.rideStartedAt && !r.rideStoppedAt ? r.rideStartedAt : 0;
+  if(_startedAt){
+    var _t='';
+    try{
+      _t = new Date(_startedAt).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+    }catch(_e){}
+    return '<div id="mt-bar" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem;">'
+      +'<div style="width:100%;display:flex;align-items:center;gap:.5rem;background:#f0fdf4;border:1.5px solid #86efac;'
+      +'border-radius:8px;padding:.55rem .8rem;font-size:.78rem;font-weight:700;color:#15803d;">'
+      +'\u2713 Ride started'+(_t?' at '+_t:'')+'</div>'
+      +'<div style="display:flex;gap:5px;flex-wrap:wrap;width:100%;">'
+      +'<button onclick="openStartRide('+rid+')" style="flex:1;padding:.6rem .9rem;border-radius:8px;font-family:inherit;'
+      +'font-size:.78rem;font-weight:700;cursor:pointer;border:1.5px solid var(--light);background:none;color:var(--black);">'
+      +'\uD83E\uDDED Resume navigation</button>'
+      +'</div></div>';
+  }
+
   return '<div id="mt-bar" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem;">'
     +'<div style="display:flex;gap:5px;flex-wrap:wrap;width:100%;">'
     +'<button onclick="openStartRide('+rid+')" style="flex:1;padding:.7rem .9rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;">&#128663; Start Ride</button>'
@@ -15182,7 +15289,7 @@ function refreshDash(){
           _btns.push('<button onclick="event.stopPropagation();toggleRidePaid('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\ud83d\udcb0 Mark Paid</button>');
         } else if(_isAirport && r.flight){
           var _flightNum=(r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'').toUpperCase();
-          var _flightUrl='https://www.google.com/search?q='+_flightNum+'+flight+tracking';
+          var _flightUrl=flightTrackUrl(_flightNum);
           _btns.push('<a href="'+_flightUrl+'" rel="noopener" onclick="event.stopPropagation()" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;text-decoration:none;display:flex;align-items:center;justify-content:center;text-align:center;">\u2708\ufe0f Track</a>');
           // Send Arrival Text specifically (not Track, which stays available the whole time
           // an airport ride is relevant) only makes sense for the assigned driver, and only in
@@ -21119,7 +21226,7 @@ async function _seedGlobalPickupInstructionsGeneral(){
 }
 async function _restoreKatTemplatesV2(){
   try{
-    var CT={'AP RUN':'I am confirming your pickup scheduled for tomorrow at {time} at {pickup} going to {terminal} Terminal.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)','AP PICK UP':'I am confirming your pickup scheduled for tomorrow at {time} from the Airport, Flight # {flight}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)\n\n\ud83d\udd34 Live Flight Status: https://www.google.com/search?q=flight%20status%20{flight}','ONE WAY':'I am confirming your pickup scheduled for tomorrow at {time} at {pickup}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany Thanks\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (trip fee does not include tip for the driver. Tips are not mandatory but always greatly appreciated)','ROUND TRIP':'I am confirming your pickup scheduled for tomorrow at {time} at {pickup} going to {dropoff}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)'};
+    var CT={'AP RUN':'I am confirming your pickup scheduled for tomorrow at {time} at {pickup} going to {terminal} Terminal.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)','AP PICK UP':'I am confirming your pickup scheduled for tomorrow at {time} from the Airport, Flight # {flight}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)\n\n\ud83d\udd34 Live Flight Status: https://www.flightaware.com/live/flight/{flight}','ONE WAY':'I am confirming your pickup scheduled for tomorrow at {time} at {pickup}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany Thanks\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (trip fee does not include tip for the driver. Tips are not mandatory but always greatly appreciated)','ROUND TRIP':'I am confirming your pickup scheduled for tomorrow at {time} at {pickup} going to {dropoff}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)'};
     var PK={'North Domestic':'\ud83d\udeeb NORTH TERMINAL Pick Up Instructions\n\n1\ufe0f\u20e3 Text or call when you ARRIVE at baggage claim.\n\n2\ufe0f\u20e3 From baggage claim, take the escalator to lower level (LN1) pickup. The escalator is located just beyond baggage carousel #4, between doors N2 and N3.\n\n3\ufe0f\u20e3 The driver will meet you near the lower level elevator, which is to your right once you exit the lower level.\n\n\ud83d\udd3b\ud83d\udd3b\u2b07\ufe0f\u2b07\ufe0f\u2b07\ufe0f\u2b07\ufe0f\ud83d\udd3b\ud83d\udd3b\nDISREGARD SIGNS FOR UBER/LYFT RIDESHARE\n\ud83d\udd3a\ud83d\udd3a\u2b06\ufe0f\u2b06\ufe0f\u2b06\ufe0f\u2b06\ufe0f\ud83d\udd3a\ud83d\udd3a','South Domestic':'\ud83d\udeec SOUTH TERMINAL (Delta Domestic) Pick Up Instructions\n\n1\ufe0f\u20e3 Text your driver once you have retrieved your luggage from baggage claim.\n\n2\ufe0f\u20e3 Take the escalator or elevator located between Doors S2 and S3 down to the Lower Level Pickup Area (LS1).\n\n3\ufe0f\u20e3 Text your driver again when you are on your way to the LS1 pickup area.\n\n4\ufe0f\u20e3 Wait on the curb just before the crosswalk near the curbside baggage check-in.\n\nYour driver will pick up from there.\n\n\u2728 Important: Please make sure your phone is off Airplane Mode and your ringer is on so your driver can communicate with you.','International':'\ud83d\udeec INTERNATIONAL TERMINAL Pick Up Instructions\n\n1\ufe0f\u20e3 Text or call when you arrive at baggage claim. This helps us time our arrival appropriately.\n\n2\ufe0f\u20e3 From baggage claim, proceed to curbside pickup. Exit through door A2 to curbside pickup (A1 is usually very congested).\n\n3\ufe0f\u20e3 Follow the signs for ground transportation and passenger pick up. Doors A1 and A2 will be to the left \u2b05.\n\n4\ufe0f\u20e3 Once you exit the airport, use the walkway and proceed to the middle island for passenger pickup. IF POSSIBLE, GO TO THE LAST SIGN FOR A2\u2014just before the A3 sign.\n\n(If you do not have global entry or mobile passport control, you can visit etbykat.com/mpc for details on mobile passport control.)'};
     var GEN='I am confirming your pickup scheduled for tomorrow at {time} at {pickup} going to {dropoff}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)'; var FB='Please coordinate with your driver upon arrival for specific pickup location details.';
     // Kat AND Morgan (Morgan dispatches for Kat, so identical text). Nobody else is touched.
@@ -21690,6 +21797,23 @@ async function toggleConfText(driverName){
   showToast('Schedule Confirmation '+(driverSettings[driverName].confEnabled?'turned on':'turned off'));
 }
 
+// Flight tracking link. Deep-links to FlightAware rather than a Google search.
+//
+// Every one of the five places that offered "track your flight" built a google.com/search URL,
+// so tapping it opened a SEARCH RESULTS PAGE — the driver or client then had to pick a result
+// and load a second site. FlightAware registers Android App Links and iOS Universal Links for
+// /live/flight/, so this URL opens the FlightAware app directly when installed and falls back
+// to the mobile site when it is not. No app-detection needed: the OS decides, which is why this
+// works without knowing anything about the device.
+//
+// The identifier is stripped to letters and digits because clients type "DL 33", "dl-33" and
+// "#DL33", and FlightAware wants DL33. It accepts IATA codes and redirects to the ICAO page.
+function flightTrackUrl(flightNum){
+  var id = String(flightNum||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(!id) return '';
+  return 'https://www.flightaware.com/live/flight/' + encodeURIComponent(id);
+}
+
 function trackingLinkEnabled(driverName){
   const s = driverSettings[driverName];
   return !s || s.trackingLink !== false;   // default ON
@@ -21746,7 +21870,7 @@ function trackFlightSearch(){
   // inside the PWA's own in-app browser context) is what actually gets an installed PWA to
   // hand off to a real, separate browser - needed so a subsequent tap on the FlightAware
   // result link can properly hand off to FlightAware's own native app in turn.
-  window.location.href = 'https://www.google.com/search?q='+encodeURIComponent(q+' flight tracking');
+  window.location.href = flightTrackUrl(q) || ('https://www.flightaware.com/live/findflight');
 }
 
 // ATL TSA checkpoint data (static structure — live times fetched when possible)
@@ -21831,7 +21955,7 @@ function renderFlightsPage(){
   } else {
     list.innerHTML=apRides.map(function(r){
       const flNum=(r.flight||'').trim().replace(/\s+/g,'').toUpperCase();
-      const trackURL=flNum?'https://www.google.com/search?q='+encodeURIComponent(flNum+' flight tracking'):'';
+      const trackURL=flNum?flightTrackUrl(flNum):'';
       const c=driverColor(r.driver||'');
       const label=r.date===today?'Today':'Tomorrow';
       return '<div style="background:var(--white);border:1.5px solid var(--light);border-radius:10px;padding:.75rem;display:flex;justify-content:space-between;align-items:center;gap:.5rem;">'
