@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608101783">
+<meta name="version" content="202608101785">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -7164,18 +7164,30 @@ function renderConfirmations(){
       // filled one in for it.
       const _byType0=_ods0.pickupInstructionsByType||{};
       const _typeInstr0=(_ods0.useTypeInstructions && r.type!=='AP PICK UP') ? (_byType0[(r.type||'').trim()]||'').trim() : '';
-      const _hasAnyInstr0=!!(_defInstr0||_termKeys0.length||_typeInstr0);
-      // preselect: tolerant match of the ride's terminal against the template keys
+      // Per-terminal instructions ("meet me at gate X, look for...") only ever make sense for a
+      // true AP PICK UP - the leg where you're actually meeting the client AT a terminal. An AP
+      // RUN (home pickup, airport drop-off) or a merged AP ROUND TRIP's outbound leg does carry
+      // a terminal on the ride (the destination), but that terminal's "how to find your driver
+      // here" instructions describe the WRONG end of that trip - the client hasn't even reached
+      // the airport yet. Moved this definition earlier (was right before chkRow) so the
+      // terminal-match logic just below can gate on it too - same rule as the selfie fix above.
+      const _isTrueApPickup0=(r.type==='AP PICK UP');
+      const _hasAnyInstr0=!!(_defInstr0||(_isTrueApPickup0&&_termKeys0.length)||_typeInstr0);
+      // preselect: tolerant match of the ride's terminal against the template keys - real AP
+      // PICK UP only; every other ride type stays on the Default instructions, never a
+      // terminal-specific one, regardless of what terminal happens to be saved on the ride.
       let _preKey0='__default';
-      (function(){
-        var t=(r.terminal||r.rtTerminal||'').trim(); if(!t) return;
-        if(_byT0[t]&&(_byT0[t]||'').trim()){ _preKey0=t; return; }
-        var tl=t.toLowerCase();
-        for(var i0=0;i0<_termKeys0.length;i0++){ var kl=_termKeys0[i0].toLowerCase();
-          if((tl.indexOf('north')>-1&&kl.indexOf('north')>-1)||(tl.indexOf('south')>-1&&kl.indexOf('south')>-1)||(((tl.indexOf('international')>-1)||(tl.indexOf('intl')>-1))&&((kl.indexOf('international')>-1)||(kl.indexOf('intl')>-1)))){ _preKey0=_termKeys0[i0]; return; } }
-      })();
+      if(_isTrueApPickup0){
+        (function(){
+          var t=(r.terminal||r.rtTerminal||'').trim(); if(!t) return;
+          if(_byT0[t]&&(_byT0[t]||'').trim()){ _preKey0=t; return; }
+          var tl=t.toLowerCase();
+          for(var i0=0;i0<_termKeys0.length;i0++){ var kl=_termKeys0[i0].toLowerCase();
+            if((tl.indexOf('north')>-1&&kl.indexOf('north')>-1)||(tl.indexOf('south')>-1&&kl.indexOf('south')>-1)||(((tl.indexOf('international')>-1)||(tl.indexOf('intl')>-1))&&((kl.indexOf('international')>-1)||(kl.indexOf('intl')>-1)))){ _preKey0=_termKeys0[i0]; return; } }
+        })();
+      }
       const _instOpts0=(_defInstr0?'<option value="__default"'+(_preKey0==='__default'?' selected':'')+'>Pickup instructions (Default)</option>':'')
-        +_termKeys0.map(function(k){ return '<option value="'+escHtml(k)+'"'+(_preKey0===k?' selected':'')+'>Pickup instructions ('+escHtml(k)+')</option>'; }).join('');
+        +(_isTrueApPickup0 ? _termKeys0.map(function(k){ return '<option value="'+escHtml(k)+'"'+(_preKey0===k?' selected':'')+'>Pickup instructions ('+escHtml(k)+')</option>'; }).join('') : '');
       const _isApPickup0=(r.type==='AP PICK UP'||r.type==='AP ROUND TRIP');
       // This card is built once per ride, keyed to r.date — for a merged single-ride
       // "AP ROUND TRIP" booking that's always the outbound/home-pickup leg (the return/
@@ -7183,7 +7195,6 @@ function renderConfirmations(){
       // terminal instructions and the day-of selfie must NOT default on for it. A true
       // "AP PICK UP" ride (standalone, or the split return leg from Quick-Add) IS the
       // airport-meeting leg, so those stay on for it.
-      const _isTrueApPickup0=(r.type==='AP PICK UP');
       const chkRow=function(key,label,fn,defOn,disabled,subNote,onchangeExtra){
         return '<div style="display:flex;flex-direction:column;gap:.2rem;min-width:0;">'
           +'<div style="display:flex;gap:.4rem;align-items:center;">'
@@ -7203,15 +7214,27 @@ function renderConfirmations(){
         +'<div style="font-size:.66rem;color:var(--mid);text-align:center;margin:-.2rem 0 .1rem;">Tick or untick what to include, then send \u2014 or tap any row to send just that piece</div>'
         +chkRow('text','&#x1F4AC; Confirmation text','sendConfText', _sa0.message!==false)
         +chkRow('inst','&#x1F4CD; Pickup instructions','sendConfInstructions', _sa0.instructions!==false&&_hasAnyInstr0&&_isTrueApPickup0, !_hasAnyInstr0, _instSel0)
-        +chkRow('selfie','&#x1F933; Day-of selfie','sendSelfiePic', _sa0.selfie!==false&&_isTrueApPickup0, !_isTrueApPickup0,
-          _isTrueApPickup0?'':'<div style="font-size:.62rem;color:var(--mid);">Only makes sense for an airport pickup \u2014 not offered on this ride type</div>')
+        // Not just disabled with a note anymore - the row doesn't render at all for a ride
+        // type that can never send a selfie (only a true AP PICK UP meets someone at the
+        // airport; an AP RUN or a merged AP ROUND TRIP's outbound leg never does). A disabled,
+        // greyed-out row still took up space and asked to be read past on every single AP RUN
+        // confirmation. sendAllConf() below has its own independent ride-type check for this
+        // too - not relying on "the checkbox is just missing" to mean "don't send," since that
+        // reader defaults a missing box to true.
+        +(_isTrueApPickup0 ? chkRow('selfie','&#x1F933; Day-of selfie','sendSelfiePic', _sa0.selfie!==false) : '')
         +chkRow('vcard','&#x1F4C7; Client contact \u2192 driver','sendClientVCardToDriver', _sa0.vcard!==false, false,
           '<div style="font-size:.62rem;color:var(--mid);">Goes to the driver only, never the client</div>',
           'if(this.checked){var p=document.getElementById(\'cchk-'+pid+'-phone\'); if(p) p.checked=false;}')
         +chkRow('card','&#x1F5BC; Driver card','sendDriverCard', _sa0.card!==false)
-        +chkRow('phone','&#x1F4F1; Client phone to driver','sendClientPhone', false, false,
+        // Same treatment as the selfie row: doesn't render at all when it can't apply, rather
+        // than showing disabled with a note. This row exists so the DRIVER can have the
+        // client's number even when they didn't book the ride themselves; when the driver IS
+        // the client owner (_own0), they already have that client's contact info as the
+        // person who brought them in - sending it to themselves is pure noise. sendAllConf()
+        // below independently re-checks this too, same reasoning as the selfie fix.
+        +(_own0!==(r.driver||'').trim() ? chkRow('phone','&#x1F4F1; Client phone to driver','sendClientPhone', false, false,
           '<div style="font-size:.62rem;color:var(--mid);">Goes to the driver, not the client \u2014 sends as a second text. Same info as the contact card above, so only one is needed.</div>',
-          'if(this.checked){var v=document.getElementById(\'cchk-'+pid+'-vcard\'); if(v) v.checked=false;}')
+          'if(this.checked){var v=document.getElementById(\'cchk-'+pid+'-vcard\'); if(v) v.checked=false;}') : '')
         +'</div>';
 
       return '<div id="conf-card-'+r.id+'" style="border:1.5px solid '+c+';border-left:5px solid '+c+';border-radius:12px;padding:.9rem 1rem;margin-bottom:.75rem;background:var(--white);">'
@@ -8177,16 +8200,10 @@ function _prevPaySend(withTip){
 // using time ordering, since leg 1 always physically happens before leg 2 regardless of which
 // TYPE (AP Run or AP Pickup) actually starts a given round trip. Falls back to id order (lower
 // = created first) only if both rides somehow share the exact same date+time. Never returns
-// anything but a real 1 or 2 when a paired ride is actually passed in - no more raw "?".
-// Same fix as _inferLegNumber above, self-contained for use directly inside a template
-// literal (the dashboard card's ride list has no room for a separate local variable per ride).
-// Returns the full " · Leg X/2" suffix, or '' when the ride isn't paired at all.
-function _pairedLegLabel(r){
-  if(!r.pairId) return '';
-  var paired = (rides||[]).find(function(x){ return x && x.id!==r.id && x.pairId===r.pairId; });
-  if(!paired) return '';
-  return ' · Leg '+_inferLegNumber(r, paired)+'/2';
-}
+// anything but a real 1 or 2 when a paired ride is actually passed in - no more raw "?". Still
+// used by the ride detail modal's own leg badge (renderRideView) - the dashboard card's use of
+// this (_pairedLegLabel) was removed at Chase's request; the modal badge was left alone since
+// that wasn't what was reported.
 function _inferLegNumber(r, pairedRide){
   if(r.rtLegNumber) return r.rtLegNumber;
   if(!pairedRide) return r.rtLegNumber || 1;
@@ -15272,7 +15289,7 @@ function refreshDash(){
       <div class="ride-date" style="color:${tc};">${fmtDateShort(r.date)}<br><span style="font-size:.72rem">${fmtTime12(r.time)||''}</span></div>
       <div class="ride-info">
         <div class="ride-client" style="color:${tc};">${_rideIsConfirmed(r)?'<span title="Confirmed" style="color:#15803d;font-weight:700;">&#x2713;</span> ':''}${r.client}</div>
-        <div class="ride-detail" style="color:${tc};opacity:.78;">${r.type} · ${vehTag(r.vehicle)} · ${r.driver?driverShortName(r.driver):'<em>Unassigned</em>'}${_pairedLegLabel(r)}</div>
+        <div class="ride-detail" style="color:${tc};opacity:.78;">${r.type} · ${vehTag(r.vehicle)} · ${r.driver?driverShortName(r.driver):'<em>Unassigned</em>'}</div>
       </div>
       <span class="badge ${typeCls}">${r.type}${apVehSuffix(r)}</span>
       ${(function(){
@@ -21572,14 +21589,25 @@ async function sendAllConf(id){
   const r=rides.find(function(x){ return x&&x.id===id; }); if(!r) return;
   // Read the per-ride checklist (falls back to checked if a box is missing).
   const g=function(k){ var el=document.getElementById('cchk-'+id+'-'+k); return el? el.checked : true; };
+  // Selfie is only ever meaningful for a true AP PICK UP - the row itself doesn't even render
+  // for any other ride type (see chkRow above), so g('selfie') would fall back to its "missing
+  // box = true" default and silently include a selfie on a ride type that can't use one. This
+  // check is independent of whether the checkbox exists in the DOM at all, on purpose.
+  const _selfieApplies=(r.type==='AP PICK UP');
+  // Same shape of guard for the phone row: it doesn't render when the driver IS the client
+  // owner (see chkRow above), so g('phone') would otherwise fall back to true and silently
+  // text the driver their own client's number. Recomputes the same owner resolution used to
+  // decide whether to render the row in the first place, rather than trusting DOM absence.
+  const _phoneOwner=feeOwnerFor(r.createdBy)||(r.driver||'').trim();
+  const _phoneApplies=(_phoneOwner!==(r.driver||'').trim());
   // Lock in the instruction template the driver picked.
   var selEl=document.getElementById('cinst-'+id);
   if(selEl){ _setConfInstKey(id, selEl.value); }
-  if(!g('text')&&!g('inst')&&!g('card')&&!g('vcard')&&!g('selfie')&&!g('phone')){ showToast('Nothing is checked \u2014 tick at least one item to send','error'); return; }
+  if(!g('text')&&!g('inst')&&!g('card')&&!g('vcard')&&!(_selfieApplies&&g('selfie'))&&!(_phoneApplies&&g('phone'))){ showToast('Nothing is checked \u2014 tick at least one item to send','error'); return; }
   const fm=(window._confFilesMap||{})[id]||{};
   const files=[];
   if(g('card')&&fm.card) files.push(fm.card);
-  if(g('selfie')&&fm.selfie) files.push(fm.selfie);
+  if(_selfieApplies&&g('selfie')&&fm.selfie) files.push(fm.selfie);
   if(g('text')||g('inst')||files.length){
     await textClient(id, { msgOn:g('text'), instOn:g('inst'), files:files });
   }
@@ -21588,10 +21616,11 @@ async function sendAllConf(id){
   if(g('vcard')){ try{ await sendClientVCardToDriver(id); }catch(e){} }
   const sent=[];
   ['text','inst','card','vcard','selfie'].forEach(function(k){
+    if(k==='selfie'&&!_selfieApplies) return;
     if(!g(k)) return;
     if(document.getElementById('cpart-'+id+'-'+k)){ markPartSent(id,k); sent.push(k); }
   });
-  if(g('phone')){ setTimeout(function(){ try{ sendClientPhone(id); markPartSent(id,'phone'); }catch(e){} }, 900); sent.push('phone'); }
+  if(_phoneApplies&&g('phone')){ setTimeout(function(){ try{ sendClientPhone(id); markPartSent(id,'phone'); }catch(e){} }, 900); sent.push('phone'); }
   showAllSentConfirm(id, sent);
 }
 // Clear confirmation that the whole confirmation went out.
