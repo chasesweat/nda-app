@@ -8,6 +8,7 @@
   :root{
     --black:#1a0d2e; --white:#fdfcff; --gold:#7c3aed; --gold-pale:#f3eeff;
     --mid:#463c5f; --light:#e2d9f3; --surface:#f7f3ff; --accent:#0f766e; --accent-pale:#e6f5f3;
+    --topbar-bg:var(--black);
   }
   *{box-sizing:border-box;}
   body{
@@ -19,19 +20,21 @@
   .screen.active{display:flex;}
   @keyframes fade{from{opacity:0;}to{opacity:1;}}
 
-  .topbar{background:var(--black); color:#fff; padding:1.4rem 1.25rem 1.1rem; flex-shrink:0;
+  .topbar{background:var(--topbar-bg); color:#fff; padding:1.4rem 1.25rem 1.1rem; flex-shrink:0;
     display:flex; align-items:center; gap:.7rem;}
   .topbar-logo{flex-shrink:0; width:38px; height:38px; border-radius:9px; overflow:hidden;
     display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.1);}
   .topbar-logo img{width:100%; height:100%; object-fit:cover; display:block;}
   .topbar-logo .ini{font-size:.85rem; font-weight:800; color:#fff; letter-spacing:.5px;}
   .topbar-text{min-width:0;}
-  /* --brand-on-dark is the accent colour LIGHTENED until it is actually legible against the dark
-     topbar. --gold is the raw accent and stays correct for buttons on white; using it here put
+  /* --brand-on-dark is computed against whatever --topbar-bg actually is (see
+     _logoHeaderTheme / renderBranding below), so it stays legible however dark or light the
+     background itself ends up being - not tuned for one fixed navy that may no longer apply.
+     --gold is the raw accent and stays correct for buttons on white; using it here put
      dark-on-dark text in the header for any driver whose logo colour happens to be dark. */
   .brand{font-family:Georgia,serif; font-size:1.2rem; color:var(--brand-on-dark,var(--gold));
     letter-spacing:.4px; overflow-wrap:anywhere;}
-  .sub{font-size:.76rem; color:#c9c0da; margin-top:.2rem;}
+  .sub{font-size:.76rem; color:var(--brand-on-dark,#c9c0da); margin-top:.2rem;}
 
   .driver-hero{
     display:flex; flex-direction:column; align-items:center; text-align:center;
@@ -366,6 +369,72 @@ async function init(){
   goScreen('s-action');
 }
 
+// Pulls a two-color header theme straight out of the driver's own logo pixels: the darkest
+// meaningfully-colored swatch (for the topbar's own background) and the lightest (for the text
+// on top of it). Runs entirely client-side on driverInfo.logo, which the page already has -- no
+// new cached profile field, no backfill script to run, correct immediately for every driver
+// including ones onboarded long before this existed.
+//
+// Why the topbar background needed to change at all, not just the text color: it used to be a
+// fixed dark purple (var(--black)) no matter whose logo this was, and only the TEXT adapted --
+// boosted only as far as the legal minimum (4.5:1) against a background that had nothing to do
+// with that driver's actual brand. For a dark logo (a deep navy, like No Sweat Transportation
+// Co.'s) that produced text that barely cleared the bar rather than genuinely reading as
+// theirs. Deriving both ends from the logo, and aiming well past the legal minimum (7:1, not
+// 4.5:1) rather than just clearing it, is what actually fixes "barely readable."
+//
+// Resolves { dark, light } as hex strings, or null if the logo has nothing usable to extract
+// (no logo set, image failed to decode, or it's genuinely monochrome -- pure black-on-white
+// text with no real color anywhere). Callers fall back to the existing fixed-background /
+// accent-only behavior in that case, so a driver with no logo, or a plain black-and-white one,
+// sees exactly what they saw before this.
+function _logoHeaderTheme(dataUri){
+  return new Promise(function(resolve){
+    if(!dataUri || typeof dataUri!=='string' || dataUri.indexOf('data:image')!==0){ resolve(null); return; }
+    try{
+      var img = new Image();
+      img.onload = function(){
+        try{
+          var size = 48; // small and fast - a header theme doesn't need full resolution
+          var cv = document.createElement('canvas'); cv.width=size; cv.height=size;
+          var ctx = cv.getContext('2d');
+          ctx.drawImage(img, 0, 0, size, size);
+          var data = ctx.getImageData(0, 0, size, size).data;
+          var buckets = {};
+          for(var i=0; i<data.length; i+=4){
+            var r=data[i], g=data[i+1], b=data[i+2], a=data[i+3];
+            if(a<128) continue;                 // transparent - not part of the visible mark
+            var max=Math.max(r,g,b), min=Math.min(r,g,b);
+            if(max>245 && min>230) continue;     // pure/near-white background pixel
+            if(max<12) continue;                 // pure/near-black - usually outline or text
+            var key = Math.round(r/20)+','+Math.round(g/20)+','+Math.round(b/20);
+            if(!buckets[key]) buckets[key] = {r:0,g:0,b:0,n:0};
+            buckets[key].r+=r; buckets[key].g+=g; buckets[key].b+=b; buckets[key].n++;
+          }
+          // A bucket smaller than this is noise (anti-aliased edge pixels between two real
+          // colors), not a genuine part of the mark - excluding it keeps the darkest/lightest
+          // pick from latching onto a handful of stray pixels.
+          var MIN_PIXELS = 8;
+          var candidates = Object.keys(buckets).map(function(k){ return buckets[k]; })
+            .filter(function(bk){ return bk.n>=MIN_PIXELS; });
+          if(!candidates.length){ resolve(null); return; }
+          var lin=function(v){ v=v/255; return v<=0.03928? v/12.92 : Math.pow((v+0.055)/1.055,2.4); };
+          var lum=function(c){ return 0.2126*lin(c.r)+0.7152*lin(c.g)+0.0722*lin(c.b); };
+          var withLum = candidates.map(function(bk){
+            var c = { r:bk.r/bk.n, g:bk.g/bk.n, b:bk.b/bk.n };
+            return { c:c, l:lum(c) };
+          });
+          withLum.sort(function(a,b){ return a.l-b.l; });
+          var hex=function(c){ return '#'+[c.r,c.g,c.b].map(function(v){ return Math.round(v).toString(16).padStart(2,'0'); }).join(''); };
+          resolve({ dark: hex(withLum[0].c), light: hex(withLum[withLum.length-1].c) });
+        }catch(e){ resolve(null); }
+      };
+      img.onerror = function(){ resolve(null); };
+      img.src = dataUri;
+    }catch(e){ resolve(null); }
+  });
+}
+
 function renderBranding(){
   const displayName = driverInfo.displayName || 'your driver';
   const bizName = (driverInfo.businessName||'').trim();
@@ -437,6 +506,58 @@ function renderBranding(){
   document.getElementById('action-sub').textContent = 'Both options go straight to '+firstName+' \u2014 no waiting on hold.';
   document.getElementById('form-brandname').textContent = primary;
   document.getElementById('form-sub-line').textContent = providedBy;
+
+  // Upgrade the header to a two-tone theme pulled straight from the logo, once it's actually
+  // decoded (async - canvas pixel reads can't be synchronous). Runs AFTER everything above, so
+  // the page has already painted with the accent-only theme computed synchronously earlier in
+  // this function; this only refines it further rather than delaying first paint. If the logo
+  // has nothing usable (no logo, decode failure, genuinely monochrome mark), nothing changes
+  // and the accent-only result from above stands exactly as it did before this existed.
+  if(driverInfo.logo){
+    _logoHeaderTheme(driverInfo.logo).then(function(theme){
+      if(!theme) return;
+      const m = /^#([0-9a-f]{6})$/i.exec(theme.dark);
+      const n = parseInt(m[1],16);
+      let r=(n>>16)&255, g=(n>>8)&255, b=n&255;
+      const lm = /^#([0-9a-f]{6})$/i.exec(theme.light);
+      const ln = parseInt(lm[1],16), lr=(ln>>16)&255, lg=(ln>>8)&255, lb=ln&255;
+      const hex = (rr,gg,bb)=> '#'+[rr,gg,bb].map(v=>Math.round(v).toString(16).padStart(2,'0')).join('');
+      // The extracted "darkest" swatch isn't guaranteed to be dark ENOUGH to work as a header
+      // background - a logo whose darkest color is a medium teal, say, caps out well under 7:1
+      // contrast no matter what color the text is, since even pure white against it can't clear
+      // the bar (the math ceiling is 1.05/(L+0.05)). So: deepen the dark swatch toward true black
+      // first, only as far as needed to guarantee 7:1 is actually reachable, before touching the
+      // text color at all. Preserves the logo's own hue as the background (same color, just
+      // deep enough to hold text on top of it) rather than silently falling back to a value with
+      // no connection to this driver's brand.
+      const bgCeiling = 0.08; // luminance ceiling that leaves headroom for a real 7:1 with white
+      let bgLum = _lum(r,g,b);
+      if(bgLum > bgCeiling){
+        for(let t=0; t<=1.001; t+=0.05){
+          const rr=r*(1-t), gg=g*(1-t), bb=b*(1-t);
+          if(_lum(rr,gg,bb) <= bgCeiling){ r=Math.round(rr); g=Math.round(gg); b=Math.round(bb); break; }
+          if(t>=1){ r=g=b=0; }   // unreachable in practice; pure black always clears it
+        }
+        bgLum = _lum(r,g,b);
+      }
+      const bgHex = hex(r,g,b);
+      // Aim well past the legal minimum (7:1, not 4.5:1) - the whole point of this change was
+      // that "technically passes" still read as barely legible. Starts from the logo's own
+      // lightest swatch rather than white, so a driver whose logo already has a light accent
+      // (cream, pale gold) keeps that as their header text instead of it being bleached out.
+      let onDark = theme.light;
+      if(_contrast(_lum(lr,lg,lb), bgLum) < 7){
+        for(let t=0; t<=1.001; t+=0.05){
+          const rr=lr+(255-lr)*t, gg=lg+(255-lg)*t, bb=lb+(255-lb)*t;
+          if(_contrast(_lum(rr,gg,bb), bgLum) >= 7){ onDark = hex(rr,gg,bb); break; }
+          if(t>=1) onDark = '#ffffff';   // unreachable in practice; white always clears it
+        }
+      }
+      const root = document.documentElement.style;
+      root.setProperty('--topbar-bg', bgHex);
+      root.setProperty('--brand-on-dark', onDark);
+    }).catch(function(){ /* logo theme is a refinement, never worth breaking the page over */ });
+  }
 }
 
 function goForm(type){
