@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608101780">
+<meta name="version" content="202608101781">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -20535,11 +20535,28 @@ registerAdminAction('driver_add', async function(rec){
   if(!USERS.some(function(u){ return u.name===login; })){
     USERS.push({ name:login, initials:name.split(' ').map(function(n){return n[0];}).join('').slice(0,2).toUpperCase(), password:password, role:'driver', disabled:false });
   }
+  // v781: a new driver's photo used to be embedded as raw base64 directly in this record, which
+  // saveAddedDriver() below persists into kat:addedDrivers forever - a second full-size copy of
+  // a photo that belongs in kat:driverPhotoOverrides, the shared store every OTHER photo edit in
+  // the app already uses (see the vehicle-card save a few functions up: storageSet('kat:driver
+  // PhotoOverrides', ...)). Measured at 659KB for a handful of added drivers, the majority of it
+  // one or two embedded photos. Route it to the canonical store instead of inlining a second copy.
+  // DRIVER_PHOTOS[name] above already has it in memory for this session; loadAddedDrivers()'s own
+  // rec.photo fallback is left untouched so any driver added BEFORE this change keeps working
+  // exactly as it does today - this only changes what NEW adds persist going forward.
+  var _newDriverPhotoToStore = rec.photo || '';
+  var _recToSave = Object.assign({}, rec, { photo:'' });
   try{
-    await saveAddedDriver(rec);
+    await saveAddedDriver(_recToSave);
     await storageSet('kat:driverProfiles', DRIVER_PROFILES);
     await storageSet('kat:driverColors', driverColors);
     await savePasswords();
+    if(_newDriverPhotoToStore){
+      var _addedOv=await storageGet('kat:driverPhotoOverrides');
+      if(!_addedOv || typeof _addedOv!=='object') _addedOv={};
+      _addedOv[name]=_newDriverPhotoToStore;
+      await storageSet('kat:driverPhotoOverrides', _addedOv);
+    }
   }catch(e){ console.warn('add driver save',e); }
   showToast('\u2713 '+name.split(' ')[0]+' added \u2014 they can log in as \u201c'+login+'\u201d');
   try{ renderDriverMembers(); }catch(e){}
