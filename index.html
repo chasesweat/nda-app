@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608101785">
+<meta name="version" content="202608101787">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -7206,14 +7206,29 @@ function renderConfirmations(){
           +(subNote?('<div style="padding-left:calc(17px + .5rem);">'+subNote+'</div>'):'')
           +'</div>';
       };
+      // The dropdown itself is gone below for anything but a true AP PICK UP - there's only
+      // ever one valid choice (Default) once terminal options are excluded, so a select with a
+      // single option was pure clutter. But removing the dropdown doesn't remove the need for
+      // window._confInstKey: buildConfirmationText() does its OWN independent terminal-match
+      // against r.terminal (see there, "AP PICK UP meets the client AT the airport..."), and
+      // that override key is the ONLY thing that corrects it back to Default - previously
+      // supplied by the dropdown's onchange, or by sendAllConf() locking in its value before
+      // sending. With no dropdown, neither ever fires, so the override has to be set here, at
+      // render time, once, covering every way this row can be sent (Send everything, or tapping
+      // the row directly - sendConfInstructions() never went through sendAllConf() at all).
+      // Idempotent to set on every re-render: for these ride types there's no user choice left
+      // to preserve, it's always Default.
+      if(_hasAnyInstr0 && !_isTrueApPickup0){ try{ _setConfInstKey(pid,'__default'); }catch(e){} }
       const _instSel0=_hasAnyInstr0
-        ?'<select id="cinst-'+pid+'" onchange="_setConfInstKey('+pid+',this.value)" style="width:100%;padding:.35rem .5rem;border:1px solid var(--light);border-radius:7px;font-size:.76rem;font-family:\'DM Sans\',sans-serif;color:var(--black);background:var(--white);box-sizing:border-box;">'+_instOpts0+'</select>'
+        ?(_isTrueApPickup0
+          ?'<select id="cinst-'+pid+'" onchange="_setConfInstKey('+pid+',this.value)" style="width:100%;padding:.35rem .5rem;border:1px solid var(--light);border-radius:7px;font-size:.76rem;font-family:\'DM Sans\',sans-serif;color:var(--black);background:var(--white);box-sizing:border-box;">'+_instOpts0+'</select>'
+          :'')
         :'<div style="font-size:.68rem;color:var(--mid);font-style:italic;">No pickup instruction templates set up yet \u2014 add them under Profile.</div>';
       const buttons='<div style="display:flex;flex-direction:column;gap:.45rem;margin-bottom:.75rem;">'+((_isApPickup0 && getMyDriverName()===r.driver && typeof _isRideWithinHoursSymmetric==='function' && _isRideWithinHoursSymmetric(r,6))?('<button onclick="dashSendArrival('+pid+')" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.6rem;background:#1d4ed8;border:none;border-radius:8px;color:#fff;font-weight:800;font-size:.88rem;cursor:pointer;font-family:\'DM Sans\',sans-serif;">&#x2708;&#xFE0F; Send arrival text</button>'+'<div style="font-size:.63rem;color:var(--mid);text-align:center;margin:-.15rem 0 .15rem;">Send this the moment they land \u2014 goes straight to '+escHtml(r.client||'the client')+'</div>'):'')
         +'<button onclick="sendAllConf('+pid+')" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.45rem;padding:.65rem;background:#15803d;border:none;border-radius:8px;color:#fff;font-weight:800;font-size:.9rem;cursor:pointer;font-family:\'DM Sans\',sans-serif;">&#x1F4E4; Send checked items in one text</button>'
         +'<div style="font-size:.66rem;color:var(--mid);text-align:center;margin:-.2rem 0 .1rem;">Tick or untick what to include, then send \u2014 or tap any row to send just that piece</div>'
         +chkRow('text','&#x1F4AC; Confirmation text','sendConfText', _sa0.message!==false)
-        +chkRow('inst','&#x1F4CD; Pickup instructions','sendConfInstructions', _sa0.instructions!==false&&_hasAnyInstr0&&_isTrueApPickup0, !_hasAnyInstr0, _instSel0)
+        +chkRow('inst','&#x1F4CD; Pickup instructions','sendConfInstructions', _sa0.instructions!==false&&_hasAnyInstr0, !_hasAnyInstr0, _instSel0)
         // Not just disabled with a note anymore - the row doesn't render at all for a ride
         // type that can never send a selfie (only a true AP PICK UP meets someone at the
         // airport; an AP RUN or a merged AP ROUND TRIP's outbound leg never does). A disabled,
