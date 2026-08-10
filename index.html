@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608101787">
+<meta name="version" content="202608101788">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -7237,9 +7237,14 @@ function renderConfirmations(){
         // too - not relying on "the checkbox is just missing" to mean "don't send," since that
         // reader defaults a missing box to true.
         +(_isTrueApPickup0 ? chkRow('selfie','&#x1F933; Day-of selfie','sendSelfiePic', _sa0.selfie!==false) : '')
-        +chkRow('vcard','&#x1F4C7; Client contact \u2192 driver','sendClientVCardToDriver', _sa0.vcard!==false, false,
+        // Same reasoning and same treatment as the phone row a few lines down: doesn't render
+        // when the driver IS the client owner (_own0). This exists so a driver who DIDN'T bring
+        // the client in has their contact info; when the driver already owns that client
+        // relationship, sending it to themselves is pure noise, not information. sendAllConf()
+        // below independently re-checks this too, same reasoning as the selfie/phone fixes.
+        +(_own0!==(r.driver||'').trim() ? chkRow('vcard','&#x1F4C7; Client contact \u2192 driver','sendClientVCardToDriver', _sa0.vcard!==false, false,
           '<div style="font-size:.62rem;color:var(--mid);">Goes to the driver only, never the client</div>',
-          'if(this.checked){var p=document.getElementById(\'cchk-'+pid+'-phone\'); if(p) p.checked=false;}')
+          'if(this.checked){var p=document.getElementById(\'cchk-'+pid+'-phone\'); if(p) p.checked=false;}') : '')
         +chkRow('card','&#x1F5BC; Driver card','sendDriverCard', _sa0.card!==false)
         // Same treatment as the selfie row: doesn't render at all when it can't apply, rather
         // than showing disabled with a note. This row exists so the DRIVER can have the
@@ -21609,16 +21614,17 @@ async function sendAllConf(id){
   // box = true" default and silently include a selfie on a ride type that can't use one. This
   // check is independent of whether the checkbox exists in the DOM at all, on purpose.
   const _selfieApplies=(r.type==='AP PICK UP');
-  // Same shape of guard for the phone row: it doesn't render when the driver IS the client
-  // owner (see chkRow above), so g('phone') would otherwise fall back to true and silently
-  // text the driver their own client's number. Recomputes the same owner resolution used to
-  // decide whether to render the row in the first place, rather than trusting DOM absence.
-  const _phoneOwner=feeOwnerFor(r.createdBy)||(r.driver||'').trim();
-  const _phoneApplies=(_phoneOwner!==(r.driver||'').trim());
+  // Same shape of guard for the phone AND vcard rows: neither renders when the driver IS the
+  // client owner (see chkRow above), so g('phone')/g('vcard') would otherwise fall back to true
+  // and silently send the driver their own client's contact info back to themselves. Both share
+  // the same owner resolution - recomputed here rather than trusting DOM absence.
+  const _contactOwner=feeOwnerFor(r.createdBy)||(r.driver||'').trim();
+  const _phoneApplies=(_contactOwner!==(r.driver||'').trim());
+  const _vcardApplies=(_contactOwner!==(r.driver||'').trim());
   // Lock in the instruction template the driver picked.
   var selEl=document.getElementById('cinst-'+id);
   if(selEl){ _setConfInstKey(id, selEl.value); }
-  if(!g('text')&&!g('inst')&&!g('card')&&!g('vcard')&&!(_selfieApplies&&g('selfie'))&&!(_phoneApplies&&g('phone'))){ showToast('Nothing is checked \u2014 tick at least one item to send','error'); return; }
+  if(!g('text')&&!g('inst')&&!g('card')&&!(_vcardApplies&&g('vcard'))&&!(_selfieApplies&&g('selfie'))&&!(_phoneApplies&&g('phone'))){ showToast('Nothing is checked \u2014 tick at least one item to send','error'); return; }
   const fm=(window._confFilesMap||{})[id]||{};
   const files=[];
   if(g('card')&&fm.card) files.push(fm.card);
@@ -21628,10 +21634,11 @@ async function sendAllConf(id){
   }
   // Client contact goes to the driver ONLY \u2014 fired separately, never mixed into the
   // group files above (see sendClientVCardToDriver for why that has to be a real limit).
-  if(g('vcard')){ try{ await sendClientVCardToDriver(id); }catch(e){} }
+  if(_vcardApplies&&g('vcard')){ try{ await sendClientVCardToDriver(id); }catch(e){} }
   const sent=[];
   ['text','inst','card','vcard','selfie'].forEach(function(k){
     if(k==='selfie'&&!_selfieApplies) return;
+    if(k==='vcard'&&!_vcardApplies) return;
     if(!g(k)) return;
     if(document.getElementById('cpart-'+id+'-'+k)){ markPartSent(id,k); sent.push(k); }
   });
