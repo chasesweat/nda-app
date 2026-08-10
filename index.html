@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608101788">
+<meta name="version" content="202608101789">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -7334,29 +7334,45 @@ function renderConfirmations(){
 // _unmarkConfirmFromRide removed — its only caller (the ride modal's "tap to unmark"
 // indicator) was removed alongside it. toggleConfirmSent() itself is still very much in use
 // (the dashboard's Unsend action calls it directly).
+// Marks a ride confirmed — the shared "the confirmation text actually went out" state change.
+// Used by the manual "Mark confirmation text sent" button below, AND automatically by
+// sendAllConf() once it actually sends the confirmation message itself. Previously only the
+// manual button touched confirmSent, which meant using the real Send button — the thing that
+// actually sends the text — never itself counted as confirming: a driver who used it correctly
+// and closed the "Everything sent!" popup still saw the ride sitting in Confirmations To Send
+// indefinitely, with nothing telling them a second, separate tap was still required. No-ops if
+// already confirmed, so calling this after an already-confirmed ride's text gets re-sent (a
+// driver double-checking, or resending after an edit) doesn't stomp the original confirmSentBy/
+// confirmSentAt with whoever happened to re-send it.
+function _markRideConfirmed(r){
+  if(r.confirmSent) return;
+  r.confirmSent=true;
+  r.confirmSentBy=currentUser?.name||'';
+  r.confirmSentAt=Date.now();
+  touchRide(r, 'marked confirmation sent');
+  // Auto-advance the ride trail to Confirmed (only from Scheduled — never downgrade a paid ride).
+  if(r.status==='scheduled' || !r.status){ r.status='confirmed'; r.driverChangedPending=false; }
+}
+
 async function toggleConfirmSent(id){
   await _ensureFresh();
   const r=_rideById(id);
   if(!r) return;
-  const wasConfirmed=r.confirmSent;
-  r.confirmSent=!r.confirmSent;
-  touchRide(r, r.confirmSent ? 'marked confirmation sent' : 'unmarked confirmation');
   if(r.confirmSent){
-    r.confirmSentBy=currentUser?.name||'';
-    r.confirmSentAt=Date.now();
-    // Auto-advance the ride trail to Confirmed (only from Scheduled — never downgrade a paid ride).
-    if(r.status==='scheduled' || !r.status){ r.status='confirmed'; r.driverChangedPending=false; }
+    r.confirmSent=false;
+    delete r.confirmSentBy;
+    delete r.confirmSentAt;
+    touchRide(r, 'unmarked confirmation');
+    // Undoing the confirmation walks the trail back to Scheduled (but leaves a paid ride alone).
+    if(r.status==='confirmed'){ r.status='scheduled'; }
+  } else {
+    _markRideConfirmed(r);
     // Gentle fade before the card re-renders as its collapsed thumbnail
     const card=document.getElementById('conf-card-'+id);
     if(card){
       card.style.transition='opacity .2s';
       card.style.opacity='.4';
     }
-  } else {
-    delete r.confirmSentBy;
-    delete r.confirmSentAt;
-    // Undoing the confirmation walks the trail back to Scheduled (but leaves a paid ride alone).
-    if(r.status==='confirmed'){ r.status='scheduled'; }
   }
   await saveRides();
   setTimeout(function(){
@@ -21632,6 +21648,26 @@ async function sendAllConf(id){
   if(g('text')||g('inst')||files.length){
     await textClient(id, { msgOn:g('text'), instOn:g('inst'), files:files });
   }
+  // The Send button is the thing that actually sends the confirmation text - using it
+  // correctly should BE confirming, not a separate step someone has to remember afterward.
+  // Previously only the manual "Mark confirmation text sent" button ever set confirmSent, so a
+  // driver who used this real Send button, watched the "Everything sent!" popup, and closed it
+  // still had the ride sitting in Confirmations To Send with nothing telling them a second tap
+  // was still needed - reported directly: sent the text, checked the dashboard, still showed
+  // as needing confirmation. Only fires when the confirmation MESSAGE itself (g('text')) was
+  // part of what got sent - sending just pickup instructions or just a driver card on their own
+  // doesn't confirm anything. _markRideConfirmed no-ops if already confirmed, so re-sending an
+  // already-confirmed ride's text (a driver double-checking, or after an edit) is harmless.
+  if(g('text')){
+    _markRideConfirmed(r);
+    await saveRides();
+    setTimeout(function(){
+      renderConfirmations();
+      renderCal();
+      renderMyCal();
+      if(typeof refreshDash==='function') refreshDash();
+    }, 200);
+  }
   // Client contact goes to the driver ONLY \u2014 fired separately, never mixed into the
   // group files above (see sendClientVCardToDriver for why that has to be a real limit).
   if(_vcardApplies&&g('vcard')){ try{ await sendClientVCardToDriver(id); }catch(e){} }
@@ -22166,6 +22202,18 @@ function _doSendConfText(id){
   const conf=buildConfirmationText(r);
   openGroupThread(id, conf.message);
   markPartSent(id,'text');
+  // Same fix as sendAllConf's batch path, for the other door to the same action - tapping
+  // the "Confirmation text" row directly sends the exact same message and should mark the
+  // ride confirmed too, not just the bundled Send-everything button.
+  _markRideConfirmed(r);
+  saveRides().then(function(){
+    setTimeout(function(){
+      renderConfirmations();
+      renderCal();
+      renderMyCal();
+      if(typeof refreshDash==='function') refreshDash();
+    }, 200);
+  });
 }
 var _vehPickerCb=null;
 function openVehiclePicker(id, onChosen){
