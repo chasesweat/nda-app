@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608101781">
+<meta name="version" content="202608101783">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -5916,31 +5916,33 @@ async function _saveNewClientInfo(){
 // ═══════════════════════════════════════════
 // NOTIFICATIONS
 // ═══════════════════════════════════════════
-// Tomorrow's calendar date - built from today's actual date components (year/month/day),
-// then day+1, letting the Date constructor handle month/year rollover correctly. Deliberately
-// NOT "now + 86400000ms" (a fixed 24-hour duration) - that approach could cross a calendar-day
-// boundary incorrectly right around midnight (pressed at 11:59pm targets one day, 12:01am two
-// minutes later targets the next one), and is technically vulnerable on DST transition days,
-// where a "day" isn't exactly 24 hours. This is genuinely midnight-to-midnight instead.
-function _tomorrowDateStr(){
-  var _now = new Date();
-  return toDateStr(new Date(_now.getFullYear(), _now.getMonth(), _now.getDate()+1));
+// Today's calendar date, as a plain YYYY-MM-DD string - the actual reference point the
+// notification-hold logic below compares against. Used to be _tomorrowDateStr() (built the
+// same way, day+1 instead of today) back when the hold only applied to literally-tomorrow
+// assignments; broadened below to any future date, so what matters now is "today" as the
+// dividing line, not "tomorrow" as one specific day.
+function _todayDateStr(){
+  return toDateStr(new Date());
 }
 function addNotification(driverName, ride, action, customMsg, forceNow){
   if(!forceNow && action==='assigned'&&currentUser&&driverName===(USER_DRIVER_MAP[currentUser.name]||'')) return;
-  // A driver isn't notified they've been assigned a ride for TOMORROW until whoever scheduled
-  // that ride (the client owner - Kat, Morgan, or anyone else who created it) taps Notify
-  // Drivers on the calendar page. Avoids pinging a driver repeatedly as the owner drafts and
-  // adjusts tomorrow's assignments throughout today, in favor of one consolidated,
-  // genuinely current notification whenever the owner decides the schedule is actually set.
+  // A driver isn't notified they've been assigned a ride for ANY future date until whoever
+  // scheduled it (the client owner - Kat, Morgan, or anyone else who created it) taps Notify
+  // Drivers. Avoids pinging a driver repeatedly as the owner drafts and adjusts assignments,
+  // in favor of one consolidated, genuinely current notification whenever the owner decides
+  // the schedule is actually set - and, just as importantly, means the accept/reject clock
+  // (see driverNotifiedAt below) doesn't start ticking until that actual moment either. This
+  // used to only hold back literally-tomorrow assignments; a ride assigned further out than
+  // that notified - and started its one-hour accept window - immediately at creation, which is
+  // exactly how a ride assigned two weeks in advance got auto-accepted overnight before the
+  // driver had any real reason to be checking the app.
   // Only the assignment notification itself is held back; everything else (chat, transfers,
-  // etc.) still fires immediately as normal. Today-and-earlier assignments (a same-day
-  // reassignment, or a ride already underway) still notify immediately - there's no "later
-  // today" to wait for.
+  // etc.) still fires immediately as normal. Today's assignments (a same-day reassignment, or
+  // a ride already underway) still notify immediately - there's no "later today" to wait for.
   // forceNow=true bypasses this specifically for notifyMyAssignedDrivers()'s own release
   // step below, reusing this exact same message/push logic rather than a second copy of it.
-  var _tomorrowStr = _tomorrowDateStr();
-  if(!forceNow && action==='assigned' && ride && ride.date===_tomorrowStr){
+  var _todayStr = _todayDateStr();
+  if(!forceNow && action==='assigned' && ride && ride.date>_todayStr){
     ride.assignNotifyPending = true;
     return;
   }
@@ -5952,7 +5954,7 @@ function addNotification(driverName, ride, action, customMsg, forceNow){
   // Fire push notification to driver's phone
   if(action==='assigned'){
     // Starts the accept/reject window right here - the one true moment the driver actually
-    // gets told, whether that's immediately (same-day) or only now, after a delayed tomorrow
+    // gets told, whether that's immediately (same-day) or only now, after a delayed future
     // assignment was finally released via Notify Drivers. A reassignment (this firing again
     // for the same ride) correctly restarts the clock, since it's a genuinely new ask.
     ride.driverNotifiedAt = Date.now();
@@ -5984,25 +5986,29 @@ function addNotification(driverName, ride, action, customMsg, forceNow){
 }
 
 // How many of the CURRENT USER'S OWN scheduled rides are still sitting on a queued,
-// unreleased assignment notification for tomorrow - drives whether Notify Drivers shows on the
-// calendar page at all. Uses isMyScheduledRide() - the same, already-established function used
-// elsewhere for "which scheduled rides are mine" - rather than a naive createdBy comparison,
-// so this automatically inherits the app's real Kat/Morgan shared-dispatch rule: a ride
-// scheduled by either one shows, and can be notified, by both. Confirmed directly with Chase:
-// anything Kat can do here, Morgan can do too, and vice versa - this is NOT the same
+// unreleased assignment notification for some future date - drives whether Notify Drivers
+// shows on the calendar page at all. Uses isMyScheduledRide() - the same, already-established
+// function used elsewhere for "which scheduled rides are mine" - rather than a naive createdBy
+// comparison, so this automatically inherits the app's real Kat/Morgan shared-dispatch rule: a
+// ride scheduled by either one shows, and can be notified, by both. Confirmed directly with
+// Chase: anything Kat can do here, Morgan can do too, and vice versa - this is NOT the same
 // distinction as feeOwnerFor()'s fee-attribution resolution (which folds Morgan into Kat only
 // for who EARNS the 15% finder's fee); this is about who can genuinely act on the ride.
 // Zero once there's nothing left to release, same "gone once its job is done" pattern every
 // other action-block banner already follows.
+// Was scoped to literally-tomorrow rides only; broadened to any future date so a ride assigned
+// weeks out doesn't skip the hold entirely and start its accept-window clock unattended - see
+// the comment on assignNotifyPending's origin in addNotification() for the incident that
+// prompted this.
 function myPendingNotifyCount(){
   if(!currentUser) return 0;
-  var _tomorrowStr = _tomorrowDateStr();
+  var _todayStr = _todayDateStr();
   return (rides||[]).filter(function(r){
-    return r && isMyScheduledRide(r) && r.date===_tomorrowStr && r.assignNotifyPending===true && r.status!=='cancelled' && r.driver;
+    return r && isMyScheduledRide(r) && r.date>_todayStr && r.assignNotifyPending===true && r.status!=='cancelled' && r.driver;
   }).length;
 }
 // Releases the queued assignment notification for every one of the current user's OWN
-// scheduled tomorrow rides (Kat/Morgan shared-dispatch aware, same as above), to WHICHEVER
+// scheduled future rides (Kat/Morgan shared-dispatch aware, same as above), to WHICHEVER
 // DRIVER IS CURRENTLY ASSIGNED on each one - not to the person pressing the button. If Kat
 // assigned a ride to Morgan, then later reassigned it to Chase before ever pressing this, only
 // Chase gets notified when either Kat OR Morgan finally does; Morgan never hears about an
@@ -6011,9 +6017,9 @@ function myPendingNotifyCount(){
 // sync over time.
 async function notifyMyAssignedDrivers(){
   if(!currentUser){ showToast('Could not find your account','error'); return; }
-  var _tomorrowStr = _tomorrowDateStr();
+  var _todayStr = _todayDateStr();
   var pending = (rides||[]).filter(function(r){
-    return r && isMyScheduledRide(r) && r.date===_tomorrowStr && r.assignNotifyPending===true && r.status!=='cancelled' && r.driver;
+    return r && isMyScheduledRide(r) && r.date>_todayStr && r.assignNotifyPending===true && r.status!=='cancelled' && r.driver;
   });
   if(!pending.length){ showToast('Nothing to notify'); return; }
   pending.forEach(function(r){
@@ -6130,6 +6136,16 @@ function updateNotifBadge(){
   // Count unread ride notifications
   const unreadRide = dName ? (notifications[dName]||[]).filter(function(n){
     if(!n||n.read) return false;
+    // Self-caused notifications are hidden by default - nobody needs a badge ping for their
+    // own routine action (accepting a ride, marking something paid). ride_rejected is
+    // different: it's addressed to the CLIENT OWNER saying "this needs reassigning," and the
+    // owner and the rejecting driver are routinely the same person here - Morgan's rides fold
+    // to Kat for fee attribution (see feeOwnerFor), so a ride Morgan created and Kat drove has
+    // Kat as both. Rejecting it is Kat acting as the driver; the resulting notification is
+    // Kat needing to act as the owner - a different role, not a repeat of the same action, and
+    // hiding it left the one person who could actually reassign the ride with no badge telling
+    // her there was anything to do.
+    if(n.type==='ride_rejected') return true;
     if(n.createdBy && n.createdBy===(currentUser?.name||'')) return false;
     return true;
   }).length : 0;
@@ -15320,8 +15336,8 @@ function refreshDash(){
 // Only shows for whoever actually has something pending to release - disappears the moment
 // they've done it, same "gone once its job is done" pattern the dashboard's own action-block
 // banners already follow. Lives on the Calendar page - the client owner is naturally looking
-// right here when reviewing and settling tomorrow's schedule anyway. This is the OWNER's
-// button (whoever scheduled the ride), not the driver's - see myPendingNotifyCount/
+// right here when reviewing and settling the schedule anyway. This is the OWNER's button
+// (whoever scheduled the ride), not the driver's - see myPendingNotifyCount/
 // notifyMyAssignedDrivers above for why.
 function renderCalFinalizeTomorrow(){
   var box=document.getElementById('cal-finalize-tomorrow'); if(!box) return;
@@ -15329,10 +15345,10 @@ function renderCalFinalizeTomorrow(){
   if(!count){ box.innerHTML=''; return; }
   box.innerHTML='<div style="background:#eef2ff;border:1.5px solid #c7d2fe;border-radius:12px;padding:1rem;margin-bottom:.75rem;">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.4rem;">'
-    +'<span style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#4338ca;">\ud83d\udccb Tomorrow\u2019s schedule \u00b7 '+count+' ride'+(count===1?'':'s')+' to notify</span>'
+    +'<span style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#4338ca;">\ud83d\udccb Upcoming schedule \u00b7 '+count+' ride'+(count===1?'':'s')+' to notify</span>'
     +'<button onclick="notifyMyAssignedDrivers()" style="background:#4338ca;color:#fff;border:none;border-radius:8px;padding:.4rem .8rem;font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;">Notify Drivers</button>'
     +'</div>'
-    +'<div style="font-size:.75rem;color:var(--mid);line-height:1.45;">You\u2019ve scheduled '+count+' ride'+(count===1?'':'s')+' for tomorrow \u2014 tap Notify Drivers once it\u2019s set, and whoever\u2019s currently assigned finds out.</div>'
+    +'<div style="font-size:.75rem;color:var(--mid);line-height:1.45;">You\u2019ve scheduled '+count+' ride'+(count===1?'':'s')+' that '+(count===1?'hasn\u2019t':'haven\u2019t')+' been announced yet \u2014 tap Notify Drivers once it\u2019s set, and whoever\u2019s currently assigned finds out.</div>'
     +'</div>';
 }
 function renderDashNeedsAttention(){
