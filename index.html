@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608111805">
+<meta name="version" content="202608111808">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2493,8 +2493,13 @@ async function _loadAppData() {
   try{ await _migrateLegacyProfileTemplates(); }catch(e){ console.warn('legacy template migration', e); }
   try{ await _promoteChaseTemplatesToGlobalDefault(); }catch(e){ console.warn('Chase default promotion', e); }
   try{ await _clearChasePersonalDuplicates(); }catch(e){ console.warn('Chase personal duplicate cleanup', e); }
-  try{ await _seedGlobalPickupInstructionsByTerminal(); }catch(e){ console.warn('Global terminal instructions seed', e); }
-  try{ await _seedGlobalPickupInstructionsGeneral(); }catch(e){ console.warn('Global pickup instructions seed', e); }
+  // The two pickup-instructions seed migrations that used to run here (v793-era) were removed
+  // in v807 - both only ever populated globalSettings fields (defaultPickupInstructions,
+  // defaultPickupInstructionsByTerminal) that nothing reads anymore now that pickup instructions
+  // are purely hardcoded-default-plus-personal-override. Calling them was already a harmless
+  // no-op on every boot after their first run (flag-guarded), but with no reader left for what
+  // they wrote, running them at all served no purpose - removed rather than leave dead work
+  // happening silently on every single app load.
   await loadBiometricCreds();
     // Repair ride IDs: every ride must have a UNIQUE numeric id. Duplicate or
     // non-numeric ids (e.g. from a NaN nextId or repeated imports) caused clicking one
@@ -7486,11 +7491,11 @@ function buildConfirmationText(r){
   else if(type==='AP PICK UP'){
     const termUpper = terminalVal.toUpperCase();
     if(termUpper.includes('NORTH')){
-      instructions = '🛫 NORTH TERMINAL Pick Up Instructions\n\n1️⃣ Text or call when you ARRIVE at baggage claim.\n\n2️⃣ From baggage claim, take the escalator to lower level (LN1) pickup. The escalator is located just beyond baggage carousel #4, between doors N2 and N3.\n\n3️⃣ The driver will meet you near the lower level elevator, which is to your right once you exit the lower level.\n\n🔻🔻⬇️⬇️⬇️⬇️🔻🔻\nDISREGARD SIGNS FOR UBER/LYFT RIDESHARE\n🔺🔺⬆️⬆️⬆️⬆️🔺🔺';
+      instructions = '\ud83d\udeeb North Terminal (LN1)\nStep 1: Text your driver once you have your bags.\nStep 2: Go to the Lower Level (LN1) using the elevators or escalators near Doors N2 & N3.\nStep 3: Text the driver when you are heading out to the curb.\nStep 4: Wait at the curb just before the crosswalk.';
     } else if(termUpper.includes('SOUTH')){
-      instructions = '🛬 SOUTH TERMINAL (Delta Domestic) Pick Up Instructions\n\n1️⃣ Text your driver once you have retrieved your luggage from baggage claim.\n\n2️⃣ Take the escalator or elevator located between Doors S2 and S3 down to the Lower Level Pickup Area (LS1).\n\n3️⃣ Text your driver again when you are on your way to the LS1 pickup area.\n\n4️⃣ Wait on the curb just before the crosswalk near the curbside baggage check-in.\n\nYour driver will pick up from there.\n\n✨ Important: Please make sure your phone is off Airplane Mode and your ringer is on so your driver can communicate with you.';
+      instructions = '\ud83d\udeec South Terminal (LS1)\nStep 1: Text your driver after you get your bags.\nStep 2: Go to the Lower Level (LS1) using the elevators or escalators between Doors S2 & S3.\nStep 3: Text the driver when you are heading out to the curb.\nStep 4: Wait at the curb just before the crosswalk.';
     } else if(termUpper.includes('INTERNATIONAL') || termUpper.includes('INTL')){
-      instructions = '🛂 INTERNATIONAL TERMINAL Pick Up Instructions\n\n1️⃣ Text or call when you arrive at baggage claim. This helps us time our arrival appropriately.\n\n2️⃣ From baggage claim, proceed to curbside pickup. Exit through door A2 to curbside pickup (A1 is usually very congested).\n\n3️⃣ Follow the signs for ground transportation and passenger pickup. Doors A1 and A2 will be to the left ⬅.\n\n4️⃣ Once you exit the airport, use the walkway and proceed to the middle island for passenger pickup. IF POSSIBLE, GO TO THE LAST SIGN FOR A2—just before the A3 sign.\n\n(If you do not have Global Entry or Mobile Passport Control, you can visit etbykat.com/mpc for details on Mobile Passport Control.)';
+      instructions = '\ud83d\udec2 International (Middle Island)\nStep 1: Text your driver once you have your bags.\nStep 2: Walk out the main doors and cross the first road to the Middle Island.\nStep 3: Walk all the way to the VERY LAST A2 sign at the far end of the island.\nStep 4: Keep your ringer on!';
     }
     message = 'I am confirming your pickup scheduled for tomorrow at '+time+' from the airport, Flight # '+flight+'.\n\n'+
               driverLine+'\n\n'+contact+'\n\n'+
@@ -7554,8 +7559,13 @@ function buildConfirmationText(r){
       }
     }
     // No personal override from the owner - fall back to the app-wide default per-terminal
-    // instructions (Chase-editable, same layer confirm/pickup/arrival already have) before
-    // finally falling to the hardcoded built-in walkthrough. Same fuzzy terminal matching.
+    // instructions. Restored in v808 - v807 had removed this, reasoning the hardcoded default
+    // was enough on its own; Chase's follow-up clarified he wants HIS OWN edits (via the
+    // personal "AP Pick Up - per-terminal instructions" section, same UI every other driver
+    // uses) to live-update this shared default for everyone, not require a hardcode for every
+    // wording change. Falls to buildConfirmationText's own hardcoded walkthrough (kept in sync
+    // with HARDCODED_PICKUP_BY_TERMINAL by hand) only if NEITHER a personal override NOR this
+    // shared default is set. Same fuzzy terminal matching as the personal-override check above.
     if(!_termInstr){
       var _gByTerm = (globalSettings && globalSettings.defaultPickupInstructionsByTerminal) || {};
       _termInstr = _gByTerm[_rideTerm] || '';
@@ -7583,7 +7593,14 @@ function buildConfirmationText(r){
   // hasn't opted in, or hasn't filled in that specific ride type.
   var _typeInstr = (_ods.useTypeInstructions && _ods.pickupInstructionsByType && type!=='AP PICK UP')
     ? (_ods.pickupInstructionsByType[type]||'') : '';
-  const customInstr = (_termInstr || _typeInstr || (type!=='AP PICK UP' ? (_ods.pickupInstructions||_oProf.pickupInstructions||(globalSettings&&globalSettings.defaultPickupInstructions)||'') : '')).trim();
+  // General (non-terminal) pickup instructions - "personal override, then the shared app-wide
+  // default (Chase-editable, live), then the hardcoded default as final safety net" - restored
+  // in v808 after v807 had removed the middle layer; Chase's follow-up clarified he wants his
+  // own edits to live-update this default for everyone, not require a hardcode for every
+  // wording change. HARDCODED_MSG_DEFAULTS.pickup (defined further down, safe forward reference
+  // since this only runs when a message is actually being built) is the true last resort, used
+  // only if NEITHER a personal override NOR the shared default is set.
+  const customInstr = (_termInstr || _typeInstr || (type!=='AP PICK UP' ? (_ods.pickupInstructions||_oProf.pickupInstructions||(globalSettings&&globalSettings.defaultPickupInstructions)||HARDCODED_MSG_DEFAULTS.pickup||'') : '')).trim();
   if(customMsg)   message      = fillConfTemplate(customMsg, r, sender, assigned);
   if(customInstr) instructions = fillConfTemplate(customInstr, r, sender, assigned);
 
@@ -17433,6 +17450,18 @@ function _driverSurchAutoHTML(dName){
 // deliberately admin-default-only, no per-driver override exists for those.
 const _TEMPLATE_FIELD_MAP = {
   confirm:      { global: 'defaultConfirmTemplate',      personal: 'confTemplate' },
+  // pickup's global mapping restored (v808) - v807 removed it, reasoning that the hardcoded
+  // default alone was enough now that it held real content. Chase's own follow-up clarified
+  // the actual want: editing HIS OWN pickup instructions should live-update the shared default
+  // for every driver automatically, the same way it already works for confirm/arrival below -
+  // not a one-time hardcode that needs a new build every time the wording changes. Restoring
+  // this re-enables saveTemplateField's existing auto-promote-to-global behavior for pickup:
+  // Chase edits his personal field, it's copied into globalSettings.defaultPickupInstructions,
+  // and his personal copy is cleared right after (so it doesn't sit there looking like a
+  // separate, redundant customization) - see saveTemplateField's own comment for the full
+  // mechanism. Only ever writes to Chase's own field and the shared default; never touches
+  // another driver's personal customization (Kat, Morgan, or anyone else's own override still
+  // wins over whatever this sets, unconditionally, same guarantee as before).
   pickup:       { global: 'defaultPickupInstructions',   personal: 'pickupInstructions' },
   arrival:      { global: 'defaultArrivalTemplate',       personal: 'arrivalTemplate' },
   driverchange: { global: 'defaultDriverChangeTemplate',  personal: null },
@@ -17448,7 +17477,7 @@ const _TEMPLATE_FIELD_MAP = {
 // representative example, noted as such, rather than presenting it as the only possibility.
 const HARDCODED_MSG_DEFAULTS = {
   confirm: '(Varies by ride type - shown here is the AP Run / Local version)\n\nI am confirming your pickup scheduled for tomorrow at {time}.\n\n[driver + contact info]\n\nMany thanks,\n\n[signature]\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)',
-  pickup: '(No built-in default for AP Run, One Way, or Round Trip pickup instructions \u2014 leave this blank and nothing gets sent for that part of the message unless you set one here.)',
+  pickup: '\ud83c\udfe0 Home/Hotel Pickup Instructions\nStep 1: Your driver will text you when they are 15 minutes away.\nStep 2: Your driver will text again once they have arrived at your door or curb.\nStep 3: Please keep your ringer on!',
   arrival: "Hi, this is {driver}, your driver. I see that you've landed\u2014welcome! I'm parked just a few minutes away.\nOnce you grab your bags and start heading toward the pickup location, please let me know and I will pull right up. (If you haven't already, sending a quick description or selfie helps me spot you faster!) See you soon.",
   driverchange: "Dear {client},\n\nPlease be advised that there has been a change regarding your scheduled pickup on {date} at {time}.\n\nYour new driver will be {driver}. We have attached a photo of your driver and the vehicle for easy identification upon arrival. If you need to reach them directly, they can be contacted at {phone}.\n\nThere are no changes to your scheduled itinerary or pickup location. If you have any questions, please reply to this message.",
   receiptshare: "Here's the receipt for your transportation service on {date}.",
@@ -17457,15 +17486,18 @@ const HARDCODED_MSG_DEFAULTS = {
 // Keys with NO genuine hardcoded default to copy from - the placeholder text for these is
 // purely an explanatory note (e.g. "no built-in default exists"), not real usable content,
 // so "Start from this default" must not offer to copy it in as if it were a message.
-const NO_REAL_DEFAULT_KEYS = { pickup: true };
+// 'pickup' used to be one of these (no built-in home/hotel pickup wording existed at all) -
+// removed now that HARDCODED_MSG_DEFAULTS.pickup holds Chase's real current wording instead
+// of just an explanatory note. Empty on purpose - nothing currently has no real default.
+const NO_REAL_DEFAULT_KEYS = { };
 // The three terminal-specific hardcoded fallbacks AP Pick Up rides use when no terminal
 // override is set - extracted directly from buildConfirmationText's own instructions='...'
 // assignments (North/South/International), so these are guaranteed to match what actually
 // sends, same guarantee as HARDCODED_MSG_DEFAULTS above.
 const HARDCODED_PICKUP_BY_TERMINAL = {
-  'North Domestic': '🛫 NORTH TERMINAL Pick Up Instructions\n\n1️⃣ Text or call when you ARRIVE at baggage claim.\n\n2️⃣ From baggage claim, take the escalator to lower level (LN1) pickup. The escalator is located just beyond baggage carousel #4, between doors N2 and N3.\n\n3️⃣ The driver will meet you near the lower level elevator, which is to your right once you exit the lower level.\n\n🔻🔻⬇️⬇️⬇️⬇️🔻🔻\nDISREGARD SIGNS FOR UBER/LYFT RIDESHARE\n🔺🔺⬆️⬆️⬆️⬆️🔺🔺',
-  'South Domestic': '🛬 SOUTH TERMINAL (Delta Domestic) Pick Up Instructions\n\n1️⃣ Text your driver once you have retrieved your luggage from baggage claim.\n\n2️⃣ Take the escalator or elevator located between Doors S2 and S3 down to the Lower Level Pickup Area (LS1).\n\n3️⃣ Text your driver again when you are on your way to the LS1 pickup area.\n\n4️⃣ Wait on the curb just before the crosswalk near the curbside baggage check-in.\n\nYour driver will pick up from there.\n\n✨ Important: Please make sure your phone is off Airplane Mode and your ringer is on so your driver can communicate with you.',
-  'International': '🛂 INTERNATIONAL TERMINAL Pick Up Instructions\n\n1️⃣ Text or call when you arrive at baggage claim. This helps us time our arrival appropriately.\n\n2️⃣ From baggage claim, proceed to curbside pickup. Exit through door A2 to curbside pickup (A1 is usually very congested).\n\n3️⃣ Follow the signs for ground transportation and passenger pickup. Doors A1 and A2 will be to the left ⬅.\n\n4️⃣ Once you exit the airport, use the walkway and proceed to the middle island for passenger pickup. IF POSSIBLE, GO TO THE LAST SIGN FOR A2—just before the A3 sign.\n\n(If you do not have Global Entry or Mobile Passport Control, you can visit etbykat.com/mpc for details on Mobile Passport Control.)',
+  'North Domestic': '\ud83d\udeeb North Terminal (LN1)\nStep 1: Text your driver once you have your bags.\nStep 2: Go to the Lower Level (LN1) using the elevators or escalators near Doors N2 & N3.\nStep 3: Text the driver when you are heading out to the curb.\nStep 4: Wait at the curb just before the crosswalk.',
+  'South Domestic': '\ud83d\udeec South Terminal (LS1)\nStep 1: Text your driver after you get your bags.\nStep 2: Go to the Lower Level (LS1) using the elevators or escalators between Doors S2 & S3.\nStep 3: Text the driver when you are heading out to the curb.\nStep 4: Wait at the curb just before the crosswalk.',
+  'International': '\ud83d\udec2 International (Middle Island)\nStep 1: Text your driver once you have your bags.\nStep 2: Walk out the main doors and cross the first road to the Middle Island.\nStep 3: Walk all the way to the VERY LAST A2 sign at the far end of the island.\nStep 4: Keep your ringer on!',
 };
 function renderMessageTemplates(){
   const panel = document.getElementById('driver-panel-templates');
@@ -17545,6 +17577,10 @@ function renderMessageTemplates(){
       + field('personal','confirm', 'My confirmation text', 'Placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}', myCustom.confTemplate, 5)
       + field('personal','pickup', 'My pickup instructions', 'For AP Run, One Way, and Round Trip rides only \u2014 AP Pick Up always uses the per-terminal instructions below instead. Folded into the confirmation text. Same placeholders as above.', myCustom.pickupInstructions, 3, _byTypeHtml)
       + (function(){
+          // Compares against the live shared default first, hardcoded default as fallback -
+          // restored in v808 (v807 had removed the live layer, reverted per Chase's follow-up
+          // wanting his own edits to live-update the shared default). Same "effective default"
+          // shape the personal confirm/arrival comparisons already use via _TEMPLATE_FIELD_MAP.
           const _gByTermForCompare = (globalSettings && globalSettings.defaultPickupInstructionsByTerminal) || {};
           const _termDiffers = function(k){
             const v = (_byTerm[k]||'').trim(); if(!v) return false;
@@ -17595,36 +17631,16 @@ function renderMessageTemplates(){
   }
 
   if(admin){
-    const _gByTerm = (globalSettings && globalSettings.defaultPickupInstructionsByTerminal) || {};
-    const _gTermDiffers = function(k){
-      const v = (_gByTerm[k]||'').trim(); if(!v) return false;
-      return v !== (HARDCODED_PICKUP_BY_TERMINAL[k]||'').trim();
-    };
-    const _gTermIsSet = _gTermDiffers('North Domestic') || _gTermDiffers('South Domestic') || _gTermDiffers('International');
-    const _gTermColor = _gTermIsSet ? '#15803d' : 'var(--mid)';
-    const _gTermBg = _gTermIsSet ? '#e8f5ee' : 'var(--surface)';
-    const _gTermStatus = _gTermIsSet ? 'Custom set' : 'Using default';
-    const _globalTerminalBlock = '<div style="border:1.5px solid var(--light);border-radius:10px;margin-bottom:.6rem;overflow:hidden;">'
-      +'<button type="button" onclick="toggleMsgTplField(\'msgtpl-global-pickup-terminal\')" style="width:100%;text-align:left;background:var(--surface);border:none;padding:.65rem .8rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-family:\'DM Sans\',sans-serif;">'
-      +'<span style="font-size:.82rem;font-weight:700;color:var(--black);">AP Pick Up \u2014 per-terminal instructions (app-wide default)</span>'
-      +'<span style="display:flex;align-items:center;gap:.5rem;flex-shrink:0;">'
-      +'<span style="font-size:.66rem;font-weight:700;color:'+_gTermColor+';background:'+_gTermBg+';border-radius:10px;padding:2px 8px;">'+_gTermStatus+'</span>'
-      +'<span id="msgtpl-global-pickup-terminal-arrow" style="font-size:.7rem;color:var(--mid);">\u25be</span>'
-      +'</span></button>'
-      +'<div id="msgtpl-global-pickup-terminal-body" style="display:none;padding:.75rem .8rem;">'
-      +'<div style="font-size:.66rem;color:var(--mid);margin-bottom:.6rem;line-height:1.4;">The shared fallback every driver\'s AP Pick Up rides use unless THEY have their own per-terminal instructions set (their own always wins over this). Leave a terminal blank to use the app\'s built-in walkthrough for it.</div>'
-      +'<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">North Domestic</div><textarea id="msgtpl-global-pickup-term-north" rows="2" placeholder="'+escAttr(HARDCODED_PICKUP_BY_TERMINAL['North Domestic'].replace(/\n/g,' '))+'" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_gByTerm['North Domestic']||'')+'</textarea></div>'
-      +'<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">South Domestic</div><textarea id="msgtpl-global-pickup-term-south" rows="2" placeholder="'+escAttr(HARDCODED_PICKUP_BY_TERMINAL['South Domestic'].replace(/\n/g,' '))+'" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_gByTerm['South Domestic']||'')+'</textarea></div>'
-      +'<div style="margin-bottom:.5rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">International</div><textarea id="msgtpl-global-pickup-term-intl" rows="2" placeholder="'+escAttr(HARDCODED_PICKUP_BY_TERMINAL['International'].replace(/\n/g,' '))+'" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_gByTerm['International']||'')+'</textarea></div>'
-      +(_gTermIsSet?'<button onclick="clearGlobalPerTerminalPickupInstructions()" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;margin-right:.4rem;">Clear all (use built-in default)</button>':'')
-      +'<button onclick="saveGlobalPerTerminalPickupInstructions()" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Save</button>'
-      +'</div>'
-      +'</div>';
+    // Pickup instructions (general and per-terminal) removed from this admin section (v807) -
+    // there's no more live app-wide-editable layer for either; both are now purely hardcoded
+    // (HARDCODED_MSG_DEFAULTS.pickup, HARDCODED_PICKUP_BY_TERMINAL), changeable only through a
+    // code update, with a driver's own personal override still the only thing that can win over
+    // that hardcoded default. Editing rows for globalSettings.defaultPickupInstructions /
+    // defaultPickupInstructionsByTerminal would have silently done nothing once the read path
+    // stopped consulting them - removed rather than leave controls that lie about having effect.
     html += '<div style="font-size:.72rem;color:var(--mid);margin-bottom:1.25rem;line-height:1.5;background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.7rem .85rem;">'
       +'App-wide default \u2014 the fallback every driver gets unless they\'ve customized their own version. A driver\'s own customization always wins over this. Tap a message to open it; leaving a field blank keeps the app\'s original built-in message.</div>'
       + field('global','confirm', 'Confirmation text', 'Sent to clients confirming their ride. Placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}', gs.defaultConfirmTemplate, 5)
-      + field('global','pickup', 'Pickup instructions', 'For AP Run, One Way, and Round Trip rides only \u2014 AP Pick Up always uses the per-terminal instructions below instead. Folded into the confirmation text. Same placeholders as above.', gs.defaultPickupInstructions, 3)
-      + _globalTerminalBlock
       + field('global','arrival', 'Arrival text', 'Sent when a client lands. Placeholders: {driver} {client}', gs.defaultArrivalTemplate, 4)
       + field('global','driverchange', 'Driver-change notice to client', 'Sent to the client when their driver gets reassigned. Placeholders: {client} {date} {time} {driver} {phone}', gs.defaultDriverChangeTemplate, 5)
       + field('global','receiptshare', 'Receipt share text', 'The message sent alongside a shared PDF receipt. Placeholders: {date}', gs.defaultReceiptShareTemplate, 3)
@@ -17702,7 +17718,6 @@ async function saveAllTemplateFields(scope){
   const keys = scope==='personal' ? ['confirm','pickup','arrival'] : Object.keys(_TEMPLATE_FIELD_MAP);
   for(const key of keys){ await saveTemplateField(scope, key); }
   if(scope==='personal'){ await savePerTypePickupInstructions(true); await savePerTerminalPickupInstructions(true); }
-  if(scope==='global'){ await saveGlobalPerTerminalPickupInstructions(true); }
   renderMessageTemplates();
   showToast(scope==='personal' ? '\u2713 All your messages saved' : '\u2713 All default messages saved');
 }
@@ -17739,7 +17754,27 @@ async function savePerTerminalPickupInstructions(silent){
   const s = gv('msgtpl-pickup-term-south'); if(s) byTerm['South Domestic'] = s;
   const i = gv('msgtpl-pickup-term-intl');  if(i) byTerm['International'] = i;
   driverSettings[myName].pickupInstructionsByTerminal = byTerm;
-  try{ await saveDriverSettings(); if(!silent) showToast('\u2713 Saved'); }
+  try{
+    await saveDriverSettings();
+    // Same auto-promote-to-shared-default mechanism saveTemplateField already uses for
+    // confirm/pickup/arrival (v808) - this function is a separate save path (per-terminal
+    // instructions were never routed through the generic field()/_TEMPLATE_FIELD_MAP system),
+    // so it needs its own copy of the same logic rather than inheriting it automatically.
+    // Only fires when Chase edits HIS OWN per-terminal instructions with at least one terminal
+    // filled in - never touches another driver's personal customization, and clearing his own
+    // field (byTerm empty) never cascades into wiping the shared default as a side effect.
+    if(Object.keys(byTerm).length && currentUser && currentUser.name==='Chase'){
+      globalSettings = globalSettings || {};
+      globalSettings.defaultPickupInstructionsByTerminal = byTerm;
+      await storageSet('kat:globalSettings', globalSettings);
+      // Clear his personal copy right after propagating, so it doesn't sit there showing
+      // "Custom set" for text that's now just a duplicate of the default he controls - same
+      // redundant-duplicate cleanup saveTemplateField already does for the other templates.
+      driverSettings[myName].pickupInstructionsByTerminal = {};
+      await saveDriverSettings();
+    }
+    if(!silent) showToast('\u2713 Saved');
+  }
   catch(e){ console.warn('savePerTerminalPickupInstructions failed', e); const err=document.getElementById('msgtpl-personal-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
 }
 async function clearPerTerminalPickupInstructions(){
@@ -17750,31 +17785,10 @@ async function clearPerTerminalPickupInstructions(){
   await savePerTerminalPickupInstructions();
   renderMessageTemplates();
 }
-// App-wide default per-terminal AP Pickup instructions - Chase-only, same restriction as
-// every other global default field. Any driver with their OWN per-terminal instructions set
-// still has those win; this only fills in for drivers who've never set their own.
-async function saveGlobalPerTerminalPickupInstructions(silent){
-  if(!(currentUser && currentUser.name==='Chase')){ showToast('Only Chase can edit the default messages','error'); return; }
-  const el = document.getElementById('msgtpl-global-pickup-term-north'); if(!el) return;
-  globalSettings = globalSettings || {};
-  const gv = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
-  const byTerm = {};
-  const n = gv('msgtpl-global-pickup-term-north'); if(n) byTerm['North Domestic'] = n;
-  const s = gv('msgtpl-global-pickup-term-south'); if(s) byTerm['South Domestic'] = s;
-  const i = gv('msgtpl-global-pickup-term-intl');  if(i) byTerm['International'] = i;
-  globalSettings.defaultPickupInstructionsByTerminal = byTerm;
-  try{ await storageSet('kat:globalSettings', globalSettings); if(!silent) showToast('\u2713 Saved'); }
-  catch(e){ console.warn('saveGlobalPerTerminalPickupInstructions failed', e); const err=document.getElementById('msgtpl-global-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
-}
-async function clearGlobalPerTerminalPickupInstructions(){
-  if(!(currentUser && currentUser.name==='Chase')){ showToast('Only Chase can edit the default messages','error'); return; }
-  if(!confirm('Clear all three terminal instructions (North, South, International) for the app-wide default and switch back to the app\'s built-in walkthrough for each? This deletes the current shared wording immediately \u2014 it can\'t be recovered afterward.')) return;
-  ['msgtpl-global-pickup-term-north','msgtpl-global-pickup-term-south','msgtpl-global-pickup-term-intl'].forEach(function(id){
-    const el = document.getElementById(id); if(el) el.value = '';
-  });
-  await saveGlobalPerTerminalPickupInstructions();
-  renderMessageTemplates();
-}
+// App-wide default per-terminal AP Pickup instructions - removed (v807). Was Chase-only, same
+// restriction as every other global default field; the UI that called this no longer exists,
+// since there's no more live app-wide-editable layer for per-terminal instructions at all -
+// just the hardcoded default and a driver's own personal override, which still always wins.
 function renderAccessControl(){
   if(!(currentUser && currentUser.role==='admin')){
     document.getElementById('access-control-list').innerHTML='<p style="color:var(--mid);">Admins only.</p>';
@@ -21503,7 +21517,6 @@ async function _promoteChaseTemplatesToGlobalDefault(){
   var chase = (driverSettings && driverSettings['Chase Sweat']) || {};
   var changed=false;
   if(chase.confTemplate && !globalSettings.defaultConfirmTemplate){ globalSettings.defaultConfirmTemplate=chase.confTemplate; changed=true; }
-  if(chase.pickupInstructions && !globalSettings.defaultPickupInstructions){ globalSettings.defaultPickupInstructions=chase.pickupInstructions; changed=true; }
   if(chase.arrivalTemplate && !globalSettings.defaultArrivalTemplate){ globalSettings.defaultArrivalTemplate=chase.arrivalTemplate; changed=true; }
   globalSettings._chaseDefaultsPromoted = true;
   try{ await storageSet('kat:globalSettings', globalSettings); }catch(e){ console.warn('Chase default promotion save failed', e); }
@@ -21523,43 +21536,17 @@ async function _clearChasePersonalDuplicates(){
   if(!chase) return;
   var changed=false;
   if(chase.confTemplate && chase.confTemplate===globalSettings.defaultConfirmTemplate){ delete chase.confTemplate; changed=true; }
-  if(chase.pickupInstructions && chase.pickupInstructions===globalSettings.defaultPickupInstructions){ delete chase.pickupInstructions; changed=true; }
   if(chase.arrivalTemplate && chase.arrivalTemplate===globalSettings.defaultArrivalTemplate){ delete chase.arrivalTemplate; changed=true; }
   globalSettings._chasePersonalDuplicatesCleared = true;
   try{ await storageSet('kat:globalSettings', globalSettings); if(changed) await saveDriverSettings(); }
   catch(e){ console.warn('Chase personal duplicate cleanup failed', e); }
 }
-async function _seedGlobalPickupInstructionsByTerminal(){
-  globalSettings = globalSettings || {};
-  if(globalSettings._globalTerminalInstructionsSeeded) return;
-  globalSettings.defaultPickupInstructionsByTerminal = globalSettings.defaultPickupInstructionsByTerminal || {};
-  var gByTerm = globalSettings.defaultPickupInstructionsByTerminal;
-  // Seeded once from Chase's own document (Airport_pick_up_and_Drop_off_Confirmation_and_
-  // Instructions.pdf) as the app-wide default per-terminal instructions - only fills in
-  // terminals that are genuinely empty, never overwrites anything already customized.
-  if(!gByTerm['North Domestic']) gByTerm['North Domestic'] = "\ud83d\udeeb North Terminal (LN1)\n\nStep 1: Text your driver once you have your bags.\nStep 2: Go to the Lower Level (LN1) using the elevators or escalators near Doors N2 & N3.\nStep 3: Text the driver when you are heading out to the curb.\nStep 4: Wait at the curb just before the crosswalk.";
-  if(!gByTerm['South Domestic']) gByTerm['South Domestic'] = "\ud83d\udeec South Terminal (LS1)\n\nStep 1: Text your driver after you get your bags.\nStep 2: Go to the Lower Level (LS1) using the elevators or escalators between Doors S2 & S3.\nStep 3: Text the driver when you are heading out to the curb.\nStep 4: Wait at the curb just before the crosswalk.";
-  if(!gByTerm['International']) gByTerm['International'] = "\ud83d\udec2 International (Middle Island)\n\nStep 1: Text your driver once you have your bags.\nStep 2: Walk out the main doors and cross the first road to the Middle Island.\nStep 3: Walk all the way to the VERY LAST A2 sign at the far end of the island.\nStep 4: Keep your ringer on!";
-  globalSettings._globalTerminalInstructionsSeeded = true;
-  try{ await storageSet('kat:globalSettings', globalSettings); }
-  catch(e){ console.warn('Global terminal instructions seed failed', e); }
-}
-// Same idea, for the general (non-AP-Pickup) "Pickup instructions" default - AP Run, One Way,
-// and Round Trip rides. Confirmed via v631 that this field genuinely has no hardcoded
-// fallback in the message-building code, so unlike the per-terminal seed above this ISN'T
-// replacing a wrong hardcoded value - it's filling in the first real default that's ever
-// existed for this field. Only fills in if genuinely empty, never overwrites anything already
-// customized, one-time only.
-async function _seedGlobalPickupInstructionsGeneral(){
-  globalSettings = globalSettings || {};
-  if(globalSettings._globalPickupInstructionsSeeded) return;
-  if(!globalSettings.defaultPickupInstructions){
-    globalSettings.defaultPickupInstructions = "\ud83c\udfe0 Home/Hotel Pickup Instructions\n\nStep 1: Your driver will text you when they are 15 minutes away.\nStep 2: Your driver will text again once they have arrived at your door or curb.\nStep 3: Please keep your ringer on!";
-  }
-  globalSettings._globalPickupInstructionsSeeded = true;
-  try{ await storageSet('kat:globalSettings', globalSettings); }
-  catch(e){ console.warn('Global pickup instructions seed failed', e); }
-}
+// Two pickup-instructions seed migrations used to live here (v793-era) - removed in v807, since
+// the fields they populated (globalSettings.defaultPickupInstructionsByTerminal,
+// defaultPickupInstructions) are no longer read anywhere. Pickup instructions are now purely
+// hardcoded-default-plus-personal-override; see HARDCODED_MSG_DEFAULTS.pickup and
+// HARDCODED_PICKUP_BY_TERMINAL for the current baked-in wording, and _TEMPLATE_FIELD_MAP.pickup
+// (global: null) for why the personal-override comparison no longer checks a global layer.
 async function _restoreKatTemplatesV2(){
   try{
     var CT={'AP RUN':'I am confirming your pickup scheduled for tomorrow at {time} at {pickup} going to {terminal} Terminal.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)','AP PICK UP':'I am confirming your pickup scheduled for tomorrow at {time} from the Airport, Flight # {flight}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)\n\n\ud83d\udd34 Live Flight Status: https://www.google.com/search?q={flight}+flight+tracking','ONE WAY':'I am confirming your pickup scheduled for tomorrow at {time} at {pickup}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany Thanks\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (trip fee does not include tip for the driver. Tips are not mandatory but always greatly appreciated)','ROUND TRIP':'I am confirming your pickup scheduled for tomorrow at {time} at {pickup} going to {dropoff}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)'};
