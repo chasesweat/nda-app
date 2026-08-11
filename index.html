@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608111808">
+<meta name="version" content="202608111812">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -8092,7 +8092,12 @@ function _ownerPhonesForClient(clientName){
 function _driverChangeClientMessage(ride, newDriverName, newDriverPhone){
   const dateStr = fmtDateShort(ride.date) || '';
   const timeStr = fmtTime12(ride.time) || '';
-  const _tpl = (globalSettings && globalSettings.defaultDriverChangeTemplate) || '';
+  // Owner-first, then shared default, then hardcoded - same three-tier chain and same "owner"
+  // resolution buildConfirmationText already uses (v812). A ride Kat owns but has Chase driving
+  // should still carry Kat's own driver-change wording if she's set one, not Chase's default.
+  const _owner = (typeof feeOwnerFor==='function' ? feeOwnerFor(ride.createdBy) : null) || ride.driver;
+  const _ownerSettings = (typeof driverSettings!=='undefined' && driverSettings[_owner]) || {};
+  const _tpl = _ownerSettings.driverChangeTemplate || (globalSettings && globalSettings.defaultDriverChangeTemplate) || '';
   if(_tpl){
     return _tpl
       .replace(/\{client\}/g, ride.client||'Client')
@@ -9438,7 +9443,10 @@ function buildReceiptText(r){
     L.push('TOTAL: $'+(amt+_tip).toFixed(2));
   }
   L.push('');
-  const _closingTpl = (globalSettings && globalSettings.defaultReceiptClosingLine) || '';
+  // Owner-first (same owner already resolved above for branding/orgName), then shared default,
+  // then hardcoded (v812) - consistent with which name's business info the receipt already uses.
+  const _closingOwnerSettings = (typeof driverSettings!=='undefined' && driverSettings[_ownerName||driver]) || {};
+  const _closingTpl = _closingOwnerSettings.receiptClosingLine || (globalSettings && globalSettings.defaultReceiptClosingLine) || '';
   L.push(_closingTpl ? _closingTpl.replace(/\{org\}/g, orgName) : 'Thank you for riding with '+orgName+'!');
   return L.join('\n');
 }
@@ -9572,7 +9580,11 @@ async function shareReceiptDocument(id){
     const file = new File([html], fname, {type:'text/html'});
     if(navigator.canShare && navigator.canShare({files:[file]})){
       const _dateLbl = r.date ? fmtDateShort(r.date) : 'your ride';
-      const _shareTpl = (globalSettings && globalSettings.defaultReceiptShareTemplate) || '';
+      // Owner-first, then shared default, then hardcoded (v812) - same getClientOwner
+      // resolution buildReceiptText already uses for this same receipt's branding.
+      const _shareOwnerName = (typeof getClientOwner==='function') ? getClientOwner(r.client) : null;
+      const _shareOwnerSettings = (typeof driverSettings!=='undefined' && driverSettings[_shareOwnerName||r.driver]) || {};
+      const _shareTpl = _shareOwnerSettings.receiptShareTemplate || (globalSettings && globalSettings.defaultReceiptShareTemplate) || '';
       const _shareText = _shareTpl ? _shareTpl.replace(/\{date\}/g, _dateLbl)
         : 'Here\u2019s the receipt for your transportation service on '+_dateLbl+'.';
       await navigator.share({ files:[file], title:'Transportation Receipt', text:_shareText });
@@ -17436,18 +17448,15 @@ function _driverSurchAutoHTML(dName){
     +'<div id="surch-info-'+_sk+'" style="display:none;font-size:.64rem;color:var(--mid);margin-top:.3rem;background:var(--surface);border-radius:6px;padding:.4rem .5rem;">A pill means that surcharge\u2019s auto-add is off for this driver \u2014 view-only, they set it themselves.</div>'
     +'</div>';
 }
-// Admin-only tab: lets admins set the GLOBAL default for each auto-generated message.
-// Three-tier fallback for the ones that already had per-driver customization (confirmation
-// text, pickup instructions, arrival text): driver's own custom text -> this admin default ->
-// the original hardcoded message, in that order. The three that had no per-driver system at
-// all (driver-change notice, receipt share text, receipt closing line) get a simpler two-tier
-// fallback: admin default -> hardcoded. Regular drivers never see this tab (admin-only, same
-// gating as Access Control and Pricing) -- they can only ever edit THEIR OWN customization,
-// in onboarding, which is unchanged by this feature.
-// Maps a template "key" to where it actually lives for each scope. Personal scope only
-// covers the 3 templates that support per-driver customization at all (confirm/pickup/
-// arrival) — driver-change notice, receipt share text, and receipt closing line are
-// deliberately admin-default-only, no per-driver override exists for those.
+// Every driver can now edit their own version of all six of these (v812) - driver-change
+// notice, receipt share text, and receipt closing line used to be admin-default-only, no
+// per-driver override at all. Chase's clarification: every driver should be able to
+// personalize any message they send; Chase alone controls what everyone else falls back to,
+// by editing his own copy the same way (which auto-promotes, same mechanism as confirm/pickup/
+// arrival already use). The separate admin editing section is gone entirely now - there's
+// nothing left for it to do once all six fields work through the same personal-then-shared-
+// default-then-hardcoded chain.
+// Maps a template "key" to where it actually lives for each scope.
 const _TEMPLATE_FIELD_MAP = {
   confirm:      { global: 'defaultConfirmTemplate',      personal: 'confTemplate' },
   // pickup's global mapping restored (v808) - v807 removed it, reasoning that the hardcoded
@@ -17464,9 +17473,14 @@ const _TEMPLATE_FIELD_MAP = {
   // wins over whatever this sets, unconditionally, same guarantee as before).
   pickup:       { global: 'defaultPickupInstructions',   personal: 'pickupInstructions' },
   arrival:      { global: 'defaultArrivalTemplate',       personal: 'arrivalTemplate' },
-  driverchange: { global: 'defaultDriverChangeTemplate',  personal: null },
-  receiptshare: { global: 'defaultReceiptShareTemplate',  personal: null },
-  receiptclosing:{ global: 'defaultReceiptClosingLine',   personal: null },
+  // These three gained a personal mapping in v812 - previously null, admin-default-only.
+  // _driverChangeClientMessage / buildReceiptText / shareReceiptDocument (wherever each
+  // actually sends) were updated to check the ride/receipt owner's own template first, same
+  // "owner" resolution buildConfirmationText already uses, before falling to the shared
+  // default and then the hardcoded fallback.
+  driverchange: { global: 'defaultDriverChangeTemplate',  personal: 'driverChangeTemplate' },
+  receiptshare: { global: 'defaultReceiptShareTemplate',  personal: 'receiptShareTemplate' },
+  receiptclosing:{ global: 'defaultReceiptClosingLine',   personal: 'receiptClosingLine' },
 };
 // The actual hardcoded text each message falls back to when neither a driver's own
 // customization nor an admin default is set - pulled directly from the functions that
@@ -17504,15 +17518,19 @@ function renderMessageTemplates(){
   if(!panel) return;
   const myName = getMyDriverName();
   const myCustom = (driverSettings && driverSettings[myName]) || {};
-  const hasOwnCustomText = !!(myCustom.confTemplate || myCustom.pickupInstructions || myCustom.arrivalTemplate);
-  // Editing the app-wide DEFAULT messages is Chase-only — not even other admins can touch
-  // these, same restriction as canGrantFreeAccess() elsewhere. Any driver (including other
-  // admins, Kat, Morgan, everyone) still sees and edits their OWN customization below if
-  // they have any — this only gates the shared defaults section specifically.
-  const admin = !!(currentUser && currentUser.name==='Chase');
-  if(!admin && !hasOwnCustomText){ panel.innerHTML=''; return; }
+  // Every driver can now edit all six of their own message types (v812) - the separate
+  // admin-only "app-wide default" section that used to sit below this is gone entirely, so
+  // this personal section is the ONLY content on this page now. It used to hide itself when
+  // nothing was customized yet (hasOwnCustomText, checking only 3 of the 6 fields even before
+  // this build) - that made sense back when an admin section still rendered below it either
+  // way. With nothing left to fall back to, hiding this would leave a driver who's never
+  // customized anything staring at a completely blank tab, with no way to even discover the
+  // feature exists. Always shows now for anyone linked to a driver profile - a driver with
+  // genuinely nothing customized just sees every row as "Using default," same as it already
+  // looks once you open one, just visible from the start instead of hidden until you have
+  // something to show.
+  if(!myName){ panel.innerHTML='<div style="padding:1.5rem 0;color:var(--mid);font-size:.9rem;">Your login isn\u2019t linked to a driver profile yet. Ask an admin to link your account on the Team page.</div>'; return; }
 
-  const gs = globalSettings || {};
   // Each field is now a collapsible section - collapsed by default, showing the label and
   // a status pill so you can scan which messages are customized without opening every one.
   function field(scope, key, label, hint, value, rows, extraHtml){
@@ -17555,7 +17573,11 @@ function renderMessageTemplates(){
 
   let html = '';
 
-  if(hasOwnCustomText){
+  // Personal section always builds now (v812) - reaching this point already guarantees myName
+  // is valid (the early return above catches the only case where it wouldn't be). The old
+  // hasOwnCustomText/admin gate here is gone for the same reason it's gone above: nothing left
+  // to fall back to if this were hidden.
+  {
     const _byType = myCustom.pickupInstructionsByType || {};
     const _byTerm = myCustom.pickupInstructionsByTerminal || {};
     const _typeOn = !!myCustom.useTypeInstructions;
@@ -17609,6 +17631,9 @@ function renderMessageTemplates(){
           +'</div>';
         })()
       + field('personal','arrival', 'My arrival text', 'Placeholders: {driver} {client}', myCustom.arrivalTemplate, 4)
+      + field('personal','driverchange', 'My driver-change notice', 'Sent to the client if you hand off one of your rides to another driver. Placeholders: {client} {date} {time} {driver} {phone}', myCustom.driverChangeTemplate, 5)
+      + field('personal','receiptshare', 'My receipt share text', 'The message sent alongside a shared PDF receipt. Placeholders: {date}', myCustom.receiptShareTemplate, 3)
+      + field('personal','receiptclosing', 'My receipt closing line', 'Just the closing line of the receipt itself \u2014 the rest (charges, totals, receipt number) is always computed and can\'t be edited here, for accuracy. Placeholders: {org}', myCustom.receiptClosingLine, 2)
       + (function(){
           // openPolicyEditor()/_savePolicyEditor() read and write driverSettings[currentUser.name]
           // (login name) - NOT myCustom above, which is keyed by getMyDriverName() (driver display
@@ -17627,27 +17652,14 @@ function renderMessageTemplates(){
           +'</button>';
         })()
       + '<div id="msgtpl-personal-error" style="color:var(--red);font-size:.82rem;min-height:1rem;margin-bottom:.5rem;"></div>'
-      + '<button onclick="saveAllTemplateFields(\'personal\')" class="btn-primary" style="width:100%;padding:.75rem;margin-bottom:'+(admin?'2rem':'0')+';">Save All My Messages</button>';
+      + '<button onclick="saveAllTemplateFields()" class="btn-primary" style="width:100%;padding:.75rem;">Save All My Messages</button>';
   }
 
-  if(admin){
-    // Pickup instructions (general and per-terminal) removed from this admin section (v807) -
-    // there's no more live app-wide-editable layer for either; both are now purely hardcoded
-    // (HARDCODED_MSG_DEFAULTS.pickup, HARDCODED_PICKUP_BY_TERMINAL), changeable only through a
-    // code update, with a driver's own personal override still the only thing that can win over
-    // that hardcoded default. Editing rows for globalSettings.defaultPickupInstructions /
-    // defaultPickupInstructionsByTerminal would have silently done nothing once the read path
-    // stopped consulting them - removed rather than leave controls that lie about having effect.
-    html += '<div style="font-size:.72rem;color:var(--mid);margin-bottom:1.25rem;line-height:1.5;background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.7rem .85rem;">'
-      +'App-wide default \u2014 the fallback every driver gets unless they\'ve customized their own version. A driver\'s own customization always wins over this. Tap a message to open it; leaving a field blank keeps the app\'s original built-in message.</div>'
-      + field('global','confirm', 'Confirmation text', 'Sent to clients confirming their ride. Placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}', gs.defaultConfirmTemplate, 5)
-      + field('global','arrival', 'Arrival text', 'Sent when a client lands. Placeholders: {driver} {client}', gs.defaultArrivalTemplate, 4)
-      + field('global','driverchange', 'Driver-change notice to client', 'Sent to the client when their driver gets reassigned. Placeholders: {client} {date} {time} {driver} {phone}', gs.defaultDriverChangeTemplate, 5)
-      + field('global','receiptshare', 'Receipt share text', 'The message sent alongside a shared PDF receipt. Placeholders: {date}', gs.defaultReceiptShareTemplate, 3)
-      + field('global','receiptclosing', 'Receipt closing line', 'Just the closing line of the receipt itself \u2014 the rest (charges, totals, receipt number) is always computed and can\'t be edited here, for accuracy. Placeholders: {org}', gs.defaultReceiptClosingLine, 2)
-      + '<div id="msgtpl-global-error" style="color:var(--red);font-size:.82rem;min-height:1rem;margin-bottom:.5rem;"></div>'
-      + '<button onclick="saveAllTemplateFields(\'global\')" class="btn-primary" style="width:100%;padding:.75rem;">Save All Default Messages</button>';
-  }
+  // The separate admin "app-wide default" editing section is gone entirely (v812) - every one
+  // of the six message types now has a personal mapping, so there's nothing left for a second
+  // editing surface to do. Chase edits his own copy of any message, same as every other driver;
+  // his edits alone auto-promote to become the shared default everyone else falls back to (see
+  // saveTemplateField's own comment for the mechanism). One button, one place, for everyone.
 
   panel.innerHTML = html;
 }
@@ -17672,54 +17684,55 @@ function toggleMsgTplField(id){
   body.style.display = opening ? 'block' : 'none';
   if(arrow) arrow.textContent = opening ? '\u25b4' : '\u25be';
 }
-// Saves a single field, either the admin-wide default or the current user's own
-// customization, depending on scope. One shared function instead of separate per-field
-// handlers for each of the up-to-9 fields across both sections.
+// Saves a single field - always the current user's own customization now (v812 removed the
+// admin-wide "global" scope entirely, since every field has a personal mapping and nothing
+// calls this with 'global' anymore).
 async function saveTemplateField(scope, key){
   const map = _TEMPLATE_FIELD_MAP[key]; if(!map) return;
   const el = document.getElementById('msgtpl-'+scope+'-'+key); if(!el) return;
   const val = el.value.trim();
-  if(scope==='global'){
-    if(!(currentUser && currentUser.name==='Chase')){ showToast('Only Chase can edit the default messages','error'); return; }
-    globalSettings = globalSettings || {};
-    globalSettings[map.global] = val;
-    try{ await storageSet('kat:globalSettings', globalSettings); showToast('\u2713 Saved'); }
-    catch(e){ console.warn('saveTemplateField (global) failed', e); const err=document.getElementById('msgtpl-global-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
-  } else {
-    if(!map.personal) return; // this template has no per-driver customization
-    const myName = getMyDriverName(); if(!myName) return;
-    driverSettings[myName] = driverSettings[myName] || {};
-    driverSettings[myName][map.personal] = val;
-    try{
+  if(!map.personal) return; // this template has no per-driver customization
+  const myName = getMyDriverName(); if(!myName) return;
+  driverSettings[myName] = driverSettings[myName] || {};
+  driverSettings[myName][map.personal] = val;
+  var _promotedToDefault = false;
+  try{
+    await saveDriverSettings();
+    // Chase's own edits to his personal confirm/pickup/arrival text also become the
+    // app-wide default automatically, so he only has to edit one place - the same
+    // relationship the v619 promotion and v622 Chase-only restriction already established,
+    // just kept live instead of one-time. Only a genuinely non-empty edit propagates -
+    // clearing his personal field (val==='') must never cascade into wiping the shared
+    // default as a side effect.
+    if(val && map.global && currentUser && currentUser.name==='Chase'){
+      globalSettings = globalSettings || {};
+      globalSettings[map.global] = val;
+      await storageSet('kat:globalSettings', globalSettings);
+      // Clear the personal copy right after propagating, so it doesn't sit there showing
+      // "Custom set" for text that's now just a duplicate of the default he controls -
+      // exactly the redundant-duplicate confusion the v624 cleanup addressed.
+      driverSettings[myName][map.personal] = '';
       await saveDriverSettings();
-      // Chase's own edits to his personal confirm/pickup/arrival text also become the
-      // app-wide default automatically, so he only has to edit one place - the same
-      // relationship the v619 promotion and v622 Chase-only restriction already established,
-      // just kept live instead of one-time. Only a genuinely non-empty edit propagates -
-      // clearing his personal field (val==='') must never cascade into wiping the shared
-      // default as a side effect.
-      if(val && map.global && currentUser && currentUser.name==='Chase'){
-        globalSettings = globalSettings || {};
-        globalSettings[map.global] = val;
-        await storageSet('kat:globalSettings', globalSettings);
-        // Clear the personal copy right after propagating, so it doesn't sit there showing
-        // "Custom set" for text that's now just a duplicate of the default he controls -
-        // exactly the redundant-duplicate confusion the v624 cleanup addressed.
-        driverSettings[myName][map.personal] = '';
-        await saveDriverSettings();
-      }
-      showToast('\u2713 Saved');
+      _promotedToDefault = true;
     }
-    catch(e){ console.warn('saveTemplateField (personal) failed', e); const err=document.getElementById('msgtpl-personal-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
+    // A plain "Saved" here, followed by the field going blank the moment the page
+    // re-renders, reads as data loss even though it's working correctly - Chase reported
+    // exactly this confusion in v808. Distinct wording when the auto-promotion actually
+    // fired, so it's clear the edit succeeded AND explains why the personal field is about
+    // to look empty, instead of leaving that to be inferred after the fact.
+    showToast(_promotedToDefault ? '\u2713 Saved \u2014 now the default for every driver' : '\u2713 Saved');
   }
+  catch(e){ console.warn('saveTemplateField (personal) failed', e); const err=document.getElementById('msgtpl-personal-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
 }
-async function saveAllTemplateFields(scope){
-  if(scope==='global' && !(currentUser && currentUser.name==='Chase')){ showToast('Only Chase can edit the default messages','error'); return; }
-  const keys = scope==='personal' ? ['confirm','pickup','arrival'] : Object.keys(_TEMPLATE_FIELD_MAP);
-  for(const key of keys){ await saveTemplateField(scope, key); }
-  if(scope==='personal'){ await savePerTypePickupInstructions(true); await savePerTerminalPickupInstructions(true); }
+// Always saves the personal scope now (v812) - the only caller left is the "Save All My
+// Messages" button. Dropped the scope parameter entirely rather than leave a value that
+// could only ever be 'personal' pretending to be configurable.
+async function saveAllTemplateFields(){
+  const keys = Object.keys(_TEMPLATE_FIELD_MAP);
+  for(const key of keys){ await saveTemplateField('personal', key); }
+  await savePerTypePickupInstructions(true); await savePerTerminalPickupInstructions(true);
   renderMessageTemplates();
-  showToast(scope==='personal' ? '\u2713 All your messages saved' : '\u2713 All default messages saved');
+  showToast('\u2713 All your messages saved');
 }
 // Per-ride-type pickup instructions (AP Run / One Way / Round Trip) — same opt-in a driver
 // sees during onboarding, editable here anytime afterward since onboarding itself isn't
@@ -17763,6 +17776,7 @@ async function savePerTerminalPickupInstructions(silent){
     // Only fires when Chase edits HIS OWN per-terminal instructions with at least one terminal
     // filled in - never touches another driver's personal customization, and clearing his own
     // field (byTerm empty) never cascades into wiping the shared default as a side effect.
+    var _promotedToDefault = false;
     if(Object.keys(byTerm).length && currentUser && currentUser.name==='Chase'){
       globalSettings = globalSettings || {};
       globalSettings.defaultPickupInstructionsByTerminal = byTerm;
@@ -17772,8 +17786,12 @@ async function savePerTerminalPickupInstructions(silent){
       // redundant-duplicate cleanup saveTemplateField already does for the other templates.
       driverSettings[myName].pickupInstructionsByTerminal = {};
       await saveDriverSettings();
+      _promotedToDefault = true;
     }
-    if(!silent) showToast('\u2713 Saved');
+    // Same reasoning as saveTemplateField's matching fix - a plain "Saved" here, immediately
+    // followed by this field appearing empty, reads as data loss rather than the intended
+    // "your edit is now everyone's default." Distinct wording when promotion actually fired.
+    if(!silent) showToast(_promotedToDefault ? '\u2713 Saved \u2014 now the default for every driver' : '\u2713 Saved');
   }
   catch(e){ console.warn('savePerTerminalPickupInstructions failed', e); const err=document.getElementById('msgtpl-personal-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
 }
