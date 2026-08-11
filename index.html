@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608111812">
+<meta name="version" content="202608111813">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -15283,26 +15283,62 @@ async function _savePolicyEditor(){
   var b=document.getElementById('policy-editor-back'); if(b) b.remove();
   showToast(custom?'\u2713 Custom scheduling message saved':'Using the default scheduling message');
 }
-function policyTextMessage(firstName, rideDate, rideTime, ridePrice){
-  const hi = firstName ? 'Hi '+firstName+',\n\n' : '';
-  const cancelFee = ridePrice ? cancelFeePct()+'% of the $'+ridePrice+' fare' : cancelFeePct()+'% of the fare';
-  const dtLine = (rideDate&&rideTime) ? 'I have your ride scheduled for '+(typeof fmtDateShort==='function'?fmtDateShort(rideDate):rideDate)+' at '+(typeof fmtTime12==='function'?fmtTime12(rideTime):rideTime)+'.' : 'I have your ride scheduled.';
-  const _customPolicy=(typeof driverSettings!=='undefined'&&currentUser)?(driverSettings[currentUser.name]||{}).policyTemplate||'':'';
-  if(_customPolicy){
-    var _dt2=(rideDate&&typeof fmtDateShort==='function')?fmtDateShort(rideDate):(rideDate||'');
-    var _tm2=(rideTime&&typeof fmtTime12==='function')?fmtTime12(rideTime):(rideTime||'');
-    return _customPolicy
-      .replace(/\{name\}/g,firstName||'').replace(/\{date\}/g,_dt2).replace(/\{time\}/g,_tm2)
-      .replace(/\{amount\}/g,ridePrice?'$'+ridePrice:'').replace(/\{cancelFee\}/g,cancelFee)
-      .replace(/\{changeFee\}/g,'$'+changeFeeAmt())
-      .replace(/\{driver\}/g,getMyDriverName()||'').replace(/\{phone\}/g,(DRIVER_PROFILES[getMyDriverName()||'']||{}).phone||'');
+// Save/clear for the Message Templates row (v813) - separate from saveTemplateField/
+// clearTemplateField (the generic system every other field on this page uses) because this
+// one field is intentionally keyed by driverSettings[currentUser.name] (login name, whoever's
+// actively booking right now) instead of getMyDriverName() (driver display name) - see the
+// row's own comment for why that's correct here and not a bug. Mirrors saveTemplateField's
+// Chase-auto-promotes-to-shared-default mechanism exactly, just against this field's own key.
+async function _saveSchedulingField(){
+  if(!currentUser) return;
+  const el = document.getElementById('msgtpl-personal-scheduling'); if(!el) return;
+  const val = el.value.trim();
+  driverSettings[currentUser.name] = driverSettings[currentUser.name] || {};
+  driverSettings[currentUser.name].policyTemplate = val;
+  var _promotedToDefault = false;
+  try{
+    await saveDriverSettings();
+    if(val && currentUser.name==='Chase'){
+      globalSettings = globalSettings || {};
+      globalSettings.defaultPolicyTemplate = val;
+      await storageSet('kat:globalSettings', globalSettings);
+      driverSettings[currentUser.name].policyTemplate = '';
+      await saveDriverSettings();
+      _promotedToDefault = true;
+    }
+    showToast(_promotedToDefault ? '\u2713 Saved \u2014 now the default for every driver' : '\u2713 Saved');
   }
-  return hi
-    +dtLine+'\n\n'
-    +'\u2022 Confirmation: We\u2019ll text you a confirmation the day before your trip.\n'
-    +'\u2022 Changes: Any changes to travel date or time after the confirmation text will incur a $'+changeFeeAmt()+' fee (except for emergencies/acts of God).\n'
-    +'\u2022 Cancellations: Canceling after the confirmation text will result in a fee of '+cancelFee+'.\n\n'
-    +'We appreciate your business and look forward to driving you!';
+  catch(e){ console.warn('_saveSchedulingField failed', e); const err=document.getElementById('msgtpl-personal-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
+}
+async function _clearSchedulingField(){
+  if(!currentUser) return;
+  if(!confirm('Clear this message and switch back to the default? This deletes your current wording immediately \u2014 it can\'t be recovered afterward.')) return;
+  const el = document.getElementById('msgtpl-personal-scheduling'); if(el) el.value = '';
+  await _saveSchedulingField();
+  renderMessageTemplates();
+}
+function policyTextMessage(firstName, rideDate, rideTime, ridePrice){
+  const cancelFee = ridePrice ? cancelFeePct()+'% of the $'+ridePrice+' fare' : cancelFeePct()+'% of the fare';
+  // Personal (currentUser - whoever's actively booking right now, not a resolved ride owner,
+  // since a scheduling message is sent live by whoever's creating this specific booking) ->
+  // shared default (Chase-editable, auto-promotes the same way every other message type does,
+  // v813) -> hardcoded fallback. All three now resolve through this ONE template and ONE
+  // placeholder-fill pass - this function used to carry a SECOND, separate hardcoded copy of
+  // the fallback text below this comment, and it had drifted: missing the credit-card-fee line
+  // added to _defaultPolicyTpl()'s preview text back in v805. Anyone actually relying on "the
+  // default" (no personal customization) has been sending clients a message without that
+  // disclosure, even though the editor's own preview showed it. HARDCODED_MSG_DEFAULTS.scheduling
+  // is that same _defaultPolicyTpl() text - one source now, not two that could quietly diverge.
+  const _tpl = ((typeof driverSettings!=='undefined'&&currentUser&&driverSettings[currentUser.name]&&driverSettings[currentUser.name].policyTemplate) || '')
+    || (globalSettings && globalSettings.defaultPolicyTemplate) || ''
+    || HARDCODED_MSG_DEFAULTS.scheduling;
+  var _dt2=(rideDate&&typeof fmtDateShort==='function')?fmtDateShort(rideDate):(rideDate||'');
+  var _tm2=(rideTime&&typeof fmtTime12==='function')?fmtTime12(rideTime):(rideTime||'');
+  return _tpl
+    .replace(/\{name\}/g,firstName||'').replace(/\{date\}/g,_dt2).replace(/\{time\}/g,_tm2)
+    .replace(/\{amount\}/g,ridePrice?'$'+ridePrice:'').replace(/\{cancelFee\}/g,cancelFee)
+    .replace(/\{changeFee\}/g,'$'+changeFeeAmt())
+    .replace(/\{driver\}/g,getMyDriverName()||'').replace(/\{phone\}/g,(DRIVER_PROFILES[getMyDriverName()||'']||{}).phone||'');
 }
 function clearQuoteForm(){
   _fuelUserTouched = false; // fresh quote — let fuel default on again (until the driver chooses otherwise)
@@ -17496,6 +17532,11 @@ const HARDCODED_MSG_DEFAULTS = {
   driverchange: "Dear {client},\n\nPlease be advised that there has been a change regarding your scheduled pickup on {date} at {time}.\n\nYour new driver will be {driver}. We have attached a photo of your driver and the vehicle for easy identification upon arrival. If you need to reach them directly, they can be contacted at {phone}.\n\nThere are no changes to your scheduled itinerary or pickup location. If you have any questions, please reply to this message.",
   receiptshare: "Here's the receipt for your transportation service on {date}.",
   receiptclosing: 'Thank you for riding with {org}!',
+  // Calls _defaultPolicyTpl() directly (v813) rather than duplicating its text - function
+  // declarations are hoisted, and this object initializes after the whole script has parsed
+  // regardless of literal file order, so the function is already callable here. One source of
+  // truth instead of two copies that could quietly drift apart.
+  scheduling: _defaultPolicyTpl(),
 };
 // Keys with NO genuine hardcoded default to copy from - the placeholder text for these is
 // purely an explanatory note (e.g. "no built-in default exists"), not real usable content,
@@ -17635,21 +17676,43 @@ function renderMessageTemplates(){
       + field('personal','receiptshare', 'My receipt share text', 'The message sent alongside a shared PDF receipt. Placeholders: {date}', myCustom.receiptShareTemplate, 3)
       + field('personal','receiptclosing', 'My receipt closing line', 'Just the closing line of the receipt itself \u2014 the rest (charges, totals, receipt number) is always computed and can\'t be edited here, for accuracy. Placeholders: {org}', myCustom.receiptClosingLine, 2)
       + (function(){
-          // openPolicyEditor()/_savePolicyEditor() read and write driverSettings[currentUser.name]
-          // (login name) - NOT myCustom above, which is keyed by getMyDriverName() (driver display
-          // name). Those can differ (e.g. login "Kat" vs driver name "Kathleen Herringdine"), so
-          // the status badge has to check the SAME key the editor actually uses, not myCustom,
-          // or it could show "Using default" while a custom message is genuinely saved, or vice
-          // versa, for anyone whose login and driver name aren't identical strings.
-          const _polSet = !!((typeof driverSettings!=='undefined' && currentUser && driverSettings[currentUser.name] && driverSettings[currentUser.name].policyTemplate) || '').trim();
+          // openPolicyEditor()/_savePolicyEditor() (still used by onboarding, unchanged) read and
+          // write driverSettings[currentUser.name] (login name) - NOT myCustom above, which is
+          // keyed by getMyDriverName() (driver display name). Those can differ (e.g. login "Kat"
+          // vs driver name "Kathleen Herringdine"), and that's actually correct here, not a bug -
+          // a scheduling message is sent live by whoever's actively booking the ride right now,
+          // so keying it to the logged-in user is intentional, unlike every other field on this
+          // page. Rebuilt (v813) to look and behave exactly like the six above - same
+          // collapsible row, same Save/Clear/Start-from-default, same "Custom set" badge, same
+          // Chase-edits-promote-to-shared-default mechanism - while keeping this one field's
+          // actual storage location untouched, since migrating it to getMyDriverName() risked
+          // losing existing data for anyone whose login and driver name aren't identical strings.
+          const _polId = 'msgtpl-personal-scheduling';
+          const _polCurrent = ((typeof driverSettings!=='undefined' && currentUser && driverSettings[currentUser.name] && driverSettings[currentUser.name].policyTemplate) || '');
+          const _polEffectiveDefault = (globalSettings && globalSettings.defaultPolicyTemplate) || HARDCODED_MSG_DEFAULTS.scheduling;
+          const _polTrim = _polCurrent.trim();
+          const _polSet = !!(_polTrim && _polTrim !== _polEffectiveDefault.trim());
           const _polColor = _polSet ? '#15803d' : 'var(--mid)';
           const _polBg = _polSet ? '#e8f5ee' : 'var(--surface)';
           const _polStatus = _polSet ? 'Custom set' : 'Using default';
-          return '<button type="button" onclick="openPolicyEditor()" style="width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.65rem .8rem;margin-bottom:.6rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-family:\'DM Sans\',sans-serif;">'
-          +'<span><span style="font-size:.82rem;font-weight:700;color:var(--black);display:block;">My scheduling message</span>'
-          +'<span style="font-size:.66rem;color:var(--mid);">Sent the moment a ride is booked \u2014 includes your change &amp; cancellation policy</span></span>'
-          +'<span style="font-size:.66rem;font-weight:700;color:'+_polColor+';background:'+_polBg+';border-radius:10px;padding:2px 8px;flex-shrink:0;">'+_polStatus+'</span>'
-          +'</button>';
+          const _polPlaceholder = escAttr(HARDCODED_MSG_DEFAULTS.scheduling.replace(/\n/g,' '));
+          return '<div style="border:1.5px solid var(--light);border-radius:10px;margin-bottom:.6rem;overflow:hidden;">'
+          +'<button type="button" onclick="toggleMsgTplField(\''+_polId+'\')" style="width:100%;text-align:left;background:var(--surface);border:none;padding:.65rem .8rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-family:\'DM Sans\',sans-serif;">'
+          +'<span style="font-size:.82rem;font-weight:700;color:var(--black);">My scheduling message</span>'
+          +'<span style="display:flex;align-items:center;gap:.5rem;flex-shrink:0;">'
+          +'<span style="font-size:.66rem;font-weight:700;color:'+_polColor+';background:'+_polBg+';border-radius:10px;padding:2px 8px;">'+_polStatus+'</span>'
+          +'<span id="'+_polId+'-arrow" style="font-size:.7rem;color:var(--mid);">\u25be</span>'
+          +'</span></button>'
+          +'<div id="'+_polId+'-body" style="display:none;padding:.75rem .8rem;">'
+          +'<div style="display:flex;align-items:center;justify-content:'+(_polSet?'flex-end':'space-between')+';margin-bottom:.2rem;gap:.5rem;">'
+          +(_polSet?'<button onclick="_clearSchedulingField()" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Clear (use default)</button>':'<button onclick="startFromDefault(\''+_polId+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Start from this default</button>')
+          +'<button onclick="_saveSchedulingField().then(renderMessageTemplates)" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Save</button>'
+          +'</div>'
+          +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">Sent the moment a ride is booked \u2014 includes your change &amp; cancellation policy. Placeholders: {name} {date} {time} {amount} {changeFee} {cancelFee} {driver} {phone}</div>'
+          +'<textarea id="'+_polId+'" rows="6" placeholder="'+_polPlaceholder+'" data-default="'+escAttr(HARDCODED_MSG_DEFAULTS.scheduling)+'" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(_polCurrent||'')+'</textarea>'
+          +'<div style="font-size:.66rem;color:var(--mid);margin-top:.35rem;line-height:1.4;">'+(_polSet?'This is your current wording, live and editable above. "Clear (use default)" empties this field and saves, switching back to whatever the app-wide default or built-in message provides.':'Shown above (grayed out, in the box) is the app\'s current built-in default \u2014 leave blank to keep using it, or tap "Start from this default" to copy it in and edit from there.')+'</div>'
+          +'</div>'
+          +'</div>';
         })()
       + '<div id="msgtpl-personal-error" style="color:var(--red);font-size:.82rem;min-height:1rem;margin-bottom:.5rem;"></div>'
       + '<button onclick="saveAllTemplateFields()" class="btn-primary" style="width:100%;padding:.75rem;">Save All My Messages</button>';
