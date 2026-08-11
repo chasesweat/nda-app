@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608101789">
+<meta name="version" content="202608111791">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1197,6 +1197,7 @@ input,select,textarea{font-size:16px;}
       <button id="rm-delete-btn" class="btn-danger" onclick="deleteRide(activeRideId)" style="background:#dc2626;color:#fff;font-weight:800;">🗑️ Delete Ride</button>
       <button id="rm-cancelride-btn" class="btn-secondary" onclick="cancelRide(activeRideId)" style="background:#b03a2e;display:none;color:#fff;font-weight:800;transition:none;">🚫 Cancel Ride</button>
       <button id="rm-paid-btn" class="btn-secondary" onclick="toggleRidePaid(activeRideId)" style="background:var(--green);color:#fff;font-weight:800;">💰 Mark Paid</button>
+      <button id="rm-billlater-btn" class="btn-secondary" onclick="openLogMiles(activeRideId,true)" style="background:none;border:1.5px solid var(--light);color:var(--mid);font-weight:600;font-size:.8rem;">🧾 Bill later instead</button>
       <button id="rm-close-btn" class="btn-secondary" onclick="closeRideModal()" style="background:#6b7280;color:#fff;font-weight:800;">✕ Close</button>
     </div>
   </div>
@@ -6655,6 +6656,11 @@ function _ridePaidTag(r){
   var overdue=false;
   try{ overdue = (typeof _hoursUntilRide==='function') && _hoursUntilRide(r) < 0; }catch(_e){}
   if(overdue && r.status!=='cancelled' && r.status!=='placeholder'){
+    // A ride billed later on purpose (Bill later instead) already had its odometer logged and
+    // its invoice sent - the amber UNPAID flag is meant for a ride that just got forgotten
+    // about, and would misread this one the same way. Distinct calmer tag instead, so skimming
+    // the dashboard doesn't raise a false alarm over something already handled.
+    if(r.awaitingInvoice) return '<span title="Invoiced \u2014 awaiting payment" style="'+base+'background:#7c3aed;color:#fff;">INVOICED</span>';
     return '<span title="Ride has happened and is not marked paid" style="'+base+'background:#f59e0b;color:#fff;">UNPAID</span>';
   }
   return '';
@@ -8671,6 +8677,33 @@ function buildRideLifecycle(r, nested){
     }
   }
 
+  // Same idea as confLine just above: attribution for a state the chips can't show on their
+  // own. The 3-stage trail deliberately never gets a 4th "Invoiced" chip (see _saveLogMiles's
+  // own comment on why 'completed' wasn't reused for this) — awaitingInvoice sits alongside
+  // the existing Text Sent / Scheduled chip, not folded into it, so a ride billed through
+  // Square (or however) still reads as "not actually paid yet" everywhere the chips do.
+  let invoiceLine = '';
+  if(r.awaitingInvoice){
+    let when = '';
+    try{
+      if(r.invoicedAt){
+        const d = new Date(r.invoicedAt);
+        if(!isNaN(d.getTime())){
+          when = d.toLocaleDateString(undefined,{month:'short',day:'numeric'})
+               + ' ' + d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+        }
+      }
+    }catch(_e){}
+    const me = (typeof getMyDriverName==='function') ? getMyDriverName() : '';
+    const rawBy = (r.invoicedBy||'').trim();
+    const by = rawBy ? (rawBy===me ? 'you' : (typeof driverShortName==='function' ? driverShortName(rawBy) : rawBy)) : '';
+    const parts = [];
+    if(by)   parts.push('by ' + by);
+    if(when) parts.push(when);
+    invoiceLine = '<div style="font-size:.68rem;color:#7c3aed;font-weight:600;margin-top:.35rem;text-align:center;">'
+      + '\ud83e\uddfe Awaiting invoice payment' + (parts.length ? ' \u2014 marked ' + escHtml(parts.join(' \u00b7 ')) : '') + '</div>';
+  }
+
   const fare = parseFloat(r.price)||0;
   // Driver-as-client rides owe no fee; otherwise resolve owner proxy-aware.
   const owner  = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
@@ -8695,6 +8728,7 @@ function buildRideLifecycle(r, nested){
   const inner = `<div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Ride status</div>
     <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.35rem;">${chips}</div>
     ${confLine}
+    ${invoiceLine}
     <div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Payment owed</div>
     ${payHtml}`;
   if(nested) return inner;
@@ -8940,6 +8974,10 @@ async function _saveMarkPaidCombined(rideId){
     if(method){ r.payment=method; touchRide(r,'set payment method'); }
     if(tipSplitChecked && tipMethod){ r.tipPayment=tipMethod; } else { delete r.tipPayment; }
     r.status='paid'; r.paidAt=Date.now(); r.paidBy=currentUser?.name||'';
+    // Clears the active "still waiting on this" flag now that it's genuinely paid - invoicedAt/
+    // invoicedBy stay put as a historical record of when this went out for billing, same as
+    // confirmSentAt/By staying after a ride moves past the Confirmed stage.
+    delete r.awaitingInvoice;
     touchRide(r,'set status to paid');
 
     // The local ride record above is already fully, correctly updated - everything the
@@ -9658,11 +9696,21 @@ async function markRideUnpaid(id){
 // data was always right, only this one button's leftover visual state was wrong.
 function _syncPaidBtn(r){
   var paidBtn=document.getElementById('rm-paid-btn');
-  if(!paidBtn || !r) return;
-  paidBtn.textContent=r.status==='paid'?'\u2713 Paid':'\ud83d\udcb0 Mark Paid';
-  paidBtn.style.fontWeight=r.status==='paid'?'700':'400';
-  paidBtn.style.background=r.status==='paid'?'#f0fdf4':'var(--green)';
-  paidBtn.style.color=r.status==='paid'?'#15803d':'#fff';
+  if(paidBtn && r){
+    paidBtn.textContent=r.status==='paid'?'\u2713 Paid':'\ud83d\udcb0 Mark Paid';
+    paidBtn.style.fontWeight=r.status==='paid'?'700':'400';
+    paidBtn.style.background=r.status==='paid'?'#f0fdf4':'var(--green)';
+    paidBtn.style.color=r.status==='paid'?'#15803d':'#fff';
+  }
+  // "Bill later instead" only makes sense before either thing has already happened: hidden
+  // once actually paid (nothing left to bill), and hidden once already marked awaiting an
+  // invoice (re-tapping it would just reopen the odometer entry for no reason - the ride
+  // already knows it's invoiced). Shown otherwise, right alongside Mark Paid, so the choice
+  // between "paid now" and "bill later" happens at the one moment it's actually relevant.
+  var blBtn=document.getElementById('rm-billlater-btn');
+  if(blBtn && r){
+    blBtn.style.display=(r.status==='paid'||r.awaitingInvoice)?'none':'inline-block';
+  }
 }
 
 async function setRideStatus(id, status){
@@ -9867,7 +9915,7 @@ function toggleEditMode(on){
   // the time is permission-based (canDeleteRide, ride status, etc.), computed elsewhere when
   // the ride was opened — so on exit, restore whatever that was rather than forcing them
   // visible and potentially showing a button someone shouldn't see.
-  ['rm-delete-btn','rm-cancelride-btn','rm-paid-btn'].forEach(function(id){
+  ['rm-delete-btn','rm-cancelride-btn','rm-paid-btn','rm-billlater-btn'].forEach(function(id){
     var btn=document.getElementById(id); if(!btn) return;
     if(on){ btn.dataset.prevDisplay = btn.style.display; btn.style.display='none'; }
     else if(btn.dataset.prevDisplay!==undefined){ btn.style.display = btn.dataset.prevDisplay; }
@@ -10604,9 +10652,53 @@ function _navStopListHtml(){
   html+='<div style="font-size:.62rem;color:#94a3b8;margin-top:5px;">First &amp; last stay fixed. Use &#8593;&#8595; to reorder, or Optimize. &#10148; = navigate one stop.</div>';
   return html;
 }
+function _navStopsBoxHtml(){
+  return '<div id="nav-stop-list">'+_navStopListHtml()+'</div>'
+    +((window._navStops&&window._navStops.length>3)?'<button onclick="_navOptimize()" style="width:100%;margin-top:.55rem;padding:.5rem;border:1.5px solid #7c3aed;border-radius:8px;background:#f5f3ff;color:#7c3aed;font-family:inherit;font-size:.78rem;font-weight:700;cursor:pointer;">\ud83e\ude84 Optimize stop order (nearest first)</button>':'');
+}
 function _navGoogleUrl(){ return 'https://www.google.com/maps/dir/'+(window._navStops||[]).map(_navEnc).join('/'); }
 function _navSyncGm(){ var b=document.getElementById('nav-gm-btn'); if(b) b.setAttribute('onclick', "window.open('"+_navGoogleUrl().replace(/'/g,"\\'")+"','_blank');_closeNavModal();"); }
-function _navMoveStop(i,dir){ var s=window._navStops; if(!s) return; var j=i+dir; if(i<=0||i>=s.length-1||j<=0||j>=s.length-1) return; var t=s[i]; s[i]=s[j]; s[j]=t; var el=document.getElementById('nav-stop-list'); if(el) el.innerHTML=_navStopListHtml(); _navSyncGm(); }
+// Re-renders the whole stops box (list + Optimize button, which only shows past 3 stops) —
+// used by move/optimize/add-stop alike so the Optimize button correctly appears once a typed
+// stop pushes the count past the threshold, not just the list itself.
+function _navRefreshStopsBox(){ var el=document.getElementById('nav-stops-box'); if(el) el.innerHTML=_navStopsBoxHtml(); _navSyncGm(); }
+function _navMoveStop(i,dir){ var s=window._navStops; if(!s) return; var j=i+dir; if(i<=0||i>=s.length-1||j<=0||j>=s.length-1) return; var t=s[i]; s[i]=s[j]; s[j]=t; _navRefreshStopsBox(); }
+// Typed-address field in the Start Ride modal — lets a driver route through somewhere the ride
+// itself never had, without leaving the app or re-typing the whole trip into Maps by hand.
+// Only Google Maps' link resyncs live (_navSyncGm, called via _navRefreshStopsBox) — Apple Maps
+// and Waze's links were already fixed at modal-open time before this existed (reordering and
+// Optimize never resynced those two either), so this doesn't introduce a new inconsistency,
+// just inherits the one that was already there. Minimal fields (formatted_address only) on
+// purpose — same pattern as every other address field in the app — keeps this on the cheap
+// Place Details tier rather than pulling in phone/rating/photo data nothing here uses.
+function _attachNavAddStopAutocomplete(){
+  if(typeof google==='undefined' || !google.maps || !google.maps.places) return;
+  var el=document.getElementById('nav-add-stop-input');
+  if(!el || el.dataset.acInit) return;
+  try{
+    var ac=new google.maps.places.Autocomplete(el, {
+      componentRestrictions: { country: 'us' },
+      fields: ['formatted_address'],
+      types: ['geocode','establishment']
+    });
+    ac.addListener('place_changed', function(){
+      var place=ac.getPlace();
+      var addr=place && place.formatted_address;
+      // No resolved place = just typed text with nothing selected from the dropdown. Requiring
+      // a real selection (not raw input) keeps a half-typed fragment or a typo from silently
+      // becoming a stop nobody can actually navigate to.
+      if(!addr) return;
+      var s=window._navStops||[];
+      if(s.length<2) return; // no fixed start/end yet to insert between
+      s.splice(s.length-1, 0, addr); // new stop goes just before the fixed final destination
+      window._navStops=s;
+      el.value='';
+      _navRefreshStopsBox();
+    });
+    el.addEventListener('keydown', function(e){ if(e.key==='Enter') e.preventDefault(); });
+    el.dataset.acInit='1';
+  }catch(e){ console.warn('nav add-stop autocomplete failed', e); }
+}
 function _navOptimize(){
   var s=window._navStops; if(!s||s.length<4){ showToast('Nothing to optimize'); return; }
   showToast('Optimizing route\u2026'); var addrs=s.slice(), coords=new Array(addrs.length), done=0;
@@ -10617,7 +10709,7 @@ function _navOptimize(){
     var ordered=[], remaining=midIdx.slice(), cur=start;
     while(remaining.length){ var best=0,bd=Infinity; for(var m=0;m<remaining.length;m++){ var d=_haversineMiles(cur,coords[remaining[m]]); if(d<bd){bd=d;best=m;} } var pk=remaining.splice(best,1)[0]; ordered.push(addrs[pk]); cur=coords[pk]; }
     window._navStops=[addrs[0]].concat(ordered).concat([addrs[addrs.length-1]]);
-    var el=document.getElementById('nav-stop-list'); if(el) el.innerHTML=_navStopListHtml(); _navSyncGm();
+    _navRefreshStopsBox();
     showToast('\u2713 Route optimized \u2014 fine-tune with \u2191\u2193 if needed');
   }
 }
@@ -10678,8 +10770,12 @@ function _openStartRideWithHome(rideId, startAddr, endAddr, swapPickupDropoff){
 
     // Route preview
     +'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:.75rem;margin-bottom:.85rem;">'
-    +'<div id="nav-stop-list">'+_navStopListHtml()+'</div>'
-    +((window._navStops&&window._navStops.length>3)?'<button onclick="_navOptimize()" style="width:100%;margin-top:.55rem;padding:.5rem;border:1.5px solid #7c3aed;border-radius:8px;background:#f5f3ff;color:#7c3aed;font-family:inherit;font-size:.78rem;font-weight:700;cursor:pointer;">\ud83e\ude84 Optimize stop order (nearest first)</button>':'')
+    +'<div id="nav-stops-box">'+_navStopsBoxHtml()+'</div>'
+    +'<div style="display:flex;gap:.4rem;margin-top:.55rem;">'
+    +'<input id="nav-add-stop-input" type="text" placeholder="Add another address\u2026" autocomplete="off" '
+    +'style="flex:1;min-width:0;padding:.4rem .55rem;border:1px solid #e2e8f0;border-radius:7px;font-size:.78rem;font-family:\'DM Sans\',sans-serif;color:#334155;box-sizing:border-box;">'
+    +'</div>'
+    +'<div style="font-size:.6rem;color:#94a3b8;margin-top:3px;">Added between your current stops and the final destination \u2014 use \u2191\u2193 or Optimize to reorder.</div>'
     +'</div>'
 
     // Nav app buttons
@@ -10717,6 +10813,10 @@ function _openStartRideWithHome(rideId, startAddr, endAddr, swapPickupDropoff){
     +'</div>'
     +'</div>';
   document.body.appendChild(ov);
+  // Attach after the input actually exists in the DOM. If Maps hasn't finished loading yet,
+  // this just no-ops silently — same as every other address field in the app when that
+  // happens; nothing here is a new failure mode.
+  _attachNavAddStopAutocomplete();
 }
 
 // ── LOG MILES MODAL (after the ride) ─────────────────────────────────────
@@ -10749,7 +10849,7 @@ function _rideById(id){
   if(id==null || typeof rides==='undefined' || !rides) return null;
   return rides.find(function(x){ return _rideIdMatches(x, id); }) || null;
 }
-function openLogMiles(rideId){
+function openLogMiles(rideId, billLater){
   var r=_rideById(rideId);
   if(!r){ console.warn('[LogMiles] openLogMiles: no ride for id', rideId, '(type '+(typeof rideId)+')'); showToast('Ride not found'); return; }
   // Pre-fill the saved gas price. Used to work by accident - mtStart()/_mtShowStopPopup() (the
@@ -10771,13 +10871,21 @@ function openLogMiles(rideId){
   ov.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,.65);z-index:14000;'
     +'display:flex;justify-content:center;padding:1rem;overflow-y:auto;box-sizing:border-box;';
   ov.onclick=function(e){if(e.target===ov)_closeLogMiles();};
+  // billLater (from the "Bill later instead" link, not the small Log/Edit button elsewhere)
+  // reuses this exact same modal — same fields, same save-button reliability handling below,
+  // no second copy of any of it — just a different title/copy and a flag threaded through to
+  // _saveLogMiles so it also marks the ride as awaiting an invoice instead of leaving status
+  // untouched. Chase's own framing for why this needed to be per-ride, not a client setting: a
+  // normally-pay-on-completion client running late for a flight, needing an invoice just that
+  // once — the ride in front of you decides this, not who the client usually is.
   ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:360px;width:100%;margin:auto;padding:1.25rem;'
     +'box-shadow:0 24px 60px rgba(0,0,0,.35);box-sizing:border-box;">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.9rem;">'
-    +'<div><div style="font-size:1.05rem;font-weight:800;color:#0f172a;">&#128205; Log Miles</div>'
+    +'<div><div style="font-size:1.05rem;font-weight:800;color:#0f172a;">'+(billLater?'&#129534; Complete Ride \u2014 Bill Later':'&#128205; Log Miles')+'</div>'
     +'<div style="font-size:.75rem;color:#64748b;margin-top:2px;">'+escHtml(r.client||'')+'</div></div>'
     +'<button onclick="_closeLogMiles()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button>'
     +'</div>'
+    +(billLater?'<div style="background:#faf5ff;border:1px solid #c4b5fd;border-radius:9px;padding:.6rem .8rem;margin-bottom:.75rem;font-size:.76rem;color:#6d28d9;line-height:1.45;">No payment questions here \u2014 just locks in the ending odometer. Mark it paid later, whenever the invoice actually clears.</div>':'')
     // Nudge: only when an odometer trip was actually started for this ride, never got an
     // ending reading, AND enough time has passed that it's very unlikely still an ordinary,
     // in-progress ride (which would make the nudge just noise) - two hours is a proxy for
@@ -10785,7 +10893,7 @@ function openLogMiles(rideId){
     +_buildOdoMilesTipGasFieldsHtml('lm', r, 'Total from Waze / Apple / Google Maps \u2014 include the drive to pick them up, not just the ride itself. That\u2019s still deductible business mileage.')
     +'<div style="display:flex;gap:.5rem;">'
     +'<button onclick="_closeLogMiles()" style="flex:1;padding:.6rem;background:#f1f5f9;color:#475569;border:none;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:600;cursor:pointer;">Cancel</button>'
-    +'<button id="lm-save-btn" onclick="if(!this.dataset.lmFired){this.dataset.lmFired=\'1\';_saveLogMiles('+rideId+');}" style="flex:2;padding:.6rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.9rem;font-weight:700;cursor:pointer;">&#128190; Save</button>'
+    +'<button id="lm-save-btn" onclick="if(!this.dataset.lmFired){this.dataset.lmFired=\'1\';_saveLogMiles('+rideId+','+(billLater?'true':'false')+');}" style="flex:2;padding:.6rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.9rem;font-weight:700;cursor:pointer;">'+(billLater?'&#128190; Save \u2014 Mark Invoiced':'&#128190; Save')+'</button>'
     +'</div>'
     +'</div>';
   document.body.appendChild(ov);
@@ -10831,7 +10939,7 @@ function openLogMiles(rideId){
         if(this.dataset.lmFired) return;
         this.dataset.lmFired='1';
         try{ ev.preventDefault(); }catch(_e){}
-        _saveLogMiles(rideId);
+        _saveLogMiles(rideId, billLater);
       }, {passive:false});
     }
   }catch(_e){}
@@ -10943,7 +11051,7 @@ function _lmPreviewOdoMiles(rideId){
   if(total==null) return;
   milesInput.value=total;
 }
-async function _saveLogMiles(rideId){
+async function _saveLogMiles(rideId, billLater){
   // This `if(!r)` used to be a bare `return` — no toast, no throw, no console line. Combined
   // with the id-type coercion described on _rideById, that made Save a button that visibly
   // did NOTHING when clicked, which is exactly how it was reported ("almost like clicking
@@ -10989,6 +11097,20 @@ async function _saveLogMiles(rideId){
     r.drivenMiles=mi;
     if(tip>0) r.tip=tip;
     if(gas>0) await _mtSaveGasPrice(gas);
+    // "Bill later instead" from the ride card, not the small Log/Edit miles button elsewhere -
+    // marks the ride done and awaiting an invoice, WITHOUT touching r.status/the Scheduled ->
+    // Confirmed -> Paid trail at all. Deliberately not reusing the old 'completed' status:
+    // that value already exists in legacy data and every place that reads the 3-stage trail
+    // collapses it straight to a "Paid" chip for display (see RIDE_STAGE_LABEL) - setting it
+    // here would have made an unpaid, invoiced ride LOOK paid, which is the opposite of the
+    // point. awaitingInvoice is a separate, unambiguous flag instead; buildRideLifecycle
+    // renders it as its own small badge alongside the trail, not folded into one of the chips.
+    if(billLater){
+      r.awaitingInvoice=true;
+      r.invoicedAt=Date.now();
+      r.invoicedBy=currentUser?.name||'';
+      touchRide(r,'marked awaiting invoice');
+    }
     try{await saveRides();}catch(e){console.warn(e);}
     _closeLogMiles();
     // Refresh the mileage bar in the open ride modal
@@ -10997,7 +11119,10 @@ async function _saveLogMiles(rideId){
     // sheet keeps showing the old (quoted) miles until you navigate away and back.
     try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
     try{ if(typeof renderIncome==='function' && document.getElementById('page-income') && document.getElementById('page-income').classList.contains('active')) renderIncome(); }catch(e){}
-    showToast('\uD83D\uDCCD '+mi+' mi saved'+(tip?' + $'+tip+' tip':''));
+    try{ if(document.getElementById('ride-modal')?.classList.contains('show')) renderRideView(r); }catch(e){}
+    showToast(billLater
+      ? ('\ud83e\uddfe '+mi+' mi saved \u2014 marked awaiting invoice')
+      : ('\uD83D\uDCCD '+mi+' mi saved'+(tip?' + $'+tip+' tip':'')));
   }catch(err){
     // The safety net. Whatever this says next time is the real bug — report it verbatim.
     try{ console.error('[LogMiles] save threw:', err && (err.stack||err.message) || err); }catch(_e){}
@@ -15348,6 +15473,7 @@ function refreshDash(){
         }
 
         var _isAirport = (r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP');
+        var _showBillLater = false;
         if(r.arrivalSentAt || r.type==='AP RUN'){
           // AP RUN never has an "arrival" to send a text about at all - it's the driver taking
           // the client TO the airport, no incoming flight to track. It was previously stuck
@@ -15356,6 +15482,7 @@ function refreshDash(){
           // with no way to reach Mark Paid from this card at all. Goes straight through once
           // started, same as every other non-airport ride type already does.
           _btns.push('<button onclick="event.stopPropagation();toggleRidePaid('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\ud83d\udcb0 Mark Paid</button>');
+          _showBillLater = !r.awaitingInvoice;
         } else if(_isAirport && r.flight){
           var _flightNum=(r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'').toUpperCase();
           var _flightUrl=flightTrackUrl(_flightNum);
@@ -15377,7 +15504,14 @@ function refreshDash(){
         // outer card's flex-wrap layout), buttons laid out with their own flex context so
         // they evenly split whatever width is available - whether that's 3 buttons or,
         // once the arrival text is sent, 2.
-        return '<div style="display:flex;gap:.4rem;width:100%;">'+_btns.join('')+'</div>';
+        // "Bill later instead" is deliberately NOT a fourth button in that equal-weight row -
+        // it's a quiet secondary link underneath, only shown alongside Mark Paid, never
+        // competing with it for space or attention. Chase's own framing for why this had to be
+        // per-ride rather than a client setting: a normally-pay-on-completion client running
+        // late for a flight, needing an invoice just that once - the ride in front of you
+        // decides this, not who the client usually is.
+        return '<div style="display:flex;gap:.4rem;width:100%;">'+_btns.join('')+'</div>'
+          +(_showBillLater ? '<div style="text-align:center;margin-top:.3rem;"><button onclick="event.stopPropagation();openLogMiles('+r.id+',true)" style="background:none;border:none;color:var(--mid);font-size:.68rem;font-weight:600;text-decoration:underline;cursor:pointer;padding:.2rem;">\ud83e\uddfe Bill later instead</button></div>' : '');
       })()}
       <div class="ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}${_ridePaidTag(r)}</div>
     </div>`;
