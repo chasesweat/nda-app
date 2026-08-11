@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608111801">
+<meta name="version" content="202608111805">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -14863,6 +14863,14 @@ async function saveOnboarding(){
     if(typeof DRIVER_PHOTOS!=='undefined') DRIVER_PHOTOS[dn]=_onbGeneratedCard;
     if(Array.isArray(p.vehicles) && p.vehicles.length) p.vehicles[0].photo=_onbGeneratedCard;
     try{ var _ov=await storageGet('kat:driverPhotoOverrides'); if(!_ov||typeof _ov!=='object')_ov={}; _ov[dn]=_onbGeneratedCard; await storageSet('kat:driverPhotoOverrides',_ov); }catch(e){}
+    // Keeps the driver's OWN device from serving their old photo back to them out of the
+    // v802 local cache after they've just uploaded a new one. Without this, a driver who
+    // reopens the app later the same day (still inside the 24h window from an earlier Team
+    // page visit, say) would see their PREVIOUS photo again until the cache naturally expired
+    // - confusing after they just changed it themselves. Firebase write above already made
+    // this the correct value for every device; this just makes sure this device's own cache
+    // agrees immediately instead of waiting up to 24h to catch up with itself.
+    try{ if(typeof _writeDriverPhotoOverrideCacheEntry==='function') _writeDriverPhotoOverrideCacheEntry(dn, _onbGeneratedCard); }catch(e){}
   }
   // Mark onboarding as completed so an admin "re-prompt all" reset clears for this driver.
   p.onboardedAt = Date.now();
@@ -15207,7 +15215,8 @@ function _defaultPolicyTpl(){
   return 'Hi {name},\n\nI have your ride scheduled for {date} at {time}.\n\n'
     +'\u2022 Confirmation: We\u2019ll text you a confirmation the day before your trip.\n'
     +'\u2022 Changes: Any changes to travel date or time after the confirmation text will incur a {changeFee} fee (except for emergencies/acts of God).\n'
-    +'\u2022 Cancellations: Canceling after the confirmation text will result in a fee of {cancelFee}.\n\n'
+    +'\u2022 Cancellations: Canceling after the confirmation text will result in a fee of {cancelFee}.\n'
+    +'\u2022 Card Payments: A processing fee will be applied to any credit or debit card payments \u2014 cash and other methods have no added fee.\n\n'
     +'We appreciate your business and look forward to driving you!';
 }
 function openPolicyEditor(){
@@ -16783,6 +16792,10 @@ async function saveDriverCards(){
     if(!overrides || typeof overrides!=='object') overrides={};
     overrides[dn]=vehicles[0].photo||'';
     await storageSet('kat:driverPhotoOverrides', overrides);
+    // Same reasoning as saveOnboarding's own cache-refresh: don't let this device's local
+    // v802 cache serve a stale pre-edit photo back to whoever's looking at dn's card next,
+    // on this device, before the 24h window would otherwise catch up on its own.
+    try{ if(typeof _writeDriverPhotoOverrideCacheEntry==='function') _writeDriverPhotoOverrideCacheEntry(dn, vehicles[0].photo||''); }catch(e){}
   }catch(e){ console.warn('save driver photo', e); }
   try{ if(typeof _driverCardImgCache!=='undefined') delete _driverCardImgCache[dn]; }catch(e){}
   var ov=document.getElementById('edit-photo-overlay'); if(ov) ov.remove();
@@ -17560,6 +17573,23 @@ function renderMessageTemplates(){
           +'</div>';
         })()
       + field('personal','arrival', 'My arrival text', 'Placeholders: {driver} {client}', myCustom.arrivalTemplate, 4)
+      + (function(){
+          // openPolicyEditor()/_savePolicyEditor() read and write driverSettings[currentUser.name]
+          // (login name) - NOT myCustom above, which is keyed by getMyDriverName() (driver display
+          // name). Those can differ (e.g. login "Kat" vs driver name "Kathleen Herringdine"), so
+          // the status badge has to check the SAME key the editor actually uses, not myCustom,
+          // or it could show "Using default" while a custom message is genuinely saved, or vice
+          // versa, for anyone whose login and driver name aren't identical strings.
+          const _polSet = !!((typeof driverSettings!=='undefined' && currentUser && driverSettings[currentUser.name] && driverSettings[currentUser.name].policyTemplate) || '').trim();
+          const _polColor = _polSet ? '#15803d' : 'var(--mid)';
+          const _polBg = _polSet ? '#e8f5ee' : 'var(--surface)';
+          const _polStatus = _polSet ? 'Custom set' : 'Using default';
+          return '<button type="button" onclick="openPolicyEditor()" style="width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.65rem .8rem;margin-bottom:.6rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-family:\'DM Sans\',sans-serif;">'
+          +'<span><span style="font-size:.82rem;font-weight:700;color:var(--black);display:block;">My scheduling message</span>'
+          +'<span style="font-size:.66rem;color:var(--mid);">Sent the moment a ride is booked \u2014 includes your change &amp; cancellation policy</span></span>'
+          +'<span style="font-size:.66rem;font-weight:700;color:'+_polColor+';background:'+_polBg+';border-radius:10px;padding:2px 8px;flex-shrink:0;">'+_polStatus+'</span>'
+          +'</button>';
+        })()
       + '<div id="msgtpl-personal-error" style="color:var(--red);font-size:.82rem;min-height:1rem;margin-bottom:.5rem;"></div>'
       + '<button onclick="saveAllTemplateFields(\'personal\')" class="btn-primary" style="width:100%;padding:.75rem;margin-bottom:'+(admin?'2rem':'0')+';">Save All My Messages</button>';
   }
@@ -20841,6 +20871,10 @@ registerAdminAction('driver_add', async function(rec){
       if(!_addedOv || typeof _addedOv!=='object') _addedOv={};
       _addedOv[name]=_newDriverPhotoToStore;
       await storageSet('kat:driverPhotoOverrides', _addedOv);
+      // Same reasoning as the other two photo-write sites: keeps whoever's adding this driver
+      // from having their OWN device's v802 cache serve a "no photo yet" stale result back for
+      // this brand-new name, before the 24h window would otherwise catch up.
+      try{ if(typeof _writeDriverPhotoOverrideCacheEntry==='function') _writeDriverPhotoOverrideCacheEntry(name, _newDriverPhotoToStore); }catch(e){}
     }
   }catch(e){ console.warn('add driver save',e); }
   showToast('\u2713 '+name.split(' ')[0]+' added \u2014 they can log in as \u201c'+login+'\u201d');
@@ -26623,6 +26657,33 @@ function _driverPhotoSlug(name){
     .replace(/[^a-z0-9]+/g,'-')
     .replace(/^-+|-+$/g,'');
 }
+// Firebase override results cached locally, with a staleness window - repeat app opens don't
+// re-ask Firebase for something that essentially never changes. Photos change maybe a few
+// times a year per driver at most; checking Firebase every single time anyone opens the app
+// is exactly the kind of unconditional-on-every-load cost v799-v801 already eliminated for
+// the "does an override exist at all" case - this closes the same gap for "has it changed
+// since I last checked," without ever going stale for long: once the window expires, the very
+// next load re-verifies against Firebase, so a real photo change is caught within one cache
+// cycle, not forgotten forever. Caches the result EITHER way, found or not - a driver with no
+// live override (running purely on their seed photo) still gets the same benefit, not just
+// drivers who happen to have uploaded one. Self-limiting by design: only ever holds entries
+// for drivers THIS device has actually looked at, not all 18 - the same per-driver scoping
+// v801 already established, not a new source of the localStorage bloat this app has already
+// fought hard against elsewhere this session.
+const DRIVER_PHOTO_OVERRIDE_CACHE_MAX_AGE_MS = 24*60*60*1000; // 24 hours
+function _readDriverPhotoOverrideCache(){
+  try{
+    var v = localStorage.getItem('kat:driverPhotoOverrideCache');
+    return v ? JSON.parse(v) : {};
+  }catch(e){ return {}; }
+}
+function _writeDriverPhotoOverrideCacheEntry(name, dataURL){
+  try{
+    var cache = _readDriverPhotoOverrideCache();
+    cache[name] = { v: dataURL||null, ts: Date.now() };
+    localStorage.setItem('kat:driverPhotoOverrideCache', JSON.stringify(cache));
+  }catch(e){ /* quota or serialization - never worth breaking the app over a cache write */ }
+}
 // Fetches ONE driver's live Firebase override directly, by path - not the whole
 // kat:driverPhotoOverrides object. Firebase Realtime Database is a real tree, not an opaque
 // blob: nda/kat/driverPhotoOverrides/{name} already addresses exactly that one driver's node
@@ -26633,7 +26694,9 @@ async function _fetchDriverPhotoOverride(name){
   if(typeof fbDB!=='undefined' && fbDB){
     try{
       const snap = await fbRef('nda/kat/driverPhotoOverrides/'+name).once('value');
-      if(snap.exists()) return snap.val();
+      const val = snap.exists() ? snap.val() : null;
+      _writeDriverPhotoOverrideCacheEntry(name, val);
+      return val;
     }catch(e){}
   }
   // Offline fallback: if a full overrides object was ever cached locally by some other path,
@@ -26669,6 +26732,17 @@ function _ensureDriverPhotoLoaded(name){
         s.onerror=function(){ resolve(); };
         document.head.appendChild(s);
       });
+    }
+    // Trust a recent local check over asking Firebase again - this is the actual cost
+    // reduction, not just a speed illusion. A driver opening the app 10 times in a day only
+    // triggers ONE real Firebase read for their own photo, not 10, as long as nothing has
+    // actually changed within the window. Applies the cached value (even if it's "no override,
+    // use the seed") the same way a fresh Firebase read would.
+    var cached = _readDriverPhotoOverrideCache()[name];
+    var isFresh = cached && (Date.now()-cached.ts) < DRIVER_PHOTO_OVERRIDE_CACHE_MAX_AGE_MS;
+    if(isFresh){
+      if(cached.v) DRIVER_PHOTOS[name]=cached.v;
+      return;
     }
     try{
       const _ov = await _fetchDriverPhotoOverride(name);
