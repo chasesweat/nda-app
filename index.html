@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608111794">
+<meta name="version" content="202608111797">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1130,7 +1130,24 @@ input,select,textarea{font-size:16px;}
             <span class="mtip-btn-wrap-inline"><button onclick="findClosestDrivers()" style="display:inline-flex;align-items:center;gap:.4rem;padding:.4rem .75rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;cursor:pointer;font-weight:600;font-size:.78rem;font-family:'DM Sans',sans-serif;">&#128205; Find closest drivers</button><span class="mtip-dot mtip-dot-badge" id="mtd-cal-dispatch" onclick="toggleMtip('cal-dispatch')" title="What&#8217;s this?">i</span></span><div class="mtip-pop" id="mtp-cal-dispatch">Suggests the nearest available driver based on where they are, instead of you checking everyone&#8217;s location by hand.</div>
             <div id="rm-closest-drivers"></div>
           </div>
+          <div id="rm-quickfee-wrap"></div>
         </div>
+      </div>
+      <!-- Delete/Cancel deliberately sit OUTSIDE .rm-exp-body, as their own independently-
+           gated sibling, not nested inside the collapsible toggle above. Cancel Ride's real
+           permission (any assigned driver, on a ride of ANY status) is wider than
+           canAssignOnRide (which gates the collapsible itself, and stays scoped to confirmed+
+           on purpose - see canAssignOnRide's own comment). Nesting Delete/Cancel inside the
+           collapsible would have meant one of two regressions: either an assigned driver on a
+           not-yet-confirmed ride loses Cancel Ride entirely (parent hidden hides everything
+           inside it, no exception), or broadening the collapsible's own gate to cover that case
+           would improperly expose Find Closest Drivers (which has no gate of its own - it
+           relies entirely on the collapsible's) to that same driver before they're supposed to
+           have it. A visually-adjacent sibling gets the decluttering without either regression.
+      -->
+      <div id="rm-danger-zone" style="display:flex;gap:.5rem;margin-top:.5rem;">
+        <button id="rm-delete-btn" class="btn-danger" onclick="deleteRide(activeRideId)" style="flex:1;background:#dc2626;color:#fff;font-weight:800;padding:.6rem .5rem;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;cursor:pointer;">🗑️ Delete Ride</button>
+        <button id="rm-cancelride-btn" class="btn-secondary" onclick="cancelRide(activeRideId)" style="flex:1;background:#b03a2e;display:none;color:#fff;font-weight:800;transition:none;padding:.6rem .5rem;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;cursor:pointer;">🚫 Cancel Ride</button>
       </div>
     </div>
     <!-- EDIT MODE -->
@@ -1194,11 +1211,9 @@ input,select,textarea{font-size:16px;}
     </div>
     <div class="modal-footer">
       <button id="rm-save-btn" class="btn-primary" onclick="saveRideEdits()" style="display:none;font-weight:800;">Save Changes</button>
-      <button id="rm-delete-btn" class="btn-danger" onclick="deleteRide(activeRideId)" style="background:#dc2626;color:#fff;font-weight:800;">🗑️ Delete Ride</button>
-      <button id="rm-cancelride-btn" class="btn-secondary" onclick="cancelRide(activeRideId)" style="background:#b03a2e;display:none;color:#fff;font-weight:800;transition:none;">🚫 Cancel Ride</button>
       <button id="rm-paid-btn" class="btn-secondary" onclick="toggleRidePaid(activeRideId)" style="background:var(--green);color:#fff;font-weight:800;">💰 Mark Paid</button>
-      <button id="rm-billlater-btn" class="btn-secondary" onclick="openLogMiles(activeRideId,true)" style="background:none;border:1.5px solid var(--light);color:var(--mid);font-weight:600;font-size:.8rem;">🧾 Bill later instead</button>
-      <button id="rm-close-btn" class="btn-secondary" onclick="closeRideModal()" style="background:#6b7280;color:#fff;font-weight:800;">✕ Close</button>
+      <button id="rm-billlater-btn" class="btn-secondary" onclick="openLogMiles(activeRideId,true)" style="background:#7c3aed;color:#fff;font-weight:800;">🧾 Client Invoiced</button>
+      <button id="rm-close-btn" class="btn-secondary" onclick="closeRideModal()" style="background:#6b7280;color:#fff;font-weight:800;grid-column:1/-1;width:auto;min-width:140px;margin:0 auto;">✕ Close</button>
     </div>
   </div>
 </div>
@@ -5577,6 +5592,14 @@ function splitApRoundTripRide(ride){
     pickup: secondType==='AP PICK UP' ? (terminalAddr || ride.home || '') : (ride.home || ''),
     home: secondType==='AP PICK UP' ? (ride.pickup || '') : (terminalAddr || ride.home || ''),
     price: split.leg2,
+    // Fresh, independent history - NOT the array Object.assign would otherwise carry over BY
+    // REFERENCE from `ride`. Every caller of this function already logs its own touchRide(leg2,
+    // 'created') right after calling it; ride.trail by then already has ITS OWN 'created' entry
+    // (touchRide(ride,'created') always runs first), so inheriting it produced two identical
+    // entries - and worse, meant leg1 and leg2 shared one mutable array, so any LATER
+    // touchRide() on either leg would silently show up on both. Reported directly: the ride
+    // modal showing "Chase created" twice, same timestamp, on an AP PICK UP leg 2.
+    trail: [],
   });
   ride.type=firstType;
   ride.pairId=pairId;
@@ -8165,13 +8188,19 @@ function openRideModal(id){
   if(_dxExtra){ _dxExtra.innerHTML=''; }
   // reset closest-driver suggestions for the freshly-opened ride
   var _cd=document.getElementById('rm-closest-drivers'); if(_cd) _cd.innerHTML='';
-  // delete button
+  // Delete/Cancel live outside the collapsible now (see the HTML comment on rm-danger-zone
+  // for why) - each button keeps its own existing permission check, unchanged; the wrapper
+  // itself just needs to show whenever at least one of them would.
   const delBtn=document.getElementById('rm-delete-btn');
-  if(delBtn) delBtn.style.display=canDeleteRide(r)?'inline-block':'none';
+  const _canDelete=canDeleteRide(r);
+  if(delBtn) delBtn.style.display=_canDelete?'':'none';
   // Cancel Ride is a creator/admin/assigned-driver action now — the driver on the
   // ride should be able to cancel it themselves, not just whoever booked it.
   const cancelBtn=document.getElementById('rm-cancelride-btn');
-  if(cancelBtn) cancelBtn.style.display=(canAssignOnRide(r)||getMyDriverName()===r.driver)?'inline-block':'none';
+  const _canCancel=(canAssignOnRide(r)||getMyDriverName()===r.driver);
+  if(cancelBtn) cancelBtn.style.display=_canCancel?'':'none';
+  const _dangerZone=document.getElementById('rm-danger-zone');
+  if(_dangerZone) _dangerZone.style.display=(_canDelete||_canCancel)?'flex':'none';
   // edit button — client owner (Kat↔Morgan proxy-aware) or the assigned driver.
   // Kept identical to the permission check in saveRideEdits() so what's visible here
   // always matches what can actually be saved - no more showing Edit to someone who'll
@@ -8546,20 +8575,6 @@ function renderRideView(r){
       <div style="width:100%;background:var(--surface);border-radius:10px;padding:.85rem;">
         ${buildFeeMathHTML(r)}
         ${buildRideLifecycle(r, true)}
-        ${(()=>{
-          const _c2m=currentUser?(PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name):null;const _c2c=r.createdBy?(PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy):null;const _isCreator2=!!(_c2m&&_c2c&&_c2m===_c2c);
-          if(!_isCreator2) return '';
-          const _feeApplied=r.feeType;
-          return `<div style="margin-top:.75rem;padding-top:.75rem;border-top:1px solid var(--light);">`
-            +`<div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Quick fees</div>`
-            +(_feeApplied
-              ?`<div style="background:${r.feeType==='cancel'?'#fff5f5':'#fff8e1'};border:1.5px solid ${r.feeType==='cancel'?'#fca5a5':'#fcd34d'};border-radius:9px;padding:.6rem .85rem;display:flex;align-items:center;justify-content:space-between;"><span style="font-size:.9rem;font-weight:700;color:${r.feeType==='cancel'?'#dc2626':'#92400e'};">${r.feeType==='cancel'?' Cancellation fee':'⚡ Change fee'}: $${r.feeAmount}</span><button onclick="clearRideFee(${r.id})" style="background:none;border:none;color:#aaa;cursor:pointer;font-size:.85rem;">Remove</button></div>`
-              :`<div style="display:flex;gap:.5rem;flex-wrap:wrap;">`
-                +`<button onclick="applyRideFee(${r.id},'change')" style="flex:1;min-width:140px;padding:.6rem .75rem;background:#fef3c7;border:1.5px solid #fcd34d;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:700;color:#92400e;cursor:pointer;">⚡ Change fee +$${changeFeeAmt()}</button>`
-                +`<button onclick="applyRideFee(${r.id},'cancel')" style="flex:1;min-width:140px;padding:.6rem .75rem;background:#fff5f5;border:1.5px solid #fca5a5;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:700;color:#dc2626;cursor:pointer;"> Cancel — ${cancelFeePct()}% fee $${Math.round((r.price||0)*cancelFeePct()/100)}</button>`
-                +`</div>`)
-            +`</div>`;
-        })()}
       </div>
     </div>
 
@@ -8630,6 +8645,24 @@ function renderRideView(r){
       </div>`;
     })()}
   `;
+  // Quick fees, moved into Dispatch Tools (v797) to keep the main card focused on ride
+  // facts and the two actions everyone actually uses (Mark Paid / Client Invoiced) - this is
+  // an occasional, creator-only action, not something that needs to always be visible.
+  // Still inside the same try/catch as the assignment above: a throw here should fail loudly
+  // the same way a throw anywhere else in this function does, not silently leave stale content.
+  (function(){
+    var _qfWrap = document.getElementById('rm-quickfee-wrap');
+    if(!_qfWrap) return;
+    var _c2m=currentUser?(PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name):null;
+    var _c2c=r.createdBy?(PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy):null;
+    var _isCreator2=!!(_c2m&&_c2c&&_c2m===_c2c);
+    if(!_isCreator2){ _qfWrap.innerHTML=''; return; }
+    var _feeApplied=r.feeType;
+    _qfWrap.innerHTML = '<div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Quick fees</div>'
+      +(_feeApplied
+        ?('<div style="background:'+(r.feeType==='cancel'?'#fff5f5':'#fff8e1')+';border:1.5px solid '+(r.feeType==='cancel'?'#fca5a5':'#fcd34d')+';border-radius:9px;padding:.6rem .85rem;display:flex;align-items:center;justify-content:space-between;"><span style="font-size:.9rem;font-weight:700;color:'+(r.feeType==='cancel'?'#dc2626':'#92400e')+';">'+(r.feeType==='cancel'?' Cancellation fee':'\u26a1 Change fee')+': $'+r.feeAmount+'</span><button onclick="clearRideFee('+r.id+')" style="background:none;border:none;color:#aaa;cursor:pointer;font-size:.85rem;">Remove</button></div>')
+        : ('<button onclick="applyRideFee('+r.id+',\'change\')" style="width:100%;padding:.6rem .75rem;background:#fef3c7;border:1.5px solid #fcd34d;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;font-weight:700;color:#92400e;cursor:pointer;">\u26a1 Change fee +$'+changeFeeAmt()+'</button>'));
+  })();
   }catch(err){
     // Whatever this says next is the real bug — no more guessing which field is bad.
     try{ console.error('[renderRideView] threw for ride', r&&r.id, (err&&(err.stack||err.message))||err); }catch(_e){}
@@ -10050,21 +10083,29 @@ async function saveRideEdits(){
   showToast('Ride updated ✓');
 }
 
+// 'cancel' used to be a valid feeType here too (Quick Fees' own "Cancel — X% fee" button),
+// removed entirely because it only ever set ride.cancelled=true — a field nothing else in the
+// app reads. r.status='cancelled' (set by cancelRide(), the real working cancel action) is
+// what every filter, list, and calendar view actually checks. That meant this button charged
+// the client a cancellation fee without ever cancelling the ride anywhere the app could see —
+// reported directly as "why do we have 2 cancel ride buttons." cancelRide() already offers this
+// exact same fee choice correctly, so this is a change-fee-only action now, not a fee-type
+// dispatcher. feeType stays as a parameter (still passed 'change' at the one call site) rather
+// than hardcoding it inline, in case a genuinely different fee type is ever added later.
 async function applyRideFee(rideId, feeType){
   const ride=_rideById(rideId);
   if(!ride) return;
-  const feeAmount = feeType==='cancel' ? Math.round((ride.price||0)*cancelFeePct()/100) : changeFeeAmt();
-  const label = feeType==='cancel' ? 'Cancellation' : 'Last-minute change';
+  const feeAmount = changeFeeAmt();
+  const label = 'Last-minute change';
   const _ok=await showConfirmModal({
-    icon: feeType==='cancel'?'\uD83D\uDEAB':'\u26A1', iconBg: feeType==='cancel'?'#3a1a1a':'#3a2a10',
+    icon:'\u26A1', iconBg:'#3a2a10',
     title: label+' fee',
     message:'Apply a $'+feeAmount+' '+label.toLowerCase()+' fee to '+(ride.client||'this ride')+'? This is logged to the ride and your income.',
-    buttons:[{label:'Not now',style:'neutral',value:false},{label:'Apply $'+feeAmount+' fee',style: feeType==='cancel'?'danger':'primary',value:true}]
+    buttons:[{label:'Not now',style:'neutral',value:false},{label:'Apply $'+feeAmount+' fee',style:'primary',value:true}]
   });
   if(!_ok) return;
   ride.feeType = feeType;
   ride.feeAmount = feeAmount;
-  if(feeType==='cancel') ride.cancelled = true;
   // Add fee note
   const feeNote = label+' fee: $'+feeAmount;
   ride.notes = ride.notes ? ride.notes+'\n'+feeNote : feeNote;
@@ -10076,6 +10117,9 @@ async function applyRideFee(rideId, feeType){
 function clearRideFee(rideId){
   const ride=_rideById(rideId);
   if(!ride||!confirm('Remove this fee from the ride?')) return;
+  // The (Cancellation|Last-minute change) pattern stays broad on purpose - a ride with a
+  // legacy 'cancel'-type fee note from before that path was removed still needs its Remove
+  // button to clean up correctly, not just newly-applied change fees.
   if(ride.notes) ride.notes=ride.notes.replace(/\n?(Cancellation|Last-minute change) fee: \$\d+/g,'').trim();
   delete ride.feeType; delete ride.feeAmount; delete ride.cancelled;
   saveRides();
@@ -15532,7 +15576,7 @@ function refreshDash(){
         // late for a flight, needing an invoice just that once - the ride in front of you
         // decides this, not who the client usually is.
         return '<div style="display:flex;gap:.4rem;width:100%;">'+_btns.join('')+'</div>'
-          +(_showBillLater ? '<div style="text-align:center;margin-top:.3rem;"><button onclick="event.stopPropagation();openLogMiles('+r.id+',true)" style="background:none;border:none;color:var(--mid);font-size:.68rem;font-weight:600;text-decoration:underline;cursor:pointer;padding:.2rem;">\ud83e\uddfe Bill later instead</button></div>' : '');
+          +(_showBillLater ? '<div style="text-align:center;margin-top:.3rem;"><button onclick="event.stopPropagation();openLogMiles('+r.id+',true)" style="background:none;border:none;color:var(--mid);font-size:.68rem;font-weight:600;text-decoration:underline;cursor:pointer;padding:.2rem;">\ud83e\uddfe Client Invoiced</button></div>' : '');
       })()}
       <div class="ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}${_ridePaidTag(r)}</div>
     </div>`;
