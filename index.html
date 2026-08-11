@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608111791">
+<meta name="version" content="202608111794">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -4428,44 +4428,50 @@ function openGoogleMaps(){
 // AP RUN = client going TO airport → terminal fills PICKUP
 // AP PICK UP = client arriving FROM airport → terminal fills DROPOFF
 const TERMINAL_ADDRESSES = {
-  // These are the addresses that resolve correctly in Google Maps for the ACTUAL
-  // pickup curbs (confirmed by Chase, who drives these daily). Note: North and
-  // South are NOT the same pin — "6000 S Terminal Pkwy" lands at the South
-  // pickup, "6000 N Terminal Pkwy" at the North. Precise GPS coordinates can be
-  // set per terminal (see TERMINAL_COORDS) and take priority when present.
+  // Used ONLY to auto-fill a human-readable address into the booking form's pickup/dropoff
+  // text field when a dispatcher picks a terminal (autoFillTerminalAddress and its Quick-Add/
+  // Edit equivalents) - a display convenience, not a navigation source. Confirmed by Chase:
+  // "6000 N Terminal Pkwy" geocodes to a point on the tarmac between gates, not a driveable
+  // curb - undriveable, not just imprecise. This is why terminalToAddress() (below,
+  // TERMINAL_COORDS) no longer falls back to these strings for actual navigation under any
+  // circumstance. Do not reintroduce that fallback without re-verifying these addresses
+  // resolve somewhere a car can actually reach.
   'North Domestic':  '6000 N Terminal Pkwy, Atlanta, GA 30320',
   'South Domestic':  '6000 S Terminal Pkwy, Atlanta, GA 30337',
   'International':    '2600 Maynard H Jackson Jr Blvd, Atlanta, GA 30337',
 };
-// Precise coordinates per terminal, walked and confirmed by Chase directly at each curb
-// (Aug 2026) - each one deliberately covers BOTH directions (AP RUN drop-off and AP PICK UP
-// pickup) at that terminal, not two separate pins. When a terminal has coords here, the route
-// uses them instead of the street address (a lat/lng pin can't be mis-geocoded). These replace
-// an earlier set that was never actually verified for drop-off specifically, and sent at least
-// one AP RUN to the wrong side of the airport entirely - see the handoff notes for the full
-// story. Format: 'lat,lng' string, or '' if not set yet.
+// Precise coordinates per terminal. All three corrected directly by Chase (Aug 2026) after
+// the street-address fallback below sent an AP RUN's navigation to a pin literally on the
+// tarmac between gates - not "imprecise," genuinely undriveable. See terminalToAddress() just
+// below: the street-address fallback is gone entirely now, specifically because of that.
+// Format: 'lat,lng' string, or '' if not set yet.
 const TERMINAL_COORDS = {
-  'North Domestic':  '33.6417292,-84.4476379',
-  'South Domestic':  '33.6389139,-84.4426426',
-  'International':    '33.6409304,-84.4195535',
+  'North Domestic':  '33.641718,-84.448644',
+  'South Domestic':  '33.638882,-84.442656',
+  'International':    '33.641312,-84.419636',
 };
-// Resolve a stored terminal value to a navigable destination. Prefers a precise
-// GPS coordinate pin (TERMINAL_COORDS) when one is set, else the street address.
+// Resolve a stored terminal value to a navigable destination. COORDINATE ONLY - no street-
+// address fallback. That fallback used to return TERMINAL_ADDRESSES[key] when no coordinate was
+// set, which sounded like a reasonable "better than nothing" - until Chase found it in practice:
+// Google geocodes "6000 N Terminal Pkwy" to a point on the tarmac, not a driveable curb. A wrong
+// coordinate is at least visibly wrong on a map before you drive there; a plausible-looking
+// street address that resolves somewhere undriveable is the worse failure, not the safer one.
+// If a terminal has no verified coordinate here, this now returns '' - the caller falls back to
+// whatever's already on the ride record instead of this function silently supplying a street
+// address that turned out not to be trustworthy for navigation at all.
 // Tolerant of both the full form ('North Domestic') and legacy short form
 // ('North'); returns '' if there's no terminal set or no match.
 function terminalToAddress(term){
   if(!term) return '';
   var key=String(term).trim();
-  if(!TERMINAL_ADDRESSES[key]){
+  if(!TERMINAL_COORDS[key]){
     var low=key.toLowerCase();
     if(low.indexOf('north')===0)      key='North Domestic';
     else if(low.indexOf('south')===0) key='South Domestic';
     else if(low.indexOf('int')===0)   key='International';
     else return '';
   }
-  var coord=(TERMINAL_COORDS[key]||'').trim();
-  if(coord) return coord;               // a lat,lng pin — most reliable
-  return TERMINAL_ADDRESSES[key]||'';
+  return (TERMINAL_COORDS[key]||'').trim();
 }
 
 // Checks whether the client currently entered has a stored terminal preference that differs
@@ -8079,11 +8085,24 @@ async function notifyDriverChange(ride, oldDriverName, newDriverName){
   // Deliberately scoped to ONLY this recipient — the client's own vCard must never go to the
   // client themselves (step 3, below) or to the owner (step 2). Those two stay exactly as
   // they were; only this one gets a file.
+  //
+  // Same class of bug as sendAllConf's vcard/phone rows (v788), reached through a completely
+  // different door: if the NEW driver is already this client's resolved owner, they already
+  // have the contact - attaching it again is noise. NOT using the feeOwnerFor(...)||ride.driver
+  // fallback pattern the confirmation-checklist fix used, on purpose - by the time this
+  // function runs, ride.driver has ALREADY been updated to newDriverName, so that fallback
+  // would make this comparison trivially true on every single reassignment and silently drop
+  // the vCard from every one of them. Only suppresses when a real, resolved owner is confidently
+  // known and matches; any ambiguity defaults to sending, same as it always has.
   try{
     if(newPhone){
       const driverMsg = 'You\u2019ve been assigned '+(ride.client||'a client')+'\u2019s ride on '+(fmtDateShort(ride.date)||'')+' at '+(fmtTime12(ride.time)||'')+(ride.pickup?('. Pickup: '+ride.pickup):'')+'.';
       let driverFiles=[];
-      try{ const vcf=(window._confFilesMap&&window._confFilesMap[ride.id]&&window._confFilesMap[ride.id].vcard) || buildClientVCard(ride); if(vcf) driverFiles=[vcf]; }catch(e){ console.warn('client vcard build for driver-change failed',e); }
+      var _resolvedClientOwner = (getClientOwner(ride.client) || feeOwnerFor(ride.createdBy) || '').trim();
+      var _newDriverOwnsClient = _resolvedClientOwner && (_resolvedClientOwner === (newDriverName||'').trim());
+      if(!_newDriverOwnsClient){
+        try{ const vcf=(window._confFilesMap&&window._confFilesMap[ride.id]&&window._confFilesMap[ride.id].vcard) || buildClientVCard(ride); if(vcf) driverFiles=[vcf]; }catch(e){ console.warn('client vcard build for driver-change failed',e); }
+      }
       await _sendTextWithFiles([newPhone.replace(/[^0-9+]/g,'')], driverMsg, driverFiles);
     }
   }catch(e){ console.warn('new driver SMS failed',e); }
@@ -10133,9 +10152,11 @@ function _buildRouteUrlsFrom(r, startAddr, endAddr, linkRide){
   var pickup  = (r.pickup||'').trim();
   var dropoff = (r.home||'').trim();
   var t       = r.type||'';
-  // For airport rides, prefer the terminal's street address when a terminal is
-  // set (falls back to the saved address otherwise). AP PICK UP: the client is
-  // picked up AT the terminal, so the terminal is the PICKUP. AP RUN: the client
+  // For airport rides, prefer the terminal's verified GPS coordinate when a terminal is set
+  // (falls back to the ride's own saved address otherwise - never a street address derived
+  // here; see terminalToAddress()'s own comment for why that fallback was removed entirely).
+  // AP PICK UP: the client is picked up AT the terminal, so the terminal is the PICKUP. AP RUN:
+  // the client
   // is dropped AT the terminal, so the terminal is the DROP-OFF.
   var termAddr = terminalToAddress(r.terminal);
   if(termAddr){
