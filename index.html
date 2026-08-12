@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608111815">
+<meta name="version" content="202608121819">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2771,6 +2771,26 @@ function startClientRequestPolling(){
   setInterval(function(){ processClientRequests(); }, 60000);
 }
 
+// Applies a client's confirmed "set as my new default address" choice from an incoming
+// booking-link request (see newAddressesToSave in book.html's submitRequest()). Runs here, in
+// the driver's own already-trusted, logged-in session - the public page never writes to
+// clientAddressOverrides directly, only records what the client confirmed as part of their
+// request, exactly like every other field on that request already works.
+function _applyClientBookingRequestSideEffects(r){
+  if(!r || !r.clientKey || !Array.isArray(r.newAddressesToSave) || !r.newAddressesToSave.length) return;
+  var owner = getClientOwner(r.clientName) || getMyDriverName();
+  r.newAddressesToSave.forEach(function(a){
+    if(!a || !a.address) return;
+    var label = a.field==='pickup' ? 'Pickup' : 'Home';
+    setClientAddress(r.clientKey, label, a.address, true);
+  });
+  if(owner){
+    var addrList = r.newAddressesToSave.map(function(a){ return a.address; }).join('; ');
+    addNotification(owner, {id:null, client:r.clientName}, 'client_address_changed',
+      '\ud83d\udccd '+(r.clientName||'A client')+' set a new default address via their booking link: '+addrList);
+  }
+}
+
 async function processClientRequests(){
   if(!currentUser) return;
   var myDriverName = getMyDriverName();
@@ -2814,6 +2834,7 @@ async function processClientRequests(){
       if(!notifications[myDriverName]) notifications[myDriverName] = [];
       notifications[myDriverName].unshift({ rideId:null, type:'client_request', channel:null, read:false, msg:msg, ts:Date.now(), createdBy:'', clientRequestId:id });
       if(typeof sendPushToDriver==='function') sendPushToDriver(myDriverName, '\ud83d\udccb New request via your booking link', kind+' from '+(r.clientName||'a client'));
+      _applyClientBookingRequestSideEffects(r);
       reqs[id].status = 'processed';
       changed = true;
     }
@@ -5041,9 +5062,15 @@ function defaultRideDriver(){
   if(currentUser && currentUser.name==='Morgan') return 'Kathleen Herringdine';
   return getMyDriverName() || '';
 }
-function touchRide(r, action){
+// `by` defaults to whoever's currently logged in - correct for every existing caller, all of
+// which log something a person actually did. `whoOverride` (v819) exists for the opposite case:
+// an automatic action nobody actually performed, like an auto-accept firing on whichever
+// driver's device happens to run the periodic check. Attributing that to "whoever's logged in
+// right now" would be actively wrong, not just imprecise - it would look like that specific
+// driver did something they had no part in.
+function touchRide(r, action, whoOverride){
   if(!r) return;
-  const who = getMyDriverName() || currentUser?.name || 'Someone';
+  const who = whoOverride || getMyDriverName() || currentUser?.name || 'Someone';
   if(!Array.isArray(r.trail)) r.trail = [];
   r.trail.push({ by: who, action: action||'updated', ts: Date.now() });
   if(r.trail.length>12) r.trail = r.trail.slice(-12);
@@ -5147,18 +5174,34 @@ async function saveQuote(){
   // Recurrence — defaults to a SINGLE ride; only repeats if the user explicitly chose a repeat option
   const repeat = document.getElementById('q-repeat')?.value || 'none';
   const baseDate = ride.date;
+  let _leg2=null;
   if(repeat==='none' || !baseDate){
     rides.push(ride);
-    if(driverVal) addNotification(driverVal, ride, 'assigned');
-    // AP Round Trip booked directly from the live Quote form used to save as ONE record with the
-    // return leg's details tacked on as unread extra fields - no second ride, nothing on the
-    // calendar for the return. Same split Add Ride has always used.
-    if(ride.type==='AP ROUND TRIP'){
-      var _leg2=splitApRoundTripRide(ride);
-      touchRide(_leg2,'created'); rides.push(_leg2);
-      if(_leg2.driver) addNotification(_leg2.driver,_leg2,'assigned');
+    // Wrapped (v818) - this had zero error handling between pushing the ride into memory and
+    // actually persisting it below. If splitApRoundTripRide threw for any reason, saveRides()
+    // never ran and nothing told the user why - a silent "it just didn't save." Reported
+    // directly: Morgan entering an AP Round Trip.
+    try{
+      // AP Round Trip booked directly from the live Quote form used to save as ONE record with
+      // the return leg's details tacked on as unread extra fields - no second ride, nothing on
+      // the calendar for the return. Same split Add Ride has always used.
+      if(ride.type==='AP ROUND TRIP'){
+        _leg2=splitApRoundTripRide(ride);
+        touchRide(_leg2,'created'); rides.push(_leg2);
+      }
+    }catch(e){
+      console.warn('saveQuote split failed', e);
+      var _sqIdx = rides.indexOf(ride); if(_sqIdx>-1) rides.splice(_sqIdx,1);
+      if(_leg2){ var _sqIdx2 = rides.indexOf(_leg2); if(_sqIdx2>-1) rides.splice(_sqIdx2,1); }
+      showToast('\u26a0\ufe0f Ride did not save \u2014 check your connection and try again', 'error');
+      return;
     }
+    if(driverVal) addNotification(driverVal, ride, 'assigned');
+    if(_leg2 && _leg2.driver) addNotification(_leg2.driver,_leg2,'assigned');
   } else {
+    // Note: a recurring series does NOT currently split each AP Round Trip instance into its
+    // own return leg the way a single one does above - flagged, not fixed here, since it's a
+    // separate gap from what was reported and touching the recurring loop is a bigger change.
     const count = Math.max(1, Math.min(52, parseInt(document.getElementById('q-repeat-count')?.value)||1));
     const everyLabel = repeat==='weekly'?'week':repeat==='biweekly'?'2 weeks':'month';
     if(!confirm('Create '+count+' recurring rides ('+repeat+', one every '+everyLabel+') for '+client+'?')){ return; }
@@ -5176,7 +5219,13 @@ async function saveQuote(){
     if(driverVal) addNotification(driverVal, ride, 'assigned'); // one notification for the series
   }
 
-  await saveRides(); await saveNotifs();
+  try{
+    await saveRides(); await saveNotifs();
+  }catch(e){
+    console.warn('saveQuote persist failed', e);
+    showToast('\u26a0\ufe0f Ride did not save \u2014 check your connection and try again', 'error');
+    return;
+  }
   var _qAddClient=document.getElementById('q-add-client');
   if(!_qAddClient||_qAddClient.checked){ await upsertClientFromRide(ride); }
   _notifyOwnerOfForeignSchedule(ride);
@@ -5819,18 +5868,35 @@ async function scheduleSavedQuote(qid){
   delete ride._quoteId; delete ride.savedAt;
   if(typeof touchRide==='function') touchRide(ride, 'created');
   rides.push(ride);
-  // THE BUG: scheduling a saved AP Round Trip quote produced exactly one ride record, carrying
-  // the full combined price, with no second entry anywhere for the return leg - so the return
-  // simply wasn't on the calendar. Same split as Add Ride and saveQuote(), now shared.
-  if(ride.type==='AP ROUND TRIP' && typeof splitApRoundTripRide==='function'){
-    var _leg2=splitApRoundTripRide(ride);
-    if(typeof touchRide==='function') touchRide(_leg2,'created');
-    rides.push(_leg2);
-    if(_leg2.driver && typeof addNotification==='function') addNotification(_leg2.driver,_leg2,'assigned');
+  let _leg2=null;
+  // Reordered and wrapped (v818). Two separate problems, same root cause: this used to remove
+  // the saved quote from savedQuotes BEFORE confirming the new ride actually saved, and the
+  // save's own failure was silently swallowed (empty catch). If saveRides() failed for any
+  // reason but saveSavedQuotes() then succeeded right after, the client's saved quote was gone
+  // permanently with no ride ever created to replace it - genuine data loss, not just a missed
+  // save, and nothing told anyone it happened. Now: the quote is only removed after the ride is
+  // CONFIRMED saved, and any failure rolls the ride back out of memory and tells the user.
+  try{
+    // THE BUG (original, v767-era): scheduling a saved AP Round Trip quote produced exactly one
+    // ride record, carrying the full combined price, with no second entry anywhere for the
+    // return leg - so the return simply wasn't on the calendar. Same split as Add Ride and
+    // saveQuote(), now shared.
+    if(ride.type==='AP ROUND TRIP' && typeof splitApRoundTripRide==='function'){
+      _leg2=splitApRoundTripRide(ride);
+      if(typeof touchRide==='function') touchRide(_leg2,'created');
+      rides.push(_leg2);
+      if(_leg2.driver && typeof addNotification==='function') addNotification(_leg2.driver,_leg2,'assigned');
+    }
+    await saveRides();
+  }catch(e){
+    console.warn('scheduleSavedQuote save failed', e);
+    var _sqIdx1 = rides.indexOf(ride); if(_sqIdx1>-1) rides.splice(_sqIdx1,1);
+    if(_leg2){ var _sqIdx2 = rides.indexOf(_leg2); if(_sqIdx2>-1) rides.splice(_sqIdx2,1); }
+    showToast('\u26a0\ufe0f Could not schedule this ride \u2014 check your connection and try again', 'error');
+    return;
   }
   savedQuotes.splice(i,1);
-  try{ await saveRides(); }catch(e){}
-  try{ await saveSavedQuotes(); }catch(e){}
+  try{ await saveSavedQuotes(); }catch(e){ console.warn('saveSavedQuotes failed after a successful ride save', e); }
   if(ride.driver){ try{ addNotification(ride.driver, ride, 'assigned'); await saveNotifs(); }catch(e){} }
   try{ await upsertClientFromRide(ride); }catch(e){}
   try{ _notifyOwnerOfForeignSchedule(ride); }catch(e){}
@@ -6099,6 +6165,12 @@ function _checkAutoAcceptRides(){
       r.driverResponse = 'accepted';
       r.driverRespondedAt = now;
       r.driverAutoAccepted = true;
+      // Logged to the ride's own history now (v819) instead of a separate standalone banner -
+      // it belongs alongside every other "what happened to this ride" entry, not called out on
+      // its own. Worded as what it IS, not as an acceptance - "auto-accepted" alone reads like
+      // a feature; the point is that nobody replied.
+      var _who = r.driver ? (typeof driverShortName==='function' ? driverShortName(r.driver) : r.driver) : 'driver';
+      touchRide(r, 'auto-accepted \u2014 '+_who+' did not respond in time', 'System');
       changed = true;
     }
   });
@@ -6122,6 +6194,9 @@ async function acceptAssignedRide(rideId){
   var r=_rideById(rideId);
   if(!r){ showToast('Ride not found','error'); return; }
   r.driverResponse='accepted'; r.driverRespondedAt=Date.now(); delete r.driverAutoAccepted;
+  // Logged to history now (v819), same as auto-accept - a deliberate tap and a timeout both
+  // belong in the same "what happened to this ride" log, not a separate banner for one of them.
+  touchRide(r, 'accepted the ride');
   try{ await saveRides(); }catch(e){}
   showToast('\u2705 Ride accepted');
   _clearAssignedNotif(r.driver, rideId);
@@ -8380,45 +8455,13 @@ function renderRideView(r){
       +'</div></div>')
     : '';
 
-  // WHAT HAPPENED TO THAT REQUEST — once the banner above has done its job and vanished.
-  //
-  // driverRespondedAt and driverAutoAccepted were both written and read by NOTHING. The second
-  // is the one that matters: when the acceptance window expires the app AUTO-ACCEPTS on the
-  // driver's behalf and sets driverAutoAccepted, and the result was indistinguishable from a
-  // driver who deliberately tapped Accept. A dispatcher looking at the card saw "assigned" either
-  // way, with no way to tell whether anyone had actually acknowledged the ride.
-  //
-  // Shown to anyone who can see the card, not just the assigned driver — knowing nobody has
-  // actually confirmed is dispatch information, not personal information.
+  // WHAT HAPPENED TO THAT REQUEST — used to be its own standalone banner here, separate from
+  // the ride's history. Folded into the trail instead (v819): accept, auto-accept, and decline
+  // all now log through touchRide() and show up in "View full history" like every other change
+  // to this ride, rather than one specific kind of event getting called out on its own. Auto-
+  // accept is attributed to "System" (touchRide's whoOverride), not whichever driver's device
+  // happened to be open when the periodic check fired - that's not something a person did.
   let _respLine = '';
-  if(r.driverResponse === 'accepted' || r.driverResponse === 'rejected'){
-    let _w = '';
-    try{
-      if(r.driverRespondedAt){
-        const d = new Date(r.driverRespondedAt);
-        if(!isNaN(d.getTime())){
-          _w = d.toLocaleDateString(undefined,{month:'short',day:'numeric'})
-             + ' ' + d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
-        }
-      }
-    }catch(_e){}
-    const _who = r.driver ? (typeof driverShortName==='function' ? driverShortName(r.driver) : r.driver) : 'driver';
-    let _txt, _col, _bg, _bd;
-    if(r.driverResponse === 'rejected'){
-      _txt = '\u2717 Declined by ' + _who;           _col='#b91c1c'; _bg='#fef2f2'; _bd='#fecaca';
-    } else if(r.driverAutoAccepted){
-      // Deliberately worded as what it IS, not as an acceptance. "Auto-accepted" alone reads
-      // like a feature; the point is that nobody replied.
-      _txt = '\u23F1 Auto-accepted \u2014 ' + _who + ' did not respond in time';
-      _col='#92400e'; _bg='#fffbeb'; _bd='#fde68a';
-    } else {
-      _txt = '\u2713 Accepted by ' + _who;           _col='#15803d'; _bg='#f0fdf4'; _bd='#86efac';
-    }
-    _respLine = '<div style="background:'+_bg+';border:1.5px solid '+_bd+';border-radius:10px;'
-      + 'padding:.5rem .75rem;margin-bottom:1rem;font-size:.75rem;font-weight:700;color:'+_col+';">'
-      + escHtml(_txt) + (_w ? '<span style="font-weight:600;opacity:.8;"> \u00b7 ' + escHtml(_w) + '</span>' : '')
-      + '</div>';
-  }
 
   const canEditMedHours = (_myDName && _myDName===r.driver) || (typeof isAdmin==='function' && isAdmin());
   const _ccRm = currentUser ? (PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name) : null;
@@ -15186,19 +15229,36 @@ async function saveQuickAddRide(){
   rides.push(ride);
   if(ride.driver) addNotification(ride.driver,ride,'assigned');
   let ride2=null;
-  if(qaType==='AP ROUND TRIP'){
-    ride.rtDateAP=document.getElementById('qa-rt-date')?.value||date;
-    ride.rtTime=document.getElementById('qa-rt-time')?.value||'';
-    ride.rtFlight=document.getElementById('qa-rt-flight')?.value.trim()||'';
-    ride.rtTerminal=document.getElementById('qa-rt-terminal')?.value||'';
-    ride.rtFirstLeg=(typeof qaRtFirstLegType==='function') ? qaRtFirstLegType() : 'AP RUN';
-    // splitApRoundTripRide prices each leg from its own real breakdown (not the full total
-    // duplicated onto both) and mutates `ride` in place into the outbound AP Run.
-    ride2=splitApRoundTripRide(ride);
-    touchRide(ride2,'created'); rides.push(ride2);
-    if(ride2.driver) addNotification(ride2.driver,ride2,'assigned');
+  // Wrapped (v818) - this whole block used to have zero error handling between pushing the
+  // ride into memory and actually persisting it. If splitApRoundTripRide (or anything it calls
+  // - buildRideBreakdown, touchRide) threw for any reason, saveRides() below never ran, the
+  // modal never closed, and nothing told the user why - a silent, unrecoverable "it just didn't
+  // save" with no error anywhere. Reported directly: Morgan entering an AP Round Trip.
+  try{
+    if(qaType==='AP ROUND TRIP'){
+      ride.rtDateAP=document.getElementById('qa-rt-date')?.value||date;
+      ride.rtTime=document.getElementById('qa-rt-time')?.value||'';
+      ride.rtFlight=document.getElementById('qa-rt-flight')?.value.trim()||'';
+      ride.rtTerminal=document.getElementById('qa-rt-terminal')?.value||'';
+      ride.rtFirstLeg=(typeof qaRtFirstLegType==='function') ? qaRtFirstLegType() : 'AP RUN';
+      // splitApRoundTripRide prices each leg from its own real breakdown (not the full total
+      // duplicated onto both) and mutates `ride` in place into the outbound AP Run.
+      ride2=splitApRoundTripRide(ride);
+      touchRide(ride2,'created'); rides.push(ride2);
+      if(ride2.driver) addNotification(ride2.driver,ride2,'assigned');
+    }
+    await saveRides(); await saveNotifs();
+  }catch(e){
+    console.warn('Quick Add save failed', e);
+    // Roll back whatever got pushed locally - a failed save must never leave a half-created
+    // round trip (one leg present, the other missing) sitting silently in memory looking like
+    // it worked, and must never leave the Save button stuck disabled with no way to retry.
+    var _qaIdx1 = rides.indexOf(ride); if(_qaIdx1>-1) rides.splice(_qaIdx1,1);
+    if(ride2){ var _qaIdx2 = rides.indexOf(ride2); if(_qaIdx2>-1) rides.splice(_qaIdx2,1); }
+    showToast('\u26a0\ufe0f Ride did not save \u2014 check your connection and try again', 'error');
+    _reenableBtn();
+    return;
   }
-  await saveRides(); await saveNotifs();
   var _addClient=document.getElementById('qa-add-client');
   if(!_addClient||_addClient.checked){ await upsertClientFromRide(ride); }
   _notifyOwnerOfForeignSchedule(ride);
@@ -18316,6 +18376,62 @@ function myBookingLink(){
   }catch(e){ return ''; }
 }
 
+// Firebase keys can't contain . # $ [ ] / — client names occasionally can (e.g. "Dr. Smith").
+// Lossy on purpose: a genuine collision (two differently-punctuated names landing on the same
+// sanitized key) would at worst reuse one token between them, never leak one client's data to
+// the wrong recipient — the token itself, not this key, is what actually gates access.
+function _fbSafeKey(s){ return String(s||'').replace(/[.#$\[\]\/]/g, '_'); }
+
+// Generates (or reuses) an unguessable per-client booking-link token, so a link sent to one
+// established client can safely prefill THEIR saved name/phone/email/addresses without exposing
+// any other client's data to anyone who intercepts or guesses a link. Snapshots name/phone/email
+// at send-time (from the same client lookup the send button already does) rather than giving
+// book.html — a public, unauthenticated page — any live path into the driver's full ride/client
+// history, even indirectly. The token is the only thing that ever appears in the URL; the real
+// client name and key never do.
+async function _getOrCreateClientBookingToken(clientName, driverLogin){
+  var clientKey = (clientName||'').trim().toLowerCase();
+  var loginKey = (driverLogin||'').trim().toLowerCase();
+  if(!clientKey || !loginKey || typeof fbRef!=='function') return '';
+  try{
+    var existing = await fbRef('nda/kat/bookingLinkTokensByClient/'+loginKey+'/'+_fbSafeKey(clientKey)).once('value');
+    if(existing.exists() && existing.val()) return existing.val();
+  }catch(e){ console.warn('booking token lookup failed', e); }
+  var token;
+  try{
+    var bytes = new Uint8Array(18);
+    (window.crypto||window.msCrypto).getRandomValues(bytes);
+    token = Array.from(bytes).map(function(b){ return b.toString(36).padStart(2,'0'); }).join('').slice(0,24);
+  }catch(e){ console.warn('booking token random generation failed', e); return ''; }
+  var _va = (currentUser && PROXY_MAP[currentUser.name]) || getMyDriverName();
+  var _db = (typeof buildClientDB==='function') ? (buildClientDB(_va)||{}) : {};
+  var c = _db[clientKey] || {};
+  try{
+    await fbRef('nda/kat/bookingLinkTokens/'+token).set({
+      loginName: loginKey,
+      clientKey: clientKey,
+      clientName: (clientName||'').trim(),
+      clientPhone: c.phone || (c.phones&&c.phones[0]) || '',
+      clientEmail: c.email || (c.emails&&c.emails[0]) || '',
+      createdAt: Date.now()
+    });
+    await fbRef('nda/kat/bookingLinkTokensByClient/'+loginKey+'/'+_fbSafeKey(clientKey)).set(token);
+  }catch(e){ console.warn('booking token create failed', e); return ''; }
+  return token;
+}
+
+// Same URL myBookingLink() builds, but with a per-client token appended - book.html uses it to
+// safely prefill that one client's saved name/phone/email and offer their saved addresses as a
+// dropdown, without needing to expose (or even accept) a plain client name in the URL. Falls
+// back to the plain generic link if token generation fails for any reason - a missing token
+// just means no prefill, never a broken link.
+async function bookingLinkForClient(clientName){
+  var base = myBookingLink(); if(!base) return '';
+  var login = (currentUser && currentUser.name) ? String(currentUser.name).trim() : '';
+  var token = await _getOrCreateClientBookingToken(clientName, login);
+  return token ? (base + '&t=' + encodeURIComponent(token)) : base;
+}
+
 // Hand off to the OS share sheet so the DRIVER picks the app - Messages, WhatsApp, Mail, whatever
 // they already use with that client. Copy-to-clipboard was four steps (copy, leave the app, find
 // the person, paste); this is two. Clipboard stays as the fallback for desktop browsers with no
@@ -18339,10 +18455,13 @@ function shareMyBookingLink(){ _shareBookingLink(myBookingLink(), ''); }
 
 // Row button. Picks the channel from what the client actually has on file rather than asking:
 // a phone means text, an email means mail, neither means the OS share sheet. The kebab menu
-// still offers the explicit choice for anyone who wants the other one.
-function sendClientBookingLink(name, ev){
+// still offers the explicit choice for anyone who wants the other one. Async now - resolves a
+// per-client token link (bookingLinkForClient) instead of the plain generic one, so THIS
+// client's saved name/phone/email/addresses can prefill on the other end. onclick doesn't need
+// to await it; the link opens whichever app once resolved, same as any other async UI action.
+async function sendClientBookingLink(name, ev){
   if(ev){ ev.stopPropagation(); }
-  var link = myBookingLink(); if(!link) return;
+  var link = await bookingLinkForClient(name); if(!link) return;
   var _va = (currentUser && PROXY_MAP[currentUser.name]) || getMyDriverName();
   var _db = (typeof buildClientDB==='function') ? (buildClientDB(_va)||{}) : {};
   var c   = _db[(name||'').trim().toLowerCase()] || {};
@@ -18353,9 +18472,11 @@ function sendClientBookingLink(name, ev){
 
 // Deliberate channel choice, for the per-client menu. sms: and mailto: hand off to whichever app
 // the driver has set as their default handler - we never pick one for them and never send
-// anything ourselves; the message is pre-filled and the driver still presses send.
-function _sendBookingLinkVia(channel, link, clientName, phone, email){
-  link = link || myBookingLink();
+// anything ourselves; the message is pre-filled and the driver still presses send. Async now -
+// when the kebab menu calls this directly with an empty link (letting this function resolve its
+// own), it resolves the per-client token link via clientName rather than the plain generic one.
+async function _sendBookingLinkVia(channel, link, clientName, phone, email){
+  link = link || (clientName ? await bookingLinkForClient(clientName) : myBookingLink());
   if(!link) return;
   var first=(clientName||'').trim().split(' ')[0];
   var body=(first?'Hi '+first+' \u2014 ':'')+'you can book directly with me here: '+link;
