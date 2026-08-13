@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608131830">
+<meta name="version" content="202608131831">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -7098,7 +7098,9 @@ function renderMonthView(containerId, monthDate, driverFilter, jumpFn){
 }
 
 function renderCal(){
-  if(!document.getElementById('cal-grid')) return;
+  _dbgTrace('renderCal() entered');
+  if(!document.getElementById('cal-grid')){ _dbgTrace('renderCal(): cal-grid NOT FOUND, returning early'); return; }
+  _dbgTrace('renderCal(): cal-grid found, proceeding');
   buildCalTabs();
   renderCalFinalizeTomorrow();
   // FamilyWall sync only on the all-drivers view
@@ -12883,6 +12885,7 @@ async function togglePushNotifications(){
 
 // ── NAVIGATION ──
 function nav(id){
+  _dbgTrace('nav("'+id+'") called');
   closeMenu();
   // Reported: the calendar search stayed active after navigating away and back — had to be
   // cleared by hand every time. The calendar page div stays in the DOM (just hidden), so its
@@ -12903,6 +12906,7 @@ function nav(id){
   if(_tipPages.indexOf(id)>=0) setTimeout(function(){ showPageTip(id); }, 600);
   // Small delay so menu closes visually before page switches
   setTimeout(function(){
+    _dbgTrace('nav("'+id+'") setTimeout fired, branching...');
     if(id === 'income'){
       openIncomePage(null); // null is safe — guarded inside the function
     } else if(id === 'access'){
@@ -13317,12 +13321,15 @@ async function shareRideToOfferings(id){
 
 // \u2500\u2500 TEAM CHAT init
 async function initChat(){
+  _dbgTrace('initChat() entered');
   // Scoped per-user (matches the design comment above: nda/kat/chatLastRead/{userKey} -> that
   // user's own {channelKey:timestamp} map) - NOT the bare, shared 'kat:chatLastRead' this used
   // to read, which every user's browser was overwriting with their own read-state on every
   // channel switch, silently clobbering everyone else's.
   const _myReadKey = (getMyDriverName() || currentUser?.name || '').replace(/ /g,'_');
+  _dbgTrace('initChat(): about to storageGet chatLastRead');
   const stored = _myReadKey ? await storageGet('kat:chatLastRead:'+_myReadKey) : null;
+  _dbgTrace('initChat(): storageGet returned');
   if(stored) chatLastRead = stored;
   listenAllChat();          // discover ALL channels (group + every DM I'm part of), even ones others started
   listenChatTyping();
@@ -13338,6 +13345,7 @@ async function initChat(){
   renderChatMessages();
   updateChatBadge();
   renderPresence();
+  _dbgTrace('initChat() completed fully');
 }
 
 // ── PER-CHANNEL SUBSCRIPTIONS ──
@@ -25266,7 +25274,9 @@ let selectedClients  = new Set();
 
 function setProxyListMode(m){ window._proxyListMode=(m==='mine')?'mine':'owner'; try{ renderClients(); }catch(e){} }
 function renderClients(){
-  if(!document.getElementById('client-list')) return;
+  _dbgTrace('renderClients() entered');
+  if(!document.getElementById('client-list')){ _dbgTrace('renderClients(): client-list NOT FOUND, returning early'); return; }
+  _dbgTrace('renderClients(): client-list found, proceeding');
   const admin    = isAdmin();
   const myDriver = getMyDriverName();
   document.getElementById('client-page-title').textContent = admin?'Client Directory':'My Clients';
@@ -25486,31 +25496,65 @@ function logout(){
     try{ history.pushState({nda:1},''); }catch(e){}
   });
 })();
+// TEMPORARY DEBUG INSTRUMENTATION (v831) - remove once the Calendar/Clients/Chat blank-page
+// bug is actually found. Every hypothesis checked so far (uncaught JS error, duplicate element
+// ids, a CSS override) has come back clean, and the global error catcher from v830 never fires
+// either - meaning nothing is actually throwing. This traces the real execution path step by
+// step instead of guessing at another single function, so wherever it actually stops becomes
+// visible directly. Independent of showToast/mtipDot/anything else in the app that could
+// itself be part of the problem - raw DOM only.
+var _dbgTraceEl = null;
+function _dbgTrace(msg){
+  try{
+    if(!_dbgTraceEl){
+      _dbgTraceEl = document.createElement('div');
+      _dbgTraceEl.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:999998;background:#0f172a;color:#86efac;padding:.5rem .75rem;font-family:monospace;font-size:.68rem;line-height:1.6;max-height:40vh;overflow-y:auto;box-shadow:0 -4px 12px rgba(0,0,0,.4);';
+      var header = document.createElement('div');
+      header.style.cssText = 'display:flex;justify-content:space-between;color:#fbbf24;font-weight:700;margin-bottom:.3rem;';
+      header.innerHTML = '<span>NAV TRACE (temporary debug)</span>';
+      var closeBtn = document.createElement('span');
+      closeBtn.textContent = '✕ clear';
+      closeBtn.style.cssText = 'cursor:pointer;';
+      closeBtn.onclick = function(){ if(_dbgTraceEl.parentNode) _dbgTraceEl.parentNode.removeChild(_dbgTraceEl); _dbgTraceEl=null; };
+      header.appendChild(closeBtn);
+      _dbgTraceEl.appendChild(header);
+      document.body.appendChild(_dbgTraceEl);
+    }
+    var line = document.createElement('div');
+    line.textContent = new Date().toLocaleTimeString() + '  ' + msg;
+    _dbgTraceEl.appendChild(line);
+    _dbgTraceEl.scrollTop = _dbgTraceEl.scrollHeight;
+  }catch(_e){}
+}
+
 function showPage(id, el){
+  _dbgTrace('showPage("'+id+'") called');
   // Hide all pages, show the target
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   const pg = document.getElementById('page-'+id);
-  if(!pg){ console.warn('showPage: no page found for id='+id); return; }
+  if(!pg){ console.warn('showPage: no page found for id='+id); _dbgTrace('page-'+id+' NOT FOUND - stopping here'); return; }
+  _dbgTrace('page-'+id+' element found, marking active');
   pg.classList.add('active');
   // Scroll to top
   window.scrollTo(0,0);
   // Page-specific render
   if(id==='dashboard') refreshDash();
   if(id==='quote'){ renderAddons(); updateTripFields(); calcQuote(); populateClientDatalist(); if(gmapsLoaded) setTimeout(initAddressAutocomplete, 100); }
-  if(id==='calendar') renderCal();
-  if(id==='clients') renderClients();
+  if(id==='calendar'){ _dbgTrace('calling renderCal()'); renderCal(); _dbgTrace('renderCal() returned'); }
+  if(id==='clients'){ _dbgTrace('calling renderClients()'); renderClients(); _dbgTrace('renderClients() returned'); }
   if(id==='documents') renderDocuments();
   if(id==='drivers'){
     renderDriverSettings();
     renderDriverMembers(); // always render Driver Cards
     if(currentUser && currentUser.role==='admin') renderAccessControl();
   }
-  if(id==='chat') initChat();
+  if(id==='chat'){ _dbgTrace('calling initChat()'); initChat(); _dbgTrace('initChat() call returned (async - may still be running)'); }
   if(id==='myrides') renderMyCal();
   if(id==='myprofile'){ window._profileAs=null; var _adm=currentUser&&currentUser.role==='admin'; var _ta=document.getElementById('mptab-access'); if(_ta) _ta.style.display=_adm?'inline-block':'none'; var _tar=document.getElementById('mptab-archived'); if(_tar) _tar.style.display=_adm?'inline-block':'none'; var _tp=document.getElementById('mptab-pricing'); if(_tp) _tp.style.display=_adm?'inline-block':'none'; switchProfileTab('me'); if(typeof renderProfileDriverPicker==='function') renderProfileDriverPicker(); }
   if(id==='account') renderAccountPage();
   if(id==='income'){ renderIncome(); renderExpensesView(); }
   document.querySelectorAll('#quicknav .qn').forEach(b=>b.classList.toggle('active', b.dataset.qn===id));
+  _dbgTrace('showPage("'+id+'") finished');
 }
 
 // ═══════════════════════════════════════════
