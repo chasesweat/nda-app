@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608131831">
+<meta name="version" content="202608131832">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -6982,9 +6982,11 @@ function buildCalTabs(){
 
 // Build the week-view markup for a Sunday-start week into containerId.
 function renderWeekView(containerId, weekStart, driverFilter){
+  _dbgTrace('renderWeekView('+containerId+') entered');
   const today = toDateStr(new Date());
   const container = document.getElementById(containerId);
-  if(!container) return;
+  if(!container){ _dbgTrace('renderWeekView: container "'+containerId+'" NOT FOUND, returning early'); return; }
+  _dbgTrace('renderWeekView: container found, building html');
   let html='<div class="week-view">';
   for(let i=0;i<7;i++){
     const day=addDays(weekStart,i);
@@ -7055,12 +7057,15 @@ function renderWeekView(containerId, weekStart, driverFilter){
   }
   html+='</div>';
   container.innerHTML=html;
+  _dbgTrace('renderWeekView: container.innerHTML set, '+html.length+' chars written');
 }
 
 // Build a month grid into containerId. weekToggleFn(dateStr) is called when a day is clicked.
 function renderMonthView(containerId, monthDate, driverFilter, jumpFn){
+  _dbgTrace('renderMonthView('+containerId+') entered');
   const container=document.getElementById(containerId);
-  if(!container) return;
+  if(!container){ _dbgTrace('renderMonthView: container "'+containerId+'" NOT FOUND, returning early'); return; }
+  _dbgTrace('renderMonthView: container found, building html');
   const today=toDateStr(new Date());
   const year=monthDate.getFullYear(), month=monthDate.getMonth();
   const first=new Date(year,month,1);
@@ -7095,6 +7100,7 @@ function renderMonthView(containerId, monthDate, driverFilter, jumpFn){
   }
   html+='</div>';
   container.innerHTML=html;
+  _dbgTrace('renderMonthView: container.innerHTML set, '+html.length+' chars written');
 }
 
 function renderCal(){
@@ -7209,21 +7215,29 @@ function isMyScheduledRide(r){
 }
 
 function renderMyCal(){
-  if(!document.getElementById('my-cal-grid')) return;
+  _dbgTrace('renderMyCal() entered');
+  if(!document.getElementById('my-cal-grid')){ _dbgTrace('renderMyCal(): my-cal-grid NOT FOUND, returning early'); return; }
+  _dbgTrace('renderMyCal(): my-cal-grid found, proceeding');
   const dName=getMyDriverName();
   document.getElementById('mycal-view-week').classList.toggle('active', myCalView==='week');
   document.getElementById('mycal-view-month').classList.toggle('active', myCalView==='month');
+  _dbgTrace('renderMyCal(): view toggle buttons updated, myCalView='+myCalView);
   const label=document.getElementById('mycal-range-label');
   if(myCalView==='month'){
     if(label) label.textContent=monthLabel(myCalMonthDate);
+    _dbgTrace('renderMyCal(): calling renderMonthView');
     renderMonthView('my-cal-grid', myCalMonthDate, isMyRide, 'myCalJumpToWeek');
+    _dbgTrace('renderMyCal(): renderMonthView returned');
   } else {
     if(label) label.textContent=weekLabel(myCalWeekStart);
+    _dbgTrace('renderMyCal(): calling renderWeekView');
     renderWeekView('my-cal-grid', myCalWeekStart, isMyRide);
+    _dbgTrace('renderMyCal(): renderWeekView returned');
   }
   // upcoming list (separate tab) — clearly split: rides I'm driving vs rides I scheduled (I confirm)
   const todayStr=toDateStr(new Date());
   const ul=document.getElementById('my-rides-list');
+  _dbgTrace('renderMyCal(): my-rides-list element '+(ul?'found':'NOT FOUND'));
   if(ul){
     const driving = rides.filter(r=>isMyDrivingRide(r) && r.date>=todayStr && r.status!=='cancelled')
       .sort((a,b)=>a.date.localeCompare(b.date)||(a.time||'').localeCompare(b.time||''));
@@ -7256,11 +7270,13 @@ function renderMyCal(){
     html += sectionHead('📋','Rides you scheduled — you confirm these', scheduled.length+' upcoming, driven by others');
     html += scheduled.length ? scheduled.map(rideCard).join('') : '<p style="color:var(--mid);font-size:.85rem;">No rides you scheduled for other drivers.</p>';
     ul.innerHTML = html;
+    _dbgTrace('renderMyCal(): my-rides-list innerHTML set, '+driving.length+' driving + '+scheduled.length+' scheduled');
   }
   if(dName&&notifications[dName]){
     notifications[dName].forEach(n=>n.read=true);
     saveNotifs(); updateNotifBadge();
   }
+  _dbgTrace('renderMyCal() completed fully');
 }
 function myCalJumpToWeek(ds){ myCalWeekStart=getWeekStart(new Date(ds+'T12:00:00')); setMyCalView('week'); }
 function setMyCalView(v){ myCalView=v; renderMyCal(); }
