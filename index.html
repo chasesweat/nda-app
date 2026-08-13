@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608131826">
+<meta name="version" content="202608131827">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -7226,8 +7226,15 @@ function switchMyTab(tab, el){
   myTab=tab;
   document.querySelectorAll('#page-myrides .cal-tab').forEach(t=>t.classList.remove('active'));
   if(el) el.classList.add('active');
-  document.getElementById('my-cal-panel').style.display = tab==='cal' ? 'block':'none';
-  document.getElementById('my-rides-list').style.display = tab==='list' ? 'block':'none';
+  // Both null-guarded now (v827) - a caller that fires this before the myrides page has
+  // actually rendered (nav('myrides') schedules its real render 80ms later via its own
+  // internal setTimeout, so anything calling switchMyTab synchronously right after nav()
+  // hits this exact gap) used to throw here, uncaught, before ever reaching renderConfirmations()
+  // or renderMyCal() below - the actual reason the page came up blank, not a rendering bug in
+  // either of those functions themselves. cp/ex two lines down already had this guard; these
+  // two didn't, for no functional reason - now consistent.
+  const calPanel=document.getElementById('my-cal-panel'); if(calPanel) calPanel.style.display = tab==='cal' ? 'block':'none';
+  const listPanel=document.getElementById('my-rides-list'); if(listPanel) listPanel.style.display = tab==='list' ? 'block':'none';
   const cp=document.getElementById('my-confirm-panel');
   if(cp) cp.style.display = tab==='confirm' ? 'block':'none';
   const ex=document.getElementById('my-export-block');
@@ -15942,7 +15949,7 @@ function renderDashConfirmations(){
   box.innerHTML = `<div style="background:#fff8ec;border:1.5px solid #f3d9a0;border-radius:12px;padding:1rem;">
     <div style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#b5651d;margin-bottom:.5rem;">📋 Confirmations to send for tomorrow · ${stillDue} ${mtipDot('dash-conf','Tap Send \u203a to open that ride and send it, change the driver after confirming, or mark fees paid \u2014 all without opening the calendar. Already-sent ones stay listed in green \u2014 tap Unsend if you need to redo one.')}</div>
     ${rows}
-    <button onclick="nav('myrides'); switchMyTab('confirm', document.getElementById('mytab-confirm'))" style="width:100%;margin-top:.7rem;padding:.55rem;background:#b5651d;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">Go to My Rides → To Confirm</button>
+    <button onclick="nav('myrides'); setTimeout(function(){ var t=document.getElementById('mytab-confirm'); if(t) switchMyTab('confirm', t); }, 150)" style="width:100%;margin-top:.7rem;padding:.55rem;background:#b5651d;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">Go to My Rides → To Confirm</button>
   </div>`;
 }
 
