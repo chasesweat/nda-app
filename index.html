@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608131832">
+<meta name="version" content="202608131835">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -7058,6 +7058,11 @@ function renderWeekView(containerId, weekStart, driverFilter){
   html+='</div>';
   container.innerHTML=html;
   _dbgTrace('renderWeekView: container.innerHTML set, '+html.length+' chars written');
+  try{
+    var _wcs = getComputedStyle(container);
+    var _wrect = container.getBoundingClientRect();
+    _dbgTrace('renderWeekView: container computed style: display='+_wcs.display+' visibility='+_wcs.visibility+' opacity='+_wcs.opacity+' height='+Math.round(_wrect.height)+'px');
+  }catch(_e){ _dbgTrace('renderWeekView: computed style check failed: '+_e.message); }
 }
 
 // Build a month grid into containerId. weekToggleFn(dateStr) is called when a day is clicked.
@@ -18145,10 +18150,13 @@ async function clearPerTerminalPickupInstructions(){
 // since there's no more live app-wide-editable layer for per-terminal instructions at all -
 // just the hardcoded default and a driver's own personal override, which still always wins.
 function renderAccessControl(){
+  _dbgTrace('renderAccessControl() entered');
   if(!(currentUser && currentUser.role==='admin')){
     document.getElementById('access-control-list').innerHTML='<p style="color:var(--mid);">Admins only.</p>';
+    _dbgTrace('renderAccessControl(): not admin, showing admins-only message, returning');
     return;
   }
+  _dbgTrace('renderAccessControl(): admin confirmed, proceeding');
   const list = document.getElementById('access-control-list');
   const _onbResetPanel = '<div style="border:1px solid var(--light);border-radius:10px;padding:.85rem;margin-bottom:1rem;background:var(--surface);">'
     +'<div style="font-size:.8rem;font-weight:700;color:var(--black);margin-bottom:.25rem;">\uD83D\uDD04 Re-prompt drivers to update their info</div>'
@@ -18427,7 +18435,9 @@ NWDA Transportation`);
 }
 
 function renderDriverSettings(){
-  if(!document.getElementById('driver-settings-grid')) return;
+  _dbgTrace('renderDriverSettings() entered');
+  if(!document.getElementById('driver-settings-grid')){ _dbgTrace('renderDriverSettings(): driver-settings-grid NOT FOUND, returning early'); return; }
+  _dbgTrace('renderDriverSettings(): driver-settings-grid found, proceeding');
   const adminCheck = currentUser && currentUser.role === 'admin';
   // Colors tab — folded into Access control; never shown as its own tab
   const settingsTab = document.getElementById('dtab-settings');
@@ -18479,9 +18489,12 @@ function driversForDisplay(){
   return list;
 }
 async function renderDriverMembers(){
+  _dbgTrace('renderDriverMembers() entered, about to await driver photos');
   await _ensureAllDriverPhotosLoaded(driversForDisplay());
+  _dbgTrace('renderDriverMembers(): driver photos await returned');
   const grid=document.getElementById('driver-members-grid');
-  if(!grid) return;
+  if(!grid){ _dbgTrace('renderDriverMembers(): driver-members-grid NOT FOUND, returning early'); return; }
+  _dbgTrace('renderDriverMembers(): driver-members-grid found, proceeding');
   const admin=isAdmin();
   var _ub=document.getElementById('driver-unlock-bar');
   if(_ub){
@@ -19940,7 +19953,9 @@ function getMonthlyExpenseTotal(){
 }
 
 function renderExpensesView(){
-  if(!document.getElementById('expenses-view')) return;
+  _dbgTrace('renderExpensesView() entered');
+  if(!document.getElementById('expenses-view')){ _dbgTrace('renderExpensesView(): expenses-view NOT FOUND, returning early'); return; }
+  _dbgTrace('renderExpensesView(): expenses-view found, proceeding');
   const expenses = getMyExpenses();
   const total    = expenses.reduce((s,e)=>s+e.amount,0);
   const viewEl   = document.getElementById('expenses-view');
@@ -20058,9 +20073,11 @@ function confirmTextGate(){
   return hasIncomeAccess();
 }
 function openIncomePage(el){
+  _dbgTrace('openIncomePage() entered');
   // Everyone in the app has full access — always open the income page.
   showPage('income', el);
   renderIncome();
+  _dbgTrace('openIncomePage() completed');
 }
 
 
@@ -20237,6 +20254,7 @@ function _payFilterBarHTML(){
 }
 
 function renderIncome(){
+  _dbgTrace('renderIncome() entered');
   try{ var _pfb=document.getElementById('pay-filter-bar'); if(_pfb) _pfb.innerHTML=_payFilterBarHTML(); }catch(e){}
   // The driver's own IRS mileage rate lives with their income tools — no admin involved.
   try{ var _irsBox=document.getElementById('irs-rate-box');
@@ -25551,6 +25569,37 @@ function showPage(id, el){
   if(!pg){ console.warn('showPage: no page found for id='+id); _dbgTrace('page-'+id+' NOT FOUND - stopping here'); return; }
   _dbgTrace('page-'+id+' element found, marking active');
   pg.classList.add('active');
+  // Direct, real computed style check - removes all guessing about whether .active class
+  // toggling is actually resulting in visible content, rather than inferring it from the
+  // classList call succeeding (which only proves the class was added, not that anything
+  // is actually rendering on screen because of it). Deferred to the end of showPage() (see
+  // _dbgCheckVisibility below) rather than run here, because at this point the page's actual
+  // content hasn't been rendered yet - measuring height here would report ~0 for every page
+  // including working ones, which would look alarming and mean nothing.
+  var _dbgCheckVisibility = function(){
+    try{
+      var _cs = getComputedStyle(pg);
+      var _rect = pg.getBoundingClientRect();
+      _dbgTrace('page-'+id+': display='+_cs.display+' visibility='+_cs.visibility+' opacity='+_cs.opacity+' h='+Math.round(_rect.height)+' w='+Math.round(_rect.width)+' top='+Math.round(_rect.top));
+      var _allActive = document.querySelectorAll('.page.active');
+      if(_allActive.length !== 1){
+        _dbgTrace('WARNING: '+_allActive.length+' .page elements active: '+Array.from(_allActive).map(function(x){return x.id;}).join(', '));
+      }
+      // Walk up the parent chain - something ABOVE this element (a container with height:0,
+      // display:none, or an overlay stacked over it) would hide fully-rendered content just
+      // as effectively as a problem on the element itself, and wouldn't show up in the check
+      // above at all.
+      var _p = pg.parentElement, _depth = 0;
+      while(_p && _p !== document.body && _depth < 5){
+        var _pcs = getComputedStyle(_p);
+        var _prect = _p.getBoundingClientRect();
+        if(_pcs.display==='none' || _pcs.visibility==='hidden' || _pcs.opacity==='0' || Math.round(_prect.height)===0){
+          _dbgTrace('PARENT PROBLEM: <'+_p.tagName.toLowerCase()+(_p.id?'#'+_p.id:'')+'> display='+_pcs.display+' visibility='+_pcs.visibility+' opacity='+_pcs.opacity+' h='+Math.round(_prect.height));
+        }
+        _p = _p.parentElement; _depth++;
+      }
+    }catch(_e){ _dbgTrace('visibility check failed: '+_e.message); }
+  };
   // Scroll to top
   window.scrollTo(0,0);
   // Page-specific render
@@ -25570,6 +25619,7 @@ function showPage(id, el){
   if(id==='account') renderAccountPage();
   if(id==='income'){ renderIncome(); renderExpensesView(); }
   document.querySelectorAll('#quicknav .qn').forEach(b=>b.classList.toggle('active', b.dataset.qn===id));
+  _dbgCheckVisibility();
   _dbgTrace('showPage("'+id+'") finished');
 }
 
@@ -26232,9 +26282,11 @@ function renderDocFilterTabs(){
 }
 
 function renderDocuments(){
+  _dbgTrace('renderDocuments() entered');
   renderDocFilterTabs();
   const list = document.getElementById('doc-list');
-  if(!list) return;
+  if(!list){ _dbgTrace('renderDocuments(): doc-list NOT FOUND, returning early'); return; }
+  _dbgTrace('renderDocuments(): doc-list found, proceeding');
   let docs = [...sharedDocs];
   if(docFilter !== 'All') docs = docs.filter(d=>d.category===docFilter);
   docs.sort((a,b)=>(b.ts||0)-(a.ts||0));
