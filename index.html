@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608131827">
+<meta name="version" content="202608131829">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -12878,7 +12878,23 @@ function nav(id){
       try{ renderSavedQuotes(); }catch(e){}
       try{ if(typeof updateTripFields==='function') updateTripFields(); }catch(e){}
     } else {
-      showPage(id, null);
+      // Wrapped (v829) - this branch (calendar, clients, chat, team, documents, myprofile, and
+      // anything else without its own special case above) had no error handling at all, unlike
+      // quote's explicit try/catch around each step just above. An uncaught exception anywhere
+      // inside showPage() or whatever it calls (renderCal, renderClients, initChat, etc.) used
+      // to propagate silently - the page container would still get marked active, but whatever
+      // was mid-render when the throw happened never finished, leaving a blank page with no
+      // visible error anywhere a driver could see. Reported directly: Calendar, Clients, and
+      // Chat all doing this, while quote (already protected) and popups that bypass nav()
+      // entirely (Hearted Rides, Profile Merge, Share Location) kept working - exactly the
+      // pattern this gap predicts. Catching it here can't fix whatever the underlying throw
+      // is, but it stops a silent blank page and gives the driver something to act on instead
+      // of a dead end with no explanation.
+      try{ showPage(id, null); }
+      catch(e){
+        console.warn('nav('+id+') failed', e);
+        showToast('\u26a0\ufe0f That page hit a snag \u2014 try again, or refresh if it keeps happening', 'error');
+      }
     }
   }, 80);
 }
@@ -15947,7 +15963,7 @@ function renderDashConfirmations(){
   }).join('');
 
   box.innerHTML = `<div style="background:#fff8ec;border:1.5px solid #f3d9a0;border-radius:12px;padding:1rem;">
-    <div style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#b5651d;margin-bottom:.5rem;">📋 Confirmations to send for tomorrow · ${stillDue} ${mtipDot('dash-conf','Tap Send \u203a to open that ride and send it, change the driver after confirming, or mark fees paid \u2014 all without opening the calendar. Already-sent ones stay listed in green \u2014 tap Unsend if you need to redo one.')}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:.4rem;margin-bottom:.5rem;"><div style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#b5651d;">📋 Confirmations to send for tomorrow · ${stillDue}</div>${mtipDot('dash-conf','Tap Send \u203a to open that ride and send it, change the driver after confirming, or mark fees paid \u2014 all without opening the calendar. Already-sent ones stay listed in green \u2014 tap Unsend if you need to redo one.')}</div>
     ${rows}
     <button onclick="nav('myrides'); setTimeout(function(){ var t=document.getElementById('mytab-confirm'); if(t) switchMyTab('confirm', t); }, 150)" style="width:100%;margin-top:.7rem;padding:.55rem;background:#b5651d;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">Go to My Rides → To Confirm</button>
   </div>`;
