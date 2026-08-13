@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608131837">
+<meta name="version" content="202608131840">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -307,8 +307,14 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
 .member-card-vehicle-name{color:#ccc;font-size:.75rem;flex:1;}
 .member-card-body{padding:.85rem;}
 .member-card-field{display:flex;align-items:baseline;gap:.4rem;margin-bottom:.4rem;font-size:.82rem;}
-.member-card-lbl{font-size:.65rem;text-transform:uppercase;letter-spacing:1px;color:var(--mid);min-width:52px;}
-.member-card-val{color:var(--black);}
+.member-card-lbl{font-size:.65rem;text-transform:uppercase;letter-spacing:1px;color:var(--mid);min-width:52px;flex-shrink:0;}
+/* Reported: a long email address ran past the card's right edge and was cut off mid-address.
+   The label already has a fixed min-width, so without min-width:0 here the value box refuses
+   to shrink below its content's natural width (flex items default to min-width:auto), pushing
+   it outside the card instead of wrapping. overflow-wrap handles the case of a single
+   unbroken string longer than the whole column - an email with no spaces in it is exactly
+   that, so plain word-wrapping alone wouldn't have been enough. */
+.member-card-val{color:var(--black);min-width:0;overflow-wrap:anywhere;}
 .color-picker-row{display:flex;align-items:center;gap:.75rem;}
 .color-picker-row label{font-size:.78rem;color:var(--mid);}
 .color-picker-row input[type=color]{width:36px;height:36px;border:none;border-radius:6px;cursor:pointer;padding:0;}
@@ -7429,7 +7435,31 @@ function renderConfirmations(){
       const _sa0=(driverSettings[_own0]||{}).sendParts||{};
       const _ods0=driverSettings[_own0]||{};
       const _oProf0=DRIVER_PROFILES[_own0]||{};
-      const _byT0=_ods0.pickupInstructionsByTerminal||{};
+      // Terminal instructions resolve through the SAME three tiers the actual send path uses
+      // (see the _termInstr resolution in buildConfirmationText): the owner's own per-terminal
+      // override first, then the Chase-editable shared default, then the baked-in hardcoded
+      // walkthrough. Reported: an AP Pick Up offered only "Pickup instructions (Default)" in
+      // this dropdown and sent the generic text, because this line used to read ONLY
+      // _ods0.pickupInstructionsByTerminal - the driver's personal overrides. A driver who has
+      // never personally customized their terminal wording (the normal case, since v807-808
+      // moved the real content into the shared/hardcoded tiers) had an empty object here, so
+      // _termKeys0 came out empty, so no terminal options were built at all - and the
+      // preselect logic below had nothing to match against, silently falling back to Default.
+      // The send path was always resolving correctly; only this picker was blind to the other
+      // two tiers, which is why it looked like the wrong text was "sent" rather than just
+      // not being offered.
+      const _byTPersonal0=_ods0.pickupInstructionsByTerminal||{};
+      const _byTGlobal0=(globalSettings && globalSettings.defaultPickupInstructionsByTerminal)||{};
+      const _byTHard0=(typeof HARDCODED_PICKUP_BY_TERMINAL!=='undefined')?HARDCODED_PICKUP_BY_TERMINAL:{};
+      const _byT0=(function(){
+        var merged={};
+        // Lowest priority first, each tier overwriting the last - so a personal override still
+        // wins, exactly as it does at send time.
+        [_byTHard0,_byTGlobal0,_byTPersonal0].forEach(function(src){
+          for(var k in src){ if((src[k]||'').trim()) merged[k]=src[k]; }
+        });
+        return merged;
+      })();
       const _defInstr0=(_ods0.pickupInstructions||_oProf0.pickupInstructions||'').trim();
       const _termKeys0=Object.keys(_byT0).filter(function(k){ return (_byT0[k]||'').trim(); });
       // Per-ride-type instructions (opt-in) — this specific ride's type, if the owner
@@ -7805,7 +7835,24 @@ function buildConfirmationText(r){
   // AP PICK UP meets the client AT the airport — only terminal-specific instructions may
   // replace the built-in terminal walk-through. The general home/hotel instructions are
   // for rides that START at the client's location (AP Run, round trips, one-ways).
-  try{ var _ovKey=(window._confInstKey||{})[r.id]; if(_ovKey){ if(_ovKey==='__default'){ _termInstr=(_ods.pickupInstructions||_oProf.pickupInstructions||''); } else if(_byTerm[_ovKey]){ _termInstr=_byTerm[_ovKey]; } } }catch(e){}
+  // The dropdown's explicit override. Resolves through the same three tiers the picker itself
+  // now offers (v840) - it used to check only _byTerm (the owner's personal overrides), so
+  // choosing a terminal that exists only in the shared default or the hardcoded set would
+  // silently do nothing and leave whatever was already resolved above in place. Now a
+  // deliberate pick is always honored, whichever tier that terminal's text actually lives in.
+  try{
+    var _ovKey=(window._confInstKey||{})[r.id];
+    if(_ovKey){
+      if(_ovKey==='__default'){
+        _termInstr=(_ods.pickupInstructions||_oProf.pickupInstructions||'');
+      } else {
+        var _ovGlobal=(globalSettings && globalSettings.defaultPickupInstructionsByTerminal)||{};
+        var _ovHard=(typeof HARDCODED_PICKUP_BY_TERMINAL!=='undefined')?HARDCODED_PICKUP_BY_TERMINAL:{};
+        var _ovText=(_byTerm[_ovKey]||'').trim() || (_ovGlobal[_ovKey]||'').trim() || (_ovHard[_ovKey]||'').trim();
+        if(_ovText) _termInstr=_ovText;
+      }
+    }
+  }catch(e){}
   // Per-ride-type instructions — the OWNER's opt-in choice (same person the terminal
   // instructions above belong to). Only applies to AP RUN / ONE WAY / ROUND TRIP, which
   // previously all shared one generic default with no way to tell them apart. AP PICK UP
