@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608131829">
+<meta name="version" content="202608131830">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1790,6 +1790,49 @@ input,select,textarea{font-size:16px;}
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script>
+// Last-resort diagnostic net (v830) - Chase reported Calendar/Clients/Chat going completely
+// blank with zero indication anything went wrong, even after v829 wrapped the specific nav()
+// branch those pages share in a try/catch. No toast ever fired, meaning whatever's actually
+// throwing isn't happening where that wrapper could catch it - somewhere else entirely, or an
+// unhandled promise rejection (initChat is async and never awaited, so a throw inside it
+// wouldn't propagate to a synchronous try/catch around the call site at all). Rather than keep
+// guessing at individual functions one at a time, this catches literally anything going wrong
+// anywhere in the app - both synchronous errors (window.onerror) and rejected promises nobody
+// caught (unhandledrejection) - and shows it plainly on screen. Deliberately independent of
+// showToast or any other app function: those aren't null-guarded either, and a diagnostic tool
+// that can itself fail isn't one. Chase can't access dev tools, so this is the only way the
+// actual error becomes visible to him at all - a screenshot of this banner is worth more than
+// any further static reading of the code without it.
+(function(){
+  var _shown = false;
+  function _showFatalBanner(msg){
+    try{
+      if(_shown) return; // one at a time - a cascade of these would be its own new problem
+      _shown = true;
+      var b = document.createElement('div');
+      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999999;background:#7f1d1d;color:#fff;padding:.75rem 1rem;font-family:monospace;font-size:.78rem;line-height:1.5;word-break:break-word;box-shadow:0 4px 12px rgba(0,0,0,.4);';
+      var closeBtn = document.createElement('span');
+      closeBtn.textContent = '✕ tap to dismiss';
+      closeBtn.style.cssText = 'float:right;cursor:pointer;font-weight:700;padding-left:1rem;';
+      closeBtn.onclick = function(){ if(b.parentNode) b.parentNode.removeChild(b); _shown=false; };
+      var text = document.createElement('div');
+      text.textContent = 'Something went wrong: ' + msg;
+      b.appendChild(closeBtn);
+      b.appendChild(text);
+      document.body.appendChild(b);
+    }catch(_e){ /* if even this throws, there's genuinely nothing left to do */ }
+  }
+  window.addEventListener('error', function(ev){
+    _showFatalBanner((ev && ev.message || 'unknown error') + (ev && ev.filename ? ' (line ' + ev.lineno + ')' : ''));
+  });
+  window.addEventListener('unhandledrejection', function(ev){
+    var reason = ev && ev.reason;
+    var msg = (reason && (reason.message || String(reason))) || 'unknown promise rejection';
+    _showFatalBanner(msg + ' [unhandled promise]');
+  });
+})();
+</script>
 <script>
 // Reported: closing a modal (e.g. Add Ride via Cancel) and reopening it later showed it
 // scrolled to wherever it was left, instead of starting at the top. Root cause: .modal has
