@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608131836">
+<meta name="version" content="202608131837">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1804,49 +1804,6 @@ input,select,textarea{font-size:16px;}
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-<script>
-// Last-resort diagnostic net (v830) - Chase reported Calendar/Clients/Chat going completely
-// blank with zero indication anything went wrong, even after v829 wrapped the specific nav()
-// branch those pages share in a try/catch. No toast ever fired, meaning whatever's actually
-// throwing isn't happening where that wrapper could catch it - somewhere else entirely, or an
-// unhandled promise rejection (initChat is async and never awaited, so a throw inside it
-// wouldn't propagate to a synchronous try/catch around the call site at all). Rather than keep
-// guessing at individual functions one at a time, this catches literally anything going wrong
-// anywhere in the app - both synchronous errors (window.onerror) and rejected promises nobody
-// caught (unhandledrejection) - and shows it plainly on screen. Deliberately independent of
-// showToast or any other app function: those aren't null-guarded either, and a diagnostic tool
-// that can itself fail isn't one. Chase can't access dev tools, so this is the only way the
-// actual error becomes visible to him at all - a screenshot of this banner is worth more than
-// any further static reading of the code without it.
-(function(){
-  var _shown = false;
-  function _showFatalBanner(msg){
-    try{
-      if(_shown) return; // one at a time - a cascade of these would be its own new problem
-      _shown = true;
-      var b = document.createElement('div');
-      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999999;background:#7f1d1d;color:#fff;padding:.75rem 1rem;font-family:monospace;font-size:.78rem;line-height:1.5;word-break:break-word;box-shadow:0 4px 12px rgba(0,0,0,.4);';
-      var closeBtn = document.createElement('span');
-      closeBtn.textContent = '✕ tap to dismiss';
-      closeBtn.style.cssText = 'float:right;cursor:pointer;font-weight:700;padding-left:1rem;';
-      closeBtn.onclick = function(){ if(b.parentNode) b.parentNode.removeChild(b); _shown=false; };
-      var text = document.createElement('div');
-      text.textContent = 'Something went wrong: ' + msg;
-      b.appendChild(closeBtn);
-      b.appendChild(text);
-      document.body.appendChild(b);
-    }catch(_e){ /* if even this throws, there's genuinely nothing left to do */ }
-  }
-  window.addEventListener('error', function(ev){
-    _showFatalBanner((ev && ev.message || 'unknown error') + (ev && ev.filename ? ' (line ' + ev.lineno + ')' : ''));
-  });
-  window.addEventListener('unhandledrejection', function(ev){
-    var reason = ev && ev.reason;
-    var msg = (reason && (reason.message || String(reason))) || 'unknown promise rejection';
-    _showFatalBanner(msg + ' [unhandled promise]');
-  });
-})();
-</script>
 <script>
 // Reported: closing a modal (e.g. Add Ride via Cancel) and reopening it later showed it
 // scrolled to wherever it was left, instead of starting at the top. Root cause: .modal has
@@ -6996,11 +6953,9 @@ function buildCalTabs(){
 
 // Build the week-view markup for a Sunday-start week into containerId.
 function renderWeekView(containerId, weekStart, driverFilter){
-  _dbgTrace('renderWeekView('+containerId+') entered');
   const today = toDateStr(new Date());
   const container = document.getElementById(containerId);
-  if(!container){ _dbgTrace('renderWeekView: container "'+containerId+'" NOT FOUND, returning early'); return; }
-  _dbgTrace('renderWeekView: container found, building html');
+  if(!container) return;
   let html='<div class="week-view">';
   for(let i=0;i<7;i++){
     const day=addDays(weekStart,i);
@@ -7071,20 +7026,12 @@ function renderWeekView(containerId, weekStart, driverFilter){
   }
   html+='</div>';
   container.innerHTML=html;
-  _dbgTrace('renderWeekView: container.innerHTML set, '+html.length+' chars written');
-  try{
-    var _wcs = getComputedStyle(container);
-    var _wrect = container.getBoundingClientRect();
-    _dbgTrace('renderWeekView: container computed style: display='+_wcs.display+' visibility='+_wcs.visibility+' opacity='+_wcs.opacity+' height='+Math.round(_wrect.height)+'px');
-  }catch(_e){ _dbgTrace('renderWeekView: computed style check failed: '+_e.message); }
 }
 
 // Build a month grid into containerId. weekToggleFn(dateStr) is called when a day is clicked.
 function renderMonthView(containerId, monthDate, driverFilter, jumpFn){
-  _dbgTrace('renderMonthView('+containerId+') entered');
   const container=document.getElementById(containerId);
-  if(!container){ _dbgTrace('renderMonthView: container "'+containerId+'" NOT FOUND, returning early'); return; }
-  _dbgTrace('renderMonthView: container found, building html');
+  if(!container) return;
   const today=toDateStr(new Date());
   const year=monthDate.getFullYear(), month=monthDate.getMonth();
   const first=new Date(year,month,1);
@@ -7119,13 +7066,10 @@ function renderMonthView(containerId, monthDate, driverFilter, jumpFn){
   }
   html+='</div>';
   container.innerHTML=html;
-  _dbgTrace('renderMonthView: container.innerHTML set, '+html.length+' chars written');
 }
 
 function renderCal(){
-  _dbgTrace('renderCal() entered');
-  if(!document.getElementById('cal-grid')){ _dbgTrace('renderCal(): cal-grid NOT FOUND, returning early'); return; }
-  _dbgTrace('renderCal(): cal-grid found, proceeding');
+  if(!document.getElementById('cal-grid')) return;
   buildCalTabs();
   renderCalFinalizeTomorrow();
   // FamilyWall sync only on the all-drivers view
@@ -7234,29 +7178,21 @@ function isMyScheduledRide(r){
 }
 
 function renderMyCal(){
-  _dbgTrace('renderMyCal() entered');
-  if(!document.getElementById('my-cal-grid')){ _dbgTrace('renderMyCal(): my-cal-grid NOT FOUND, returning early'); return; }
-  _dbgTrace('renderMyCal(): my-cal-grid found, proceeding');
+  if(!document.getElementById('my-cal-grid')) return;
   const dName=getMyDriverName();
   document.getElementById('mycal-view-week').classList.toggle('active', myCalView==='week');
   document.getElementById('mycal-view-month').classList.toggle('active', myCalView==='month');
-  _dbgTrace('renderMyCal(): view toggle buttons updated, myCalView='+myCalView);
   const label=document.getElementById('mycal-range-label');
   if(myCalView==='month'){
     if(label) label.textContent=monthLabel(myCalMonthDate);
-    _dbgTrace('renderMyCal(): calling renderMonthView');
     renderMonthView('my-cal-grid', myCalMonthDate, isMyRide, 'myCalJumpToWeek');
-    _dbgTrace('renderMyCal(): renderMonthView returned');
   } else {
     if(label) label.textContent=weekLabel(myCalWeekStart);
-    _dbgTrace('renderMyCal(): calling renderWeekView');
     renderWeekView('my-cal-grid', myCalWeekStart, isMyRide);
-    _dbgTrace('renderMyCal(): renderWeekView returned');
   }
   // upcoming list (separate tab) — clearly split: rides I'm driving vs rides I scheduled (I confirm)
   const todayStr=toDateStr(new Date());
   const ul=document.getElementById('my-rides-list');
-  _dbgTrace('renderMyCal(): my-rides-list element '+(ul?'found':'NOT FOUND'));
   if(ul){
     const driving = rides.filter(r=>isMyDrivingRide(r) && r.date>=todayStr && r.status!=='cancelled')
       .sort((a,b)=>a.date.localeCompare(b.date)||(a.time||'').localeCompare(b.time||''));
@@ -7289,13 +7225,11 @@ function renderMyCal(){
     html += sectionHead('📋','Rides you scheduled — you confirm these', scheduled.length+' upcoming, driven by others');
     html += scheduled.length ? scheduled.map(rideCard).join('') : '<p style="color:var(--mid);font-size:.85rem;">No rides you scheduled for other drivers.</p>';
     ul.innerHTML = html;
-    _dbgTrace('renderMyCal(): my-rides-list innerHTML set, '+driving.length+' driving + '+scheduled.length+' scheduled');
   }
   if(dName&&notifications[dName]){
     notifications[dName].forEach(n=>n.read=true);
     saveNotifs(); updateNotifBadge();
   }
-  _dbgTrace('renderMyCal() completed fully');
 }
 function myCalJumpToWeek(ds){ myCalWeekStart=getWeekStart(new Date(ds+'T12:00:00')); setMyCalView('week'); }
 function setMyCalView(v){ myCalView=v; renderMyCal(); }
@@ -12920,7 +12854,6 @@ async function togglePushNotifications(){
 
 // ── NAVIGATION ──
 function nav(id){
-  _dbgTrace('nav("'+id+'") called');
   closeMenu();
   // Reported: the calendar search stayed active after navigating away and back — had to be
   // cleared by hand every time. The calendar page div stays in the DOM (just hidden), so its
@@ -12941,7 +12874,6 @@ function nav(id){
   if(_tipPages.indexOf(id)>=0) setTimeout(function(){ showPageTip(id); }, 600);
   // Small delay so menu closes visually before page switches
   setTimeout(function(){
-    _dbgTrace('nav("'+id+'") setTimeout fired, branching...');
     if(id === 'income'){
       openIncomePage(null); // null is safe — guarded inside the function
     } else if(id === 'access'){
@@ -13356,15 +13288,12 @@ async function shareRideToOfferings(id){
 
 // \u2500\u2500 TEAM CHAT init
 async function initChat(){
-  _dbgTrace('initChat() entered');
   // Scoped per-user (matches the design comment above: nda/kat/chatLastRead/{userKey} -> that
   // user's own {channelKey:timestamp} map) - NOT the bare, shared 'kat:chatLastRead' this used
   // to read, which every user's browser was overwriting with their own read-state on every
   // channel switch, silently clobbering everyone else's.
   const _myReadKey = (getMyDriverName() || currentUser?.name || '').replace(/ /g,'_');
-  _dbgTrace('initChat(): about to storageGet chatLastRead');
   const stored = _myReadKey ? await storageGet('kat:chatLastRead:'+_myReadKey) : null;
-  _dbgTrace('initChat(): storageGet returned');
   if(stored) chatLastRead = stored;
   listenAllChat();          // discover ALL channels (group + every DM I'm part of), even ones others started
   listenChatTyping();
@@ -13380,7 +13309,6 @@ async function initChat(){
   renderChatMessages();
   updateChatBadge();
   renderPresence();
-  _dbgTrace('initChat() completed fully');
 }
 
 // ── PER-CHANNEL SUBSCRIPTIONS ──
@@ -18164,13 +18092,10 @@ async function clearPerTerminalPickupInstructions(){
 // since there's no more live app-wide-editable layer for per-terminal instructions at all -
 // just the hardcoded default and a driver's own personal override, which still always wins.
 function renderAccessControl(){
-  _dbgTrace('renderAccessControl() entered');
   if(!(currentUser && currentUser.role==='admin')){
     document.getElementById('access-control-list').innerHTML='<p style="color:var(--mid);">Admins only.</p>';
-    _dbgTrace('renderAccessControl(): not admin, showing admins-only message, returning');
     return;
   }
-  _dbgTrace('renderAccessControl(): admin confirmed, proceeding');
   const list = document.getElementById('access-control-list');
   const _onbResetPanel = '<div style="border:1px solid var(--light);border-radius:10px;padding:.85rem;margin-bottom:1rem;background:var(--surface);">'
     +'<div style="font-size:.8rem;font-weight:700;color:var(--black);margin-bottom:.25rem;">\uD83D\uDD04 Re-prompt drivers to update their info</div>'
@@ -18449,9 +18374,7 @@ NWDA Transportation`);
 }
 
 function renderDriverSettings(){
-  _dbgTrace('renderDriverSettings() entered');
-  if(!document.getElementById('driver-settings-grid')){ _dbgTrace('renderDriverSettings(): driver-settings-grid NOT FOUND, returning early'); return; }
-  _dbgTrace('renderDriverSettings(): driver-settings-grid found, proceeding');
+  if(!document.getElementById('driver-settings-grid')) return;
   const adminCheck = currentUser && currentUser.role === 'admin';
   // Colors tab — folded into Access control; never shown as its own tab
   const settingsTab = document.getElementById('dtab-settings');
@@ -18503,12 +18426,9 @@ function driversForDisplay(){
   return list;
 }
 async function renderDriverMembers(){
-  _dbgTrace('renderDriverMembers() entered, about to await driver photos');
   await _ensureAllDriverPhotosLoaded(driversForDisplay());
-  _dbgTrace('renderDriverMembers(): driver photos await returned');
   const grid=document.getElementById('driver-members-grid');
-  if(!grid){ _dbgTrace('renderDriverMembers(): driver-members-grid NOT FOUND, returning early'); return; }
-  _dbgTrace('renderDriverMembers(): driver-members-grid found, proceeding');
+  if(!grid) return;
   const admin=isAdmin();
   var _ub=document.getElementById('driver-unlock-bar');
   if(_ub){
@@ -19967,9 +19887,7 @@ function getMonthlyExpenseTotal(){
 }
 
 function renderExpensesView(){
-  _dbgTrace('renderExpensesView() entered');
-  if(!document.getElementById('expenses-view')){ _dbgTrace('renderExpensesView(): expenses-view NOT FOUND, returning early'); return; }
-  _dbgTrace('renderExpensesView(): expenses-view found, proceeding');
+  if(!document.getElementById('expenses-view')) return;
   const expenses = getMyExpenses();
   const total    = expenses.reduce((s,e)=>s+e.amount,0);
   const viewEl   = document.getElementById('expenses-view');
@@ -20087,11 +20005,9 @@ function confirmTextGate(){
   return hasIncomeAccess();
 }
 function openIncomePage(el){
-  _dbgTrace('openIncomePage() entered');
   // Everyone in the app has full access — always open the income page.
   showPage('income', el);
   renderIncome();
-  _dbgTrace('openIncomePage() completed');
 }
 
 
@@ -20268,7 +20184,6 @@ function _payFilterBarHTML(){
 }
 
 function renderIncome(){
-  _dbgTrace('renderIncome() entered');
   try{ var _pfb=document.getElementById('pay-filter-bar'); if(_pfb) _pfb.innerHTML=_payFilterBarHTML(); }catch(e){}
   // The driver's own IRS mileage rate lives with their income tools — no admin involved.
   try{ var _irsBox=document.getElementById('irs-rate-box');
@@ -25322,9 +25237,7 @@ let selectedClients  = new Set();
 
 function setProxyListMode(m){ window._proxyListMode=(m==='mine')?'mine':'owner'; try{ renderClients(); }catch(e){} }
 function renderClients(){
-  _dbgTrace('renderClients() entered');
-  if(!document.getElementById('client-list')){ _dbgTrace('renderClients(): client-list NOT FOUND, returning early'); return; }
-  _dbgTrace('renderClients(): client-list found, proceeding');
+  if(!document.getElementById('client-list')) return;
   const admin    = isAdmin();
   const myDriver = getMyDriverName();
   document.getElementById('client-page-title').textContent = admin?'Client Directory':'My Clients';
@@ -25544,97 +25457,31 @@ function logout(){
     try{ history.pushState({nda:1},''); }catch(e){}
   });
 })();
-// TEMPORARY DEBUG INSTRUMENTATION (v831) - remove once the Calendar/Clients/Chat blank-page
-// bug is actually found. Every hypothesis checked so far (uncaught JS error, duplicate element
-// ids, a CSS override) has come back clean, and the global error catcher from v830 never fires
-// either - meaning nothing is actually throwing. This traces the real execution path step by
-// step instead of guessing at another single function, so wherever it actually stops becomes
-// visible directly. Independent of showToast/mtipDot/anything else in the app that could
-// itself be part of the problem - raw DOM only.
-var _dbgTraceEl = null;
-function _dbgTrace(msg){
-  try{
-    if(!_dbgTraceEl){
-      _dbgTraceEl = document.createElement('div');
-      _dbgTraceEl.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:999998;background:#0f172a;color:#86efac;padding:.5rem .75rem;font-family:monospace;font-size:.68rem;line-height:1.6;max-height:40vh;overflow-y:auto;box-shadow:0 -4px 12px rgba(0,0,0,.4);';
-      var header = document.createElement('div');
-      header.style.cssText = 'display:flex;justify-content:space-between;color:#fbbf24;font-weight:700;margin-bottom:.3rem;';
-      header.innerHTML = '<span>NAV TRACE (temporary debug)</span>';
-      var closeBtn = document.createElement('span');
-      closeBtn.textContent = '✕ clear';
-      closeBtn.style.cssText = 'cursor:pointer;';
-      closeBtn.onclick = function(){ if(_dbgTraceEl.parentNode) _dbgTraceEl.parentNode.removeChild(_dbgTraceEl); _dbgTraceEl=null; };
-      header.appendChild(closeBtn);
-      _dbgTraceEl.appendChild(header);
-      document.body.appendChild(_dbgTraceEl);
-    }
-    var line = document.createElement('div');
-    line.textContent = new Date().toLocaleTimeString() + '  ' + msg;
-    _dbgTraceEl.appendChild(line);
-    _dbgTraceEl.scrollTop = _dbgTraceEl.scrollHeight;
-  }catch(_e){}
-}
-
 function showPage(id, el){
-  _dbgTrace('showPage("'+id+'") called');
   // Hide all pages, show the target
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   const pg = document.getElementById('page-'+id);
-  if(!pg){ console.warn('showPage: no page found for id='+id); _dbgTrace('page-'+id+' NOT FOUND - stopping here'); return; }
-  _dbgTrace('page-'+id+' element found, marking active');
+  if(!pg){ console.warn('showPage: no page found for id='+id); return; }
   pg.classList.add('active');
-  // Direct, real computed style check - removes all guessing about whether .active class
-  // toggling is actually resulting in visible content, rather than inferring it from the
-  // classList call succeeding (which only proves the class was added, not that anything
-  // is actually rendering on screen because of it). Deferred to the end of showPage() (see
-  // _dbgCheckVisibility below) rather than run here, because at this point the page's actual
-  // content hasn't been rendered yet - measuring height here would report ~0 for every page
-  // including working ones, which would look alarming and mean nothing.
-  var _dbgCheckVisibility = function(){
-    try{
-      var _cs = getComputedStyle(pg);
-      var _rect = pg.getBoundingClientRect();
-      _dbgTrace('page-'+id+': display='+_cs.display+' visibility='+_cs.visibility+' opacity='+_cs.opacity+' h='+Math.round(_rect.height)+' w='+Math.round(_rect.width)+' top='+Math.round(_rect.top));
-      var _allActive = document.querySelectorAll('.page.active');
-      if(_allActive.length !== 1){
-        _dbgTrace('WARNING: '+_allActive.length+' .page elements active: '+Array.from(_allActive).map(function(x){return x.id;}).join(', '));
-      }
-      // Walk up the parent chain - something ABOVE this element (a container with height:0,
-      // display:none, or an overlay stacked over it) would hide fully-rendered content just
-      // as effectively as a problem on the element itself, and wouldn't show up in the check
-      // above at all.
-      var _p = pg.parentElement, _depth = 0;
-      while(_p && _p !== document.body && _depth < 5){
-        var _pcs = getComputedStyle(_p);
-        var _prect = _p.getBoundingClientRect();
-        if(_pcs.display==='none' || _pcs.visibility==='hidden' || _pcs.opacity==='0' || Math.round(_prect.height)===0){
-          _dbgTrace('PARENT PROBLEM: <'+_p.tagName.toLowerCase()+(_p.id?'#'+_p.id:'')+'> display='+_pcs.display+' visibility='+_pcs.visibility+' opacity='+_pcs.opacity+' h='+Math.round(_prect.height));
-        }
-        _p = _p.parentElement; _depth++;
-      }
-    }catch(_e){ _dbgTrace('visibility check failed: '+_e.message); }
-  };
   // Scroll to top
   window.scrollTo(0,0);
   // Page-specific render
   if(id==='dashboard') refreshDash();
   if(id==='quote'){ renderAddons(); updateTripFields(); calcQuote(); populateClientDatalist(); if(gmapsLoaded) setTimeout(initAddressAutocomplete, 100); }
-  if(id==='calendar'){ _dbgTrace('calling renderCal()'); renderCal(); _dbgTrace('renderCal() returned'); }
-  if(id==='clients'){ _dbgTrace('calling renderClients()'); renderClients(); _dbgTrace('renderClients() returned'); }
+  if(id==='calendar') renderCal();
+  if(id==='clients') renderClients();
   if(id==='documents') renderDocuments();
   if(id==='drivers'){
     renderDriverSettings();
     renderDriverMembers(); // always render Driver Cards
     if(currentUser && currentUser.role==='admin') renderAccessControl();
   }
-  if(id==='chat'){ _dbgTrace('calling initChat()'); initChat(); _dbgTrace('initChat() call returned (async - may still be running)'); }
+  if(id==='chat') initChat();
   if(id==='myrides') renderMyCal();
   if(id==='myprofile'){ window._profileAs=null; var _adm=currentUser&&currentUser.role==='admin'; var _ta=document.getElementById('mptab-access'); if(_ta) _ta.style.display=_adm?'inline-block':'none'; var _tar=document.getElementById('mptab-archived'); if(_tar) _tar.style.display=_adm?'inline-block':'none'; var _tp=document.getElementById('mptab-pricing'); if(_tp) _tp.style.display=_adm?'inline-block':'none'; switchProfileTab('me'); if(typeof renderProfileDriverPicker==='function') renderProfileDriverPicker(); }
   if(id==='account') renderAccountPage();
   if(id==='income'){ renderIncome(); renderExpensesView(); }
   document.querySelectorAll('#quicknav .qn').forEach(b=>b.classList.toggle('active', b.dataset.qn===id));
-  _dbgCheckVisibility();
-  _dbgTrace('showPage("'+id+'") finished');
 }
 
 // ═══════════════════════════════════════════
@@ -26296,11 +26143,9 @@ function renderDocFilterTabs(){
 }
 
 function renderDocuments(){
-  _dbgTrace('renderDocuments() entered');
   renderDocFilterTabs();
   const list = document.getElementById('doc-list');
-  if(!list){ _dbgTrace('renderDocuments(): doc-list NOT FOUND, returning early'); return; }
-  _dbgTrace('renderDocuments(): doc-list found, proceeding');
+  if(!list) return;
   let docs = [...sharedDocs];
   if(docFilter !== 'All') docs = docs.filter(d=>d.category===docFilter);
   docs.sort((a,b)=>(b.ts||0)-(a.ts||0));
