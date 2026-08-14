@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608141853">
+<meta name="version" content="202608141854">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -16480,6 +16480,34 @@ function waiveDashFee(owner, driver){
     +'</div>';
   document.body.appendChild(ov);
 }
+// Waive ONE ride's fee directly, without a driver having to request it first (v854).
+// Reported gap: the "Waive all" flow only offered time-based scopes (today / week / month /
+// year / forever), so the one thing missing was the most obvious case - forgiving the single
+// ride sitting in front of you, without touching anything else that person owes.
+//
+// Deliberately reuses the SAME waivedRides array that approveFeeWaive() writes to, which
+// feeSettledForRide() has always honored (line ~16280). So this needs no new settlement logic
+// and no new state shape - it's the existing per-ride mechanism, just reachable directly
+// instead of only as a response to a driver's request.
+async function waiveOneRideFee(owner, driver, rideId, clientName){
+  await _ensureFresh();
+  var key=owner+':recv:'+driver;
+  if(!feePayments[key]) feePayments[key]={};
+  var wr=feePayments[key].waivedRides=(feePayments[key].waivedRides||[]);
+  if(wr.indexOf(rideId)<0) wr.push(rideId);
+  try{ await saveFeePayments(); }catch(e){ showToast('Could not save that \u2014 try again','error'); return; }
+  // Tell the driver, same as an approved request would - otherwise a fee simply vanishes from
+  // their dashboard with no explanation of why.
+  try{
+    var _r=(typeof _rideById==='function')?_rideById(rideId):null;
+    addNotification(driver, {id:rideId, client:clientName||'', date:_r?_r.date:''}, 'fee_waive_approved',
+      (owner.split(' ')[0])+' waived the '+clientFeePct()+'% fee for '+(clientName||'that')+'\u2019s ride \u2713');
+    await saveNotifs();
+  }catch(e){}
+  showToast('\u2713 Fee waived for '+(clientName||'that ride'));
+  try{ renderDashFees(); }catch(e){}
+}
+
 async function applyWaiveScope(scope){
   await _ensureFresh();
   const owner=window._wfOwner, driver=window._wfDriver;
@@ -16659,7 +16687,7 @@ function renderDashFees(){
       html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.55rem .85rem .3rem;gap:.6rem;">'
         +'<div style="font-size:.86rem;font-weight:700;">'+escHtml(name.split(' ')[0])+' <span style="font-weight:600;color:var(--green);">$'+v.fee.toFixed(2)+'</span></div>'
         +'<button onclick="waiveDashFee(\''+escAttr(dName)+'\',\''+escAttr(name)+'\')" '
-        +'style="padding:.24rem .6rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.7rem;font-weight:600;cursor:pointer;">Waive all</button>'
+        +'style="padding:.24rem .6rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.7rem;font-weight:600;cursor:pointer;">Waive '+escHtml(name.split(' ')[0])+'\u2019s</button>'
         +'</div>';
       // One row per ride — each is marked paid individually
       (v.rides||[]).forEach(function(ri){
@@ -16674,6 +16702,11 @@ function renderDashFees(){
         html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.35rem .85rem .35rem 1.4rem;border-bottom:1px solid var(--light);gap:.6rem;flex-wrap:wrap;">'
           +'<div style="font-size:.74rem;color:var(--mid);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_rideLabel(ri)+'</div>'
           +'<div style="display:flex;gap:.3rem;align-items:center;flex-shrink:0;">'+_sentBadge+_rejectBtn
+          // Waive THIS ride only (v854) - sits beside Received because they're the two ways a
+          // single fee gets settled: they paid it, or you forgave it. The counterparty's
+          // "Waive all" button above still handles the standing, time-based arrangement.
+          +'<button onclick="waiveOneRideFee(\''+escAttr(dName)+'\',\''+escAttr(name)+'\','+_feeIdArg(ri.id)+',\''+escAttr(ri.client||'')+'\')" '
+          +'style="flex-shrink:0;padding:.26rem .6rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;">Waive</button>'
           +'<button onclick="markFeeRidePaid(\''+escAttr(dName)+'\',\''+escAttr(name)+'\','+_feeIdArg(ri.id)+')" '
           +'style="flex-shrink:0;padding:.26rem .6rem;background:#15803d;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;">\u2713 Received</button></div>'
           +'</div>';
