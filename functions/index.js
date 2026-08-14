@@ -1,120 +1,107 @@
-/* NWDA — push delivery Cloud Function.
- *
- * THE GAP THIS FILLS: the app writes every notification to nda/kat/pushQueue and stops there
- * (see sendPushToDriver() in index.html) - by design, a browser can't call the FCM send API
- * directly with admin privileges. Something server-side has to read that queue and actually
- * call Firebase Cloud Messaging. Nothing in this repo did that, which is why notifications were
- * enqueuing successfully (the app looked completely healthy) while never actually arriving on
- * any device, iPhone or otherwise.
- *
- * Verified against the real app before writing this, not assumed:
- *   - Queue entries live at nda/kat/pushQueue/{id} = { to, title, body, ts, data? }
- *     (sendPushToDriver in index.html)
- *   - Tokens live at nda/kat/fcmTokens/{driverName}/{deviceKey} = token string
- *     (registerFcmToken and _purgeDeviceTokens in index.html - storageSet('kat:fcmTokens/...')
- *     resolves to this exact path, since storageSet writes to 'nda/'+key.replace(/:/g,'/'))
- *   - A driver can have multiple devices, each its own token under their name - this sends to
- *     all of them, not just one.
- *
- * Uses the CURRENT (2026) Admin SDK API - sendMulticast() is deprecated and removed in recent
- * firebase-admin versions; sendEachForMulticast() is the replacement. Verified this directly
- * before writing, since shipping a function that calls a removed method would just be a new,
- * different silent failure - it would deploy fine and then throw on every single invocation.
- */
-
-const { onValueCreated } = require('firebase-functions/v2/database');
-const { logger } = require('firebase-functions');
+// NWDA push sender. Watches the pushQueue; when the app drops a request in,
+// it looks up the target driver's device tokens and delivers the notification.
+const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
-
 admin.initializeApp();
 
-exports.processPushQueue = onValueCreated(
-  '/nda/kat/pushQueue/{pushId}',
-  async (event) => {
-    const pushId = event.params.pushId;
-    const entry = event.data.val();
+exports.sendPush = functions.database
+  .ref('/nda/kat/pushQueue/{id}')
+  .onCreate(async (snap) => {
+    const req = snap.val() || {};
+    const cleanup = () => snap.ref.remove().catch(() => {});
+    const to = req.to;
 
-    if (!entry || !entry.to) {
-      logger.warn(`pushQueue/${pushId}: no recipient ("to") on this entry, skipping`, entry);
-      await event.data.ref.remove();
-      return;
+    // Every exit path below now logs WHY. Previously this function's only log lines were
+    // Google's automatic "started"/"finished with status: ok" markers - so a run that found no
+    // tokens and gave up looked identical to a run that delivered successfully. Debugging a
+    // real delivery failure was impossible from the logs alone; that cost a lot of time, and
+    // these few lines are what stop it happening again.
+    if (!to) {
+      console.warn('sendPush: queue entry has no "to" field, dropping', JSON.stringify(req));
+      await cleanup();
+      return null;
     }
 
-    // All of this driver's device tokens - a driver can be logged in on more than one phone,
-    // and every device that's turned notifications on has its own token here.
-    const tokensSnap = await admin.database()
-      .ref(`nda/kat/fcmTokens/${entry.to}`)
-      .once('value');
-    const tokensObj = tokensSnap.val() || {};
-    const deviceKeys = Object.keys(tokensObj);
-    const tokens = deviceKeys.map((k) => tokensObj[k]).filter(Boolean);
+    const tokenSnap = await admin.database().ref('nda/kat/fcmTokens/' + to).once('value');
+    const raw = tokenSnap.val();
+    let tokens = [];
+    if (typeof raw === 'string') tokens = [raw];
+    else if (Array.isArray(raw)) tokens = raw.filter((t) => typeof t === 'string');
+    else if (raw && typeof raw === 'object') tokens = Object.values(raw).filter((t) => typeof t === 'string');
+    tokens = [...new Set(tokens)];
 
-    if (tokens.length === 0) {
-      // Not an error - this is the expected, ordinary state for a driver who has never turned
-      // push on, or an iPhone driver who hasn't installed to their home screen yet (see the
-      // v842 install-requirement work). Mark processed with a reason rather than deleting
-      // silently, so this is visible later if someone's checking why a specific driver never
-      // got a specific notification.
-      logger.info(`pushQueue/${pushId}: no tokens for "${entry.to}", nothing to send`);
-      await event.data.ref.update({ processed: true, processedAt: Date.now(), result: 'no-tokens' });
-      return;
+    if (!tokens.length) {
+      // Not an error - this is the ordinary state for a driver who never turned notifications
+      // on. Logged explicitly so it is distinguishable from a successful send at a glance.
+      console.log('sendPush: no device tokens stored for "' + to + '" - nothing to send');
+      await cleanup();
+      return null;
     }
-
-    // FCM's data payload must be all-string values - the app's own optional navData can include
-    // a numeric rideId (see sendPushToDriver), so every value is stringified here rather than
-    // passed through as-is, which would otherwise make the whole send throw.
-    const dataPayload = {};
-    if (entry.data && typeof entry.data === 'object') {
-      for (const k in entry.data) {
-        if (entry.data[k] != null) dataPayload[k] = String(entry.data[k]);
-      }
-    }
+    console.log('sendPush: sending to "' + to + '" on ' + tokens.length + ' device(s)');
 
     const message = {
-      notification: {
-        title: entry.title || 'Northwest Drivers',
-        body: entry.body || '',
+      // Deliberately DATA-ONLY, with no `notification` block. The service worker
+      // (firebase-messaging-sw.js) draws every notification itself from these fields, inside
+      // the push event's waitUntil - which is what iOS requires. Adding a `notification` block
+      // here would make FCM auto-display it as well, and Android would then show every alert
+      // twice. If the service worker's push listener is ever removed, this must change too -
+      // the two files are a matched pair.
+      data: {
+        title: String(req.title || 'Northwest Drivers'),
+        body: String(req.body || '')
       },
-      data: dataPayload,
-      tokens,
+      // Urgency high tells Apple's push service to deliver promptly rather than batching for
+      // power saving, which on iOS can otherwise delay a notification by minutes. TTL keeps an
+      // undelivered message alive for a day (a phone that was off overnight still gets it)
+      // rather than FCM's default of keeping it four weeks, which is far too long for a ride
+      // alert that would be stale by then anyway.
+      webpush: {
+        headers: { Urgency: 'high', TTL: '86400' }
+      },
+      tokens
     };
 
-    let response;
+    let resp;
     try {
-      response = await admin.messaging().sendEachForMulticast(message);
+      resp = await admin.messaging().sendEachForMulticast(message);
     } catch (err) {
-      // A total failure here means the call itself was rejected (bad credentials, malformed
-      // message) - not that individual tokens failed, which is handled separately below.
-      logger.error(`pushQueue/${pushId}: sendEachForMulticast threw`, err);
-      await event.data.ref.update({ processed: true, processedAt: Date.now(), result: 'error', error: String(err) });
-      return;
+      // A throw here means the whole call was rejected (bad credentials, malformed message),
+      // not that individual tokens failed - that's handled per-token below. Deliberately does
+      // NOT clean up the queue entry, so a systemic failure leaves evidence behind instead of
+      // silently deleting itself.
+      console.error('sendPush: send failed entirely for "' + to + '"', err);
+      return null;
     }
 
-    // Clean up tokens FCM says are dead (uninstalled app, expired, etc.) - left alone they'd
-    // accumulate forever and every future send would keep paying the cost of trying them.
-    const staleRemovals = [];
-    response.responses.forEach((r, i) => {
+    console.log('sendPush: "' + to + '" - ' + resp.successCount + '/' + tokens.length + ' delivered');
+
+    // Prune tokens that are no longer valid so the queue stays clean.
+    const dead = [];
+    resp.responses.forEach((r, i) => {
       if (r.success) return;
       const code = r.error && r.error.code;
-      if (code === 'messaging/invalid-registration-token' ||
-          code === 'messaging/registration-token-not-registered') {
-        const deadKey = deviceKeys[i];
-        staleRemovals.push(
-          admin.database().ref(`nda/kat/fcmTokens/${entry.to}/${deadKey}`).remove()
-        );
+      if (code === 'messaging/registration-token-not-registered' ||
+          code === 'messaging/invalid-registration-token') {
+        dead.push(tokens[i]);
       } else {
-        logger.warn(`pushQueue/${pushId}: send failed for a token, not treating as stale`, code);
+        // A failure that is NOT a dead token is worth seeing - it could be a quota problem, an
+        // APNs configuration issue, or a malformed payload, none of which fix themselves.
+        console.warn('sendPush: delivery failed for a device of "' + to + '" - ' + code);
       }
     });
-    if (staleRemovals.length) await Promise.all(staleRemovals);
 
-    logger.info(`pushQueue/${pushId}: sent to "${entry.to}" - ${response.successCount}/${tokens.length} succeeded`);
-    await event.data.ref.update({
-      processed: true,
-      processedAt: Date.now(),
-      result: 'sent',
-      successCount: response.successCount,
-      failureCount: response.failureCount,
-    });
-  }
-);
+    if (dead.length) {
+      console.log('sendPush: pruning ' + dead.length + ' dead token(s) for "' + to + '"');
+      const updates = {};
+      const rawObj = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+      Object.keys(rawObj).forEach((deviceKey) => {
+        if (dead.indexOf(rawObj[deviceKey]) >= 0) updates['nda/kat/fcmTokens/' + to + '/' + deviceKey] = null;
+      });
+      if (Object.keys(updates).length) {
+        await admin.database().ref().update(updates).catch((e) => console.warn('sendPush: prune failed', e));
+      }
+    }
+
+    await cleanup();
+    return null;
+  });
