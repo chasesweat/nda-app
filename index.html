@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608131840">
+<meta name="version" content="202608141853">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -116,12 +116,21 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
 .page-title{font-family:'Playfair Display',serif;font-size:1.75rem;margin-bottom:.25rem;}
 .page-sub{color:var(--mid);font-size:.88rem;margin-bottom:2rem;}
 .stat-val.gold{color:var(--gold);}
-.ride-date{min-width:80px;font-size:.78rem;font-weight:600;color:var(--gold);}
-.ride-info{flex:1;}
+.ride-date{min-width:80px;font-size:.78rem;font-weight:600;color:var(--gold);flex-shrink:0;}
+/* Reported: two ride cards on the dashboard rendered completely differently - a short name
+   ("Wendy Newberry") laid out on one clean row, while a longer one ("Sally Woods" on an AP RUN)
+   wrapped into a broken-looking stack with the badge and price on their own lines. Root cause
+   is the same flex trap as the driver-card email fix: `flex:1` sets flex-basis but leaves
+   min-width at its `auto` default, so this box refuses to shrink below its content's natural
+   width. Once the name plus the detail line exceed the space left over, the parent's
+   flex-wrap:wrap has no choice but to push the badge and price onto new lines. min-width:0
+   lets the text box shrink (and its own text wrap) so everything stays on one row, which is
+   what makes the two cards finally look like each other. */
+.ride-info{flex:1;min-width:0;}
 .ride-client{font-weight:600;font-size:.92rem;}
 .ride-detail{font-size:.78rem;color:var(--mid);margin-top:2px;}
 .ride-price{font-size:1rem;font-weight:600;color:var(--green);white-space:nowrap;}
-.badge{font-size:.7rem;padding:3px 9px;border-radius:10px;font-weight:800;white-space:nowrap;letter-spacing:.2px;}
+.badge{font-size:.7rem;padding:3px 9px;border-radius:10px;font-weight:800;white-space:nowrap;letter-spacing:.2px;flex-shrink:0;}
 .badge-ap{background:#dbeafe;color:var(--blue);}
 .badge-rt{background:#fef3c7;color:#92400e;}
 .badge-pt{background:#d1fae5;color:var(--green);}
@@ -998,6 +1007,7 @@ input,select,textarea{font-size:16px;}
         <div id="mp-account-billing" style="margin-bottom:1rem;"></div>
         <div style="background:var(--surface);border-radius:12px;padding:1.25rem;border:1.5px solid var(--light);margin-bottom:1rem;">
           <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.75rem;">Account</div> <button id="push-pref-btn" onclick="togglePushPref()" style="width:100%;text-align:left;padding:.65rem .85rem;background:var(--white);border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;cursor:pointer;color:var(--black);margin-bottom:.5rem;">🔔 Push notifications</button>
+          <button id="push-diag-btn" onclick="runPushDiagnostic()" style="width:100%;text-align:left;padding:.65rem .85rem;background:var(--white);border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;cursor:pointer;color:var(--black);margin-bottom:.5rem;">🩺 Check why notifications aren't working</button>
           <button id="admin-audit-btn" onclick="toggleChaseAudit()" style="display:none;width:100%;text-align:left;padding:.65rem .85rem;background:var(--white);border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;cursor:pointer;color:var(--black);margin-bottom:.5rem;">&#128276; Admin change alerts</button>
           <button onclick="openPwModal(null)" style="width:100%;text-align:left;padding:.65rem .85rem;background:var(--white);border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;cursor:pointer;color:var(--black);margin-bottom:.5rem;">Change password</button>
           <button onclick="logout()" style="width:100%;text-align:left;padding:.65rem .85rem;background:var(--white);border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;cursor:pointer;color:var(--red);">Sign out</button>
@@ -1616,8 +1626,14 @@ input,select,textarea{font-size:16px;}
         <label for="qa-new-client" style="font-size:.82rem;cursor:pointer;color:var(--black);">New client — first time with NWDA</label>
       </div>
       <div id="qa-client-warn" style="display:none;grid-column:1/-1;font-size:.85rem;font-weight:600;color:#92400e;background:#fef3c7;border:1.5px solid #f59e0b;border-radius:9px;padding:.6rem .85rem;line-height:1.55;margin-bottom:.25rem;"></div>
-      <div class="form-group"><label>Date</label><input type="date" id="qa-date" onchange="onQaDateTimeChange();checkPriceShopping('qa')" /></div>
-      <div class="form-group"><label>Time <span style="font-weight:600;color:var(--mid);font-size:.72rem;">(check AM/PM)</span></label><input type="time" id="qa-time" onchange="onQaDateTimeChange()" /></div>
+      <!-- Date and Time each span the full grid width so Time sits BELOW Date rather than
+           beside it (v847, Chase's request). Same grid-column:1/-1 pattern the Email field and
+           the client-warning banner above already use. Side by side, the time input in
+           particular was cramped on a phone - it has to fit hours, minutes, AND the AM/PM
+           selector into half a row, which is also why its label carries a "(check AM/PM)"
+           warning: an easy thing to get wrong at a glance. -->
+      <div class="form-group" style="grid-column:1/-1;"><label>Date</label><input type="date" id="qa-date" onchange="onQaDateTimeChange();checkPriceShopping('qa')" /></div>
+      <div class="form-group" style="grid-column:1/-1;"><label>Time <span style="font-weight:600;color:var(--mid);font-size:.72rem;">(check AM/PM)</span></label><input type="time" id="qa-time" onchange="onQaDateTimeChange()" /></div>
       <div class="form-group"><label>Travel Type</label>
         <select id="qa-type" onchange="qaTypeChanged()">
           <option>AP ROUND TRIP</option>
@@ -2849,6 +2865,10 @@ async function processClientRequests(){
       if(r.flight || r.terminal){
         flightBit = '. Flight '+(r.flight||'?')+(r.terminal?' ('+r.terminal+')':'');
         if(r.rtFlight) flightBit += ', return '+r.rtFlight;
+        // Return terminal is asked separately on the booking page now (v848) - surface it, or a
+        // driver would have to open the request to discover the client flies back into a
+        // different terminal than they left from.
+        if(r.rtTerminal && r.rtTerminal!==r.terminal) flightBit += ', returning into '+r.rtTerminal;
       }
       var returnBit = (r.rtDate||r.rtTime) ? ('. Return '+(r.rtDate||'?')+(r.rtTime?' '+r.rtTime:'')) : '';
       var msg = kind+' from '+(r.clientName||'a client')+' ('+(r.clientPhone||'no phone given')+') via your booking link \u2014 '
@@ -2858,7 +2878,23 @@ async function processClientRequests(){
         +(r.clientEmail?'. '+r.clientEmail:'')
         +(r.notes?'. Notes: '+r.notes:'');
       if(!notifications[myDriverName]) notifications[myDriverName] = [];
-      notifications[myDriverName].unshift({ rideId:null, type:'client_request', channel:null, read:false, msg:msg, ts:Date.now(), createdBy:'', clientRequestId:id });
+      // The full request rides along on the notification (v851) so tapping it can open the right
+      // form already filled in. Previously only the id was stored, and the request itself lived
+      // in a Firebase queue entry that gets marked processed moments later - so by the time the
+      // driver actually tapped, the data was no longer readily at hand and everything had to be
+      // re-typed from the notification's summary text.
+      var _reqPayload = {
+        requestType: r.requestType||'schedule',
+        clientName: r.clientName||'', clientPhone: r.clientPhone||'', clientEmail: r.clientEmail||'',
+        type: r.type||'', vehicle: r.vehicle||'',
+        pickup: r.pickup||'', destination: r.destination||'',
+        date: r.date||'', time: r.time||'',
+        rtDate: r.rtDate||'', rtTime: r.rtTime||'',
+        flight: r.flight||'', terminal: r.terminal||'', rtFlight: r.rtFlight||'', rtTerminal: r.rtTerminal||'',
+        pax: r.pax||1, checkedBags: r.checkedBags||0, carryOnBags: r.carryOnBags||0,
+        notes: r.notes||''
+      };
+      notifications[myDriverName].unshift({ rideId:null, type:'client_request', channel:null, read:false, msg:msg, ts:Date.now(), createdBy:'', clientRequestId:id, req:_reqPayload });
       if(typeof sendPushToDriver==='function') sendPushToDriver(myDriverName, '\ud83d\udccb New request via your booking link', kind+' from '+(r.clientName||'a client'));
       _applyClientBookingRequestSideEffects(r);
       reqs[id].status = 'processed';
@@ -6437,6 +6473,82 @@ var _NOTIF_PAGE_ROUTES = {
   sub_expired:'access',
   irs_rate:'income', combine_request:'income', combine_approved:'income', combine_denied:'income', combine_off:'income'
 };
+// Opens the right form for an incoming client request and fills it in (v851). A "quote" request
+// goes to the Quote page; a "schedule" request goes to the Quick Add sheet. Everything the
+// client typed is carried across so nothing has to be re-keyed from the notification's summary.
+//
+// Deliberately drives each form through its OWN change handlers rather than just setting values:
+// setting .value directly does not fire onchange, so without this the surcharge auto-detection,
+// mileage lookup, and price calculation would all sit stale on a form that LOOKS filled in -
+// which is worse than an empty form, because it looks finished.
+function _prefillFromClientRequest(req){
+  if(!req) return;
+  var isQuote = (req.requestType === 'quote');
+  var P = isQuote ? 'q' : 'qa';
+  var set = function(suffix, val){
+    var el = document.getElementById(P+'-'+suffix);
+    if(el && val!=null && val!=='') el.value = val;
+    return el;
+  };
+  setTimeout(function(){
+    try{
+      // Type first - it drives which other fields are even visible on both forms.
+      var typeEl = document.getElementById(P+'-type');
+      if(typeEl && req.type){
+        typeEl.value = req.type;
+        try{ isQuote ? updateTripFields() : qaTypeChanged(); }catch(e){}
+      }
+      set('client', req.clientName);
+      set('phone', req.clientPhone);
+      set('email', req.clientEmail);
+      set('vehicle', req.vehicle);
+      set('date', req.date);
+      set('time', req.time);
+      set('flight', req.flight);
+      set('terminal', req.terminal);
+      set('rt-date', req.rtDate);
+      set('rt-time', req.rtTime);
+      set('rt-flight', req.rtFlight);
+      set('rt-terminal', req.rtTerminal);
+      set('pax', req.pax);
+      set('checked-bags', req.checkedBags);
+      set('carryon-bags', req.carryOnBags);
+      // Address field names differ between the two forms - Quote uses pickup/dropoff, Quick Add
+      // uses pickup/home. Mapped explicitly rather than assumed identical. (Note qa-leg-pickup
+      // is a CHECKBOX, not an address field, despite the name - writing an address into it
+      // would silently corrupt the form.)
+      if(isQuote){
+        set('pickup', req.pickup);
+        set('dropoff', req.destination);
+      } else {
+        set('pickup', req.pickup);
+        var _hm = document.getElementById('qa-home'); if(_hm && req.destination) _hm.value = req.destination;
+      }
+      // Notes: qa-notes exists; a q-notes element is referenced elsewhere in the file but isn't
+      // actually in the Quote markup, so set() safely no-ops there. Rather than silently drop
+      // what the client wrote, surface it in the toast below when there's nowhere to put it.
+      var _notesLanded = false;
+      if(req.notes){
+        var _nEl = document.getElementById(P+'-notes');
+        if(_nEl){ _nEl.value = req.notes; _notesLanded = true; }
+      }
+      // Now trigger the real recalculation chain, exactly as if a person had typed these.
+      if(isQuote){
+        try{ onDateChange(); }catch(e){}
+        try{ onTimeChange(); }catch(e){}
+        try{ debounceMileage(); }catch(e){}
+        try{ calcQuote(); }catch(e){}
+      } else {
+        try{ onQaDateTimeChange(); }catch(e){}
+        try{ recalcQa(); }catch(e){}
+      }
+      var _msg = '\u2713 Filled in from '+(req.clientName||'the client')+'\u2019s request \u2014 check it over before saving';
+      if(req.notes && !_notesLanded) _msg += ' \u00b7 Their note: \u201c'+req.notes+'\u201d';
+      showToast(_msg);
+    }catch(e){ console.warn('prefill from client request failed', e); }
+  }, isQuote ? 260 : 160); // let the page/sheet finish opening before writing into it
+}
+
 function handleNotifClick(el){
   const driverName=el.dataset.dname;
   const idx=parseInt(el.dataset.nidx);
@@ -6447,9 +6559,24 @@ function handleNotifClick(el){
   if(typeof closeNotifPanel==="function") closeNotifPanel();
   // Capture routing info, then REMOVE this notification from the list entirely
   const type=n.type, rideId=n.rideId, channel=n.channel, msg=n.msg||n.message||"";
+  const _req = n.req || null;
   notifList.splice(idx,1);
   saveNotifs(); updateNotifBadge();
   try{ renderNotifPanel(); }catch(e){}
+  // A client's booking-link request opens the form they actually asked for, already filled in
+  // (v851) - a quote request goes to the Quote page, a ride request to the Quick Add sheet.
+  // Falls through to the old behaviour if an older notification has no payload attached, so
+  // notifications created before this build still route somewhere sensible instead of breaking.
+  if(type==='client_request' && _req){
+    if(_req.requestType === 'quote'){
+      nav('quote');
+    } else {
+      nav('calendar');
+      setTimeout(function(){ try{ openQuickAddModal(); }catch(e){} }, 150);
+    }
+    _prefillFromClientRequest(_req);
+    return;
+  }
   // Route to wherever the notification came from
   if(type==='chat'){
     nav("chat");
@@ -8758,7 +8885,7 @@ function renderRideView(r){
       <div style="font-size:1.05rem;font-weight:600;color:var(--black);margin-bottom:.2rem;">${rideDisplayType(r)} — ${r.client}${(()=>{const _cr=(rides||[]).find(function(x){return x.client&&x.client.toLowerCase()===r.client.toLowerCase()&&x.createdBy;});const _ol=_cr?(_cr.createdBy==='Morgan'?'Kat':_cr.createdBy):null;const _dLogin=Object.keys(USER_DRIVER_MAP).find(function(k){return USER_DRIVER_MAP[k]===r.driver;})||driverFirst;return (_ol&&_ol!==_dLogin)?'<span style="font-weight:600;font-size:.88rem;color:'+ink+';opacity:.85;">('+ _ol +')</span>':'';})()}</div>
       ${_legBadgeHtml}
       <div style="font-size:.78rem;color:var(--mid);">Created by ${r.createdBy||'—'}</div>
-      ${(r.trail&&r.trail.length)?`<div style="font-size:.72rem;color:var(--mid);margin-top:.25rem;">🕒 Last: <strong>${escHtml(r.trail[r.trail.length-1].by.split(' ')[0])}</strong> ${escHtml(r.trail[r.trail.length-1].action)} · ${fmtTs(r.trail[r.trail.length-1].ts)}</div>${r.trail.length>1?`<details style="margin-top:.2rem;"><summary style="font-size:.7rem;color:var(--gold);cursor:pointer;">View full history (${r.trail.length})</summary><div style="font-size:.72rem;color:var(--mid);margin-top:.3rem;line-height:1.6;">${r.trail.slice().reverse().map(t=>`• <strong>${escHtml(t.by.split(' ')[0])}</strong> ${escHtml(t.action)} · ${fmtTs(t.ts)}`).join('<br>')}</div></details>`:''}`:''}
+      ${(r.trail&&r.trail.length)?`<details style="margin-top:.25rem;"><summary style="font-size:.7rem;color:var(--gold);cursor:pointer;">View full history (${r.trail.length})</summary><div style="font-size:.72rem;color:var(--mid);margin-top:.3rem;line-height:1.6;">${r.trail.slice().reverse().map(t=>`• <strong>${escHtml(t.by.split(' ')[0])}</strong> ${escHtml(t.action)} · ${fmtTs(t.ts)}`).join('<br>')}</div></details>`:''}
     </div>
     ${_acceptRejectHtml}${_respLine}
     <div class="detail-row" style="grid-column:1/-1;">
@@ -10217,6 +10344,11 @@ function editTypeChanged(){
 function toggleEditMode(on){
   document.getElementById('rm-view-mode').style.display  = on?'none':'block';
   document.getElementById('rm-edit-mode').style.display  = on?'block':'none';
+  // Snapshot on entry / clear on exit (v849) - this is what closeRideModal compares against to
+  // decide whether closing would silently throw away work. Deferred a tick so it captures the
+  // fields as populated, not as they were mid-render.
+  if(on){ setTimeout(function(){ if(typeof _rmSnapshotEditFields==='function') _rmSnapshotEditFields(); }, 0); }
+  else { _rmEditSnapshot = null; }
   var emg=document.getElementById('edit-miles-group');if(emg)emg.style.display=on&&hasIncomeAccess()?'':'none';
   // Was unconditionally showing Edit whenever not actively editing, silently overriding
   // the permission-based visibility set in openRideModal (client owner / assigned driver
@@ -10239,6 +10371,28 @@ function toggleEditMode(on){
   })();
   document.getElementById('rm-save-btn').style.display   = on?'inline-block':'none';
   document.getElementById('rm-cancel-btn').style.display = on?'inline-block':'none';
+  // Close's grid-column:1/-1 / width:auto / margin:0 auto (in its base HTML) is sized for VIEW
+  // mode, where it sits alone on its own row below the Mark Paid + Client Invoiced pair - a
+  // lone third button spanning full width there is correct. But in EDIT mode only Save Changes
+  // and Close remain, and that same override made Close force itself onto its own row too,
+  // narrow and centered beneath a full-width Save Changes - exactly the "off" mismatch reported
+  // (screenshot: a full-width purple button over a small, centered gray one). In edit mode the
+  // two are restyled here as an even, equal-width pair, side by side in the grid's own two
+  // columns; restored to the original view-mode geometry on exit rather than left mutated.
+  (function(){
+    var _cb = document.getElementById('rm-close-btn');
+    if(!_cb) return;
+    if(on){
+      if(_cb.dataset.prevGridStyle===undefined) _cb.dataset.prevGridStyle = _cb.getAttribute('style')||'';
+      _cb.style.gridColumn = 'auto';
+      _cb.style.width = '100%';
+      _cb.style.minWidth = '0';
+      _cb.style.margin = '0';
+    } else if(_cb.dataset.prevGridStyle!==undefined){
+      _cb.setAttribute('style', _cb.dataset.prevGridStyle);
+      delete _cb.dataset.prevGridStyle;
+    }
+  })();
   // Mark Paid / Delete / Cancel Ride are irrelevant (and a little risky to have sitting right
   // there) while actively editing — hide them for the duration. Their visibility the rest of
   // the time is permission-based (canDeleteRide, ride status, etc.), computed elsewhere when
@@ -10439,7 +10593,76 @@ function saveRidePrivateNote(rideId){
   saveRides();
   showToast(ride.privateNote?'\uD83D\uDD12 Private note saved':'Private note cleared');
 }
-function closeRideModal(){document.getElementById('ride-modal').classList.remove('show');activeRideId=null;toggleEditMode(false);}
+// Snapshot of every editable field, taken the moment edit mode opens (v849). Reported: changes
+// made by a client owner sometimes weren't saved. Root cause is that closing the modal - the X,
+// the Close button, or the Android/browser back gesture - discarded everything silently, with
+// no indication anything had been lost. Someone who edited and then tapped X (a reasonable
+// assumption that X means "done") lost the lot without ever being told.
+//
+// Deliberately generic - reads every input/select/textarea inside the edit panel rather than a
+// hardcoded field list. That list is 25+ fields and grows; any hardcoded copy would silently
+// stop protecting whichever field was added last, which is exactly the kind of quiet gap this
+// is meant to close.
+var _rmEditSnapshot = null;
+function _rmSnapshotEditFields(){
+  try{
+    var panel = document.getElementById('rm-edit-mode');
+    if(!panel){ _rmEditSnapshot = null; return; }
+    var snap = {};
+    panel.querySelectorAll('input,select,textarea').forEach(function(el){
+      if(!el.id) return;
+      snap[el.id] = (el.type==='checkbox'||el.type==='radio') ? String(el.checked) : String(el.value);
+    });
+    _rmEditSnapshot = snap;
+  }catch(e){ _rmEditSnapshot = null; }
+}
+function _rmHasUnsavedChanges(){
+  try{
+    if(!_rmEditSnapshot) return false;
+    var panel = document.getElementById('rm-edit-mode');
+    if(!panel || panel.style.display === 'none') return false;
+    var changed = false;
+    panel.querySelectorAll('input,select,textarea').forEach(function(el){
+      if(changed || !el.id) return;
+      var now = (el.type==='checkbox'||el.type==='radio') ? String(el.checked) : String(el.value);
+      // A field that appeared after the snapshot counts as unchanged rather than as a
+      // difference - otherwise conditionally-shown fields would trigger a false warning.
+      if(Object.prototype.hasOwnProperty.call(_rmEditSnapshot, el.id) && _rmEditSnapshot[el.id] !== now) changed = true;
+    });
+    return changed;
+  }catch(e){ return false; }
+}
+function closeRideModal(){
+  if(_rmHasUnsavedChanges()){
+    // Three real options, because "discard or cancel" would be a false choice when what the
+    // person almost certainly wants is to keep the edit they just made.
+    var _saveBtn = document.getElementById('rm-save-btn');
+    var _ov = document.createElement('div');
+    _ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14600;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+    _ov.innerHTML = '<div style="background:#fff;border-radius:16px;max-width:340px;width:100%;padding:1.4rem 1.25rem;box-shadow:0 24px 60px rgba(0,0,0,.4);text-align:center;">'
+      +'<div style="font-size:1.9rem;margin-bottom:.4rem;">\u270F\uFE0F</div>'
+      +'<div style="font-size:1.03rem;font-weight:800;color:var(--black);margin-bottom:.4rem;">You have unsaved changes</div>'
+      +'<div style="font-size:.86rem;color:var(--mid);line-height:1.5;margin-bottom:1.1rem;">Save them before closing?</div>'
+      +'<button id="_rm-unsaved-save" class="btn-primary" style="margin-top:0;">Save changes</button>'
+      +'<button id="_rm-unsaved-discard" class="btn-ghost" style="margin-top:.4rem;color:var(--red);">Discard and close</button>'
+      +'<button id="_rm-unsaved-back" class="btn-ghost" style="margin-top:0;">Keep editing</button>'
+      +'</div>';
+    document.body.appendChild(_ov);
+    var _close = function(){ if(_ov.parentNode) _ov.parentNode.removeChild(_ov); };
+    document.getElementById('_rm-unsaved-save').onclick = function(){
+      _close(); _rmEditSnapshot = null;
+      if(_saveBtn) _saveBtn.click(); // the real save path, not a duplicate of it
+    };
+    document.getElementById('_rm-unsaved-discard').onclick = function(){
+      _close(); _rmEditSnapshot = null;
+      document.getElementById('ride-modal').classList.remove('show'); activeRideId=null; toggleEditMode(false);
+    };
+    document.getElementById('_rm-unsaved-back').onclick = _close;
+    return;
+  }
+  _rmEditSnapshot = null;
+  document.getElementById('ride-modal').classList.remove('show');activeRideId=null;toggleEditMode(false);
+}
 
 // ── RIDE INTEREST ("I'm interested" — like FamilyWall hearts) ──
 function myInterestKey(){ return getMyDriverName() || currentUser?.name || null; }
@@ -13815,7 +14038,14 @@ function updateChatBadge(){
   const myKey = (getMyDriverName() || currentUser?.name || '').replace(/ /g,'_');
   const myDmKeys = Object.keys(chatMessages).filter(k =>
     k!=='group' && k!=='offerings' && k!=='updates' && k.split('__').includes(myKey));
-  const hasAny = ['group','offerings','updates', ...myDmKeys]
+  // 'group' deliberately excluded (v841). It's a legacy channel with no tab anywhere in the UI -
+  // renderChatTabs only ever builds Offerings, Updates, and DMs - so there is no way to open it
+  // and therefore no way to mark it read. Any message left sitting in it lit this badge
+  // permanently, with nothing the user could do to clear it: exactly the "phantom red dot" Chase
+  // reported. This is the same class of bug the myDmKeys membership filter above already fixed
+  // for other people's DMs; 'group' was simply missed because it's hardcoded into this list
+  // rather than discovered from chatMessages.
+  const hasAny = ['offerings','updates', ...myDmKeys]
     .some(k => hasUnread(k));
   const b1 = document.getElementById('chat-badge');
   const b2 = document.getElementById('chat-badge-topbar');
@@ -18608,15 +18838,36 @@ async function _getOrCreateClientBookingToken(clientName, driverLogin){
   var _va = (currentUser && PROXY_MAP[currentUser.name]) || getMyDriverName();
   var _db = (typeof buildClientDB==='function') ? (buildClientDB(_va)||{}) : {};
   var c = _db[clientKey] || {};
+  // Brand this link to the CLIENT'S OWNER, not whoever happens to be sending it (v844). Same
+  // owner-then-sender priority the receipt document already uses (see buildReceiptDocHtml's
+  // "Logo priority: the client's OWNER's business logo, then the driving driver's" logic) -
+  // this is the client's relationship with THAT driver's business, so if Morgan sends a link
+  // to one of Kat's clients, the client should see Kat's branding, not Morgan's. Matters more
+  // here than almost anywhere else in the app: this is what ends up as a permanent icon on the
+  // client's home screen once they install it. Snapshotted onto the token rather than resolved
+  // at page load, because book.html is public and can only read what a token explicitly gives
+  // it - it has no access to DRIVER_PROFILES or client-ownership data, by design.
+  var _ownerName = (typeof getClientOwner==='function') ? getClientOwner(clientName) : null;
+  var _ownerProf = (_ownerName && typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[_ownerName]) ? DRIVER_PROFILES[_ownerName] : {};
+  var _brandLogo = (_ownerProf.logo||'').trim();
+  var _brandBiz = (_ownerProf.businessName||'').trim();
+  var _brandAccent = (_ownerProf.logoAccentColor||'').trim();
   try{
-    await fbRef('nda/kat/bookingLinkTokens/'+token).set({
+    var _entry = {
       loginName: loginKey,
       clientKey: clientKey,
       clientName: (clientName||'').trim(),
       clientPhone: c.phone || (c.phones&&c.phones[0]) || '',
       clientEmail: c.email || (c.emails&&c.emails[0]) || '',
       createdAt: Date.now()
-    });
+    };
+    // Only written when the owner actually has their own branding - otherwise book.html falls
+    // back to the sending driver's directory entry, which is the existing correct behavior.
+    if(_ownerName)   _entry.ownerName = _ownerName;
+    if(_brandLogo)   _entry.ownerLogo = _brandLogo;
+    if(_brandBiz)    _entry.ownerBusinessName = _brandBiz;
+    if(_brandAccent) _entry.ownerLogoAccentColor = _brandAccent;
+    await fbRef('nda/kat/bookingLinkTokens/'+token).set(_entry);
     await fbRef('nda/kat/bookingLinkTokensByClient/'+loginKey+'/'+_fbSafeKey(clientKey)).set(token);
   }catch(e){ console.warn('booking token create failed', e); return ''; }
   return token;
@@ -19798,7 +20049,7 @@ function openOutsideRideModal(editId){
       </div>
       <div class="form-group"><label>Client / source</label>
         <input type="text" id="or-client" placeholder="e.g. Cash airport run, Uber, etc." value="${_ex?escAttr(_ex.client||''):''}" style="width:100%;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;" /></div>
-      <div class="form-group"><label>Amount you kept ($) — after provider fees</label>
+      <div class="form-group"><label>Amount you kept ($) — after provider fees, before vehicle cost</label>
         <input type="number" id="or-amount" min="0" step="0.01" placeholder="0.00" value="${_ex?(parseFloat(_ex.price)||''):''}" style="width:100%;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;" /></div>
       <div class="form-group"><label>Miles driven (optional)</label>
         <input type="number" id="or-miles" min="0" step="0.1" placeholder="e.g. 14.5" value="${_ex?(parseFloat(_ex.miles)||''):''}" style="width:100%;padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;" />
@@ -26825,7 +27076,33 @@ async function registerFcmToken(){
     }
   }catch(e){ console.warn('FCM token registration failed:', e); }
 }
+// Detects an iPhone/iPad that is NOT running as an installed home-screen app. Apple only
+// allows Web Push for home-screen web apps - an open browser tab has no access to the Push
+// API at all, and that's true in every browser on iOS (Chrome, Edge and the rest are all
+// required to use WebKit underneath, so switching browsers changes nothing). Reported: iPhone
+// users not receiving push at all. Without this check the notification button either fails
+// silently or reports "not supported", neither of which tells them the one thing that would
+// actually fix it - install the app to the home screen first.
+function _iosNeedsInstallForPush(){
+  try{
+    var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent)
+             || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1); // iPadOS 13+ reports as Mac
+    if(!isIOS) return false;
+    var standalone = (window.navigator.standalone === true)
+                  || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    return !standalone;
+  }catch(e){ return false; }
+}
 async function askNotificationPermission(){
+  // Checked BEFORE the 'Notification' in window test: on iOS the Notification API may exist
+  // in a plain tab while push still cannot work, so the generic "not supported" message would
+  // be both unhelpful and slightly wrong.
+  if(_iosNeedsInstallForPush()){
+    showToast('On iPhone, notifications only work once the app is on your home screen \u2014 tap Share, then Add to Home Screen, and open it from there','error');
+    var _b=document.getElementById('ios-install-banner');
+    if(_b){ try{ localStorage.removeItem('pwa-ios-dismissed'); }catch(e){} _b.style.display='block'; }
+    return;
+  }
   if(!('Notification' in window)){ showToast('This browser does not support notifications','error'); return; }
   if(Notification.permission==='granted'){ showToast('Notifications are already on ✓'); setupPushUI(); return; }
   if(Notification.permission==='denied'){ showToast('Notifications are blocked — turn them back on in your phone’s browser/site settings','error'); return; }
@@ -26840,6 +27117,14 @@ async function askNotificationPermission(){
 function _pushPrefOn(){ try{ return localStorage.getItem('nda_push_pref')!=='0'; }catch(e){ return true; } }
 function renderPushPrefBtn(){
   const btn=document.getElementById('push-pref-btn'); if(!btn) return;
+  // iPhone in a browser tab can never receive push, no matter what permission says - say so
+  // plainly here rather than showing "Off" and letting the driver assume tapping it will fix
+  // things (it can't; only installing to the home screen can).
+  if(_iosNeedsInstallForPush()){
+    btn.innerHTML='🔕 Push notifications · <b style="color:var(--red)">Add to Home Screen first</b>';
+    btn.style.borderColor='var(--light)';
+    return;
+  }
   const supported=('Notification' in window);
   const granted=supported && Notification.permission==='granted';
   const blocked=supported && Notification.permission==='denied';
@@ -26850,6 +27135,9 @@ function renderPushPrefBtn(){
   btn.style.borderColor = on ? 'var(--green)' : 'var(--light)';
 }
 async function togglePushPref(){
+  // Same iOS gate as askNotificationPermission - reached from a different button, must not
+  // silently no-op or claim the browser is unsupported.
+  if(_iosNeedsInstallForPush()){ await askNotificationPermission(); return; }
   const supported=('Notification' in window);
   if(!supported){ showToast('This browser does not support notifications','error'); return; }
   if(Notification.permission==='denied'){ showToast('Notifications are blocked — turn them back on in your phone’s browser/site settings','error'); return; }
@@ -26922,6 +27210,97 @@ function setupFCMForeground(){
 // so tapping the notification deep-links straight to the right place, using the exact same
 // notifRoute()/fireLocalNotification() machinery the backend-free notification path already
 // uses correctly. Omit it and the push behaves exactly as before (title/body only).
+// Walks the ENTIRE push chain on the driver's own device and reports exactly which step is
+// failing, in plain language (v843). Chase reported iPhone drivers not receiving push even
+// though they ARE running the installed home-screen app, which rules out the iOS install
+// requirement handled in v842. Every remaining failure point in registerFcmToken() is a
+// silent `console.warn` a driver can never see - no VAPID key, service worker registration
+// refused, getToken() rejected, no driver profile linked, or a token that was never actually
+// stored. This surfaces all of them at once rather than guessing at one at a time, and gives
+// Chase something concrete to act on when a driver reports it.
+async function runPushDiagnostic(){
+  var lines = [];
+  var verdict = '';
+  try{
+    // 1. Platform / install state
+    var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent)
+             || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+    var standalone = (window.navigator.standalone === true)
+                  || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    lines.push((isIOS?'iPhone/iPad':'Android/Desktop') + ' \u00b7 ' + (standalone?'installed app \u2713':'browser tab'));
+    if(isIOS && !standalone) verdict = verdict || 'Open the app from your home screen icon, not Safari.';
+
+    // 2. Permission
+    var perm = ('Notification' in window) ? Notification.permission : 'unsupported';
+    lines.push('Permission: ' + perm + (perm==='granted'?' \u2713':''));
+    if(perm==='denied') verdict = verdict || 'Notifications are blocked in your phone settings for this app \u2014 turn them back on there.';
+    if(perm==='default') verdict = verdict || 'Notifications were never turned on \u2014 tap the Push notifications button above.';
+
+    // 3. Driver profile - the token is stored under this name, so no name means no delivery
+    var drv = (typeof getMyDriverName==='function') ? getMyDriverName() : '';
+    lines.push('Driver profile: ' + (drv ? drv+' \u2713' : 'NOT LINKED'));
+    if(!drv) verdict = verdict || 'Your login isn\u2019t linked to a driver profile, so there\u2019s nowhere to send notifications. Ask an admin to link it.';
+
+    // 4. VAPID key present in this build
+    var vapidOk = (typeof VAPID_KEY!=='undefined') && VAPID_KEY && VAPID_KEY.indexOf('PASTE_')!==0;
+    lines.push('Push key: ' + (vapidOk?'present \u2713':'MISSING'));
+    if(!vapidOk) verdict = verdict || 'The app\u2019s push key is missing \u2014 this is a setup problem on our end, not yours.';
+
+    // 5. Service worker actually registered
+    var swOk = false;
+    try{
+      if(navigator.serviceWorker){
+        var regs = await navigator.serviceWorker.getRegistrations();
+        swOk = regs.some(function(r){ return r.active; });
+        lines.push('Background service: ' + (swOk? regs.length+' registered \u2713' : 'NONE ACTIVE'));
+      } else { lines.push('Background service: not supported'); }
+    }catch(e){ lines.push('Background service: check failed'); }
+
+    // 6. The actual token - the thing that decides whether a push can reach this device at all
+    var tokenOk = false;
+    try{
+      if(typeof firebase!=='undefined' && firebase.messaging && vapidOk && perm==='granted'){
+        var reg = await navigator.serviceWorker.register('firebase-messaging-sw.js', { scope: 'firebase-cloud-messaging-push-scope' });
+        var tok = await firebase.messaging().getToken({ vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
+        tokenOk = !!tok;
+        lines.push('Device token: ' + (tok ? 'issued \u2713 (\u2026'+String(tok).slice(-8)+')' : 'NOT ISSUED'));
+        if(tok && drv){
+          // Re-store it: if the token had silently expired or was never saved, this repairs it.
+          try{
+            var _dev=(typeof getDeviceKey==='function')?getDeviceKey():'';
+            if(_dev){ await storageSet('kat:fcmTokens/'+drv+'/'+_dev, tok); lines.push('Saved to your profile \u2713'); }
+          }catch(e){ lines.push('Could not save token: '+e.message); }
+        }
+      } else {
+        lines.push('Device token: skipped (earlier step failed)');
+      }
+    }catch(e){
+      lines.push('Device token: FAILED \u2014 '+(e && e.message ? e.message : 'unknown'));
+      verdict = verdict || 'This device couldn\u2019t register for notifications. Screenshot this and send it to Chase.';
+    }
+
+    if(!verdict) verdict = tokenOk
+      ? 'Everything looks correct on this device. If notifications still don\u2019t arrive, the problem is on the sending side \u2014 send Chase this screenshot.'
+      : 'Something went wrong above \u2014 send Chase this screenshot.';
+  }catch(e){
+    lines.push('Diagnostic itself failed: '+(e && e.message ? e.message : 'unknown'));
+    verdict = 'Send Chase this screenshot.';
+  }
+
+  var ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:14500;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:380px;width:100%;padding:1.25rem;box-shadow:0 24px 60px rgba(0,0,0,.4);">'
+    +'<div style="font-size:1.05rem;font-weight:800;color:#0f172a;margin-bottom:.6rem;">\uD83E\uDE7A Notification check</div>'
+    +'<div style="font-family:monospace;font-size:.74rem;line-height:1.7;color:#334155;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:.6rem .7rem;margin-bottom:.75rem;">'
+    + lines.map(function(l){ return escHtml(l); }).join('<br>')
+    +'</div>'
+    +'<div style="font-size:.85rem;line-height:1.5;color:#0f172a;font-weight:600;margin-bottom:1rem;">'+escHtml(verdict)+'</div>'
+    +'<button onclick="this.closest(\'div\').parentElement.remove()" style="width:100%;padding:.7rem;background:var(--gold);color:#fff;border:none;border-radius:9px;font-family:inherit;font-size:.9rem;font-weight:700;cursor:pointer;">Close</button>'
+    +'</div>';
+  document.body.appendChild(ov);
+}
+
 async function sendPushToDriver(driverName, title, body, navData){
   if(!fbDB || !driverName) return;
   // Never push to the person who triggered the action.
@@ -27492,8 +27871,8 @@ initApp();
   <button onclick="document.getElementById('notif-perm-banner').style.display='none';localStorage.setItem('notif-perm-dismissed','1');" style="padding:8px 12px;background:none;color:#9c7bbf;border:1px solid #4a2d6e;border-radius:8px;font-size:13px;cursor:pointer;">Not now</button>
 </div>
 <div id="ios-install-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#1a0d2e;border-top:2px solid #7c3aed;padding:14px 16px;z-index:500;text-align:center;">
-  <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:4px;">Install on iPhone</div>
-  <div style="font-size:12px;color:#9c7bbf;margin-bottom:10px;">Tap <strong style="color:#fff;">Share</strong> (the box with arrow ↑) then <strong style="color:#fff;">Add to Home Screen</strong></div>
+  <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:4px;">Install on iPhone — required for notifications</div>
+  <div style="font-size:12px;color:#9c7bbf;margin-bottom:10px;">Tap <strong style="color:#fff;">Share</strong> (the box with arrow ↑) then <strong style="color:#fff;">Add to Home Screen</strong>. Apple only allows push notifications once the app is on your home screen.</div>
   <button onclick="showInstallHelp()" style="padding:6px 16px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;margin-right:6px;">Show me how</button><button onclick="document.getElementById('ios-install-banner').style.display='none';localStorage.setItem('pwa-ios-dismissed','1');" style="padding:6px 16px;background:none;color:#9c7bbf;border:1px solid #4a2d6e;border-radius:8px;font-size:12px;cursor:pointer;">Got it</button>
 </div>
 

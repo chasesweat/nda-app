@@ -4,6 +4,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Book a Ride</title>
+<!-- Home-screen install support (v839). Deliberately NOT a static manifest.json file: a
+     manifest's start_url is fixed at write time, so every client who installed it would get
+     the same generic booking form, silently losing the personal token that prefills their own
+     name, phone, and saved addresses (and which is the whole point of a personalized link).
+     Instead the manifest is built at runtime from the CURRENT url, token included, and handed
+     to the browser as a blob - so what gets saved to a client's home screen is THEIR link, not
+     a shared one. See _buildDynamicManifest() at the bottom of this file. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Book a Ride">
+<meta name="theme-color" content="#1a0d2e">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
   :root{
     --black:#1a0d2e; --white:#fdfcff; --gold:#7c3aed; --gold-pale:#f3eeff;
@@ -175,6 +187,15 @@
       <div class="h1" id="form-title">Schedule a ride</div>
       <div class="h1-sub" id="form-sub">Fill in what you know — your driver confirms everything.</div>
 
+      <!-- Contact details first (v848). These are the two things the driver genuinely cannot
+           work without, and asking a client their own name and number is the lowest-friction
+           way to open a form - it was previously below trip type and vehicle preference, so an
+           optional preference was being asked before the essentials. -->
+      <div class="section-lbl">Your details</div>
+      <div class="field"><label>Your name</label><input id="f-name" placeholder="e.g. Taylor Morgan"></div>
+      <div class="field"><label>Phone number</label><input id="f-phone" type="tel" placeholder="(770) 555-0134"></div>
+      <div class="field"><label>Email (optional)</label><input id="f-email" type="email" placeholder="you@example.com"></div>
+
       <!-- Trip type drives which fields below are relevant, exactly as it does on the app's own
            Quote page. The VALUES are the app's own strings (AP RUN, ROUND TRIP, ...) so a request
            maps straight onto a real ride without anyone re-typing or translating it. -->
@@ -202,47 +223,83 @@
         <div class="hint">Your driver confirms what's available.</div>
       </div>
 
-      <div class="field"><label>Phone number</label><input id="f-phone" type="tel" placeholder="(770) 555-0134"></div>
-      <div class="field"><label>Your name</label><input id="f-name" placeholder="e.g. Taylor Morgan"></div>
-      <div class="field"><label>Email (optional)</label><input id="f-email" type="email" placeholder="you@example.com"></div>
-
-      <div class="row2" id="datetime-row">
-        <div class="field" id="date-field"><label>Date</label><input id="f-date" type="date"></div>
-        <div class="field" id="time-field"><label>Time</label><input id="f-time" type="time"></div>
-      </div>
-
-      <!-- Return leg: only meaningful on the two round-trip types. -->
-      <div id="return-block" style="display:none;">
-        <div class="section-lbl">Return trip</div>
-        <div class="row2">
-          <div class="field"><label>Return date</label><input id="f-rt-date" type="date"></div>
-          <div class="field"><label>Return time</label><input id="f-rt-time" type="time"></div>
+      <!-- ── LEG 1: LEAVING ──────────────────────────────────────────────────────────
+           Restructured (v848) so each leg of a round trip is a self-contained block: its own
+           date, its own addresses, its own terminal. Previously the outbound date/time sat
+           under a generic "Date / Time" label, then the return block appeared several fields
+           later - nothing told a client which pair was which. Now the outbound is explicitly
+           "leaving" and the return explicitly "arriving".
+           No PICKUP time is asked for on this leg: the driver's app calculates it backward from
+           the flight's departure time (terminal buffer + real drive time + rush-hour), so
+           asking the client to guess it would only introduce a number the app then overrides. -->
+      <div id="leg-out-block">
+        <div class="section-lbl" id="leg-out-lbl">Leaving</div>
+        <div class="field" id="date-field"><label id="date-lbl">Date leaving</label><input id="f-date" type="date"></div>
+        <!-- The flight's OWN departure time, not a pickup time - this is the number the app's
+             suggested-pickup calculation works backward from. Optional: a client who doesn't
+             have it to hand can still submit, the driver just confirms it later. -->
+        <div class="field" id="dep-time-field"><label>What time does your flight leave? <span style="font-weight:600;color:var(--mid);font-size:.78rem;">(optional)</span></label><input id="f-time" type="time">
+          <div class="hint">Your driver works out your pickup time from this — you don't need to.</div>
+        </div>
+        <div class="field">
+          <label id="pickup-lbl">Pickup</label>
+          <!-- Populated only when this link resolves to an established client with saved
+               addresses (see the "t" token param in init()) - hidden entirely otherwise, so a
+               first-time client seeing this page from the generic link sees exactly what they
+               always have: a plain address field, nothing extra to explain. -->
+          <select id="f-pickup-saved" style="display:none;margin-bottom:.4rem;" onchange="_onSavedAddrChange('pickup')"></select>
+          <input id="f-pickup" placeholder="Address or airport terminal">
+        </div>
+        <div class="field" id="dest-field">
+          <label id="dest-lbl">Where to</label>
+          <select id="f-dest-saved" style="display:none;margin-bottom:.4rem;" onchange="_onSavedAddrChange('dest')"></select>
+          <input id="f-dest" placeholder="Destination">
+        </div>
+        <!-- Airline-first terminal wording (v848). Clients know which airline they're flying;
+             they very often do not know that Delta domestic means the South terminal. The
+             VALUES are still the app's own terminal strings, so nothing downstream changes -
+             only what the client reads. -->
+        <div class="field" id="terminal-field" style="display:none;">
+          <label id="terminal-lbl">Which airline / terminal?</label>
+          <select id="f-terminal">
+            <option value="">Not sure</option>
+            <option value="South Domestic">Delta — domestic</option>
+            <option value="International">Delta — international</option>
+            <option value="North Domestic">Other airline — domestic</option>
+            <option value="International">Other airline — international</option>
+          </select>
+          <div class="hint">If you're not sure, leave this and your driver will confirm.</div>
         </div>
       </div>
 
-      <!-- Flight details: only meaningful on the three airport types. -->
-      <div id="flight-block" style="display:none;">
-        <div class="section-lbl">Flight details</div>
-        <div class="field"><label>Flight #</label><input id="f-flight" placeholder="e.g. DL1234"></div>
-        <div class="field" id="rt-flight-field" style="display:none;"><label>Return flight # (optional)</label><input id="f-rt-flight" placeholder="e.g. DL5678"></div>
-      </div>
-
-      <div class="field"><label id="pickup-lbl">Pickup</label><input id="f-pickup" placeholder="Address or airport terminal"></div>
-      <div class="field"><label id="dest-lbl">Where to</label><input id="f-dest" placeholder="Destination"></div>
-      <!-- Terminal sits directly under the address fields, matching the app's Quote and Schedule
-           forms after v767. On the app the terminal AUTO-FILLS the airport address; here the
-           client types the address themselves, so the terminal's job is to tell the driver which
-           one they mean - which only makes sense read next to the address, not several fields up
-           under Flight #. -->
-      <div class="field" id="terminal-field" style="display:none;">
-        <label>Terminal</label>
-        <select id="f-terminal">
-          <option value="">Not sure</option>
-          <option>North Domestic</option>
-          <option>South Domestic</option>
-          <option>International</option>
-        </select>
-        <div class="hint">If you're not sure, leave this and your driver will confirm.</div>
+      <!-- ── LEG 2: ARRIVING ─────────────────────────────────────────────────────────
+           Only shown for the two round-trip types. The time asked for here is the FLIGHT'S
+           ARRIVAL time, not a pickup time - for a pickup the driver needs to know when the
+           plane lands, which is the one time only the client can supply. -->
+      <div id="return-block" style="display:none;">
+        <div class="section-lbl">Coming back</div>
+        <div class="field"><label>Date arriving</label><input id="f-rt-date" type="date"></div>
+        <div class="field"><label>What time does your flight land?</label><input id="f-rt-time" type="time"></div>
+        <div class="field" id="rt-flight-field"><label>Return flight # <span style="font-weight:600;color:var(--mid);font-size:.78rem;">(optional)</span></label><input id="f-rt-flight" placeholder="e.g. DL5678">
+          <div class="hint">Lets your driver track your flight and adjust for delays.</div>
+        </div>
+        <!-- Terminals differ per leg far more often than clients expect - flying out of one and
+             back into another is routine. Asked separately, with a "same" shortcut so the common
+             case is still one tap. -->
+        <div class="field" id="rt-terminal-field">
+          <label>Which airline / terminal coming back?</label>
+          <label style="display:flex;align-items:center;gap:.5rem;font-weight:600;font-size:.85rem;margin-bottom:.45rem;cursor:pointer;">
+            <input type="checkbox" id="f-rt-terminal-same" checked onchange="_onRtTerminalSameChange()" style="width:16px;height:16px;cursor:pointer;">
+            Same as when I left
+          </label>
+          <select id="f-rt-terminal" style="display:none;">
+            <option value="">Not sure</option>
+            <option value="South Domestic">Delta — domestic</option>
+            <option value="International">Delta — international</option>
+            <option value="North Domestic">Other airline — domestic</option>
+            <option value="International">Other airline — international</option>
+          </select>
+        </div>
       </div>
 
       <div class="section-lbl">Who and what's coming</div>
@@ -294,6 +351,10 @@ let driverLogin = '';
 let driverInfo = null;
 let requestType = 'schedule';
 let tripType = 'AP ROUND TRIP';
+// Set only when a valid per-client booking token resolves (see init()) - clientKeyFromToken
+// is what an actual address save gets attached to; savedAddresses drives the dropdown UI.
+let clientKeyFromToken = '';
+let savedAddresses = [];
 
 // Which fields matter depends on the trip type, the same way it does on the app's Quote page.
 // Showing a client "Flight #" on a one-way across town, or a return date on a one-way, is how a
@@ -313,15 +374,51 @@ function applyTypeVisibility(){
   const isAir    = AIRPORT_TYPES.indexOf(tripType) >= 0;
   const isReturn = RETURN_TYPES.indexOf(tripType) >= 0;
   const isQuote  = requestType === 'quote';
+  const isPickup = tripType === 'AP PICK UP';
 
-  document.getElementById('flight-block').style.display  = isAir ? 'block' : 'none';
-  // Terminal lives beside the address now rather than inside flight-block, so it is toggled
-  // separately. Same condition - it is only meaningful on an airport trip.
-  document.getElementById('terminal-field').style.display = isAir ? 'block' : 'none';
-  document.getElementById('rt-flight-field').style.display = (isAir && isReturn) ? 'block' : 'none';
-  // A quote doesn't need dates at all, so the return block follows the same rule as the main one.
-  document.getElementById('return-block').style.display  = (isReturn && !isQuote) ? 'block' : 'none';
-  document.getElementById('datetime-row').style.display  = isQuote ? 'none' : 'flex';
+  const show = function(id, on, mode){ var el=document.getElementById(id); if(el) el.style.display = on ? (mode||'block') : 'none'; };
+
+  show('terminal-field', isAir);
+  show('return-block', isReturn && !isQuote);
+  show('date-field', !isQuote);
+  show('dep-time-field', !isQuote);
+
+  // Wording per leg and per trip type (v848).
+  const dateLbl = document.getElementById('date-lbl');
+  const legLbl  = document.getElementById('leg-out-lbl');
+  const termLbl = document.getElementById('terminal-lbl');
+  const depTimeLbl = document.querySelector('#dep-time-field label');
+  const depTimeHint = document.querySelector('#dep-time-field .hint');
+
+  if(isPickup){
+    // A single arriving leg. The time that matters is when the plane LANDS - the one piece of
+    // timing only the client can supply, and the thing the driver plans around.
+    if(legLbl)  legLbl.textContent  = 'Your flight';
+    if(dateLbl) dateLbl.textContent = 'Date arriving';
+    if(depTimeLbl) depTimeLbl.innerHTML = 'What time does your flight land?';
+    if(depTimeHint) depTimeHint.textContent = 'So your driver knows when to be there.';
+    if(termLbl) termLbl.textContent = 'Which airline / terminal are you arriving into?';
+  } else if(tripType === 'AP RUN'){
+    if(legLbl)  legLbl.textContent  = 'Leaving';
+    if(dateLbl) dateLbl.textContent = 'Date leaving';
+    if(depTimeLbl) depTimeLbl.innerHTML = 'What time does your flight leave? <span style="font-weight:600;color:var(--mid);font-size:.78rem;">(optional)</span>';
+    if(depTimeHint) depTimeHint.textContent = 'Your driver works out your pickup time from this — you don\u2019t need to.';
+    if(termLbl) termLbl.textContent = 'Which airline / terminal?';
+  } else if(tripType === 'AP ROUND TRIP'){
+    if(legLbl)  legLbl.textContent  = 'Flying out';
+    if(dateLbl) dateLbl.textContent = 'Date leaving';
+    if(depTimeLbl) depTimeLbl.innerHTML = 'What time does your flight leave? <span style="font-weight:600;color:var(--mid);font-size:.78rem;">(optional)</span>';
+    if(depTimeHint) depTimeHint.textContent = 'Your driver works out your pickup time from this — you don\u2019t need to.';
+    if(termLbl) termLbl.textContent = 'Which airline / terminal flying out?';
+  } else {
+    // Non-airport types: plain wording, and the time IS the pickup time since there's no flight
+    // to work backward from.
+    if(legLbl)  legLbl.textContent  = 'When';
+    if(dateLbl) dateLbl.textContent = 'Date';
+    if(depTimeLbl) depTimeLbl.innerHTML = 'Pickup time';
+    if(depTimeHint) depTimeHint.textContent = '';
+    if(termLbl) termLbl.textContent = 'Which airline / terminal?';
+  }
 
   // Name the two address fields for the direction actually being travelled. "Pickup / Where to"
   // is ambiguous on an airport run — clients routinely put the airport in the wrong one.
@@ -331,6 +428,16 @@ function applyTypeVisibility(){
   else if(tripType === 'AP PICK UP'){ pu.textContent = 'Which airport';   de.textContent = 'Drop-off address'; }
   else if(tripType === 'AP ROUND TRIP'){ pu.textContent = 'Home address'; de.textContent = 'Which airport'; }
   else {                            pu.textContent = 'Pickup';            de.textContent = 'Where to'; }
+}
+
+// The "same as when I left" shortcut on the return terminal (v848). Checked by default because
+// it IS the common case; unchecking reveals a full picker rather than forcing every client to
+// answer a question most of them would answer identically twice.
+function _onRtTerminalSameChange(){
+  var cb  = document.getElementById('f-rt-terminal-same');
+  var sel = document.getElementById('f-rt-terminal');
+  if(!cb || !sel) return;
+  sel.style.display = cb.checked ? 'none' : 'block';
 }
 
 function goScreen(id){
@@ -343,6 +450,7 @@ function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,
 async function init(){
   const params = new URLSearchParams(location.search);
   driverLogin = (params.get('d')||'').trim().toLowerCase();
+  const bookingToken = (params.get('t')||'').trim();
   if(!driverLogin){ goScreen('s-invalid'); return; }
 
   try{
@@ -365,8 +473,182 @@ async function init(){
     return;
   }
 
+  // Personalized per-client link (see bookingLinkForClient() in the main app) - prefills this
+  // established client's own saved name/phone/email and offers their saved addresses as a
+  // dropdown. Checking loginName matches driverLogin means a token can't be replayed against
+  // a different driver's "d" param. A missing, invalid, or mismatched token just means no
+  // prefill - the form still works exactly like the generic link either way, since the token
+  // is purely additive convenience, never something the booking flow depends on.
+  if(bookingToken){
+    try{
+      const tSnap = await fbDB.ref('nda/kat/bookingLinkTokens/'+bookingToken).once('value');
+      if(tSnap.exists()){
+        const t = tSnap.val()||{};
+        if((t.loginName||'').toLowerCase() === driverLogin){
+          clientKeyFromToken = t.clientKey || '';
+          if(t.clientName)  document.getElementById('f-name').value  = t.clientName;
+          if(t.clientPhone) document.getElementById('f-phone').value = t.clientPhone;
+          if(t.clientEmail) document.getElementById('f-email').value = t.clientEmail;
+          // Brand the whole page (and the installed home-screen icon) to the CLIENT'S OWNER
+          // rather than whoever sent the link (v844). If Morgan sends a booking link to one of
+          // Kat's clients, that client's relationship is with Kat's business - so the logo,
+          // business name, and accent color should be Kat's. Overlays driverInfo before
+          // renderBranding() and _buildDynamicManifest() run below, so both the on-page
+          // branding and the saved app icon pick it up with no further changes. Only applied
+          // when the owner actually has their own branding set; otherwise driverInfo keeps
+          // whatever the public directory published for the sending driver, unchanged.
+          if(t.ownerLogo || t.ownerBusinessName || t.ownerLogoAccentColor){
+            driverInfo = Object.assign({}, driverInfo);
+            if(t.ownerLogo)             driverInfo.logo = t.ownerLogo;
+            if(t.ownerBusinessName)     driverInfo.businessName = t.ownerBusinessName;
+            if(t.ownerLogoAccentColor)  driverInfo.logoAccentColor = t.ownerLogoAccentColor;
+            if(t.ownerName)             driverInfo.displayName = t.ownerName;
+          }
+          if(clientKeyFromToken){
+            const aSnap = await fbDB.ref('nda/kat/clientAddresses/'+clientKeyFromToken).once('value');
+            if(aSnap.exists()){
+              const raw = aSnap.val();
+              savedAddresses = typeof raw==='string' ? [{label:'Default',address:raw,isDefault:true}] : (Array.isArray(raw)?raw:[]);
+              _populateSavedAddressDropdowns();
+            }
+          }
+        }
+      }
+    }catch(e){ console.warn('Booking token lookup failed (non-fatal):', e.message); }
+  }
+
   renderBranding();
+  _buildDynamicManifest();
   goScreen('s-action');
+}
+
+// Builds this page's web app manifest at runtime and injects it, so "Add to Home Screen"
+// saves THIS client's personalized link rather than a generic one (v839).
+//
+// A static manifest.json can't do this: its start_url is a fixed string, identical for every
+// visitor, so an installed shortcut would always reopen the plain booking form with no token -
+// dropping the client's prefilled name, phone, and saved addresses without any indication why.
+// Building it here means start_url is literally the URL they're standing on, token and all.
+//
+// Named after the driver where possible ("Book with Kat") rather than a generic label, since
+// this ends up as an icon on a client's home screen next to their other apps - "Book a Ride"
+// alone is meaningless there, and a client may well deal with more than one driver.
+// Builds a proper home-screen icon from the driver's logo (v845).
+//
+// Three real problems with using the raw logo data URL directly, all of which produce a bad
+// or missing icon on a client's phone:
+//   1. Size. Uploaded logos are capped at 300px (see openBusinessLogoUpload in the main app),
+//      but Android wants 512x512 for a home-screen icon. Declaring `sizes: '512x512'` on a
+//      300px image is simply false, and a browser is entitled to reject it outright.
+//   2. Shape. Logos are rarely square. A wide logo declared as square gets squashed, or the
+//      browser skips it.
+//   3. Transparency. Logos are saved as PNG, often with transparent backgrounds - which on a
+//      home screen renders as black or an unpredictable mess depending on the OS.
+//
+// Drawing the logo, centered and aspect-correct, onto an opaque square canvas at the exact
+// declared size fixes all three at once. Falls back to the raw logo if canvas isn't available
+// for any reason - a slightly wrong icon beats no icon.
+function _makeSquareIcon(logoDataUrl, size){
+  return new Promise(function(resolve){
+    try{
+      var img = new Image();
+      img.onload = function(){
+        try{
+          var cv = document.createElement('canvas');
+          cv.width = size; cv.height = size;
+          var ctx = cv.getContext('2d');
+          // Opaque background, so a transparent logo doesn't come out black on the home screen.
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, size, size);
+          // Fit inside ~80% of the square, preserving aspect ratio, centered - the padding
+          // stops the mark from running edge to edge, which is how real app icons are drawn.
+          var pad = size * 0.1;
+          var maxDim = size - (pad * 2);
+          var scale = Math.min(maxDim / img.width, maxDim / img.height);
+          var w = img.width * scale, h = img.height * scale;
+          ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+          resolve(cv.toDataURL('image/png'));
+        }catch(e){ resolve(logoDataUrl); }
+      };
+      img.onerror = function(){ resolve(logoDataUrl); };
+      img.src = logoDataUrl;
+    }catch(e){ resolve(logoDataUrl); }
+  });
+}
+async function _buildDynamicManifest(){
+  try{
+    // Business name first if the driver has one - that's what a client recognizes on their
+    // home screen. Falls back to the driver's own first name, then a generic label.
+    var bizName = (driverInfo && (driverInfo.businessName||'').trim()) || '';
+    var displayName = (driverInfo && (driverInfo.displayName||'').trim()) || '';
+    var firstName = displayName ? displayName.split(' ')[0] : '';
+    var appName = bizName || (firstName ? ('Book with ' + firstName) : 'Book a Ride');
+    var shortName = bizName ? bizName.split(' ')[0] : (firstName || 'Book');
+    var rawLogo = (driverInfo && driverInfo.logo) ? driverInfo.logo : '';
+    var icon180 = rawLogo ? await _makeSquareIcon(rawLogo, 180) : 'apple-touch-icon.png';
+    var icon512 = rawLogo ? await _makeSquareIcon(rawLogo, 512) : 'apple-touch-icon.png';
+    var manifest = {
+      name: appName,
+      short_name: shortName,
+      // The current URL exactly as loaded - this is the whole point of doing it at runtime.
+      start_url: location.href,
+      scope: location.pathname,
+      display: 'standalone',
+      background_color: '#fdfcff',
+      theme_color: '#1a0d2e',
+      icons: [
+        { src: icon180, sizes: '180x180', type: 'image/png', purpose: 'any' },
+        { src: icon512, sizes: '512x512', type: 'image/png', purpose: 'any' },
+        // maskable lets Android crop to whatever shape the launcher uses without clipping the
+        // mark, since the square above already has generous padding built in.
+        { src: icon512, sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+      ]
+    };
+    var blob = new Blob([JSON.stringify(manifest)], {type:'application/manifest+json'});
+    var link = document.createElement('link');
+    link.rel = 'manifest';
+    link.href = URL.createObjectURL(blob);
+    document.head.appendChild(link);
+    // iPhone ignores the manifest's icons entirely and uses <link rel="apple-touch-icon">
+    // instead - without this, an iPhone client's home screen icon would be a blank white
+    // square or a screenshot of the page. Uses the same generated 180px square, not the raw
+    // logo, so it gets the same opaque background and padding treatment.
+    if(rawLogo){
+      var existing = document.querySelector('link[rel="apple-touch-icon"]');
+      if(existing) existing.href = icon180;
+      var t = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+      if(t) t.setAttribute('content', shortName);
+    }
+    // Also update the page title so the suggested name in the "Add to Home Screen" dialog
+    // is the driver's business, not the generic "Book a Ride" this page loads with.
+    try{ document.title = appName; }catch(_e){}
+  }catch(e){ console.warn('manifest build failed (non-fatal - page still works normally):', e); }
+}
+
+// Fills both saved-address dropdowns (pickup and destination use the same saved list - a
+// client's "Home" is just as likely to be where they're going as where they're coming from).
+// Hidden entirely when there's nothing to show, same as the fields already were before this.
+function _populateSavedAddressDropdowns(){
+  if(!savedAddresses.length) return;
+  const opts = savedAddresses.map(function(a,i){
+    return '<option value="'+i+'">'+esc(a.label||'Saved address')+' \u2014 '+esc(a.address||'')+'</option>';
+  }).join('') + '<option value="other">Other (enter a new address)</option>';
+  ['pickup','dest'].forEach(function(which){
+    const sel = document.getElementById('f-'+which+'-saved');
+    sel.innerHTML = '<option value="" selected disabled>Choose a saved address\u2026</option>' + opts;
+    sel.style.display = '';
+  });
+}
+
+// A saved address selected -> fill the real text field with it (still editable, in case it
+// needs a small tweak for this one trip). "Other" selected -> clear the field and let them type
+// a fresh one; that new text is what _checkNewAddress() below offers to save as a new default.
+function _onSavedAddrChange(which){
+  const sel = document.getElementById('f-'+which+'-saved');
+  const input = document.getElementById('f-'+which);
+  if(sel.value === 'other'){ input.value = ''; input.focus(); return; }
+  const idx = parseInt(sel.value,10);
+  if(!isNaN(idx) && savedAddresses[idx]) input.value = savedAddresses[idx].address || '';
 }
 
 // Pulls a two-color header theme straight out of the driver's own logo pixels: the darkest
@@ -579,6 +861,38 @@ function showFormError(msg){
   el.style.display = 'block';
 }
 
+// Styled replacement for a native confirm() - matches the rest of this page's look instead of
+// a jarring browser-default dialog. Returns a Promise<boolean> so submitRequest() can just
+// await it the same way it would a confirm() call, just nicer to look at.
+function _confirmAddressOverlay(address, fieldLabel){
+  return new Promise(function(resolve){
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(26,13,46,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+    ov.innerHTML =
+        '<div style="background:var(--white);border-radius:18px;max-width:360px;width:100%;padding:1.5rem 1.35rem;box-shadow:0 24px 60px rgba(0,0,0,.35);text-align:center;">'
+      + '<div style="font-size:1.9rem;margin-bottom:.5rem;">\ud83d\udccd</div>'
+      + '<div style="font-size:1.03rem;font-weight:800;color:var(--black);margin-bottom:.5rem;">Save as your new '+esc(fieldLabel)+' address?</div>'
+      + '<div style="font-size:.85rem;color:var(--mid);line-height:1.5;background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.7rem .85rem;margin-bottom:1.2rem;">'+esc(address)+'</div>'
+      + '<button id="_addr-ov-yes" class="btn-primary" style="margin-top:0;">Yes, save this</button>'
+      + '<button id="_addr-ov-no" class="btn-ghost" style="margin-top:.4rem;">No, just for this trip</button>'
+      + '</div>';
+    document.body.appendChild(ov);
+    var close = function(answer){ document.body.removeChild(ov); resolve(answer); };
+    document.getElementById('_addr-ov-yes').onclick = function(){ close(true); };
+    document.getElementById('_addr-ov-no').onclick = function(){ close(false); };
+  });
+}
+
+// True only when this address is genuinely different from everything already saved for this
+// client - comparison is trimmed/case-insensitive so "123 Main St" and "123 main st" don't
+// both look "new." Always false when there's no token (no established client to compare
+// against) or no saved addresses yet (nothing to offer as an alternative to save alongside).
+function _isNewAddress(addr){
+  if(!addr || !clientKeyFromToken || !savedAddresses.length) return false;
+  var norm = addr.trim().toLowerCase();
+  return !savedAddresses.some(function(a){ return (a.address||'').trim().toLowerCase()===norm; });
+}
+
 async function submitRequest(){
   const name = document.getElementById('f-name').value.trim();
   const phone = document.getElementById('f-phone').value.trim();
@@ -589,11 +903,21 @@ async function submitRequest(){
   const notes = document.getElementById('f-notes').value.trim();
   const email = document.getElementById('f-email').value.trim();
   const vehicle = document.getElementById('f-vehicle').value;
-  const flight = document.getElementById('f-flight').value.trim();
+  // The departing flight number field is gone (v848) - a flight number's only real use is
+  // tracking an ARRIVAL for delays, which never applies to a leg the client is departing on.
+  // Kept as an empty string so the request record's shape is unchanged for everything
+  // downstream that reads it.
+  const flight = '';
   const terminal = document.getElementById('f-terminal').value;
   const rtFlight = document.getElementById('f-rt-flight').value.trim();
   const rtDate = document.getElementById('f-rt-date').value;
   const rtTime = document.getElementById('f-rt-time').value;
+  // Return terminal: the "same as when I left" box means literally that - reuse the outbound
+  // value rather than sending blank, so the driver gets a real answer either way.
+  const _rtSameEl = document.getElementById('f-rt-terminal-same');
+  const rtTerminal = (_rtSameEl && _rtSameEl.checked)
+    ? terminal
+    : (document.getElementById('f-rt-terminal') || {}).value || '';
   const pax = parseInt(document.getElementById('f-pax').value) || 1;
   const checkedBags = parseInt(document.getElementById('f-checked').value) || 0;
   const carryOnBags = parseInt(document.getElementById('f-carryon').value) || 0;
@@ -602,6 +926,20 @@ async function submitRequest(){
 
   if(!name || !phone){ showFormError('Please enter your name and phone number.'); return; }
   document.getElementById('form-error').style.display = 'none';
+
+  // Established client (has a token) typed something that doesn't match any of their saved
+  // addresses - ask before saving anything, and only save what they actually confirm. Never
+  // writes to their saved addresses directly from this page; the answer just rides along on
+  // the request record below, and the driver's own app is what actually applies it (see
+  // _applyClientBookingRequestSideEffects in the main app) - the same trusted write path every
+  // other piece of this request already goes through, not a new one just for this.
+  var newAddressesToSave = [];
+  if(pickup && _isNewAddress(pickup) && await _confirmAddressOverlay(pickup, 'pickup')){
+    newAddressesToSave.push({ field:'pickup', address:pickup });
+  }
+  if(dest && _isNewAddress(dest) && await _confirmAddressOverlay(dest, 'destination')){
+    newAddressesToSave.push({ field:'destination', address:dest });
+  }
 
   const btn = document.getElementById('submit-btn');
   btn.disabled = true; btn.textContent = 'Sending\u2026';
@@ -618,6 +956,8 @@ async function submitRequest(){
     clientName: name,
     clientPhone: phone,
     clientEmail: email,
+    clientKey: clientKeyFromToken || '',
+    newAddressesToSave: newAddressesToSave,
     type: tripType,
     vehicle: vehicle,
     pickup: pickup,
@@ -629,6 +969,7 @@ async function submitRequest(){
     flight: isAir ? flight : '',
     terminal: isAir ? terminal : '',
     rtFlight: (isAir && isRet) ? rtFlight : '',
+    rtTerminal: (isAir && isRet) ? rtTerminal : '',
     pax: pax,
     checkedBags: checkedBags,
     carryOnBags: carryOnBags,
