@@ -13,6 +13,9 @@ firebase.initializeApp({
   appId: "1:585911670194:web:746a9fa4d97a9171cc40ab"
 });
 
+// Still initialized: getToken() in index.html passes this registration to the SDK, so the
+// messaging instance needs to exist here for tokens to be issued at all. What changed is that
+// DISPLAY no longer goes through the SDK's onBackgroundMessage - see the push listener below.
 const messaging = firebase.messaging();
 
 // Take over immediately on install/activate — without this, a fix to this file (like the
@@ -21,16 +24,67 @@ const messaging = firebase.messaging();
 self.addEventListener('install', function (e) { self.skipWaiting(); });
 self.addEventListener('activate', function (e) { e.waitUntil(self.clients.claim()); });
 
-// Data-only messages arrive here when the app is backgrounded/closed.
-messaging.onBackgroundMessage(function (payload) {
-  const d = payload.data || {};
-  const n = payload.notification || {};
-  self.registration.showNotification(n.title || d.title || 'Northwest Drivers', {
-    body: n.body || d.body || '',
-    icon: 'icon-192.png',
-    badge: 'badge-monochrome.png',
-    tag: 'nda-' + Date.now()
-  });
+// ─────────────────────────────────────────────────────────────────────────────
+// WHY THIS IS A RAW `push` LISTENER AND NOT messaging.onBackgroundMessage()
+//
+// Reported: iPhone drivers receive nothing, while the send side is provably healthy - the
+// sendPush Cloud Function runs clean on every invocation, and the affected driver (Kathleen)
+// has a valid device token stored. So the message reaches the phone; it just never becomes a
+// visible notification.
+//
+// iOS is far stricter than Android here: every push event MUST result in a visible
+// notification, and showNotification() must be registered inside the push event's
+// waitUntil() so WebKit can see the promise before the event settles. If it doesn't, iOS
+// treats the push as "silent" - it drops it, and after a few of those Safari REVOKES the
+// site's push permission entirely, which is why this tends to get worse over time rather
+// than failing cleanly from day one.
+//
+// The SDK's onBackgroundMessage() is a wrapper over this same push event, and it does not
+// give the callback access to the event - so there is no way to waitUntil() from inside it.
+// That's a known cause of exactly this symptom on iOS (firebase-js-sdk issue #8010). Handling
+// the raw event directly is the only way to guarantee the notification is displayed within
+// the event's lifetime.
+//
+// Deliberately does NOT register onBackgroundMessage as well: both would fire for the same
+// push and show it twice on Android. The tag below is a second line of defence for that.
+// ─────────────────────────────────────────────────────────────────────────────
+self.addEventListener('push', function (event) {
+  let title = 'Northwest Drivers';
+  let body = '';
+
+  try {
+    if (event.data) {
+      const payload = event.data.json();
+      // sendPush sends data-only, but read notification too so this keeps working if the
+      // server side is ever changed to include one.
+      const d = payload.data || {};
+      const n = payload.notification || {};
+      title = n.title || d.title || title;
+      body  = n.body  || d.body  || body;
+    }
+  } catch (err) {
+    // A malformed or non-JSON payload must NOT stop us showing something - a generic
+    // notification is recoverable, a silent push on iOS costs the permission.
+  }
+
+  // Tag derived from the message content, not a timestamp. Two DIFFERENT messages get
+  // different tags and both display (a driver assigned two rides sees two alerts). The same
+  // message arriving twice collapses into one, so a duplicate can never reach the user even
+  // if something upstream sends it twice. A timestamp tag - as this file used before - makes
+  // every notification unique and so can never dedupe anything.
+  const tag = 'nda-' + String(title + '|' + body).replace(/\s+/g, '-').slice(0, 60);
+
+  // waitUntil is the whole point: it tells iOS a notification is on its way, and keeps the
+  // service worker alive until showNotification actually resolves.
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: body,
+      icon: 'icon-192.png',
+      badge: 'badge-monochrome.png',
+      tag: tag,
+      renotify: true
+    })
+  );
 });
 
 // Tapping the notification focuses (or opens) the app.
