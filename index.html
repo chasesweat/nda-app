@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608141854">
+<meta name="version" content="202608141855">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1167,23 +1167,23 @@ input,select,textarea{font-size:16px;}
             <div id="rm-closest-drivers"></div>
           </div>
           <div id="rm-quickfee-wrap"></div>
+          <!-- Danger zone (v855) - moved INSIDE the dispatch panel at Chase's request, since
+               anyone who can see these tools is already creator/admin/assigned-driver.
+               CRITICAL: this stays its own independently-gated block, NOT nested inside
+               .rm-exp-body. Cancel Ride's real permission (canAssignOnRide OR being the
+               assigned driver, on a ride of ANY status - see line ~8629) is wider than
+               canAssignOnRide alone, which gates the collapsible body. Nesting it in there
+               would silently strip Cancel Ride from an assigned driver on a not-yet-confirmed
+               ride, since a hidden parent hides everything inside it regardless of the child's
+               own display. Broadening the collapsible's gate instead would wrongly expose Find
+               Closest Drivers to that same driver. Sitting here - visually inside the panel,
+               structurally a sibling of the body - gets what Chase asked for without either
+               regression. -->
+          <div id="rm-danger-zone" style="display:flex;gap:.5rem;margin-top:.75rem;padding-top:.7rem;border-top:1.5px solid var(--light);">
+            <button id="rm-delete-btn" class="btn-danger" onclick="deleteRide(activeRideId)" style="flex:1;background:#dc2626;color:#fff;font-weight:800;padding:.6rem .5rem;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;cursor:pointer;">🗑️ Delete Ride</button>
+            <button id="rm-cancelride-btn" class="btn-secondary" onclick="cancelRide(activeRideId)" style="flex:1;background:#b03a2e;display:none;color:#fff;font-weight:800;transition:none;padding:.6rem .5rem;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;cursor:pointer;">🚫 Cancel Ride</button>
+          </div>
         </div>
-      </div>
-      <!-- Delete/Cancel deliberately sit OUTSIDE .rm-exp-body, as their own independently-
-           gated sibling, not nested inside the collapsible toggle above. Cancel Ride's real
-           permission (any assigned driver, on a ride of ANY status) is wider than
-           canAssignOnRide (which gates the collapsible itself, and stays scoped to confirmed+
-           on purpose - see canAssignOnRide's own comment). Nesting Delete/Cancel inside the
-           collapsible would have meant one of two regressions: either an assigned driver on a
-           not-yet-confirmed ride loses Cancel Ride entirely (parent hidden hides everything
-           inside it, no exception), or broadening the collapsible's own gate to cover that case
-           would improperly expose Find Closest Drivers (which has no gate of its own - it
-           relies entirely on the collapsible's) to that same driver before they're supposed to
-           have it. A visually-adjacent sibling gets the decluttering without either regression.
-      -->
-      <div id="rm-danger-zone" style="display:flex;gap:.5rem;margin-top:.5rem;">
-        <button id="rm-delete-btn" class="btn-danger" onclick="deleteRide(activeRideId)" style="flex:1;background:#dc2626;color:#fff;font-weight:800;padding:.6rem .5rem;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;cursor:pointer;">🗑️ Delete Ride</button>
-        <button id="rm-cancelride-btn" class="btn-secondary" onclick="cancelRide(activeRideId)" style="flex:1;background:#b03a2e;display:none;color:#fff;font-weight:800;transition:none;padding:.6rem .5rem;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;cursor:pointer;">🚫 Cancel Ride</button>
       </div>
     </div>
     <!-- EDIT MODE -->
@@ -10260,7 +10260,7 @@ async function showConfirmModal(opts){
       +'<div style="width:40px;height:40px;border-radius:50%;background:'+iconBg+';display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:20px;line-height:1;">'+icon+'</div>'
       +'<div style="font-size:1.02rem;font-weight:800;color:#fff;line-height:1.25;">'+(opts.title||'Are you sure?')+'</div>'
       +'</div>'
-      +(opts.message?'<div style="font-size:.86rem;color:#c4b0e0;line-height:1.5;margin-bottom:16px;">'+opts.message+'</div>':'')
+      +(opts.message?'<div style="font-size:.86rem;color:#c4b0e0;line-height:1.5;margin-bottom:16px;white-space:pre-wrap;">'+opts.message+'</div>':'')
       +'<div style="display:flex;gap:8px;flex-wrap:wrap;">'+btnHtml+'</div>'
       +'</div>';
     document.body.appendChild(ov);
@@ -16002,7 +16002,25 @@ async function deleteRide(id){
     await queueAdminAction('ride_delete', {id:r.id}, 'Delete '+((r&&r.client)||'a ride')+((r&&r.date)?(' on '+fmtDateShort(r.date)):'')+' (created by '+((r&&r.createdBy)||'someone else')+')');
     return;
   }
-  if(!confirm('Delete this ride?')) return;
+  // Upgraded from a bare confirm('Delete this ride?') (v855). That popup named nothing, said
+  // nothing about permanence, and on a phone is a small system dialog whose OK is easy to hit
+  // by reflex - the weakest guard in the app on its most destructive action, and now reachable
+  // from inside the dispatch panel alongside routine tools. This names the client and date,
+  // states plainly that it cannot be undone, points to Cancel as the usually-correct
+  // alternative, and makes the destructive choice the deliberate one rather than the default.
+  const _ok = await showConfirmModal({
+    icon:'\uD83D\uDDD1\uFE0F', iconColor:'#f0997b', iconBg:'#3a1a1a',
+    title:'Delete this ride?',
+    message:((r&&r.client)||'This ride')
+      +((r&&r.date)?(' \u2014 '+fmtDateShort(r.date)):'')
+      +((r&&r.time)?(' at '+fmtTime12(r.time)):'')
+      +'.\n\nThis removes the ride and its history permanently and cannot be undone.\n\nIf the client called off a ride that was already scheduled, use Cancel Ride instead \u2014 that keeps the record and can charge a cancellation fee.',
+    buttons:[
+      {label:'Keep ride', style:'neutral', value:false},
+      {label:'Delete permanently', style:'danger', value:true}
+    ]
+  });
+  if(!_ok) return;
   rides=rides.filter(r=>r.id!==id);
   await saveRides();
   closeRideModal(); refreshDash(); renderCal();
