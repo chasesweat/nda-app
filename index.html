@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608171873">
+<meta name="version" content="202608171877">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1096,6 +1096,7 @@ input,select,textarea{font-size:16px;}
       <button id="sweep-rt-notes-btn" onclick="sweepRoundTripLegNotes()" title="One-time cleanup: removes the auto-added 'Leg N — AP Round Trip' text from ride notes (admin)" style="display:none;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">🧹 Clean up round-trip notes</button>
       <button id="scan-adj-btn" onclick="openManualAdjustmentScan()" title="Review rides created by Kat, Chase, or Morgan whose saved price doesn't match today's pricing formula (admin)" style="display:none;background:none;border:1.5px solid #d97706;color:#d97706;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">⚖️ Review manual adjustments</button>
       <button id="sweep-adj-trail-btn" onclick="sweepManualAdjTrailEntries()" title="One-time cleanup: removes the 'Manual adjustment reviewed' entry this tool used to add to ride trails (admin)" style="display:none;background:none;border:1.5px solid #d97706;color:#d97706;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">🧹 Clean up adjustment trail entries</button>
+      <button id="scan-xxl-btn" onclick="openXXLScan()" title="Migrate old-model XXL (double-vehicle) rides to two linked, independent rides (admin)" style="display:none;background:none;border:1.5px solid #6b21a8;color:#6b21a8;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">🚐 Migrate XXL rides</button>
     </div>
     <div id="pay-filter-bar" style="margin:.2rem 0 0;"></div>
     <div id="irs-rate-box" style="margin:0 0 1rem;"></div>
@@ -1169,6 +1170,7 @@ input,select,textarea{font-size:16px;}
             <select id="rm-driver-select"></select>
             <button onclick="assignDriver()" style="padding:.5rem 1rem;background:var(--gold);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;">Assign</button>
           </div>
+          <div id="rm-xxl-link-row" style="display:none;align-items:center;gap:.6rem;padding:.5rem 0;flex-wrap:wrap;"></div>
           <div id="rm-closest-wrap" style="margin:-.5rem 0 .25rem;">
             <span class="mtip-btn-wrap-inline"><button onclick="findClosestDrivers()" style="display:inline-flex;align-items:center;gap:.4rem;padding:.4rem .75rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;cursor:pointer;font-weight:600;font-size:.78rem;font-family:'DM Sans',sans-serif;">&#128205; Find closest drivers</button><span class="mtip-dot mtip-dot-badge" id="mtd-cal-dispatch" onclick="toggleMtip('cal-dispatch')" title="What&#8217;s this?">i</span></span><div class="mtip-pop" id="mtp-cal-dispatch">Suggests the nearest available driver based on where they are, instead of you checking everyone&#8217;s location by hand.</div>
             <div id="rm-closest-drivers"></div>
@@ -1212,27 +1214,12 @@ input,select,textarea{font-size:16px;}
           <select id="edit-terminal" onchange="editAutoFillTerminalAddress()"><option value="">—</option><option>North Domestic</option><option>South Domestic</option><option>International</option></select>
         </div>
         <div class="form-group" style="grid-column:1/-1;"><label>Vehicle</label>
-          <select id="edit-vehicle" onchange="editVehicleChanged()">
+          <select id="edit-vehicle" onchange="_editAutoPrice()">
             <option value="Sedan">Sedan</option>
             <option value="SUV/Van">XL</option>
             <option value="Premium">Premium</option>
             <option value="Sprinter Van">Sprinter Van</option>
-            <option value="Sedan+XXL">Sedan + Double Vehicle (XXL)</option>
-            <option value="SUV/Van+XXL">XL + Double Vehicle (XXL)</option>
-            <option value="Premium+XXL">Premium + Double Vehicle (XXL)</option>
-            <option value="Sprinter Van+XXL">Sprinter Van + Double Vehicle (XXL)</option>
           </select>
-        </div>
-        <div id="edit-vehicle2-group" style="display:none;">
-          <div class="form-group"><label>2nd Vehicle Driver</label>
-            <select id="edit-driver2"><option value="">-- 2nd Driver --</option></select>
-          </div>
-          <div class="form-group"><label>2nd Vehicle</label>
-            <select id="edit-vehicle2"><option>Sedan</option><option value="SUV/Van">XL</option><option>Premium</option><option>Sprinter Van</option></select>
-          </div>
-          <div class="form-group"><label>2nd Vehicle Rate ($)</label>
-            <input type="number" id="edit-price2" placeholder="105" style="width:100%;" />
-          </div>
         </div>
         <div class="form-group"><label>Travel Type</label>
           <select id="edit-type" onchange="editTypeChanged();_editAutoPrice()"><option>AP ROUND TRIP</option><option>AP RUN</option><option>AP PICK UP</option><option>ROUND TRIP</option><option>ONE WAY</option><option value="MEDICAL">Medical Transport</option></select>
@@ -2115,6 +2102,22 @@ const TEMP_ADMIN_EDIT_ALL = true;
 // one line) to fall straight back to the normal second-admin queue for everyone, admins
 // included.
 const TEMP_ADMIN_DELETE_ALL = true;
+
+// ── PERMANENT: minimum build required to save rides data (Aug 17, 2026) ────────────────────
+// Unlike the two TEMP_ flags above, this one is NOT meant to be reverted — it's a lasting
+// safety mechanism, first turned on today because a real rides-data-correctness bug (the
+// XXL fee breakdown showing a fabricated "Manual adjustment") just got fixed, and a driver
+// still on an old cached tab saving with the stale logic could silently undo the fix for
+// the whole team. See saveRides()'s own comment for exactly what this blocks and why it only
+// blocks the shared Firebase write, never the person's own local copy of their edit.
+//
+// TO USE GOING FORWARD: whenever a future deploy fixes something rides-data-correctness-
+// related where an old client saving would be actively harmful, bump this to that deploy's
+// full <meta name="version"> value (the 12-digit one, not the 3-digit build shown in the
+// hamburger menu). Leave it exactly as-is for routine UI-only changes — bumping it on every
+// single deploy would just be noise, and would mean any driver who hasn't refreshed in the
+// last few minutes can't save anything at all, which is its own kind of disruption.
+const MIN_BUILD_FOR_SAVE = '202608171877';
 
 // ── Admin change audit: notify Chase when another admin changes anything (not rides) ──
 // Set CHASE_AUDIT_ENABLED=false to turn off. Hooks the single storageSet() choke point,
@@ -3359,6 +3362,36 @@ async function saveRides(){
   // localStorage stays a full mirror — it is the offline fallback and costs nothing.
   try{ localStorage.setItem('kat:rides', JSON.stringify(arr)); }catch(_e){}
 
+  // VERSION GATE (added Aug 17, 2026, recovery day): blocks a stale client from writing
+  // rides data to the SHARED Firebase node at all, if it's running an older build than
+  // MIN_BUILD_FOR_SAVE. Built specifically for a day like today: a real rides-data-
+  // correctness bug just got fixed and deployed (the XXL fee breakdown, among others), and
+  // a driver still on an old cached tab could otherwise save with the OLD, buggy logic and
+  // silently undo the fix for the whole team — or worse, given today's history, create a
+  // second correctness problem while "fixing" the first one.
+  //
+  // Deliberately does NOT block the localStorage mirror above — that's this device's own
+  // local view and blocking it would just lose the person's edit outright with no recovery
+  // path. Only the write that every OTHER device reads gets stopped. The person sees a clear
+  // toast telling them to refresh; their in-progress edit stays visible locally until they do.
+  //
+  // TO BUMP: whenever a future deploy fixes something rides-data-correctness-related where an
+  // old client saving would be actively harmful (not just "missing a nice-to-have"), update
+  // MIN_BUILD_FOR_SAVE to that deploy's full <meta name="version"> value. Leave it alone for
+  // routine UI-only changes where an old client saving is harmless.
+  if(typeof MIN_BUILD_FOR_SAVE!=='undefined' && MIN_BUILD_FOR_SAVE){
+    var _myBuildStr = (typeof _appBuildTag==='function') ? _appBuildTag() : '';
+    var _myBuild = parseInt(_myBuildStr)||0;
+    var _minBuild = parseInt(MIN_BUILD_FOR_SAVE)||0;
+    if(_minBuild>0 && _myBuild>0 && _myBuild<_minBuild){
+      try{ showToast('⚠️ This app needs to update before changes can save for everyone. Please refresh the page, then try again.', 'error'); }catch(_e){}
+      // If a newer service worker is already installed and just waiting, nudge it to take
+      // over now instead of waiting for the person to notice and refresh themselves.
+      try{ if('serviceWorker' in navigator && navigator.serviceWorker.controller){ navigator.serviceWorker.controller.postMessage({type:'SKIP_WAITING'}); } }catch(_e){}
+      return false;
+    }
+  }
+
   if(!fbDB){ _snapshotRidesBaseline(arr); try{ _auditAdminChange('kat:rides'); }catch(_e){} return true; }
 
   let changed = null;
@@ -3615,6 +3648,96 @@ function openManualAdjustmentScan(){
   +'</div>';
   document.body.appendChild(back);
   _renderManualAdjustmentScan();
+}
+
+// ── One-time migration: old-model XXL rides → linked-independent-rides (Aug 17, 2026) ──────
+// Originally shipped in v875 as a smaller fix (just filling in a missing vehicle2 field on
+// the old embedded model). Superseded here by the actual architecture migration: the old
+// model (r.xxl/r.vehicle2/r.driver2/r.price2 all bolted onto one ride) is being replaced
+// entirely by two linked, independent rides (see splitXXLRide/getXXLPartner's own comments
+// for why). This finds every remaining old-model ride and does the real migration — calls
+// the exact same splitXXLRide() that Quick Add's XXL checkbox and "Add 2nd vehicle" both use,
+// so all three paths produce identically-shaped results.
+//
+// "Migrate" is a real, confirmed, individual action (not a bulk one) because it creates a
+// whole second ride record — same caution level as the manual-adjustment scan's "Fix", which
+// also asks per-ride before changing anything real. "Not actually XXL" just clears the old
+// flag/fields without creating anything, for rides where xxl was left on by mistake.
+//
+// Self-hides once nothing's left (see openXXLScan's own trigger button, and the admin-
+// buttons refresh near hasIncomeAccess() above) — a one-time pass, not a permanent fixture.
+function _scanOldModelXXLRides(){
+  return (rides||[]).filter(function(r){ return r && r.xxl; });
+}
+async function _migrateOldXXLRide(rideId){
+  var r=_rideById(rideId); if(!r) return;
+  var v2vehicle = (r.vehicle2 && String(r.vehicle2).trim()) || r.vehicle || 'Sedan';
+  var v2driver = r.driver2 || '';
+  var v2price = parseFloat(r.price2)||0;
+  if(v2price<=0 || v2price>=(parseFloat(r.price)||0)){
+    showToast('Can\u2019t migrate '+(r.client||'this ride')+' automatically \u2014 its saved 2nd-vehicle price ($'+v2price.toFixed(2)+') isn\u2019t a valid split of the total ($'+(parseFloat(r.price)||0).toFixed(2)+'). Open the ride, clear its XXL flag manually if it\u2019s not really XXL, or use \u201cAdd 2nd vehicle\u201d after fixing the price.','error');
+    return;
+  }
+  if(!confirm('Migrate '+(r.client||'this ride')+' to two linked rides?\n\nVehicle 1: '+(r.vehicle||'Sedan')+' ('+(r.driver||'Unassigned')+') \u2014 $'+(((parseFloat(r.price)||0)-v2price).toFixed(2))+'\nVehicle 2: '+v2vehicle+' ('+(v2driver||'Unassigned')+') \u2014 $'+v2price.toFixed(2)+'\n\nThis creates a real, independent 2nd ride record.')) return;
+  var leg2 = splitXXLRide(r, { vehicle:v2vehicle, driver:v2driver, price:v2price });
+  rides.push(leg2);
+  touchRide(r, 'migrated to linked-rides XXL model'); touchRide(leg2, 'created by XXL migration');
+  if(leg2.driver) addNotification(leg2.driver, leg2, 'assigned');
+  try{ await saveRides(); await saveNotifs(); }catch(e){ showToast('Migration failed to save — try again','error'); return; }
+  showToast('\u2705 Migrated \u2014 now two linked rides');
+  try{ _renderXXLScan(); }catch(e){}
+}
+async function _skipOldXXLRide(rideId){
+  var r=_rideById(rideId); if(!r) return;
+  // Genuinely clears the stale flag/fields rather than just marking "reviewed" — once xxl is
+  // false there's nothing left for any future version of this scan to find on this ride.
+  r.xxl = undefined; r.vehicle2 = undefined; r.driver2 = undefined; r.price2 = undefined;
+  try{ await saveRides(); }catch(e){}
+  showToast('\u2713 Cleared \u2014 no longer marked XXL');
+  try{ _renderXXLScan(); }catch(e){}
+}
+function _renderXXLScan(){
+  var box=document.getElementById('xxl-scan-list'); if(!box) return;
+  var items = _scanOldModelXXLRides();
+  var countEl=document.getElementById('xxl-scan-count'); if(countEl) countEl.textContent=items.length;
+  if(!items.length){
+    box.innerHTML='<div style="text-align:center;padding:2rem 1rem;color:var(--mid);font-size:.88rem;">\u2705 Nothing left to migrate.</div>';
+    try{ var _sb=document.getElementById('scan-xxl-btn'); if(_sb) _sb.style.display='none'; }catch(e){}
+    return;
+  }
+  box.innerHTML = items.map(function(r){
+    var v2ok = r.vehicle2 && parseFloat(r.price2)>0 && parseFloat(r.price2)<(parseFloat(r.price)||0);
+    return '<div style="border:1.5px solid var(--light);border-radius:10px;padding:.75rem .85rem;margin-bottom:.6rem;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem;margin-bottom:.4rem;">'
+        +'<div><div style="font-weight:700;font-size:.9rem;">'+escHtml(r.client||'Ride')+'</div>'
+        +'<div style="font-size:.74rem;color:var(--mid);">'+escHtml(r.type||'')+' \u00b7 '+fmtDateShort(r.date)+' \u00b7 vehicle 1: '+escHtml(r.vehicle||'?')+'</div></div>'
+        +'<button onclick="openRideModal('+r.id+')" style="flex-shrink:0;background:none;border:1.5px solid var(--light);border-radius:8px;padding:.3rem .6rem;font-family:inherit;font-size:.72rem;cursor:pointer;color:var(--mid);">View ride</button>'
+      +'</div>'
+      +'<div style="font-size:.82rem;margin-bottom:.6rem;">'+(v2ok
+        ? ('Old-model XXL \u2014 vehicle 2 on file: '+escHtml(r.vehicle2)+' ('+escHtml(r.driver2||'Unassigned')+') \u2014 $'+(parseFloat(r.price2)||0).toFixed(2)+'. Migrating splits this into two linked rides.')
+        : ('Old-model XXL with an incomplete or invalid 2nd-vehicle price \u2014 can\u2019t auto-migrate. Open the ride to fix it by hand, or clear the flag if it\u2019s not really XXL.'))
+        +'</div>'
+      +'<div style="display:flex;gap:.5rem;">'
+        +(v2ok ? '<button onclick="_migrateOldXXLRide('+r.id+')" style="flex:1;padding:.45rem;background:#6b21a8;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;">Migrate</button>' : '')
+        +'<button onclick="_skipOldXXLRide('+r.id+')" style="flex:1;padding:.45rem;background:none;border:1.5px solid var(--light);border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;color:var(--black);">Not actually XXL</button>'
+      +'</div></div>';
+  }).join('');
+}
+function openXXLScan(){
+  if(!isAdmin()){ showToast('Only admins can run this','error'); return; }
+  var back=document.createElement('div');
+  back.id='xxl-scan-overlay';
+  back.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:16500;display:flex;align-items:center;justify-content:center;padding:1.1rem;';
+  back.innerHTML='<div style="background:#fff;border-radius:14px;max-width:520px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;">'
+    +'<div style="padding:1rem 1.1rem;border-bottom:1px solid var(--light);display:flex;justify-content:space-between;align-items:center;">'
+      +'<div style="font-weight:800;font-size:1rem;">\uD83D\uDE90 XXL rides to migrate (<span id="xxl-scan-count">0</span>)</div>'
+      +'<button onclick="document.getElementById(\'xxl-scan-overlay\').remove()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--mid);line-height:1;">\u00d7</button>'
+    +'</div>'
+    +'<div style="padding:.9rem 1.1rem;font-size:.78rem;color:var(--mid);border-bottom:1px solid var(--light);">Every ride still on the old XXL model (one ride carrying both vehicles\u2019 info) needs migrating to two independent, linked rides \u2014 the model everything now uses. \u201cMigrate\u201d creates the real 2nd ride, splits the price, and asks you to confirm the numbers first. \u201cNot actually XXL\u201d just clears the old flag with nothing created.</div>'
+    +'<div id="xxl-scan-list" style="padding:1rem 1.1rem;overflow-y:auto;flex:1;"></div>'
+  +'</div>';
+  document.body.appendChild(back);
+  _renderXXLScan();
 }
 
 // One-time cleanup for rides that already picked up a "Manual adjustment reviewed" trail entry
@@ -4101,6 +4224,26 @@ function calcQuote() {
   // so "Manual adjustment" only ever appears when someone actually overrides the price.
   const total = Math.floor(subtotal + fuelFee);   // fare rounds DOWN to a whole dollar, never up
   document.getElementById('quote-lines').innerHTML=lines.map(l=>`<div class="quote-line"><span style="color:#aaa">${l.label}${l.note?'<br><span style="font-size:.7rem;color:#999">'+l.note+'</span>':''}</span><span style="${l.val===0?'color:#999':''}">$${l.val.toFixed(2)}</span></div>`).join('');
+  // XXL (double vehicle): isXXL/price2 were being computed at the top of this function but
+  // never actually used anywhere — the 2nd vehicle's price never made it into the displayed
+  // total OR the price saved onto the ride when "Save as ride" was clicked. Reported directly.
+  // Mirrors the AP ROUND TRIP branch above: shows both amounts broken out, plus the actual
+  // combined total (that branch shows the "+" but never the summed number — this goes one
+  // step further, since the ask was specifically for the total to be visible too, not just
+  // the per-vehicle split). Returns the COMBINED total (vehicle 1 + vehicle 2) — same
+  // convention splitXXLRide already expects from Quick Add and "Add 2nd vehicle": the ride's
+  // saved price is the pre-split combined figure, and splitXXLRide derives vehicle 1's real
+  // share as price − price2 when it creates the linked 2nd ride.
+  if(isXXL){
+    const grandTotal = total + price2;
+    document.getElementById('quote-total').innerHTML=
+      `<div style="font-size:.85rem;color:#c4b5fd;line-height:1.5;">`
+      +`<div data-xxl-v1-label="${vehicle}" data-xxl-v1-total="${total.toFixed(2)}">Vehicle 1 (${vehicle}): $${total.toFixed(2)}</div>`
+      +`<div data-xxl-v2-label="${vehicle2}" data-xxl-v2-total="${price2.toFixed(2)}">Vehicle 2 (${vehicle2}): $${price2.toFixed(2)}</div>`
+      +`</div>`
+      +`<div data-xxl-grand-total="${grandTotal.toFixed(2)}" style="font-size:1.1rem;font-weight:700;margin-top:.3rem;">$${grandTotal.toFixed(2)} <span style="color:#9b8fb8;font-weight:400;font-size:.78rem;">total, both vehicles</span></div>`;
+    return grandTotal;
+  }
   document.getElementById('quote-total').textContent=`$${total.toFixed(2)}`;
   return total;
 }
@@ -5305,8 +5448,10 @@ async function exportCalendar(target){
   // used to skip the "my rides" filter entirely for admins, meaning an admin's personal
   // calendar export dumped in every driver's rides company-wide. Same "am I actually
   // driving this" rule used by the mileage bar and the per-ride Add to Calendar button,
-  // now applied consistently regardless of role. XXL bookings count the second driver too.
-  const _iAmDriving = r => (r.driver===dName) || (r.xxl && r.driver2===dName);
+  // now applied consistently regardless of role. XXL bookings are now two independent
+  // linked rides (see splitXXLRide) — vehicle 2's driver already has their OWN ride with
+  // their own r.driver, no special-casing needed here anymore.
+  const _iAmDriving = r => r.driver===dName;
   let list=rides.filter(r=>r.date && r.date>=todayStr && r.status!=='cancelled' && _iAmDriving(r));
   // Only rides not already included in a previous export, so pressing the button again
   // doesn't re-add duplicates to whatever calendar app it's imported into.
@@ -5403,11 +5548,15 @@ function textQuoteToClient(){
   const phone=formatPhoneUS(document.getElementById('q-phone').value||'');
   const type=document.getElementById('q-type').value||'';
   const isAprt = type==='AP ROUND TRIP';
-  // AP ROUND TRIP has no single "the total" - the quote-total slot holds two separate figures
-  // now, not one number, so it can't gate readiness the way every other type's does. Gate on
-  // whether a real leg subtotal actually rendered instead.
+  const isXxlQuote = !!document.getElementById('q-xxl')?.checked;
+  // AP ROUND TRIP and XXL both have no single plain-text "the total" - the quote-total slot
+  // holds structured data (leg subtotals, or vehicle 1 + vehicle 2 + grand total) instead of
+  // one number, so neither can gate readiness by just reading textContent the way every
+  // other type's does. Gate on whether real numbers actually rendered instead.
   if(isAprt){
     if(!document.querySelector('#quote-lines [data-leg-subtotal]')){ showToast('Fill in the trip details first so there’s a quote to send','error'); return; }
+  } else if(isXxlQuote){
+    if(!document.querySelector('[data-xxl-grand-total]')){ showToast('Fill in the trip details first so there’s a quote to send','error'); return; }
   } else {
     const total=(document.getElementById('quote-total').textContent||'').trim();
     if(!total || total==='$0.00'){ showToast('Fill in the trip details first so there’s a quote to send','error'); return; }
@@ -5442,6 +5591,16 @@ function textQuoteToClient(){
       }
       body += '\nLeg '+legNum+' total: $'+(subtotalEl.getAttribute('data-leg-subtotal-val')||'0.00');
     });
+  } else if(isXxlQuote){
+    // Same reasoning as the AP ROUND TRIP branch above — two real, separately-priced
+    // vehicles, so no single "Total:" line makes sense until both are shown. Reads the data
+    // attributes set on quote-total's XXL markup rather than scraping innerHTML text, which
+    // would otherwise smash the two vehicle lines and the grand total together with no
+    // separators at all.
+    var _v1El=document.querySelector('[data-xxl-v1-total]'), _v2El=document.querySelector('[data-xxl-v2-total]'), _gtEl=document.querySelector('[data-xxl-grand-total]');
+    if(_v1El) body += '\n\nVehicle 1 ('+(_v1El.getAttribute('data-xxl-v1-label')||'')+'): $'+_v1El.getAttribute('data-xxl-v1-total');
+    if(_v2El) body += '\nVehicle 2 ('+(_v2El.getAttribute('data-xxl-v2-label')||'')+'): $'+_v2El.getAttribute('data-xxl-v2-total');
+    if(_gtEl) body += '\nTotal (both vehicles): $'+_gtEl.getAttribute('data-xxl-grand-total');
   } else {
     const lineEls=document.querySelectorAll('#quote-lines .quote-line');
     if(lineEls.length){
@@ -5460,8 +5619,8 @@ function textQuoteToClient(){
   // yet" disclaimer, the HTML document alone had the "prices held subject to availability"
   // caveat, and text alone had the warm "please let me know... Thank you!" closing. All three
   // pieces now appear, in the same order, in all three channels.
-  body += isAprt
-    ? '\n\nEach leg is billed separately, and may be driven by a different member of our team.\n\nThis is a quote, not a booking \u2014 your ride isn\u2019t reserved until you confirm. Prices are held subject to availability and may change if the trip details change. If all of this is correct and acceptable, please let me know and I\u2019ll get you scheduled. Thank you!\n\nQuotes do not include tip — never required, but always greatly appreciated by your driver.'
+  body += (isAprt || isXxlQuote)
+    ? '\n\n'+(isAprt?'Each leg is billed separately, and may be driven by a different member of our team.':'This trip uses two vehicles, and each may be driven by a different member of our team.')+'\n\nThis is a quote, not a booking \u2014 your ride isn\u2019t reserved until you confirm. Prices are held subject to availability and may change if the trip details change. If all of this is correct and acceptable, please let me know and I\u2019ll get you scheduled. Thank you!\n\nQuotes do not include tip — never required, but always greatly appreciated by your driver.'
     : ('\n\nTotal: '+(document.getElementById('quote-total').textContent||'').trim()+'\n\nThis is a quote, not a booking \u2014 your ride isn\u2019t reserved until you confirm. Prices are held subject to availability and may change if the trip details change. If all of this is correct and acceptable, please let me know and I\u2019ll get you scheduled. Thank you!\n\nQuotes do not include tip — never required, but always greatly appreciated by your driver.');
   // Auto-save this quote to Saved Quotes, marked as sent today (replaces the old "Save as quote" button).
   try{
@@ -5509,6 +5668,20 @@ async function saveQuote(){
       if(ride.type==='AP ROUND TRIP'){
         _leg2=splitApRoundTripRide(ride);
         touchRide(_leg2,'created'); rides.push(_leg2);
+      }
+      // XXL (double vehicle) booked from the live Quote form: same gap as AP ROUND TRIP used to
+      // have — calcQuote()'s isXXL branch computes a real 2nd-vehicle price, but until now
+      // nothing here actually created a 2nd ride for it. ride.price at this point is already
+      // the COMBINED total (see calcQuote's isXXL return) — splitXXLRide derives vehicle 1's
+      // real share as price − price2, same convention as Quick Add and "Add 2nd vehicle".
+      if(document.getElementById('q-xxl')?.checked){
+        var _qXxlV2 = {
+          vehicle: document.getElementById('q-vehicle2')?.value || ride.vehicle,
+          driver:  '', // the Quote form has no 2nd-driver picker of its own — set from the ride afterward, same as any other unassigned ride
+          price:   parseFloat(document.getElementById('q-price2')?.value)||0,
+        };
+        _leg2 = splitXXLRide(ride, _qXxlV2);
+        touchRide(_leg2, 'created'); rides.push(_leg2);
       }
     }catch(e){
       console.warn('saveQuote split failed', e);
@@ -5988,6 +6161,70 @@ function splitApRoundTripRide(ride){
   ride.pairId=pairId;
   ride.rtLegNumber=1;
   ride.price=split.leg1;
+  return leg2;
+}
+
+// ── XXL (double-vehicle) rides: linked-independent-rides model (Aug 17, 2026) ──────────────
+// Replaces the old model — a single ride carrying r.xxl/r.vehicle2/r.driver2/r.price2 as
+// bolted-on fields — with the SAME pattern this file already uses for AP ROUND TRIP legs
+// (splitApRoundTripRide above): two full, independent ride records, linked by a shared ID.
+//
+// Deliberately its OWN field, r.xxlPairId, NOT the round trip's r.pairId/r.linkedRide. Those
+// carry round-trip-specific meaning elsewhere (rtLegNumber, leg-time-based surcharge
+// re-derivation in _computeFeeRebuild, "Leg 1 (outbound)"/"Leg 2 (return)" labeling, paused-
+// round-trip resume routing) that has nothing to do with two vehicles at the same date/time —
+// reusing that field would risk XXL pairs silently tripping round-trip-only logic that assumes
+// fields (rtFirstLeg, rtDateAP, etc.) an XXL pair never has.
+//
+// Why this is better than the old model: vehicle 2's driver is now a completely normal ride
+// in their own driving list, with their own confirmation text, their own cancel/delete/edit,
+// assignable through the exact same Dispatch Tools every other ride uses. Nothing that reads
+// `rides` needs to know XXL exists at all UNLESS it specifically wants to show the "this ride
+// has a linked companion vehicle" relationship — which is a much smaller, much safer surface
+// than the ~20 places that had to specifically check r.xxl/vehicle2/driver2/price2 before.
+function getXXLPartner(r){
+  if(!r || !r.xxlPairId) return null;
+  return (rides||[]).find(function(x){ return x && x.id!==r.id && x.xxlPairId===r.xxlPairId; }) || null;
+}
+// Splits ONE ride into two linked ones. Used two ways: (1) live, when someone adds a
+// companion vehicle to an existing normal ride (see addXXLCompanionVehicle below), and
+// (2) as a one-time migration, converting an OLD-model ride (r.xxl===true, with embedded
+// vehicle2/driver2/price2) into the new model — see migrateOldXXLRides.
+//
+// `ride` stays as vehicle 1 (mutated in place, same as splitApRoundTripRide does for leg 1).
+// Returns the new vehicle-2 ride — caller is responsible for pushing it into `rides` and
+// saving, exactly like every splitApRoundTripRide call site already does for round trips.
+function splitXXLRide(ride, v2){
+  // v2 = { vehicle, driver, price } for the new companion ride. When migrating an old-model
+  // ride, this comes from its own embedded vehicle2/driver2/price2 fields; when adding a
+  // fresh companion vehicle to a normal ride, it comes from whatever the admin just entered.
+  var pairId = 'xxlpair_'+ride.id;
+  var totalPrice = parseFloat(ride.price)||0;
+  var v2Price = parseFloat(v2.price)||0;
+  var v1Price = Math.round((totalPrice - v2Price)*100)/100;
+
+  var leg2 = Object.assign({}, ride, {
+    id: nextId++,
+    xxlPairId: pairId,
+    vehicle: v2.vehicle || ride.vehicle || 'Sedan',
+    driver: v2.driver || '',
+    price: v2Price,
+    // Fresh, independent history — same reasoning as splitApRoundTripRide's leg2: without
+    // this, both rides would share one mutable trail array by reference, and a later edit to
+    // either one would silently show up on both.
+    trail: [],
+    // driverResponse/confirmSent/status reset to a clean slate for the new ride — it hasn't
+    // been offered to or confirmed by anyone yet, even if the original ride had been.
+    driverResponse: undefined,
+    confirmSent: false,
+    status: 'scheduled',
+    // Old-model fields never carry forward onto either resulting ride — the whole point of
+    // this migration is that xxl/vehicle2/driver2/price2 stop being meaningful.
+    xxl: undefined, vehicle2: undefined, driver2: undefined, price2: undefined,
+  });
+  ride.xxlPairId = pairId;
+  ride.price = v1Price;
+  ride.xxl = undefined; ride.vehicle2 = undefined; ride.driver2 = undefined; ride.price2 = undefined;
   return leg2;
 }
 
@@ -7339,7 +7576,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
               }
               const ic=canSeeInterestList(r)?interestCount(r):0;
               const badge=r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP'?'badge-ap':r.type==='ROUND TRIP'?'badge-rt':'badge-pt';
-  const xxlBadge=(r.xxl&&r.vehicle2)?'<span style="font-size:.55rem;font-weight:700;background:#6b21a8;color:#fff;border-radius:3px;padding:1px 4px;margin-left:2px;">XXL</span>':'';
+  const xxlBadge=r.xxlPairId?'<span style="font-size:.55rem;font-weight:700;background:#6b21a8;color:#fff;border-radius:3px;padding:1px 4px;margin-left:2px;" title="Has a linked companion vehicle">XXL</span>':'';
   const privateBadge=r.private?'<span style="font-size:.55rem;font-weight:700;background:#1b1330;color:#fff;border-radius:3px;padding:1px 4px;margin-left:2px;" title="Hidden from other drivers">🔒</span>':'';
   const pairBadge='';
               return `<div class="week-ride-card" style="border-color:${c};background:${c}66;" onclick="openRideModal(${r.id})">
@@ -8206,14 +8443,16 @@ function buildConfirmationText(r){
   if(customMsg)   message      = fillConfTemplate(customMsg, r, sender, assigned);
   if(customInstr) instructions = fillConfTemplate(customInstr, r, sender, assigned);
 
-  // Add XXL note to message if this is a double-vehicle booking
-  if(r.xxl && r.vehicle2){
-    const d2name=r.driver2?r.driver2.split(' ')[0]:'2nd driver';
-    const d1name=r.driver?driverShortName(r.driver):'1st driver';
-    const price1=Math.round((r.price||0)-(r.price2||0));
-    message += '\n\nNote: XXL booking — 2 vehicles required.\n'
-      +'  Vehicle 1: '+vehTag(r.vehicle||'?')+' ('+d1name+') — $'+price1+'\n'
-      +'  Vehicle 2: '+vehTag(r.vehicle2||'?')+' ('+d2name+') — $'+(r.price2||0);
+  // Add companion-vehicle note to message if this ride is linked to another (XXL booking)
+  if(r.xxlPairId){
+    var _confPartner = (typeof getXXLPartner==='function') ? getXXLPartner(r) : null;
+    if(_confPartner){
+      const d2name=_confPartner.driver?driverShortName(_confPartner.driver):'2nd driver';
+      const d1name=r.driver?driverShortName(r.driver):'1st driver';
+      message += '\n\nNote: XXL booking — 2 vehicles required.\n'
+        +'  Vehicle 1: '+vehTag(r.vehicle||'?')+' ('+d1name+') — $'+(parseFloat(r.price)||0).toFixed(0)+'\n'
+        +'  Vehicle 2: '+vehTag(_confPartner.vehicle||'?')+' ('+d2name+') — $'+(parseFloat(_confPartner.price)||0).toFixed(0);
+    }
   }
   if(r.driverChangedPending){
     var _cn=((r.client||'there').split(' ')[0])||'there';
@@ -8411,9 +8650,8 @@ function _baseRideTextRecipients(r){
     const label=p.replace(phone,'').replace(/[()]/g,'').trim().replace(/^[\-–—:,]+|[\-–—:,]+$/g,'').trim();
     add(label||null, phone);
   });
-  // Assigned driver(s) — include driver2 for XXL bookings
+  // Assigned driver
   if(r.driver) add(driverShortName(r.driver), (DRIVER_PROFILES[r.driver]||{}).phone);
-  if(r.xxl && r.driver2) add(r.driver2.split(' ')[0], (DRIVER_PROFILES[r.driver2]||{}).phone);
   return { out, add };
 }
 function confirmationRecipients(r){
@@ -8815,6 +9053,30 @@ function openRideModal(id){
   if(_dx){ _dx.style.display=_canDispatch?'':'none'; _dx.classList.remove('open'); }
   const dSel=document.getElementById('rm-driver-select');
   dSel.innerHTML=driverOptionsHTML(r.driver, r.date);
+  // XXL companion-vehicle row: two states. If this ride is already linked to another one
+  // (see splitXXLRide/getXXLPartner), surfaces that link — vehicle 2's driver is assigned
+  // through that OTHER ride's own, completely ordinary Dispatch Tools, not a special control
+  // here, so this is informational plus an "Open" shortcut. If it's NOT yet linked, offers
+  // "Add 2nd vehicle" instead — this replaces the old Edit-form "+XXL" vehicle option, which
+  // buried the same action inside a form save instead of a direct, immediate action here,
+  // consistent with how every other Dispatch Tools action (Assign, Cancel, Delete) works.
+  const xxlLinkRow=document.getElementById('rm-xxl-link-row');
+  const _xxlPartner = (typeof getXXLPartner==='function') ? getXXLPartner(r) : null;
+  if(xxlLinkRow){
+    if(_xxlPartner){
+      xxlLinkRow.style.display='flex';
+      var _xp=_xxlPartner;
+      var _xpDriverLabel = _xp.driver ? driverShortName(_xp.driver) : 'Unassigned';
+      xxlLinkRow.innerHTML = '<span style="font-size:.8rem;color:var(--mid);">🔗 Linked vehicle</span>'
+        +'<span style="flex:1;font-size:.82rem;">'+escHtml(vehTag(_xp.vehicle||'?'))+' \u2014 '+escHtml(_xpDriverLabel)+' \u2014 $'+(parseFloat(_xp.price)||0).toFixed(2)+'</span>'
+        +'<button onclick="openRideModal('+_xp.id+')" style="padding:.4rem .8rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;cursor:pointer;font-weight:600;font-size:.78rem;">Open</button>';
+    } else if(_canDispatch){
+      xxlLinkRow.style.display='flex';
+      xxlLinkRow.innerHTML = '<button onclick="event.stopPropagation();addXXLCompanionVehicle('+r.id+')" style="padding:.5rem 1rem;background:none;border:1.5px solid #6b21a8;color:#6b21a8;border-radius:8px;cursor:pointer;font-weight:600;font-size:.8rem;">🔗 Add 2nd vehicle (XXL)</button>';
+    } else {
+      xxlLinkRow.style.display='none';
+    }
+  }
   // Confirmation-sent unmark, folded into Dispatch Tools alongside driver reassignment —
   // same audience (creator/admin), one collapsed panel instead of two separate controls.
   // The "Confirmation text sent · tap to unmark" indicator used to live here. Removed —
@@ -8846,7 +9108,7 @@ function openRideModal(id){
   const editBtn=document.getElementById('rm-edit-btn');
   if(editBtn){
     const _eMyDriverName = getMyDriverName();
-    const _eIsDriver = (_eMyDriverName && (r.driver===_eMyDriverName || r.driver2===_eMyDriverName));
+    const _eIsDriver = (_eMyDriverName && r.driver===_eMyDriverName);
     const _eMyLogin = currentUser && currentUser.name;
     const _eMyResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[_eMyLogin]) || _eMyDriverName;
     const _eOwner = getClientOwner(r.client) || feeOwnerFor(r.createdBy);
@@ -8989,8 +9251,7 @@ function renderRideView(r){
   const _ccRm = currentUser ? (PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name) : null;
   const _ccRc = r.createdBy ? (PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy) : null;
   const canSeeContact = (_ccRm && _ccRc && _ccRm === _ccRc)
-    || (_myDName && _myDName === r.driver)
-    || (r.xxl && _myDName && _myDName === r.driver2);
+    || (_myDName && _myDName === r.driver);
   // Share Location button now renders inline inside the Actions section below —
   // no separate DOM write needed (it used to live in its own #rm-share-loc-btn div,
   // far from every other action button; consolidated so it can't render twice).
@@ -9114,7 +9375,7 @@ function renderRideView(r){
         <i class="ti ti-users" style="font-size:18px;color:${ink};margin-top:2px;" aria-hidden="true"></i>
         <div>
           <div style="font-size:.92rem;font-weight:600;color:var(--black);">${r.driver||'Unassigned'}</div>
-          <div style="font-size:.82rem;color:var(--mid);">${r.xxl&&r.vehicle2?'<span style="font-size:.7rem;font-weight:700;background:#6b21a8;color:#fff;border-radius:3px;padding:1px 4px;">XXL</span>&nbsp;+&nbsp;'+r.vehicle2+(r.driver2?'&nbsp;('+r.driver2.split(' ')[0]+')':'')+'&nbsp;&mdash;&nbsp;$'+r.price2:''}</div>
+          <div style="font-size:.82rem;color:var(--mid);">${(function(){ if(!r.xxlPairId) return ''; var _p=(typeof getXXLPartner==='function')?getXXLPartner(r):null; if(!_p) return ''; return '<span style="font-size:.7rem;font-weight:700;background:#6b21a8;color:#fff;border-radius:3px;padding:1px 4px;">XXL</span>&nbsp;+&nbsp;'+escHtml(_p.vehicle||'?')+(_p.driver?'&nbsp;('+escHtml(_p.driver.split(' ')[0])+')':'')+'&nbsp;&mdash;&nbsp;$'+(parseFloat(_p.price)||0).toFixed(2); })()}</div>
         </div>
       </div>
     </div>
@@ -10601,7 +10862,7 @@ function toggleEditMode(on){
       if(typeof TEMP_ADMIN_EDIT_ALL!=='undefined' && TEMP_ADMIN_EDIT_ALL && isAdmin()){ _show = true; }
       else {
         var _tMyDriverName = getMyDriverName();
-        var _tIsDriver = (_tMyDriverName && (_r.driver===_tMyDriverName || _r.driver2===_tMyDriverName));
+        var _tIsDriver = (_tMyDriverName && _r.driver===_tMyDriverName);
         var _tMyLogin = currentUser && currentUser.name;
         var _tMyResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[_tMyLogin]) || _tMyDriverName;
         var _tOwner = getClientOwner(_r.client) || feeOwnerFor(_r.createdBy);
@@ -10674,15 +10935,7 @@ function toggleEditMode(on){
   document.getElementById('edit-carryon-bags').value   = r.carryOnBags||0;
   document.getElementById('edit-flight').value         = r.flight||'';
   document.getElementById('edit-terminal').value = r.terminal||'';
-  document.getElementById('edit-vehicle').value  = (r.vehicle||'Sedan') + (r.xxl?'+XXL':'');
-  editVehicleChanged();
-  const ev2=document.getElementById('edit-vehicle2'); if(ev2&&r.vehicle2) ev2.value=r.vehicle2;
-  const ep2=document.getElementById('edit-price2'); if(ep2) ep2.value=r.price2||'';
-  const ed2=document.getElementById('edit-driver2');
-  if(ed2&&r.xxl){
-    if(ed2.options.length<=1) editVehicleChanged();
-    setTimeout(function(){ if(r.driver2) ed2.value=r.driver2; },50);
-  }
+  document.getElementById('edit-vehicle').value  = r.vehicle||'Sedan';
   document.getElementById('edit-type').value     = r.type||'AP RUN';
   editTypeChanged(); // refresh address labels + return-trip section now that type is set
   window._editMedExtras = Math.max(0,(r.price||0) - (r.medHours||0)*waitRate());
@@ -10706,7 +10959,7 @@ async function saveRideEdits(){
   // TEMP_ADMIN_EDIT_ALL (see its own comment, top of file) is today's one exception — remove
   // it and this reverts to owner/driver-only automatically, no other change needed here.
   const _seMyDriverName = getMyDriverName();
-  const _seIsDriver = (_seMyDriverName && (r.driver===_seMyDriverName || r.driver2===_seMyDriverName));
+  const _seIsDriver = (_seMyDriverName && r.driver===_seMyDriverName);
   const _seMyLogin = currentUser && currentUser.name;
   const _seMyResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[_seMyLogin]) || _seMyDriverName;
   const _seOwner = getClientOwner(r.client) || feeOwnerFor(r.createdBy);
@@ -10728,12 +10981,7 @@ async function saveRideEdits(){
   r.carryOnBags = parseInt(document.getElementById('edit-carryon-bags').value)||0;
   r.flight    = document.getElementById('edit-flight').value.trim();
   r.terminal  = document.getElementById('edit-terminal').value;
-  var _vSel = document.getElementById('edit-vehicle').value;
-  r.xxl       = _vSel.endsWith('+XXL');
-  r.vehicle   = r.xxl ? _vSel.slice(0, -4) : _vSel;
-  r.vehicle2  = r.xxl?(document.getElementById('edit-vehicle2')?.value||''):'';
-  r.driver2   = r.xxl?(document.getElementById('edit-driver2')?.value||''):'';
-  r.price2    = r.xxl?(parseFloat(document.getElementById('edit-price2')?.value)||0):0;
+  r.vehicle   = document.getElementById('edit-vehicle').value;
   r.type      = document.getElementById('edit-type').value;
   r.medHours  = parseFloat((document.getElementById('edit-med-hours')||{}).value)||0;
   r.pickup    = document.getElementById('edit-pickup').value.trim();
@@ -12601,11 +12849,11 @@ function rideActionBarHtml(rid){
   if(!hasIncomeAccess()) return '';
   var r=rides.find(function(x){return x.id===rid;});
   // Start Ride is the ASSIGNED DRIVER's own action - nobody else can act on it, and a driver's
-  // mileage figures are private from admins anyway (same rule as per-driver cost settings). On
-  // an XXL ride both assigned drivers count.
+  // mileage figures are private from admins anyway (same rule as per-driver cost settings).
+  // XXL bookings are two independent linked rides now — vehicle 2's driver has their own ride.
   var _me = (typeof getMyDriverName==='function') ? getMyDriverName() : null;
   if(!r || !_me) return '';
-  var _iAmDriving = (r.driver===_me) || (r.xxl && r.driver2===_me);
+  var _iAmDriving = (r.driver===_me);
   if(!_iAmDriving) return '';
   // Only the ACTUALLY-DRIVEN mileage counts as "this trip is done" - the pre-trip quoted
   // mileage (set on nearly every ride from creation) is irrelevant here. See the v657-era bug
@@ -12824,6 +13072,13 @@ function _computeFeeRebuild(r){
   return { rows: rows, total: _rounded };
 }
 function buildFeeMathHTML(r){
+  // NOTE (Aug 17, 2026): this used to special-case XXL rides here (r.xxl && r.vehicle2),
+  // because the old embedded model stored two vehicles' combined price on one ride, which
+  // the normal single-vehicle rebuild below couldn't make sense of. With the linked-
+  // independent-rides model (see splitXXLRide/getXXLPartner), each XXL leg is now just a
+  // completely normal ride with its own real, standalone price — the normal rebuild below is
+  // accurate again, no special-casing needed. The "🔗 Linked vehicle" row in openRideModal
+  // shows the companion ride's own fee separately, on its own ride, where it belongs.
   var _rebuild = _computeFeeRebuild(r);
   var rows = _rebuild.rows, sub = _rebuild.total;
   const price = parseFloat(r.price)||0;
@@ -14594,8 +14849,9 @@ function canSeeGateCode(ride){
     const myDriverName = getMyDriverName();
     if(!myDriverName) return false;
     // Assigned driver — checked directly, no proxy resolution (a substitute driver still
-    // needs to get through the gate even if they don't own the client).
-    if(ride.driver===myDriverName || ride.driver2===myDriverName) return true;
+    // needs to get through the gate even if they don't own the client). XXL bookings are two
+    // independent linked rides now — vehicle 2's driver has their own ride's own gateCode.
+    if(ride.driver===myDriverName) return true;
     // Client owner — resolved through the same Kat/Morgan proxy relationship used
     // everywhere else in the app, so Morgan (who dispatches for Kat) can see the gate
     // code on Kat's clients same as she can manage everything else about them.
@@ -14616,7 +14872,9 @@ function canSeeRide(ride){
     if(!ride || !ride.private) return true;
     if(isAdmin()) return true;
     const myDriverName = getMyDriverName();
-    if(myDriverName && (ride.driver===myDriverName || ride.driver2===myDriverName)) return true;
+    // XXL bookings are two independent linked rides now — vehicle 2's driver has their own
+    // ride with its own r.driver, no driver2 to check here anymore.
+    if(myDriverName && ride.driver===myDriverName) return true;
     const myLogin = currentUser && currentUser.name;
     if(!myLogin) return false;
     const myResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[myLogin]) || myDriverName || myLogin;
@@ -14635,8 +14893,7 @@ function hasPrivateRideConflict(driverName, dateStr){
   try{
     if(!driverName || !dateStr) return false;
     return (rides||[]).some(function(r){
-      return r.private && r.date===dateStr && r.status!=='cancelled' &&
-        (r.driver===driverName || r.driver2===driverName);
+      return r.private && r.date===dateStr && r.status!=='cancelled' && r.driver===driverName;
     });
   }catch(e){ return false; }
 }
@@ -15898,10 +16155,6 @@ async function saveQuickAddRide(){
     date, time: document.getElementById('qa-time').value,
     type:    qaType,
     vehicle: document.getElementById('qa-vehicle').value,
-    xxl:     document.getElementById('qa-xxl')?.checked||false,
-    vehicle2:document.getElementById('qa-xxl')?.checked?(document.getElementById('qa-vehicle2')?.value||''):'',
-    driver2: document.getElementById('qa-xxl')?.checked?(document.getElementById('qa-driver2')?.value||''):'',
-    price2:  document.getElementById('qa-xxl')?.checked?(parseFloat(document.getElementById('qa-price2')?.value)||0):0,
     driver:  document.getElementById('qa-driver').value || getMyDriverName() || '',
     price:   parseFloat(document.getElementById('qa-price').value)||0,
     pickup:  document.getElementById('qa-pickup').value.trim(),gateCode:document.getElementById('qa-gate-code')?.value.trim()||'',private:!!document.getElementById('qa-private')?.checked,
@@ -15927,6 +16180,7 @@ async function saveQuickAddRide(){
   rides.push(ride);
   if(ride.driver) addNotification(ride.driver,ride,'assigned');
   let ride2=null;
+  let xxlRide2=null;
   // Wrapped (v818) - this whole block used to have zero error handling between pushing the
   // ride into memory and actually persisting it. If splitApRoundTripRide (or anything it calls
   // - buildRideBreakdown, touchRide) threw for any reason, saveRides() below never ran, the
@@ -15945,6 +16199,23 @@ async function saveQuickAddRide(){
       touchRide(ride2,'created'); rides.push(ride2);
       if(ride2.driver) addNotification(ride2.driver,ride2,'assigned');
     }
+    // XXL (double-vehicle): a second, fully independent ride record linked by xxlPairId — see
+    // splitXXLRide's own comment for why this is a separate mechanism from the round-trip
+    // split above, not the same field reused. Applied to `ride` (the outbound/only leg) —
+    // checking XXL together with AP ROUND TRIP still only doubles the outbound leg today,
+    // not both legs; the combination is rare enough that hasn't been built out further, and
+    // xxlPairId/pairId are independent fields so nothing corrupts if it comes up, it's just
+    // not a fully wired combo yet.
+    if(document.getElementById('qa-xxl')?.checked){
+      var _xxlV2 = {
+        vehicle: document.getElementById('qa-vehicle2')?.value || ride.vehicle,
+        driver:  document.getElementById('qa-driver2')?.value || '',
+        price:   parseFloat(document.getElementById('qa-price2')?.value)||0,
+      };
+      xxlRide2 = splitXXLRide(ride, _xxlV2);
+      touchRide(xxlRide2, 'created'); rides.push(xxlRide2);
+      if(xxlRide2.driver) addNotification(xxlRide2.driver, xxlRide2, 'assigned');
+    }
     await saveRides(); await saveNotifs();
   }catch(e){
     console.warn('Quick Add save failed', e);
@@ -15953,6 +16224,7 @@ async function saveQuickAddRide(){
     // it worked, and must never leave the Save button stuck disabled with no way to retry.
     var _qaIdx1 = rides.indexOf(ride); if(_qaIdx1>-1) rides.splice(_qaIdx1,1);
     if(ride2){ var _qaIdx2 = rides.indexOf(ride2); if(_qaIdx2>-1) rides.splice(_qaIdx2,1); }
+    if(xxlRide2){ var _qaIdx3 = rides.indexOf(xxlRide2); if(_qaIdx3>-1) rides.splice(_qaIdx3,1); }
     showToast('\u26a0\ufe0f Ride did not save \u2014 check your connection and try again', 'error');
     _reenableBtn();
     return;
@@ -15963,7 +16235,7 @@ async function saveQuickAddRide(){
   closeQuickAddModal();
   _reenableBtn();
   try{ setTimeout(function(){ if(ride.newClient){ if(typeof promptNewClientInfo==='function') promptNewClientInfo(ride); } else { _qaMaybeSaveTypedAddresses(ride); } }, 350); }catch(e){}
-  showToast(qaType==='AP ROUND TRIP'?`AP Round Trip added: ${client} (2 rides)`:`Ride added: ${client}`);
+  showToast(qaType==='AP ROUND TRIP'?`AP Round Trip added: ${client} (2 rides)`:(xxlRide2?`Ride added: ${client} (2 vehicles, 2 rides)`:`Ride added: ${client}`));
   refreshDash(); renderCal(); updateNotifBadge();
   if(_driverNeedsOverride) await sendAvailOverrideRequest(ride, currentUser?.name||'');
   const _usedAddr = ride.type==='AP PICK UP' ? (ride.home||'') : (ride.pickup||'');
@@ -16255,6 +16527,59 @@ async function assignDriver(){
   }
   if(newDriver!==oldDriver && _wasConfirmed){ showToast('Driver changed \u2014 ride set back to Scheduled. Re-send the confirmation to notify the client.'); }
   if(_driverNeedsOverride) await sendAvailOverrideRequest(r, currentUser?.name||'');
+}
+
+// NOTE: assignDriver2() (added v874, targeting r.driver2 on a single embedded-model XXL
+// ride) was removed here — with the linked-independent-rides model (Aug 17, 2026), vehicle
+// 2 is just its own normal ride with its own normal driver, assigned through the exact same
+// assignDriver() every other ride already uses. See getXXLPartner/splitXXLRide's own
+// comments, and the "🔗 Linked vehicle" row in openRideModal that replaces the old
+// rm-driver2-row control.
+
+// Splits an EXISTING normal ride into an XXL pair on demand — the direct replacement for the
+// old Edit-form "+XXL" vehicle option, which buried this behind a full form save. Collects
+// just the three things splitXXLRide actually needs (vehicle type, price, driver) in a small
+// dedicated modal, then calls the same split function the migration tool and Quick Add's XXL
+// checkbox both use, so all three creation paths agree on exactly what "adding a 2nd vehicle"
+// means.
+function addXXLCompanionVehicle(rideId){
+  const r=_rideById(rideId); if(!r) return;
+  if(!canAssignOnRide(r)){ showToast('You can only do this on rides you created.','error'); return; }
+  if(r.xxlPairId){ showToast('This ride already has a linked vehicle.','error'); return; }
+  var back=document.createElement('div');
+  back.id='xxl-add-overlay';
+  back.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:17000;display:flex;align-items:center;justify-content:center;padding:1.1rem;';
+  back.onclick=function(e){ if(e.target===back) back.remove(); };
+  back.innerHTML='<div style="background:#fff;border-radius:14px;max-width:380px;width:100%;padding:1.1rem;">'
+    +'<div style="font-weight:800;font-size:1rem;margin-bottom:.3rem;">🔗 Add 2nd vehicle</div>'
+    +'<div style="font-size:.78rem;color:var(--mid);margin-bottom:.9rem;">Creates a fully independent, linked ride for the 2nd vehicle — same client, date, and time as this one. Vehicle 1\'s price on this ride will be reduced by whatever you enter below.</div>'
+    +'<div class="form-group" style="margin-bottom:.7rem;"><label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.3rem;">2nd Vehicle</label>'
+    +'<select id="xxl-add-vehicle" style="width:100%;padding:.5rem;border:1.5px solid var(--light);border-radius:8px;"><option value="Sedan">Sedan</option><option value="SUV/Van" selected>XL</option><option value="Premium">Premium</option><option value="Sprinter Van">Sprinter Van</option></select></div>'
+    +'<div class="form-group" style="margin-bottom:.7rem;"><label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.3rem;">2nd Vehicle Driver</label>'
+    +'<select id="xxl-add-driver" style="width:100%;padding:.5rem;border:1.5px solid var(--light);border-radius:8px;">'+driverOptionsHTML('', r.date)+'</select></div>'
+    +'<div class="form-group" style="margin-bottom:1rem;"><label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.3rem;">2nd Vehicle Rate ($)</label>'
+    +'<input type="number" id="xxl-add-price" placeholder="105" style="width:100%;padding:.5rem;border:1.5px solid var(--light);border-radius:8px;box-sizing:border-box;" /></div>'
+    +'<div style="display:flex;gap:.5rem;">'
+    +'<button onclick="document.getElementById(\'xxl-add-overlay\').remove()" style="flex:1;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;font-weight:700;">Cancel</button>'
+    +'<button onclick="_confirmAddXXLCompanionVehicle('+rideId+')" style="flex:1;padding:.55rem;background:#6b21a8;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:700;">Add vehicle</button>'
+    +'</div></div>';
+  document.body.appendChild(back);
+}
+async function _confirmAddXXLCompanionVehicle(rideId){
+  const r=_rideById(rideId); if(!r) return;
+  const vehicle=document.getElementById('xxl-add-vehicle')?.value||'Sedan';
+  const driver=document.getElementById('xxl-add-driver')?.value||'';
+  const price=parseFloat(document.getElementById('xxl-add-price')?.value)||0;
+  if(price<=0){ showToast('Enter the 2nd vehicle\u2019s rate first','error'); return; }
+  if(price>=(parseFloat(r.price)||0)){ showToast('2nd vehicle rate must be less than the current total ($'+(parseFloat(r.price)||0).toFixed(2)+')','error'); return; }
+  const leg2 = splitXXLRide(r, { vehicle:vehicle, driver:driver, price:price });
+  rides.push(leg2);
+  touchRide(r, 'linked to a 2nd vehicle'); touchRide(leg2, 'created as 2nd vehicle');
+  if(leg2.driver) addNotification(leg2.driver, leg2, 'assigned');
+  try{ await saveRides(); await saveNotifs(); }catch(e){ showToast('Failed to save — try again','error'); return; }
+  var _ov=document.getElementById('xxl-add-overlay'); if(_ov) _ov.remove();
+  showToast('\u2705 2nd vehicle added \u2014 '+vehicle+(driver?' \u00b7 '+driver.split(' ')[0]:'')+' \u2014 $'+price.toFixed(2));
+  openRideModal(rideId); refreshDash(); renderCal();
 }
 
 async function deleteRide(id){
@@ -20854,6 +21179,8 @@ function renderIncome(){
   if(_adjBtn) _adjBtn.style.display=(isAdmin() && _scanManualAdjustmentRides().length>0)?'inline-block':'none';
   var _adjTrailBtn=document.getElementById('sweep-adj-trail-btn');
   if(_adjTrailBtn) _adjTrailBtn.style.display=(isAdmin() && _ridesWithManualAdjTrailEntry().length>0)?'inline-block':'none';
+  var _xxlBtn=document.getElementById('scan-xxl-btn');
+  if(_xxlBtn) _xxlBtn.style.display=(isAdmin() && _scanOldModelXXLRides().length>0)?'inline-block':'none';
   const admin = isAdmin();
   const myName = getMyDriverName();
   // Privacy: everyone — including admins — only ever sees their OWN income.
@@ -22468,20 +22795,6 @@ function qaXXLChanged(){
     }).join('');
   }
   recalcQa();
-}
-
-function editVehicleChanged(){
-  const sel=document.getElementById('edit-vehicle');
-  const on=!!(sel && sel.value.endsWith('+XXL'));
-  const grp=document.getElementById('edit-vehicle2-group');
-  if(grp) grp.style.display=on?'block':'none';
-  const d2sel=document.getElementById('edit-driver2');
-  if(d2sel && d2sel.options.length<=1){
-    d2sel.innerHTML='<option value="">-- 2nd Driver --</option>'+DRIVERS.map(function(d){
-      return '<option value="'+d+'">'+d.split(' ')[0]+'</option>';
-    }).join('');
-  }
-  if(typeof _editAutoPrice==='function') _editAutoPrice();
 }
 
 // ── Driver settings (per-driver selfie + templates) ───────
@@ -25519,6 +25832,11 @@ function _normalizeNameForDupeCheck(name){
 // jointly, even though the words aren't contiguous as a substring).
 function _ridesLookLikeDupes(a, b){
   if(!a || !b || !a.date || !b.date || a.date!==b.date) return false;
+  // XXL siblings (see splitXXLRide/getXXLPartner) are DELIBERATELY the same date, time, and
+  // client — that's the whole point of the linked-independent-rides model. Without this
+  // check, every XXL pair in the app would show up as a "duplicate" to review/delete, which
+  // is exactly backwards — they're two real, different vehicles for one real booking.
+  if(a.xxlPairId && b.xxlPairId && a.xxlPairId===b.xxlPairId) return false;
   var an=_normalizeNameForDupeCheck(a.client), bn=_normalizeNameForDupeCheck(b.client);
   if(!an || !bn) return false;
   var nameMatch = an===bn || an.indexOf(bn)>=0 || bn.indexOf(an)>=0;
