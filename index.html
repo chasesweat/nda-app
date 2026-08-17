@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608171870">
+<meta name="version" content="202608171873">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2092,11 +2092,29 @@ async function storageGet(key) {
 // visibility check's own comments) is deliberately owner/driver-only, NOT admin, so an
 // admin quietly having blanket edit access isn't something to leave on by accident.
 //
-// TO REVERT: set this to false (or delete this line and its two call sites — grep for
-// TEMP_ADMIN_EDIT_ALL, there are exactly two: the rm-edit-btn visibility check and
-// saveRideEdits' permission check). Both fall straight back to the original owner/driver-only
-// rule with nothing else to touch.
+// TO REVERT: set this to false (or delete this line and its call sites — grep for
+// TEMP_ADMIN_EDIT_ALL). THREE call sites, not two: the rm-edit-btn visibility check in
+// openRideModal, saveRideEdits' permission check, AND toggleEditMode's own duplicate copy
+// of the visibility check (v871 — missed in the original v870 cut, which is exactly why
+// the button kept not showing up: openRideModal set it correctly, then toggleEditMode(false)
+// ran right after and silently overwrote it back to owner/driver-only, every time). All
+// three fall straight back to the original owner/driver-only rule with nothing else to touch.
 const TEMP_ADMIN_EDIT_ALL = true;
+
+// ── TEMPORARY: admin delete-any-ride, skipping the second-admin queue (Aug 17, 2026) ──────
+// Same recovery-day exception as TEMP_ADMIN_EDIT_ALL above, requested separately once Chase
+// hit the *other* deliberate admin-only guard: deleting a ride you didn't create normally
+// queues for a second admin's approval (see deleteRide's own comment, and _twoAdminRequired()
+// — with 3+ active admins, one admin alone can't unilaterally delete someone else's ride,
+// specifically to prevent exactly the kind of unilateral, unreviewed destructive action this
+// whole recovery started from). Confirmed explicitly before building this, same as the edit
+// override — this is a real safety boundary, not an oversight, and turning it off deserved a
+// yes/no rather than a silent change.
+//
+// ONE call site: deleteRide()'s `_tempBypass` check. Set this to false (or delete it and that
+// one line) to fall straight back to the normal second-admin queue for everyone, admins
+// included.
+const TEMP_ADMIN_DELETE_ALL = true;
 
 // ── Admin change audit: notify Chase when another admin changes anything (not rides) ──
 // Set CHASE_AUDIT_ENABLED=false to turn off. Hooks the single storageSet() choke point,
@@ -10566,18 +10584,30 @@ function toggleEditMode(on){
   // the permission-based visibility set in openRideModal (client owner / assigned driver
   // only). Recompute the same check here so exiting edit mode doesn't make the button
   // reappear for someone who was never supposed to see it.
+  //
+  // BUG (reported v871): TEMP_ADMIN_EDIT_ALL was added to openRideModal's copy of this
+  // check but not to THIS copy — and openRideModal calls toggleEditMode(false) right after
+  // setting the button correctly, so this duplicate silently overwrote it back to
+  // owner/driver-only every single time a ride modal opened. The button never actually
+  // reflected the override; it just looked like nothing had changed. Two copies of the same
+  // permission check in three places (this one, openRideModal's, and saveRideEdits') was
+  // exactly the failure mode the comment above already existed to prevent, and it happened
+  // anyway because the temp override only got added to two of the three.
   (function(){
     var _r = (typeof activeRideId!=='undefined' && activeRideId!=null) ? rides.find(function(x){return x.id===activeRideId;}) : null;
     var _show = false;
     if(on){ _show = false; }
     else if(_r){
-      var _tMyDriverName = getMyDriverName();
-      var _tIsDriver = (_tMyDriverName && (_r.driver===_tMyDriverName || _r.driver2===_tMyDriverName));
-      var _tMyLogin = currentUser && currentUser.name;
-      var _tMyResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[_tMyLogin]) || _tMyDriverName;
-      var _tOwner = getClientOwner(_r.client) || feeOwnerFor(_r.createdBy);
-      var _tIsOwner = !!(_tOwner && _tOwner===_tMyResolvedIdentity);
-      _show = _tIsOwner || _tIsDriver;
+      if(typeof TEMP_ADMIN_EDIT_ALL!=='undefined' && TEMP_ADMIN_EDIT_ALL && isAdmin()){ _show = true; }
+      else {
+        var _tMyDriverName = getMyDriverName();
+        var _tIsDriver = (_tMyDriverName && (_r.driver===_tMyDriverName || _r.driver2===_tMyDriverName));
+        var _tMyLogin = currentUser && currentUser.name;
+        var _tMyResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[_tMyLogin]) || _tMyDriverName;
+        var _tOwner = getClientOwner(_r.client) || feeOwnerFor(_r.createdBy);
+        var _tIsOwner = !!(_tOwner && _tOwner===_tMyResolvedIdentity);
+        _show = _tIsOwner || _tIsDriver;
+      }
     }
     var _eb=document.getElementById('rm-edit-btn'); if(_eb) _eb.style.display = _show?'inline-flex':'none';
   })();
@@ -16231,9 +16261,12 @@ async function deleteRide(id){
   const r=_rideById(id);
   if(!canDeleteRide(r)){ showToast('You can only delete rides you created.','error'); return; }
   // Your OWN ride: delete it right away. Using the admin override to delete someone
-  // ELSE'S ride needs a second admin (cancelling stays instant for live dispatch).
+  // ELSE'S ride normally needs a second admin (cancelling stays instant for live dispatch) —
+  // TEMP_ADMIN_DELETE_ALL (today only, recovery day — see its own comment near
+  // TEMP_ADMIN_EDIT_ALL at the top of the file) skips that queue for admins specifically.
   const _mine = r && r.createdBy === (currentUser&&currentUser.name);
-  if(!_mine){
+  const _tempBypass = !_mine && typeof TEMP_ADMIN_DELETE_ALL!=='undefined' && TEMP_ADMIN_DELETE_ALL && isAdmin();
+  if(!_mine && !_tempBypass){
     if(!confirm('Delete '+((r&&r.client)||'this ride')+'?'+(_twoAdminRequired()?'\n\nThis is someone else\u2019s ride \u2014 a second admin must approve before it\u2019s deleted.':'\n\nThis is someone else\u2019s ride.')+'\n\n(To stop a ride right now, cancel it instead \u2014 that takes effect immediately.)')) return;
     await queueAdminAction('ride_delete', {id:r.id}, 'Delete '+((r&&r.client)||'a ride')+((r&&r.date)?(' on '+fmtDateShort(r.date)):'')+' (created by '+((r&&r.createdBy)||'someone else')+')');
     return;
@@ -16244,13 +16277,18 @@ async function deleteRide(id){
   // from inside the dispatch panel alongside routine tools. This names the client and date,
   // states plainly that it cannot be undone, points to Cancel as the usually-correct
   // alternative, and makes the destructive choice the deliberate one rather than the default.
+  //
+  // The temp-bypass path gets an extra line naming whose ride this actually is and that the
+  // usual second-admin approval was skipped — so this never looks, in the moment or later,
+  // like an ordinary delete of your own ride. Same dialog, same buttons, one added fact.
   const _ok = await showConfirmModal({
     icon:'\uD83D\uDDD1\uFE0F', iconColor:'#f0997b', iconBg:'#3a1a1a',
     title:'Delete this ride?',
     message:((r&&r.client)||'This ride')
       +((r&&r.date)?(' \u2014 '+fmtDateShort(r.date)):'')
       +((r&&r.time)?(' at '+fmtTime12(r.time)):'')
-      +'.\n\nThis removes the ride and its history permanently and cannot be undone.\n\nIf the client called off a ride that was already scheduled, use Cancel Ride instead \u2014 that keeps the record and can charge a cancellation fee.',
+      +'.\n\nThis removes the ride and its history permanently and cannot be undone.\n\nIf the client called off a ride that was already scheduled, use Cancel Ride instead \u2014 that keeps the record and can charge a cancellation fee.'
+      +(_tempBypass ? ('\n\n\u26A0\uFE0F Created by '+((r&&r.createdBy)||'someone else')+' \u2014 deleting directly under today\u2019s temporary admin override, skipping the usual second-admin approval.') : ''),
     buttons:[
       {label:'Keep ride', style:'neutral', value:false},
       {label:'Delete permanently', style:'danger', value:true}
@@ -25515,12 +25553,22 @@ function _isLikelyDuplicateRide(candidate, existingRides){
 // Groups EXISTING rides in the app that look like duplicates of each other — for cleaning up
 // after the fact, not for filtering an import. Built after Chase asked for a way to review and
 // remove duplicates the FamilyWall recovery may have already created before the import-time
-// check above existed. Simple pairwise clustering: any two non-cancelled rides that
-// _ridesLookLikeDupes() match land in the same group, transitively (if A matches B and B
-// matches C, all three group together even if A and C don't directly match each other).
+// check above existed. Simple pairwise clustering: any two matching rides land in the same
+// group, transitively (if A matches B and B matches C, all three group together even if A and
+// C don't directly match each other).
+//
+// Excludes cancelled AND paid/completed rides from the candidate pool entirely — not just
+// from being pre-checked, but from ever appearing in a group at all. Reported concern: a
+// driver may have already marked one copy of an import-created duplicate as paid before this
+// tool existed, and a paid ride disappearing would throw off their income tally even if it
+// looked like "just" a duplicate. Once a ride is paid, it's financial history, not calendar
+// clutter — this tool has no business touching it, so it never even offers the choice. If a
+// paid ride has an unpaid duplicate sitting next to it, the unpaid one can still surface and
+// get cleaned up on its own; the paid one is simply invisible to this entire tool.
+//
 // Returns only groups with 2+ rides — nothing to review otherwise.
 function findDuplicateRideGroups(){
-  var candidates=(rides||[]).filter(function(r){ return r && r.status!=='cancelled'; });
+  var candidates=(rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && r.status!=='completed'; });
   var visited=new Set();
   var groups=[];
   candidates.forEach(function(r){
@@ -25556,7 +25604,7 @@ function openDuplicateCleanup(){
     +'<div style="font-size:1.05rem;font-weight:700;color:var(--black);">🧹 Clean up duplicate rides</div>'
     +'<button onclick="closeDuplicateCleanup()" style="background:none;border:none;font-size:1.5rem;line-height:1;color:var(--mid);cursor:pointer;padding:0 .25rem;">&times;</button>'
     +'</div>'
-    +'<div style="font-size:.78rem;color:var(--mid);margin-bottom:.75rem;line-height:1.4;">'+groups.length+' possible duplicate group'+(groups.length===1?'':'s')+' found — same date, matching client name. Nothing is checked by default. Review each group and check off the copies you want removed, then confirm at the bottom.</div>'
+    +'<div style="font-size:.78rem;color:var(--mid);margin-bottom:.75rem;line-height:1.4;">'+groups.length+' possible duplicate group'+(groups.length===1?'':'s')+' found — same date, matching client name. Paid rides are never included here, even as part of a group with an unpaid duplicate — once a driver\'s marked something paid it\'s income history, not something this tool touches. Nothing is checked by default. Review each group and check off the copies you want removed, then confirm at the bottom.</div>'
     +'<div id="dupe-cleanup-list" style="overflow:auto;flex:1;margin-bottom:.75rem;"></div>'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;border-top:1.5px solid var(--light);padding-top:.75rem;">'
     +'<div id="dupe-cleanup-count" style="font-size:.8rem;color:var(--mid);">0 selected</div>'
