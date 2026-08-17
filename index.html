@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608171868">
+<meta name="version" content="202608171870">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1362,7 +1362,11 @@ input,select,textarea{font-size:16px;}
     <div style="background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.65rem .75rem;margin-bottom:.75rem;">
       <label for="fw-cutoff-date" style="font-size:.76rem;font-weight:600;color:var(--black);display:block;margin-bottom:.3rem;">Only import rides on or after</label>
       <input type="date" id="fw-cutoff-date" style="width:100%;padding:.4rem .5rem;border:1.5px solid var(--light);border-radius:6px;font-family:inherit;font-size:.85rem;box-sizing:border-box;">
-      <div style="font-size:.66rem;color:var(--mid);margin-top:.3rem;line-height:1.4;">Skips anything before this date so a re-import doesn't re-add rides already reflected in the app. Kat and Morgan's rides are always skipped &mdash; they enter their own directly. Applies to both options below.</div>
+      <div style="font-size:.66rem;color:var(--mid);margin-top:.3rem;line-height:1.4;">Skips anything before this date so a re-import doesn't re-add rides already reflected in the app. Applies to both options below.</div>
+      <label style="display:flex;align-items:flex-start;gap:.4rem;margin-top:.6rem;cursor:pointer;">
+        <input type="checkbox" id="fw-include-owner-rides" style="margin-top:.15rem;">
+        <span style="font-size:.72rem;color:var(--mid);line-height:1.4;">Also include Kat &amp; Morgan's own rides. Off by default — they normally enter those directly in the app, so importing them too would create duplicates. Turn this on only if the app's copy of their rides is missing (e.g. recovering after a data loss) and FamilyWall is the only place those rides still exist.</span>
+      </label>
     </div>
     <div style="background:var(--gold-pale);border:1.5px solid var(--gold);border-radius:8px;padding:.75rem;margin-bottom:.85rem;">
       <div style="font-size:.85rem;font-weight:600;margin-bottom:.35rem;">⚡ One-tap import (recommended)</div>
@@ -1373,6 +1377,7 @@ input,select,textarea{font-size:16px;}
     <textarea id="ics-paste-box" rows="6" placeholder="BEGIN:VCALENDAR…" style="width:100%;padding:.6rem;border:1.5px solid var(--light);border-radius:8px;font-family:monospace;font-size:.78rem;resize:vertical;box-sizing:border-box;"></textarea>
     <div id="ics-paste-status" style="font-size:.8rem;color:var(--mid);min-height:1.1rem;margin:.4rem 0;"></div>
     <button class="btn-primary" onclick="importPastedICS()" style="width:100%;padding:.8rem;">Import rides</button>
+    <button id="ics-cleanup-dupes-btn" onclick="openDuplicateCleanup()" class="btn-secondary" style="width:100%;padding:.7rem;margin-top:.75rem;display:none;">🧹 Clean up duplicate rides</button>
   </div>
 </div>
 
@@ -2080,6 +2085,19 @@ async function storageGet(key) {
   return null;
 }
 
+// ── TEMPORARY: admin edit-all-rides (added Aug 17, 2026, recovery day) ──────────────────
+// Chase asked for this specifically to fix rides damaged/duplicated by the FamilyWall
+// data-loss recovery, without needing to be the client owner or assigned driver on every
+// single one individually — the normal rule (see saveRideEdits' and the rm-edit-btn
+// visibility check's own comments) is deliberately owner/driver-only, NOT admin, so an
+// admin quietly having blanket edit access isn't something to leave on by accident.
+//
+// TO REVERT: set this to false (or delete this line and its two call sites — grep for
+// TEMP_ADMIN_EDIT_ALL, there are exactly two: the rm-edit-btn visibility check and
+// saveRideEdits' permission check). Both fall straight back to the original owner/driver-only
+// rule with nothing else to touch.
+const TEMP_ADMIN_EDIT_ALL = true;
+
 // ── Admin change audit: notify Chase when another admin changes anything (not rides) ──
 // Set CHASE_AUDIT_ENABLED=false to turn off. Hooks the single storageSet() choke point,
 // filters out ride/noise keys, debounces so one action = one notification.
@@ -2090,7 +2108,7 @@ async function loadChaseAudit(){ try{ const d=await storageGet('kat:chaseAuditOn
 function _updateAdminAuditBtn(){ try{ var b=document.getElementById('admin-audit-btn'); if(!b) return; if(currentUser && currentUser.name==='Chase'){ b.style.display='block'; b.innerHTML='&#128276; Admin change alerts &middot; <b style="color:'+(chaseAuditOn?'var(--green)':'var(--mid)')+';">'+(chaseAuditOn?'On':'Off')+'</b>'; } else { b.style.display='none'; } }catch(e){} }
 function toggleChaseAudit(){ if(!currentUser || currentUser.name!=='Chase') return; chaseAuditOn=!chaseAuditOn; saveChaseAudit(); if(typeof showToast==='function') showToast(chaseAuditOn?'\u2713 Admin change alerts ON':'Admin change alerts OFF'); try{ if(typeof _updateAdminAuditBtn==='function') _updateAdminAuditBtn(); }catch(e){} }
 const _AUDIT_SKIP = ['kat:rides','kat:ridesArchive','kat:outsideRides','kat:feePayments','kat:receipts',
-  'kat:notifications','kat:chatLastRead','kat:comments','kat:biometricCreds','kat:pendingAdminTutorial',
+  'kat:notifications','kat:notifHistory','kat:chatLastRead','kat:comments','kat:biometricCreds','kat:pendingAdminTutorial',
   'kat:sos','kat:presence','kat:chaseAuditOn','kat:uiPrefs','kat:driverExpenses','kat:fcmTokens'];
 // Profile keys: notify ONLY when editing someone else's profile, never your own (even for admins).
 const _AUDIT_PERSONAL = ['kat:driverProfiles','kat:driverSettings','kat:driverVenmo','kat:driverPhotoOverrides'];
@@ -2336,6 +2354,13 @@ let _archiveLoaded = false;   // whether the ride archive is currently merged in
 window._pendingUnsavedRideIds = window._pendingUnsavedRideIds || new Set();
 let comments = {};   // { rideId: [{user, text, ts}] }
 let notifications = {}; // { driverName: [{rideId, msg, ts, read}] }
+// Cleared/handled notifications, kept around so tapping one isn't a one-way trip. Same shape
+// as `notifications` plus a `handledAt` timestamp; capped per driver in _archiveNotif below so
+// this can't grow forever. Built after a driver asked "is there a way to recover the alerts" —
+// clicking a notification always removed it outright, with nothing to fall back on if the tap
+// didn't land where expected (see v867) or someone just wanted to re-check what a request said.
+let notifHistory = {}; // { driverName: [{...same fields as notifications, handledAt}] }
+const NOTIF_HISTORY_MAX_PER_DRIVER = 40;
 let nextId = 100;
 
 // ═══════════════════════════════════════════
@@ -2463,10 +2488,11 @@ async function _ensureFresh(){
 
 async function _loadAppData() {
   try {
-    const [storedRides, storedComments, storedNotifs, storedColors] = await Promise.all([
+    const [storedRides, storedComments, storedNotifs, storedNotifHistory, storedColors] = await Promise.all([
       storageGet('kat:rides'),
       storageGet('kat:comments'),
       storageGet('kat:notifications'),
+      storageGet('kat:notifHistory'),
       storageGet('kat:driverColors'),
     ]);
     rides        = storedRides    || SEED_RIDES;
@@ -2477,6 +2503,7 @@ async function _loadAppData() {
     _snapshotRidesBaseline(rides);
     comments     = storedComments || {};
     notifications= storedNotifs   || {};
+    notifHistory = storedNotifHistory || {};
     if(storedColors) driverColors = storedColors;
     // Preamble loads run in PARALLEL. The profiles -> added-drivers -> photo-override ORDER
     // matters (an edited photo must win), so those three stay one chain; the rest run alongside.
@@ -3619,6 +3646,21 @@ async function loadRideHistory(){
 }
 async function saveComments(){ await storageSet('kat:comments', comments); }
 async function saveNotifs()  { await storageSet('kat:notifications', notifications); }
+async function saveNotifHistory(){ await storageSet('kat:notifHistory', notifHistory); }
+// Called wherever a notification is removed from the active list (handleNotifClick,
+// notifRoute's client_request branch) so it lands in history instead of vanishing. Newest
+// first, capped at NOTIF_HISTORY_MAX_PER_DRIVER so this can't grow without bound.
+function _archiveNotif(driverName, notif){
+  try{
+    if(!driverName || !notif) return;
+    if(!notifHistory[driverName]) notifHistory[driverName]=[];
+    notifHistory[driverName].unshift(Object.assign({}, notif, { handledAt: Date.now() }));
+    if(notifHistory[driverName].length>NOTIF_HISTORY_MAX_PER_DRIVER){
+      notifHistory[driverName].length=NOTIF_HISTORY_MAX_PER_DRIVER;
+    }
+    saveNotifHistory();
+  }catch(e){ console.warn('_archiveNotif failed', e); }
+}
 async function saveColors()  { await storageSet('kat:driverColors', driverColors); }
 
 // ═══════════════════════════════════════════
@@ -6636,6 +6678,42 @@ function _prefillFromClientRequest(req){
   }, isQuote ? 260 : 160); // let the page/sheet finish opening before writing into it
 }
 
+// Reopens a notification from "Recently handled" — same routing as handleNotifClick, but
+// deliberately never removes anything from history, so it can be reopened again and again
+// until it ages out naturally past NOTIF_HISTORY_MAX_PER_DRIVER. Kept as its own function
+// rather than sharing code with handleNotifClick: that one's whole job includes deleting the
+// notification, this one's whole job is NOT to, and conflating the two risked one accidentally
+// picking up the other's behavior in a future edit.
+function handleNotifHistoryClick(el){
+  const driverName=el.dataset.dname;
+  const idx=parseInt(el.dataset.hidx);
+  const histList=notifHistory[driverName]||[];
+  const n=histList[idx];
+  if(!n) return;
+  if(typeof closeNotifPanel==="function") closeNotifPanel();
+  const type=n.type, rideId=n.rideId, channel=n.channel, msg=n.msg||n.message||"";
+  const _req = n.req || null;
+  if(type==='client_request' && _req){
+    if(_req.requestType === 'quote'){ nav('quote'); }
+    else { nav('calendar'); setTimeout(function(){ try{ openQuickAddModal(); }catch(e){} }, 150); }
+    _prefillFromClientRequest(_req);
+    return;
+  }
+  if(type==='chat'){
+    nav("chat");
+    if(channel && channel!=='group') setTimeout(function(){ try{ switchChatChannel(channel); }catch(e){} }, 220);
+    return;
+  }
+  if(_NOTIF_RIDE_TYPES[type] && typeof rideId==='number'){
+    const ride=rides.find(x=>x.id===rideId);
+    if(ride){ nav("calendar"); setTimeout(function(){ openRideModal(rideId); },150); return; }
+  }
+  if(_NOTIF_PAGE_ROUTES[type]){ nav(_NOTIF_PAGE_ROUTES[type]); return; }
+  if(/transfer|release|override|client/i.test(msg)){ nav("clients"); return; }
+  if(/chat|message/i.test(msg)){ nav("chat"); return; }
+  nav("calendar");
+}
+
 function handleNotifClick(el){
   const driverName=el.dataset.dname;
   const idx=parseInt(el.dataset.nidx);
@@ -6644,9 +6722,11 @@ function handleNotifClick(el){
   const n=notifList[idx];
   if(!n) return;
   if(typeof closeNotifPanel==="function") closeNotifPanel();
-  // Capture routing info, then REMOVE this notification from the list entirely
+  // Capture routing info, then REMOVE this notification from the active list — but archive it
+  // first (not just delete) so it's still recoverable from "Recently handled" afterward.
   const type=n.type, rideId=n.rideId, channel=n.channel, msg=n.msg||n.message||"";
   const _req = n.req || null;
+  _archiveNotif(driverName, n);
   notifList.splice(idx,1);
   saveNotifs(); updateNotifBadge();
   try{ renderNotifPanel(); }catch(e){}
@@ -6851,6 +6931,29 @@ function renderNotifPanel(){
         +'<div style="font-size:.72rem;color:var(--mid);margin-top:2px;">'+(n.ts?new Date(n.ts).toLocaleDateString():'')+'</div>'
         +'</div>';
     });
+  }
+
+  // Recently handled — archived copies of notifications already tapped/cleared, kept
+  // recoverable rather than gone for good the moment they're clicked. Collapsed by default
+  // (there can be up to NOTIF_HISTORY_MAX_PER_DRIVER of these) so it doesn't compete for
+  // attention with anything still actually pending above. Clicking an entry reopens it via
+  // handleNotifHistoryClick, which never removes it — it can be reopened again later too.
+  const myHistory = dName ? (notifHistory[dName]||[]) : [];
+  if(myHistory.length){
+    const _histId='notif-history-'+Date.now();
+    html += '<div onclick="var b=document.getElementById(\''+_histId+'\'); if(b) b.style.display = b.style.display===\'none\'?\'block\':\'none\';" '
+      +'style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);padding:.5rem .75rem;border-bottom:1px solid var(--light);cursor:pointer;display:flex;align-items:center;justify-content:space-between;">'
+      +'<span>Recently handled ('+myHistory.length+')</span><span style="font-size:.85rem;">▾</span></div>'
+      +'<div id="'+_histId+'" style="display:none;">';
+    myHistory.slice(0,NOTIF_HISTORY_MAX_PER_DRIVER).forEach(function(n,hidx){
+      html += '<div data-hidx="'+hidx+'" data-dname="'+escAttr(dName||'')+'" '
+        +'onclick="handleNotifHistoryClick(this)" '
+        +'style="padding:.6rem .75rem;border-bottom:0.5px solid var(--light);cursor:pointer;background:var(--white);opacity:.75;"'
+        +'><div style="font-size:.8rem;color:var(--black);">'+(n.msg||n.message||'')+'</div>'
+        +'<div style="font-size:.7rem;color:var(--mid);margin-top:2px;">'+(n.handledAt?new Date(n.handledAt).toLocaleDateString():'')+'</div>'
+        +'</div>';
+    });
+    html += '</div>';
   }
 
   panel.innerHTML = html ? (_clearBtn + html) : `<div style="padding:2rem 1.25rem;text-align:center;color:var(--mid);"><div style="font-size:2rem;margin-bottom:.4rem;">✅</div><div style="font-size:.9rem;font-weight:600;color:var(--black);margin-bottom:.2rem;">You’re all caught up</div><div style="font-size:.8rem;">No notifications right now.</div></div>`;
@@ -8717,7 +8820,8 @@ function openRideModal(id){
   if(cancelBtn) cancelBtn.style.display=_canCancel?'':'none';
   const _dangerZone=document.getElementById('rm-danger-zone');
   if(_dangerZone) _dangerZone.style.display=(_canDelete||_canCancel)?'flex':'none';
-  // edit button — client owner (Kat↔Morgan proxy-aware) or the assigned driver.
+  // edit button — client owner (Kat↔Morgan proxy-aware) or the assigned driver, plus
+  // TEMP_ADMIN_EDIT_ALL (see top of file) for today only.
   // Kept identical to the permission check in saveRideEdits() so what's visible here
   // always matches what can actually be saved - no more showing Edit to someone who'll
   // just get silently blocked when they try to save.
@@ -8729,7 +8833,7 @@ function openRideModal(id){
     const _eMyResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[_eMyLogin]) || _eMyDriverName;
     const _eOwner = getClientOwner(r.client) || feeOwnerFor(r.createdBy);
     const _eIsOwner = !!(_eOwner && _eOwner===_eMyResolvedIdentity);
-    editBtn.style.display=(_eIsOwner||_eIsDriver)?'inline-flex':'none';
+    editBtn.style.display=((TEMP_ADMIN_EDIT_ALL && isAdmin())||_eIsOwner||_eIsDriver)?'inline-flex':'none';
   }
   setCancelBtn(r.status==='cancelled');
   // build view mode detail grid
@@ -9175,7 +9279,18 @@ function buildRideLifecycle(r, nested){
     const done = RIDE_STAGES.indexOf(s) <= RIDE_STAGES.indexOf(cur);
     const bg = active ? 'var(--gold)' : (done ? 'var(--gold-pale)' : 'var(--surface)');
     const col = active ? '#fff' : (done ? 'var(--gold)' : 'var(--mid)');
-    return `<div style="flex:1;min-width:72px;padding:.4rem .3rem;border:1.5px solid ${active?'var(--gold)':'var(--light)'};border-radius:8px;background:${bg};color:${col};font-family:'DM Sans',sans-serif;font-size:.74rem;font-weight:600;cursor:default;text-align:center;">${RIDE_STAGE_LABEL[s]}</div>`;
+    // Reported: the "Text Sent" chip looked like a button but did nothing when tapped — it
+    // was cursor:default with no onclick, purely decorative. Wired it to the same
+    // toggleConfirmSent() the Confirmations dashboard card already uses, so tapping it here
+    // actually marks (or unmarks) the confirmation text as sent, then refreshes this modal in
+    // place via the same renderRideView() pattern used after every other in-modal ride
+    // mutation. Scheduled and Paid deliberately stay display-only: Scheduled isn't a state
+    // anyone sets directly (it's just "not confirmed yet"), and Paid already goes through its
+    // own, more careful payment/fee flow elsewhere that a bare tap here shouldn't shortcut.
+    const clickable = s==='confirmed';
+    const onclick = clickable ? ` onclick="event.stopPropagation();toggleConfirmSent(${r.id}).then(function(){ try{ if(document.getElementById('ride-modal')?.classList.contains('show')) renderRideView(_rideById(${r.id})); }catch(e){} });"` : '';
+    const title = clickable ? (active?'Tap to unmark \u2014 undoes it back to Scheduled':'Tap once the confirmation text has been sent') : '';
+    return `<div${onclick} title="${title}" style="flex:1;min-width:72px;padding:.4rem .3rem;border:1.5px solid ${active?'var(--gold)':'var(--light)'};border-radius:8px;background:${bg};color:${col};font-family:'DM Sans',sans-serif;font-size:.74rem;font-weight:600;cursor:${clickable?'pointer':'default'};text-align:center;">${RIDE_STAGE_LABEL[s]}</div>`;
   }).join('');
 
   // WHO sent the confirmation, and WHEN.
@@ -10553,17 +10668,20 @@ function toggleEditMode(on){
 async function saveRideEdits(){
   const r=rides.find(x=>x.id===activeRideId); if(!r) return;
   // Edit permission: the client owner (Kat/Morgan proxy-aware, same rule that decides who
-  // earns the fee - NOT admin status) or the assigned driver. Mirrors canSeeGateCode's
-  // exact pattern for the same reasoning: the owner manages everything about their client's
-  // rides, and a substitute/assigned driver still needs to fix their own ride's details
-  // even if they don't own the client relationship.
+  // earns the fee) or the assigned driver — deliberately NOT admin status by default. Mirrors
+  // canSeeGateCode's exact pattern for the same reasoning: the owner manages everything about
+  // their client's rides, and a substitute/assigned driver still needs to fix their own
+  // ride's details even if they don't own the client relationship.
+  //
+  // TEMP_ADMIN_EDIT_ALL (see its own comment, top of file) is today's one exception — remove
+  // it and this reverts to owner/driver-only automatically, no other change needed here.
   const _seMyDriverName = getMyDriverName();
   const _seIsDriver = (_seMyDriverName && (r.driver===_seMyDriverName || r.driver2===_seMyDriverName));
   const _seMyLogin = currentUser && currentUser.name;
   const _seMyResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[_seMyLogin]) || _seMyDriverName;
   const _seOwner = getClientOwner(r.client) || feeOwnerFor(r.createdBy);
   const _seIsOwner = !!(_seOwner && _seOwner===_seMyResolvedIdentity);
-  if(!_seIsOwner && !_seIsDriver){ showToast('Only the client owner or assigned driver can edit this ride','error'); return; }
+  if(!(TEMP_ADMIN_EDIT_ALL && isAdmin()) && !_seIsOwner && !_seIsDriver){ showToast('Only the client owner or assigned driver can edit this ride','error'); return; }
   if(!(await _confirmIfSameAddress('edit'))) return;
   // Apply all edits
   r.client    = document.getElementById('edit-client').value.trim()||r.client;
@@ -24846,6 +24964,7 @@ function manualICSPaste(){
   // already in the app) without making it mandatory to type a date every time.
   const cutoffEl=document.getElementById('fw-cutoff-date'); if(cutoffEl) cutoffEl.value=toDateStr(new Date());
   const modal=document.getElementById('ics-modal'); if(modal) modal.classList.add('show');
+  const cleanupBtn=document.getElementById('ics-cleanup-dupes-btn'); if(cleanupBtn) cleanupBtn.style.display=(typeof isAdmin==='function'&&isAdmin())?'block':'none';
 }
 
 // ── ONE-TIME FAMILYWALL IMPORT (today-forward, parsed from the .ics export) ──
@@ -24853,6 +24972,8 @@ const FW_IMPORT_RIDES = JSON.parse('[{"id":200,"fwUID":"event/19392843_100258499
 function runFamilyWallImport(){
   const cutoffEl=document.getElementById('fw-cutoff-date');
   const cutoff=cutoffEl&&cutoffEl.value?cutoffEl.value:'';
+  const includeOwnerEl=document.getElementById('fw-include-owner-rides');
+  const includeOwnerRides=!!(includeOwnerEl&&includeOwnerEl.checked);
   const existing=new Set(rides.map(r=>r.fwUID).filter(Boolean));
 
   // BUG (reported v863): the confirm() below used to read FW_IMPORT_RIDES.length — the raw
@@ -24869,11 +24990,12 @@ function runFamilyWallImport(){
   // actually land. If that number is zero, skip the confirm/import round-trip entirely and
   // say why — "0 imported" after a confirmed "280" reads as a broken button; a same-screen
   // breakdown reads as a snapshot that's simply run its course.
-  let willImport=0, wouldSkipDupe=0, wouldSkipOwner=0, wouldSkipDate=0;
+  let willImport=0, wouldSkipDupe=0, wouldSkipOwner=0, wouldSkipDate=0, wouldSkipAlreadyEntered=0;
   FW_IMPORT_RIDES.forEach(r=>{
     if(r.fwUID && existing.has(r.fwUID)){ wouldSkipDupe++; return; }
-    if(r.createdBy==='Kat' || r.createdBy==='Morgan'){ wouldSkipOwner++; return; }
+    if(!includeOwnerRides && (r.createdBy==='Kat' || r.createdBy==='Morgan')){ wouldSkipOwner++; return; }
     if(cutoff && r.date && r.date<cutoff){ wouldSkipDate++; return; }
+    if(_isLikelyDuplicateRide({ client:r.client, date:r.date, time:r.time }, rides)){ wouldSkipAlreadyEntered++; return; }
     willImport++;
   });
 
@@ -24881,8 +25003,7 @@ function runFamilyWallImport(){
 
   if(willImport===0){
     const why="Nothing to import: of the "+FW_IMPORT_RIDES.length+" rides in this one-time snapshot, "
-      +wouldSkipDate+" are before "+(cutoff||"today")+", "+wouldSkipOwner
-      +" are Kat/Morgan's own (they enter those directly), and "+wouldSkipDupe+" are already in the app.";
+      +wouldSkipDate+" are before "+(cutoff||"today")+(includeOwnerRides?"":", "+wouldSkipOwner+" are Kat/Morgan's own (they enter those directly)")+", "+wouldSkipAlreadyEntered+" already match a ride in the app, and "+wouldSkipDupe+" are already in the app.";
     if(st) st.textContent=why;
     showToast("Nothing to import — see details below");
     return;
@@ -24893,13 +25014,17 @@ function runFamilyWallImport(){
     +' filtered out by date, owner, or duplicate.) Safe to run once — duplicates are skipped.')) return;
 
   let maxId=rides.reduce((m,r)=>Math.max(m,r.id||0),100);
-  let added=0, skippedDupe=0, skippedOwner=0, skippedDate=0;
+  let added=0, skippedDupe=0, skippedOwner=0, skippedDate=0, skippedAlreadyEntered=0;
   FW_IMPORT_RIDES.forEach(r=>{
     if(r.fwUID && existing.has(r.fwUID)){ skippedDupe++; return; }
     // Kat and Morgan enter their own rides directly — importing FamilyWall data
-    // attributed to them would create duplicates, not catch anything new.
-    if(r.createdBy==='Kat' || r.createdBy==='Morgan'){ skippedOwner++; return; }
+    // attributed to them would create duplicates, not catch anything new. Unless
+    // includeOwnerRides opted in (recovery scenario — see the checkbox in the modal).
+    if(!includeOwnerRides && (r.createdBy==='Kat' || r.createdBy==='Morgan')){ skippedOwner++; return; }
     if(cutoff && r.date && r.date<cutoff){ skippedDate++; return; }
+    // Same fuzzy check as the manual-paste import: catches a ride already typed in by hand
+    // that this snapshot's fwUID can't match against.
+    if(_isLikelyDuplicateRide({ client:r.client, date:r.date, time:r.time }, rides)){ skippedAlreadyEntered++; return; }
     const copy=Object.assign({},r); copy.id=++maxId;
     // Same cleanup already used for the client list: normalize phone formatting,
     // strip leftover ride-type labels baked into the client name (e.g. "2XL … 1 of 2",
@@ -24910,7 +25035,7 @@ function runFamilyWallImport(){
   });
   saveRides().then(()=>{ refreshDash(); renderCal();  });
   showToast("✓ Imported "+added+" rides from FamilyWall");
-  if(st) st.textContent="✓ Imported "+added+" rides ("+skippedDupe+" already existed, "+skippedOwner+" skipped — Kat/Morgan enter their own, "+skippedDate+" before the cutoff date)";
+  if(st) st.textContent="✓ Imported "+added+" rides ("+skippedDupe+" already existed, "+skippedAlreadyEntered+" matched a ride already in the app, "+skippedOwner+" skipped — Kat/Morgan enter their own, "+skippedDate+" before the cutoff date)";
 }
 
 function importPastedICS(){
@@ -24924,10 +25049,13 @@ function importPastedICS(){
   }
   const cutoffEl=document.getElementById('fw-cutoff-date');
   const cutoff=cutoffEl&&cutoffEl.value?cutoffEl.value:'';
+  const includeOwnerEl=document.getElementById('fw-include-owner-rides');
+  const includeOwnerRides=!!(includeOwnerEl&&includeOwnerEl.checked);
   try {
-    const imported = parseAndImportICS(text, cutoff);
+    const imported = parseAndImportICS(text, cutoff, includeOwnerRides);
     saveRides().then(()=>{ refreshDash(); renderCal(); });
-    setS(`✓ ${imported.added} added, ${imported.skipped} already existed, ${imported.skipped_owner||0} skipped (Kat/Morgan enter their own), ${imported.skipped_date||0} before the cutoff date, ${imported.skipped_nonride||0} non-ride events skipped`);
+    const ownerNote = includeOwnerRides ? `${imported.skipped_owner||0} of Kat/Morgan's own rides included` : `${imported.skipped_owner||0} skipped (Kat/Morgan enter their own)`;
+    setS(`✓ ${imported.added} added, ${imported.skipped} already existed, ${imported.skipped_alreadyEntered||0} matched a ride already in the app, ${ownerNote}, ${imported.skipped_date||0} before the cutoff date, ${imported.skipped_nonride||0} non-ride events skipped`);
     showToast(`✓ Imported ${imported.added} rides`);
     setTimeout(()=>{ const m=document.getElementById('ics-modal'); if(m) m.classList.remove('show'); }, 1800);
   } catch(e){
@@ -24935,12 +25063,12 @@ function importPastedICS(){
   }
 }
 
-function parseAndImportICS(icsText, cutoffDate){
+function parseAndImportICS(icsText, cutoffDate, includeOwnerRides){
   // Split into VEVENT blocks
   const eventBlocks = icsText.split('BEGIN:VEVENT').slice(1)
     .map(b=>b.split('END:VEVENT')[0]);
 
-  let added=0, skipped=0, skipped_nonride=0, skipped_owner=0, skipped_date=0;
+  let added=0, skipped=0, skipped_nonride=0, skipped_owner=0, skipped_date=0, skipped_alreadyEntered=0;
   const existingUIDs = new Set(rides.map(r=>r.fwUID).filter(Boolean));
 
   eventBlocks.forEach(block=>{
@@ -25064,8 +25192,12 @@ function parseAndImportICS(icsText, cutoffDate){
     }
 
     // Kat and Morgan enter their own rides directly — importing FamilyWall data
-    // attributed to them would create duplicates, not catch anything new.
-    if(createdBy==='Kat' || createdBy==='Morgan'){ skipped_owner++; return; }
+    // attributed to them would create duplicates, not catch anything new. EXCEPT during
+    // recovery (v868 follow-up): if the app's own copy of their rides is gone (e.g. after
+    // a data-loss incident), FamilyWall may be the only place those rides still exist, and
+    // skipping them here means they never come back. includeOwnerRides opts into pulling
+    // them in anyway — off by default, so normal day-to-day imports behave exactly as before.
+    if(!includeOwnerRides && (createdBy==='Kat' || createdBy==='Morgan')){ skipped_owner++; return; }
 
     // Parse date/time
     let date='', time='';
@@ -25158,6 +25290,14 @@ function parseAndImportICS(icsText, cutoffDate){
     const cleanClient = _cleanClientLabel(client);
     const cleanPhone = phone ? formatPhoneUS(phone) : '';
 
+    // Catches rides already in the app some other way — typed in by hand, or imported
+    // earlier without a matching fwUID. The fwUID check above only stops re-importing the
+    // exact same calendar event twice; this stops importing a SECOND copy of a ride someone
+    // already entered. See _isLikelyDuplicateRide's own comment for the matching rules.
+    if(_isLikelyDuplicateRide({ client: cleanClient, date, time }, rides)){
+      skipped_alreadyEntered++; return;
+    }
+
     const ride = {
       id: nextId++,
       fwUID: uid,
@@ -25180,7 +25320,7 @@ function parseAndImportICS(icsText, cutoffDate){
     added++;
   });
 
-  return { added, skipped, skipped_nonride, skipped_owner, skipped_date };
+  return { added, skipped, skipped_nonride, skipped_owner, skipped_date, skipped_alreadyEntered };
 }
 
 // ═══════════════════════════════════════════
@@ -25326,6 +25466,147 @@ function _cleanClientLabel(name){
   n=n.replace(/[\s\u00b7,|/-]*\b\d+\s*of\s*\d+\s*$/i,'').trim();   // trailing "1 of 2"
   n=n.replace(/^(?:\d*xl|xxl)\b[\s.:-]+/i,'').trim();             // leading "2XL"/"XL"/"XXL"
   return n;
+}
+// Normalizes a client name for duplicate comparison only (not for display) — lowercase,
+// punctuation stripped, whitespace collapsed. "Richard & Amy Taylor" and "richard amy taylor"
+// compare equal; a stray comma or extra space doesn't cause a false "these are different".
+function _normalizeNameForDupeCheck(name){
+  return String(name||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+}
+// Core pairwise comparison, factored out so the import-time check (below) and the
+// admin-facing "Clean up duplicate rides" tool (further down) use exactly the same matching
+// rule rather than two copies that could quietly drift apart. Same date, matching or missing
+// time, and a client name match after normalization — either a direct match/substring, or
+// word-set containment ("Richard Taylor" still matches "Richard & Amy Taylor" recorded
+// jointly, even though the words aren't contiguous as a substring).
+function _ridesLookLikeDupes(a, b){
+  if(!a || !b || !a.date || !b.date || a.date!==b.date) return false;
+  var an=_normalizeNameForDupeCheck(a.client), bn=_normalizeNameForDupeCheck(b.client);
+  if(!an || !bn) return false;
+  var nameMatch = an===bn || an.indexOf(bn)>=0 || bn.indexOf(an)>=0;
+  if(!nameMatch){
+    var aw=an.split(' ').filter(Boolean), bw=bn.split(' ').filter(Boolean);
+    var shorter=aw.length<=bw.length?aw:bw, longer=aw.length<=bw.length?bw:aw;
+    nameMatch = shorter.length>0 && shorter.every(function(w){ return longer.indexOf(w)>=0; });
+  }
+  if(!nameMatch) return false;
+  // Times: treat missing-on-either-side as a match (can't rule it out), otherwise require
+  // exact HH:MM equality — good enough given the name+date match already did the heavy
+  // lifting, and avoids the complexity of parsing/comparing a "close enough" time window.
+  if(a.time && b.time && a.time!==b.time) return false;
+  return true;
+}
+// Does `candidate` (about to be imported) already exist in `existingRides`, entered some other
+// way (manually typed in, or imported earlier without an fwUID to match against)? The fwUID
+// check elsewhere in the FamilyWall import only catches re-importing the exact same calendar
+// event twice — it does nothing for a ride someone already typed into the app by hand before
+// ever running an import, which is exactly what happens when Kat's own rides get pulled in via
+// the recovery checkbox: she may have already re-entered some of them herself. Deliberately
+// not stricter than this — false negatives (an actual duplicate slips through) just mean one
+// extra ride to delete by hand; false positives (a real new ride gets silently skipped) hide a
+// booking entirely, which is worse.
+function _isLikelyDuplicateRide(candidate, existingRides){
+  if(!candidate || !candidate.date || !_normalizeNameForDupeCheck(candidate.client)) return false;
+  return (existingRides||[]).some(function(r){
+    if(!r || r.status==='cancelled') return false;
+    return _ridesLookLikeDupes(candidate, r);
+  });
+}
+// Groups EXISTING rides in the app that look like duplicates of each other — for cleaning up
+// after the fact, not for filtering an import. Built after Chase asked for a way to review and
+// remove duplicates the FamilyWall recovery may have already created before the import-time
+// check above existed. Simple pairwise clustering: any two non-cancelled rides that
+// _ridesLookLikeDupes() match land in the same group, transitively (if A matches B and B
+// matches C, all three group together even if A and C don't directly match each other).
+// Returns only groups with 2+ rides — nothing to review otherwise.
+function findDuplicateRideGroups(){
+  var candidates=(rides||[]).filter(function(r){ return r && r.status!=='cancelled'; });
+  var visited=new Set();
+  var groups=[];
+  candidates.forEach(function(r){
+    if(visited.has(r.id)) return;
+    var group=[r];
+    visited.add(r.id);
+    candidates.forEach(function(r2){
+      if(r2.id===r.id || visited.has(r2.id)) return;
+      if(_ridesLookLikeDupes(r, r2)){ group.push(r2); visited.add(r2.id); }
+    });
+    if(group.length>1) groups.push(group);
+  });
+  groups.sort(function(a,b){ return (a[0].date||'').localeCompare(b[0].date||''); });
+  return groups;
+}
+// Admin-only review tool for the groups above. Deliberately NOT a one-click "auto-delete
+// duplicates" button — given everything this whole recovery started from, an unattended bulk
+// delete based on a fuzzy name match is exactly the kind of thing that creates a second data
+// disaster while cleaning up the first one. Every ride in every group starts UNCHECKED
+// (nothing selected for deletion by default); the admin has to actively pick which copies to
+// remove, and nothing happens to the actual data until they confirm.
+function openDuplicateCleanup(){
+  if(!requireAdmin('clean up duplicate rides')) return;
+  var groups = findDuplicateRideGroups();
+  if(!groups.length){ showToast('No likely duplicates found ✓'); return; }
+  closeDuplicateCleanup();
+  var back=document.createElement('div');
+  back.id='dupe-cleanup-overlay';
+  back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13000;display:flex;align-items:flex-start;justify-content:center;padding:2.5rem 1rem 1rem;overflow:auto;';
+  back.onclick=function(e){ if(e.target===back) closeDuplicateCleanup(); };
+  back.innerHTML='<div style="background:var(--white);border-radius:16px;max-width:640px;width:100%;padding:1.1rem 1.1rem 1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.4);max-height:90vh;display:flex;flex-direction:column;box-sizing:border-box;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.4rem;">'
+    +'<div style="font-size:1.05rem;font-weight:700;color:var(--black);">🧹 Clean up duplicate rides</div>'
+    +'<button onclick="closeDuplicateCleanup()" style="background:none;border:none;font-size:1.5rem;line-height:1;color:var(--mid);cursor:pointer;padding:0 .25rem;">&times;</button>'
+    +'</div>'
+    +'<div style="font-size:.78rem;color:var(--mid);margin-bottom:.75rem;line-height:1.4;">'+groups.length+' possible duplicate group'+(groups.length===1?'':'s')+' found — same date, matching client name. Nothing is checked by default. Review each group and check off the copies you want removed, then confirm at the bottom.</div>'
+    +'<div id="dupe-cleanup-list" style="overflow:auto;flex:1;margin-bottom:.75rem;"></div>'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;border-top:1.5px solid var(--light);padding-top:.75rem;">'
+    +'<div id="dupe-cleanup-count" style="font-size:.8rem;color:var(--mid);">0 selected</div>'
+    +'<button onclick="deleteDuplicateRides()" class="btn-primary" style="padding:.6rem 1.1rem;background:#b03a2e;">Delete Selected</button>'
+    +'</div></div>';
+  document.body.appendChild(back);
+  window._dupeCleanupGroups = groups;
+  renderDupeCleanupList(groups);
+}
+function closeDuplicateCleanup(){
+  var el=document.getElementById('dupe-cleanup-overlay');
+  if(el) el.remove();
+}
+function _dupeCleanupUpdateCount(){
+  var n=document.querySelectorAll('.dupe-cleanup-check:checked').length;
+  var el=document.getElementById('dupe-cleanup-count');
+  if(el) el.textContent=n+' selected';
+}
+function renderDupeCleanupList(groups){
+  var box=document.getElementById('dupe-cleanup-list');
+  if(!box) return;
+  box.innerHTML=groups.map(function(group, gi){
+    var head=(group[0].client||'—')+' · '+fmtDateShort(group[0].date);
+    var rowsHtml=group.map(function(r){
+      var src = r.fwUID ? 'FamilyWall' : (r.createdBy||'Manual entry');
+      return '<label style="display:flex;align-items:flex-start;gap:.55rem;padding:.5rem .6rem;border-radius:8px;cursor:pointer;" onmouseover="this.style.background=\'var(--surface)\'" onmouseout="this.style.background=\'\'">'
+        +'<input type="checkbox" class="dupe-cleanup-check" data-ride-id="'+r.id+'" onchange="_dupeCleanupUpdateCount()" style="margin-top:.2rem;width:16px;height:16px;flex-shrink:0;">'
+        +'<div style="flex:1;min-width:0;font-size:.82rem;">'
+        +'<div style="font-weight:600;color:var(--black);">'+escHtml(r.client||'—')+' <span style="font-weight:400;color:var(--mid);">· '+escHtml(r.type||'')+'</span></div>'
+        +'<div style="color:var(--mid);font-size:.76rem;">'+(fmtTime12(r.time)||'no time')+' · '+escHtml(driverShortName(r.driver)||'Unassigned')+' · $'+(r.price||0)+' · '+escHtml(src)+' · '+escHtml(r.status||'scheduled')+' · id '+r.id+'</div>'
+        +'</div></label>';
+    }).join('');
+    return '<div style="margin-bottom:.9rem;border:1.5px solid var(--light);border-radius:10px;overflow:hidden;">'
+      +'<div style="font-size:.72rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--gold);background:var(--gold-pale);padding:.4rem .6rem;">'+escHtml(head)+'</div>'
+      +rowsHtml
+      +'</div>';
+  }).join('');
+  _dupeCleanupUpdateCount();
+}
+async function deleteDuplicateRides(){
+  var checked=Array.prototype.slice.call(document.querySelectorAll('.dupe-cleanup-check:checked'));
+  if(!checked.length){ showToast('Nothing selected — check the copies you want removed first','error'); return; }
+  var ids=checked.map(function(el){ return parseInt(el.dataset.rideId); }).filter(function(n){ return !isNaN(n); });
+  if(!confirm('Delete '+ids.length+' ride'+(ids.length===1?'':'s')+'? This cannot be undone from here — double check you kept at least one copy of anything real.')) return;
+  var idSet=new Set(ids);
+  rides = rides.filter(function(r){ return !r || !idSet.has(r.id); });
+  await saveRides();
+  refreshDash(); renderCal();
+  closeDuplicateCleanup();
+  showToast('✓ Deleted '+ids.length+' duplicate ride'+(ids.length===1?'':'s'));
 }
 async function repairImportedClients(){
   var driver=clientStoreDriver();
@@ -27285,6 +27566,7 @@ function notifRoute(navData){
         }
       }
       if(_found && _found.req){
+        try{ _archiveNotif(_dName, _found); }catch(e){}
         _list.splice(_foundIdx,1);
         try{ saveNotifs(); }catch(e){}
         try{ updateNotifBadge(); }catch(e){}
