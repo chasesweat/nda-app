@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608171865">
+<meta name="version" content="202608171868">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2902,7 +2902,13 @@ async function processClientRequests(){
         notes: r.notes||''
       };
       notifications[myDriverName].unshift({ rideId:null, type:'client_request', channel:null, read:false, msg:msg, ts:Date.now(), createdBy:'', clientRequestId:id, req:_reqPayload });
-      if(typeof sendPushToDriver==='function') sendPushToDriver(myDriverName, '\ud83d\udccb New request via your booking link', kind+' from '+(r.clientName||'a client'));
+      // BUG (reported v866): every other push in this file passes navData so tapping the
+      // actual OS notification deep-links somewhere (rideId → the ride, channel → the chat).
+      // This one didn't, so the notification carried no data at all — tapping it just opened
+      // a blank app window with nothing to route to. The in-app bell already worked (v851,
+      // via handleNotifClick's _req payload), which is why this only broke for people tapping
+      // the real push notification, not the in-app list.
+      if(typeof sendPushToDriver==='function') sendPushToDriver(myDriverName, '\ud83d\udccb New request via your booking link', kind+' from '+(r.clientName||'a client'), {type:'client_request', clientRequestId:id});
       _applyClientBookingRequestSideEffects(r);
       reqs[id].status = 'processed';
       changed = true;
@@ -24965,10 +24971,13 @@ function parseAndImportICS(icsText, cutoffDate){
 
     // Detect ride type from summary
     let type = 'ONE WAY';
-    if(/ap.?round.?trip/i.test(summary))          type='AP ROUND TRIP';
-    else if(/ap.?run|a\/p.?run|airport.?run/i.test(summary)) type='AP RUN';
-    else if(/ap.?pick.?up|airport.?pick/i.test(summary))     type='AP PICK UP';
-    else if(/round.?trip/i.test(summary))          type='ROUND TRIP';
+    let hasRideTypeSignal = false;
+    if(/ap.?round.?trip/i.test(summary))          { type='AP ROUND TRIP'; hasRideTypeSignal=true; }
+    else if(/ap.?run|a\/p.?run|airport.?run/i.test(summary)) { type='AP RUN'; hasRideTypeSignal=true; }
+    else if(/ap.?pick.?up|airport.?pick/i.test(summary))     { type='AP PICK UP'; hasRideTypeSignal=true; }
+    else if(/round.?trip/i.test(summary))          { type='ROUND TRIP'; hasRideTypeSignal=true; }
+    else if(/\blocal\b/i.test(summary))            { type='LOCAL'; hasRideTypeSignal=true; }
+    else if(/\bone.?way\b/i.test(summary))         { hasRideTypeSignal=true; } // type already defaults to ONE WAY
 
     // Extract client name from summary patterns like:
     // "AP RUN - Jane Doe (kat)" or "Ap run Jane Doe (Allen)" or "A/p-run Jane (Jenn)"
@@ -24983,6 +24992,7 @@ function parseAndImportICS(icsText, cutoffDate){
     // Remove emojis and cleanup
     client = client.replace(/[\u{1F300}-\u{1FFFF}]|[\u2600-\u27FF]|✅|🦦|❌|🔴|🐥|✈️/gu,'').trim();
     if(!client) client = summary.replace(/[\u{1F300}-\u{1FFFF}]|[\u2600-\u27FF]|✅|🦦|❌|🔴|🐥|✈️/gu,'').trim();
+
 
     // ── DRIVER & CREATOR MATCHING ──
     // ATTENDEE = who is DRIVING the ride
@@ -25099,12 +25109,48 @@ function parseAndImportICS(icsText, cutoffDate){
     const paxMatch = desc.match(/(\d+)\s*passenger/i);
     const pax = paxMatch ? parseInt(paxMatch[1]) : 1;
 
+    // SANITY GATE (v865): require actual evidence this is a ride, not just "not availability."
+    //
+    // Reported: "Chris Stapleton - MERCEDES BENZ" imported as a real $0 ONE WAY ride with no
+    // driver, no phone, no fee — clearly not a booking. Cause: the only thing that kept an
+    // event OUT of the import was the isAvailability check above (a narrow keyword list:
+    // available/vacation/off/etc). Anything that didn't match THAT got imported as a ride,
+    // defaulting to type ONE WAY and price $0 if nothing else was found. That's an opt-out
+    // filter where an opt-in one belongs — FamilyWall calendars mix real bookings with
+    // personal notes, reminders, and anything else someone puts on the shared calendar, and
+    // none of those should silently become a scheduled, driver-assignable ride.
+    //
+    // Require at least one real signal that this is a ride before creating one:
+    //   - an explicit ride-type keyword in the summary (ap run/pickup/round trip/local/one way), or
+    //   - the summary followed the structured "Type - Client (Creator)" pattern (clientMatch), or
+    //   - the description had extractable ride content: a price, a flight number, or a phone.
+    // No signal → skip and count it, rather than guess. The skip count is already shown to
+    // the user afterward, so anything wrongly filtered here is visible and addable by hand —
+    // silently importing garbage is worse than an honest "didn't recognize this one."
+    const hasRideContentSignal = !!(price || flight || phone);
+    if(!hasRideTypeSignal && !clientMatch && !hasRideContentSignal){
+      skipped_nonride++; return;
+    }
+
     // Address: for AP RUN use location as home, for AP PICK UP use location as home
     const home   = loc || '';
     const pickup = type==='AP PICK UP' ? '' : '';
 
-    // Check if cancelled
-    const confirmed = !isCancelled;
+    // BUG (reported v867 follow-up): imported rides showed a green "Confirmed" checkmark on
+    // the dashboard while their actual Ride Status pill still read Scheduled. Cause: this line
+    // used to set the ride's legacy `confirmed` boolean to `!isCancelled` — meaning "this
+    // calendar event wasn't cancelled," which is a completely different fact from "a
+    // confirmation text has actually been sent to this client." Everywhere else in the app,
+    // r.confirmed is deprecated and explicitly no longer written (see the comment near the
+    // Edit-ride save handler) — real confirmation status lives in r.status, set only when
+    // someone actually sends the confirmation text via the Ride Status pill. This import was
+    // the one remaining place still writing the legacy field, so anything pulled in here
+    // looked "confirmed" everywhere that field is read (dashboard, calendar cards) while the
+    // ride modal — which reads r.status — correctly showed it as not yet confirmed. Fixed by
+    // not writing r.confirmed at all; an imported ride now starts genuinely unconfirmed, same
+    // as a ride entered by hand, until someone actually confirms it in the app.
+    //
+    // isCancelled itself is unaffected — still used below to flag the notes field.
 
     // Same cleanup already used for the client list: normalize phone formatting,
     // strip leftover ride-type labels baked into the client name (e.g. "2XL … 1 of 2",
@@ -25127,7 +25173,6 @@ function parseAndImportICS(icsText, cutoffDate){
       holiday:'N', christmas:'N', late:'N', premium:'N',
       fuel:'N', xstop:0, traffic:'N',
       wait:0, email:'',
-      confirmed,
       notes: isCancelled ? '❌ CANCELLED' : '',
       createdBy,
     };
@@ -27224,6 +27269,33 @@ function notifRoute(navData){
       return;
     }
     var _t=navData.type||'', _m=navData.msg||'';
+    // A booking-link request notification (v866): match the same quality of routing the
+    // in-app bell already had via handleNotifClick — open the actual form the client asked
+    // for, prefilled — instead of just dumping the driver onto the Clients page and making
+    // them go find it. Falls back to the old generic behavior if the notification has
+    // already been opened/cleared elsewhere (e.g. from another device) by the time this tap
+    // lands, since there's nothing left here to prefill from.
+    if(_t==='client_request'){
+      var _dName=(typeof getMyDriverName==='function')?getMyDriverName():null;
+      var _list=_dName?(notifications[_dName]||null):null;
+      var _found=null, _foundIdx=-1;
+      if(_list){
+        for(var _i=0;_i<_list.length;_i++){
+          if(_list[_i] && _list[_i].type==='client_request' && _list[_i].clientRequestId===navData.clientRequestId){ _found=_list[_i]; _foundIdx=_i; break; }
+        }
+      }
+      if(_found && _found.req){
+        _list.splice(_foundIdx,1);
+        try{ saveNotifs(); }catch(e){}
+        try{ updateNotifBadge(); }catch(e){}
+        try{ renderNotifPanel(); }catch(e){}
+        if(_found.req.requestType==='quote'){ nav('quote'); }
+        else { nav('calendar'); setTimeout(function(){ try{ openQuickAddModal(); }catch(e){} }, 150); }
+        _prefillFromClientRequest(_found.req);
+        return;
+      }
+      nav('clients'); return;
+    }
     if(/transfer|client|merge/.test(_t) || /transfer|release|override|client/i.test(_m)){ nav('clients'); return; }
     if(/sos/.test(_t)){ try{ showSOSActivePopup(); }catch(e){ nav('dashboard'); } return; }
     if(/combine/.test(_t)){ nav('income'); return; }
