@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608141857">
+<meta name="version" content="202608171862">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -126,7 +126,14 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
    flex-wrap:wrap has no choice but to push the badge and price onto new lines. min-width:0
    lets the text box shrink (and its own text wrap) so everything stays on one row, which is
    what makes the two cards finally look like each other. */
-.ride-info{flex:1;min-width:0;}
+/* min-width was 0 (v846) so the box could shrink and stop pushing the price onto its own line.
+   That went too far the other way: with the date, badge and price all flex-shrink:0, this was
+   the only thing able to give, so it collapsed to a few characters wide and wrapped the client
+   name one word per line (v858 report). 150px is a floor, not a fixed width - it still shrinks
+   from its natural size to keep the row together, but never below something readable. Below
+   that the parent's flex-wrap:wrap takes over and moves the price down, which is the correct
+   outcome on a genuinely narrow screen rather than mangling the text. */
+.ride-info{flex:1;min-width:150px;}
 .ride-client{font-weight:600;font-size:.92rem;}
 .ride-detail{font-size:.78rem;color:var(--mid);margin-top:2px;}
 .ride-price{font-size:1rem;font-weight:600;color:var(--green);white-space:nowrap;}
@@ -3323,7 +3330,52 @@ async function saveRides(){
       return true;
     }
     if(changed){ await fbRef('nda/kat/rides').update(changed); }
-    else       { await fbRef('nda/kat/rides').set(arr); }
+    else       {
+      // ── THE WHOLE-ARRAY WRITE, AND WHY IT NOW MERGES FIRST (v862) ──────────────────
+      // Reported: three rides completed on a phone over a weekend - marked paid, driver
+      // assigned, a fee waived - reverted to their pre-weekend state on every device, with no
+      // failed-save banner anywhere. The rides still existed; only the changes vanished.
+      //
+      // This branch is why. It runs whenever the ride COUNT differs from the baseline (anyone
+      // adding or deleting a ride anywhere), and a bare .set(arr) replaces the entire server
+      // node with THIS device's array. Any change another device made that this device hasn't
+      // received yet is not merged or rejected - it is simply gone, silently, and the write
+      // "succeeds", which is exactly why nothing ever surfaced a warning.
+      //
+      // The merge below reads the server first and keeps any ride that is on the server but
+      // not in our array AND not in our baseline. That last condition is what preserves
+      // deletion: a ride we previously knew about and no longer hold was deliberately deleted
+      // here, so it stays deleted. A ride we have never seen came from somewhere else while we
+      // held stale data, so it survives instead of being wiped.
+      //
+      // Fails open on purpose: if the read itself fails we still write, because refusing to
+      // save is its own kind of data loss. Worst case then is the old behaviour, not worse.
+      let _toWrite = arr;
+      try{
+        const _srvSnap = await fbRef('nda/kat/rides').once('value');
+        const _srvVal = _srvSnap.val();
+        if(_srvVal){
+          const _srv = Array.isArray(_srvVal)
+            ? _srvVal.filter(function(r){ return r && r.id!=null; })
+            : Object.values(_srvVal).filter(function(r){ return r && r.id!=null; });
+          const _mineIds = new Set(arr.map(function(r){ return r && r.id; }));
+          const _knownIds = new Set();
+          _ridesBaseline.forEach(function(s){
+            try{ const p=JSON.parse(s); if(p && p.id!=null) _knownIds.add(p.id); }catch(_e){}
+          });
+          const _rescued = _srv.filter(function(r){ return !_mineIds.has(r.id) && !_knownIds.has(r.id); });
+          if(_rescued.length){
+            console.warn('saveRides: kept '+_rescued.length+' ride(s) from the server this device had not loaded');
+            _toWrite = arr.concat(_rescued);
+            rides = _toWrite;
+          }
+        }
+      }catch(_e){ console.warn('saveRides: pre-write merge check failed, writing anyway', _e); }
+      await fbRef('nda/kat/rides').set(_toWrite);
+      _snapshotRidesBaseline(_toWrite);
+      try{ _auditAdminChange('kat:rides'); }catch(_e){}
+      return true;
+    }
   }catch(e){ console.warn('Firebase write failed:', e); ok = false; }
 
   if(ok) _snapshotRidesBaseline(arr);
@@ -10165,7 +10217,17 @@ function _syncPaidBtn(r){
   // between "paid now" and "bill later" happens at the one moment it's actually relevant.
   var blBtn=document.getElementById('rm-billlater-btn');
   if(blBtn && r){
-    blBtn.style.display=(r.status==='paid'||r.awaitingInvoice)?'none':'inline-block';
+    var _blHidden=(r.status==='paid'||r.awaitingInvoice);
+    blBtn.style.display=_blHidden?'none':'inline-block';
+    // .modal-footer is a two-column grid. Mark Paid and Client Invoiced normally fill one cell
+    // each, with Close spanning the full row beneath them. Once a ride is paid, Client Invoiced
+    // hides - and without this, "Paid" was left sitting alone in column one with an empty cell
+    // beside it, above a narrow centered Close: the lopsided look Chase reported. Same class of
+    // problem as the edit-mode footer fixed in v852, just the other mode.
+    // Spanning the remaining button across both columns keeps the footer balanced whichever
+    // buttons happen to be present.
+    var _pb=document.getElementById('rm-paid-btn');
+    if(_pb) _pb.style.gridColumn=_blHidden?'1/-1':'auto';
   }
 }
 
@@ -10857,11 +10919,26 @@ function _buildOdoMilesTipGasFieldsHtml(prefix, r, milesExplanationText){
   // genuinely open. Everything else (no pause at all, or paused/resumed without capturing that
   // reading) still refers back to the original start, same as before.
   var _refReading = (r.odoResume!=null) ? r.odoResume : r.odoStart;
-  var _refAt = (r.odoResume!=null) ? r.resumedAt : r.odoStartAt;
   var _refLabel = (r.odoResume!=null) ? 'resumed this trip' : 'started this trip';
-  var odoPromptHtml = (_refReading!=null && r.odoEnd==null && _refAt && (Date.now()-_refAt) > 2*60*60*1000)
+  // Shown whenever a starting reading exists and no ending one has been recorded yet.
+  //
+  // This used to additionally require (Date.now() - _refAt) > 2 hours, which silently skipped
+  // the prompt on exactly the rides that need it most: an airport run is usually well under two
+  // hours, so a driver could start the ride, log a starting odometer, drop off, mark paid forty
+  // minutes later - and never be asked for the ending reading at all (v860 report). The mileage
+  // then had to be typed in by hand or was simply lost, despite the app already holding the
+  // starting number.
+  //
+  // The threshold looks like it was meant to catch a FORGOTTEN reading ("you started ages ago
+  // and never closed this out"), and the wording below still reflects that framing. But Mark
+  // Paid is itself the definitive "this ride is genuinely done" moment - Stop Ride was removed
+  // precisely so this screen carries that job (see the note above) - so at this point elapsed
+  // time tells us nothing the act of marking it paid hasn't already said. Wording softened
+  // accordingly, since it now greets a driver doing everything right rather than only someone
+  // who left a reading open for hours.
+  var odoPromptHtml = (_refReading!=null && r.odoEnd==null)
     ? ('<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:9px;padding:.6rem .8rem;margin-bottom:.75rem;">'
-      +'<div style="font-size:.74rem;color:#7c2d12;line-height:1.5;margin-bottom:.5rem;">You '+_refLabel+' at <strong>'+_refReading+'</strong> but never logged where you ended \u2014 enter it here and the miles below fill in automatically, or skip this and enter your total mileage directly.</div>'
+      +'<div style="font-size:.74rem;color:#7c2d12;line-height:1.5;margin-bottom:.5rem;">You '+_refLabel+' at <strong>'+_refReading+'</strong> \u2014 enter where you ended and the miles below fill in automatically, or skip this and enter your total mileage directly.</div>'
       +'<label style="font-size:.68rem;font-weight:700;color:#7c2d12;display:block;margin-bottom:3px;">ENDING ODOMETER</label>'
       +'<input id="'+prefix+'-odo-end" type="number" min="0" step="0.1" placeholder="e.g. 48261" oninput="_'+prefix+'PreviewOdoMiles('+r.id+')" '
       +'style="width:100%;padding:.5rem .65rem;border:1.5px solid #fdba74;border-radius:8px;font-family:inherit;font-size:.95rem;box-sizing:border-box;">'
@@ -11542,7 +11619,13 @@ function _maybeOfferFeeAndPaid(rideId){
     var venmoUrl=(typeof venmoPayUrl==='function')?venmoPayUrl(handle, fee, (typeof _venmoRideNote==='function')?_venmoRideNote(r):''):'';
     if(venmoUrl){
       if(typeof venmoAutoMarkRide==='function') venmoAutoMarkRide(owner, dName, rideId);
-      setTimeout(function(){ window.location.href=venmoUrl; }, 150);
+      // window.open rather than window.location.href (v861), and called immediately rather than
+      // behind a setTimeout. Two reasons: location.href navigates the app itself away, which
+      // from an installed home-screen app makes Android interpose its own "leave this app?"
+      // prompt - a second dialog stacked on the one just answered above. And a deferred call
+      // loses its association with the click that caused it, which is exactly what popup
+      // blockers key on; calling it synchronously keeps the user gesture intact.
+      window.open(venmoUrl, '_blank', 'noopener');
     }
   }
 }
@@ -16094,7 +16177,6 @@ function refreshDash(){
   const _upd=document.getElementById('upcoming-list'); if(_upd) _upd.innerHTML=upcoming.length?upcoming.map((r,idx)=>{
     const c=rideColor(r);
     const tc=contrastText(c,0.4);
-    const typeCls=r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP'?'badge-ap':r.type==='ROUND TRIP'?'badge-rt':'badge-pt';
     // Section header whenever the list crosses from today into the rest of the week —
     // so "what's on my plate today" doesn't require reading every date in a mixed list.
     const _isToday=r.date===todayStr;
@@ -16121,7 +16203,13 @@ function refreshDash(){
         <div class="ride-client" style="color:${tc};">${_rideIsConfirmed(r)?'<span title="Confirmed" style="color:#15803d;font-weight:700;">&#x2713;</span> ':''}${r.client}</div>
         <div class="ride-detail" style="color:${tc};opacity:.78;">${r.type} · ${vehTag(r.vehicle)} · ${r.driver?driverShortName(r.driver):'<em>Unassigned</em>'}</div>
       </div>
-      <span class="badge ${typeCls}">${r.type}${apVehSuffix(r)}</span>
+      ${/* The type badge that used to sit here was removed (v858). It rendered
+            "AP RUN · Sedan" while the detail line directly above already read
+            "AP RUN · Sedan · Chase" - the same facts twice, competing for width on a phone.
+            With flex-shrink:0 on the badge and price, the only thing left able to give was the
+            text column, so a longer client name got crushed into a two-or-three-character-wide
+            ribbon ("AP / RUN / · / Sedan" stacked vertically). Dropping the duplicate returns
+            that width to the name and detail line, which is the part a driver actually reads. */''}
       ${(function(){
         if(r.status==='paid' || typeof _isRideWithinHours!=='function' || !_isRideWithinHours(r,12)) return '';
         var _btns = [];
@@ -16143,13 +16231,23 @@ function refreshDash(){
 
         var _isAirport = (r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP');
         var _showBillLater = false;
-        if(r.arrivalSentAt || r.type==='AP RUN'){
+        if(r.arrivalSentAt || (r.type==='AP RUN' && _started)){
           // AP RUN never has an "arrival" to send a text about at all - it's the driver taking
           // the client TO the airport, no incoming flight to track. It was previously stuck
           // behind the same arrivalSentAt gate as AP PICK UP (which genuinely does track an
           // incoming flight), meaning an AP RUN ride could go started -> nothing -> forever,
-          // with no way to reach Mark Paid from this card at all. Goes straight through once
-          // started, same as every other non-airport ride type already does.
+          // with no way to reach Mark Paid from this card at all.
+          //
+          // That fix was right but too broad: with no `_started` condition it also put Mark
+          // Paid on an AP RUN that hadn't begun, so a ride hours away showed "Start Ride" and
+          // "Mark Paid" side by side - offering to close out a ride that hasn't happened
+          // (v859 report). Gated on _started now: before the ride, the only action is Start
+          // Ride; after it, Mark Paid. No stuck state either way, since an unstarted AP RUN
+          // always has Start Ride available rather than nothing.
+          //
+          // Marking an AP RUN paid before it starts (a client who prepays) is still possible -
+          // it just happens from the ride's own screen, which has Mark Paid regardless of
+          // status, rather than from this at-a-glance card.
           _btns.push('<button onclick="event.stopPropagation();toggleRidePaid('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\ud83d\udcb0 Mark Paid</button>');
           _showBillLater = !r.awaitingInvoice;
         } else if(_isAirport && r.flight){
@@ -16440,8 +16538,20 @@ function venmoPayRideBtn(ownerName, amount, payerDName, rideId){
   const _safePayer=payerDName?payerDName.replace(/'/g,"\\'"):'';
   const _safeOwner=ownerName.replace(/'/g,"\\'");
   const autoMark=payerDName?'venmoAutoMarkRide(\''+_safeOwner+'\',\''+_safePayer+'\','+_feeIdArg(rideId)+');':'';
-  return '<button onclick="'+autoMark+'setTimeout(function(){window.location.href=\''+url.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\';},150);" '
-    +'style="flex:1;min-width:78px;padding:.42rem;background:#3d95ce;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:600;cursor:pointer;">Venmo</button>';
+  // A real anchor with target="_blank" rather than window.location.href (v861). Reported: this
+  // started asking "do you want to go to Venmo?" instead of just going. window.location.href
+  // navigates the CURRENT context away - which in a browser tab is merely rude (the app is
+  // unloaded and reloaded on return, losing scroll position and any open state), but once the
+  // app is installed to a home screen it means leaving a standalone app entirely, and Android
+  // interposes an "open with / leave app" prompt before it will do that. Nothing about the fee
+  // logic changed; the app just became installed, most likely while testing push.
+  // target="_blank" hands the URL to the OS to route to the Venmo app or browser, leaving this
+  // app running untouched behind it. rel="noopener" because any window.opener handed to an
+  // external site is a needless liability. Matches the pattern the flight Track link already
+  // uses on the dashboard card.
+  return '<a href="'+url.replace(/"/g,'&quot;')+'" target="_blank" rel="noopener" '
+    +'onclick="event.stopPropagation();'+autoMark+'" '
+    +'style="flex:1;min-width:78px;padding:.42rem;background:#3d95ce;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:600;cursor:pointer;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center;box-sizing:border-box;">Venmo</a>';
 }
 
 function venmoPayUrl(handle, amount, note){
