@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608171877">
+<meta name="version" content="202608171878">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2079,14 +2079,12 @@ async function storageGet(key) {
 // visibility check's own comments) is deliberately owner/driver-only, NOT admin, so an
 // admin quietly having blanket edit access isn't something to leave on by accident.
 //
-// TO REVERT: set this to false (or delete this line and its call sites — grep for
-// TEMP_ADMIN_EDIT_ALL). THREE call sites, not two: the rm-edit-btn visibility check in
-// openRideModal, saveRideEdits' permission check, AND toggleEditMode's own duplicate copy
-// of the visibility check (v871 — missed in the original v870 cut, which is exactly why
-// the button kept not showing up: openRideModal set it correctly, then toggleEditMode(false)
-// ran right after and silently overwrote it back to owner/driver-only, every time). All
-// three fall straight back to the original owner/driver-only rule with nothing else to touch.
-const TEMP_ADMIN_EDIT_ALL = true;
+// REVERTED (Aug 17, 2026, same day): recovery cleanup finished, Chase asked to restore
+// original permissions. Set back to false — the app is back to owner/driver-only edit
+// access, same as before today. Left the flag and its three call sites in place rather than
+// deleting them, in case a future recovery day needs this exact override again; flipping
+// this back to true is the entire re-enable, nothing else to touch.
+const TEMP_ADMIN_EDIT_ALL = false;
 
 // ── TEMPORARY: admin delete-any-ride, skipping the second-admin queue (Aug 17, 2026) ──────
 // Same recovery-day exception as TEMP_ADMIN_EDIT_ALL above, requested separately once Chase
@@ -2098,10 +2096,11 @@ const TEMP_ADMIN_EDIT_ALL = true;
 // override — this is a real safety boundary, not an oversight, and turning it off deserved a
 // yes/no rather than a silent change.
 //
-// ONE call site: deleteRide()'s `_tempBypass` check. Set this to false (or delete it and that
-// one line) to fall straight back to the normal second-admin queue for everyone, admins
-// included.
-const TEMP_ADMIN_DELETE_ALL = true;
+// REVERTED (Aug 17, 2026, same day): recovery cleanup finished, Chase asked to restore
+// original permissions. Set back to false — deleting someone else's ride goes through the
+// normal second-admin queue again, admins included. Same note as above: left in place rather
+// than deleted, so a future recovery day's re-enable is a one-line flip, not a rebuild.
+const TEMP_ADMIN_DELETE_ALL = false;
 
 // ── PERMANENT: minimum build required to save rides data (Aug 17, 2026) ────────────────────
 // Unlike the two TEMP_ flags above, this one is NOT meant to be reverted — it's a lasting
@@ -17314,8 +17313,18 @@ function renderDashFees(){
   const hasOwed=Object.keys(owedToMe).length, hasOwe=Object.keys(iOwe).length;
   var _waiveHtml=(typeof _renderFeeWaiveRequestsHTML==='function')?_renderFeeWaiveRequestsHTML(dName):'';
   var _aaHtml=(typeof _renderAdminApprovalsHTML==='function')?_renderAdminApprovalsHTML():'';
+  var _hasPendingApprovals=(typeof _hasPendingAdminApprovals==='function')&&_hasPendingAdminApprovals();
   var _cautHtml=(typeof _renderCautiousFlagRequestsHTML==='function')?_renderCautiousFlagRequestsHTML(dName):'';
-  if(!hasOwed&&!hasOwe&&!_waiveHtml&&!_aaHtml&&!_cautHtml){ box.innerHTML=''; return; }
+  // Was checking `!_aaHtml` here — but _aaHtml also includes the purely-historical "Recently
+  // decided" log (see _renderAdminApprovalsHTML), which is non-empty for any admin who has
+  // EVER had an admin action decided, forever. That kept this card permanently visible for
+  // any active admin, labeled "Client Fees — To Be Paid," with nothing actually owed and
+  // nothing actually needing attention — just a collapsed history line sitting under a
+  // misleading header. Checking _hasPendingApprovals instead means only a genuinely pending,
+  // actionable approval keeps the card up; the decided history still renders as part of
+  // _aaHtml's content if the card is showing for some other real reason, it just isn't reason
+  // enough on its own anymore.
+  if(!hasOwed&&!hasOwe&&!_waiveHtml&&!_hasPendingApprovals&&!_cautHtml){ box.innerHTML=''; return; }
 
   function _rideLabel(ri){
     return escHtml(ri.client||'Ride')+(ri.date?' \u00b7 '+ri.date.slice(5).replace('-','/'):'')+' \u00b7 $'+ri.fee.toFixed(2);
@@ -22038,6 +22047,19 @@ function _decisionSummary(r){
   return '';
 }
 
+// Cheap, read-only check for whether there's a GENUINELY pending admin approval — separate
+// from _renderAdminApprovalsHTML's full render, which also appends the "Recently decided"
+// history log even when nothing is actually pending. Needed because the Client Fees dashboard
+// card was using the full rendered HTML (history included) to decide whether to show itself
+// at all — meaning the card stayed visible, labeled "Client Fees — To Be Paid" with zero fees
+// actually owed, purely because a past admin decision existed to log. Reported directly.
+function _hasPendingAdminApprovals(){
+  try{
+    var me=currentUser&&currentUser.name;
+    if(!_isAdminLogin(me)) return false;
+    return Object.keys(adminActions||{}).some(function(k){ var r=adminActions[k]; return r && r.status==='pending'; });
+  }catch(e){ return false; }
+}
 function _renderAdminApprovalsHTML(){
   try{
     var me=currentUser&&currentUser.name;
