@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608171881">
+<meta name="version" content="202608181882">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2912,7 +2912,7 @@ async function processClientRequests(){
   if(!currentUser) return;
   var myDriverName = getMyDriverName();
   if(!myDriverName) return;
-  if(BOOKING_LINK_ROLLOUT_ALLOWLIST.indexOf(myDriverName) < 0) return; // not eligible - nothing to check
+  if(!_bookingLinkEligible(myDriverName)) return; // not eligible - nothing to check
   var myLogin = _loginForDriver(myDriverName);
   if(!myLogin) return;
   try{
@@ -14089,7 +14089,7 @@ function setupHamburgerMenu(){
   // processClientRequests already checks) or an admin who needs to see the full picture
   // across every driver's link, not just their own.
   const brq = document.getElementById('menu-bookingreqs');
-  const _brqEligible = admin || (dName && typeof BOOKING_LINK_ROLLOUT_ALLOWLIST!=='undefined' && BOOKING_LINK_ROLLOUT_ALLOWLIST.indexOf(dName)>=0);
+  const _brqEligible = admin || (dName && typeof _bookingLinkEligible==='function' && _bookingLinkEligible(dName));
   if(brq) brq.style.display = _brqEligible ? 'flex' : 'none';
   updateBookingRequestsBadge();
 }
@@ -19709,17 +19709,29 @@ function renderProfileDriverPicker(){
     +'</div>';
 }
 
-// Temporary, hardcoded rollout gate - the booking-link feature works for every driver
-// underneath (the link resolves off their stable login name, same as anyone else's would),
-// but only Chase and Morgan actually see this card right now. Remove this allowlist check
-// when the feature is ready to open up to everyone - at that point, driverSettings[name]
-// .booksOwnClients (collected at onboarding) becomes the real, permanent gate instead.
-var BOOKING_LINK_ROLLOUT_ALLOWLIST = ['Chase Sweat', 'Morgan Newton'];
+// ── Booking-link eligibility (opened to everyone Aug 18, 2026) ─────────────────────────────
+// Was gated behind a temporary hardcoded allowlist (BOOKING_LINK_ROLLOUT_ALLOWLIST = just
+// Chase and Morgan) while the feature was being tested — the feature itself always worked
+// for any driver underneath (the link resolves off their own stable login name, same as
+// anyone else's would), only the allowlist kept it hidden from everyone else. Chase asked to
+// open it up. Now uses the real, permanent gate the allowlist's own comment already
+// described: driverSettings[name].booksOwnClients, collected at onboarding.
+//
+// Defaults to ELIGIBLE — true or never-answered (undefined/null, i.e. every driver who
+// onboarded before this question existed) both count as "yes." Only an explicit `false`
+// (a driver who was actually asked and said they don't book their own clients) opts out.
+// That's what "live for everyone" means here: on by default, not forced on top of someone
+// who already said no.
+function _bookingLinkEligible(dName){
+  if(!dName) return false;
+  var s = (typeof driverSettings!=='undefined' && driverSettings[dName]) || {};
+  return s.booksOwnClients !== false;
+}
 
 function renderBookingLinkCard(me){
   var box = document.getElementById('booking-link-card');
   if(!box) return;
-  if(BOOKING_LINK_ROLLOUT_ALLOWLIST.indexOf(me) < 0){ box.innerHTML=''; return; }
+  if(!_bookingLinkEligible(me)){ box.innerHTML=''; return; }
   var login = _loginForDriver(me);
   if(!login){ box.innerHTML=''; return; }
   // GitHub Pages serves a repo two different ways depending on its name: a repo named
@@ -19744,7 +19756,6 @@ function renderBookingLinkCard(me){
     + '<input readonly value="'+link+'" onclick="this.select()" style="flex:1;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-family:monospace;font-size:.76rem;color:var(--black);background:var(--surface);min-width:0;">'
     + '<button onclick="_copyBookingLink(\''+link+'\')" style="flex-shrink:0;padding:.55rem .9rem;border-radius:8px;border:none;background:var(--gold);color:#fff;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;">Copy</button>'
     + '</div>'
-    + '<div style="font-size:.68rem;color:var(--mid);margin-top:.6rem;">Early rollout \u2014 visible to you and Morgan only for now.</div>'
     + '</div>';
 }
 
@@ -20467,7 +20478,7 @@ function isDriverAvailable(driverName, dateStr, timeStr){
 // is allowed to see, kept in a completely separate Firebase location for exactly that reason.
 async function syncPublicDriverDirectory(dName){
   if(!dName) return;
-  if(BOOKING_LINK_ROLLOUT_ALLOWLIST.indexOf(dName) < 0) return; // not eligible yet - nothing to publish
+  if(!_bookingLinkEligible(dName)) return; // not eligible - nothing to publish
   var login = _loginForDriver(dName);
   if(!login) return;
   var prof = DRIVER_PROFILES[dName] || {};
