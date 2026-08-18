@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608171878">
+<meta name="version" content="202608171881">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -535,6 +535,7 @@ input,select,textarea{font-size:16px;}
   <div id="menu-myrides" onclick="nav('myrides')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:none;align-items:center;gap:.75rem;font-weight:600;">🗓 My Rides</div>
   <div onclick="closeMenu(); openHeartedRides();" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;font-weight:600;">❤️ Hearted Rides</div>
   <div onclick="closeMenu(); shareLocationToClient(null);" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;font-weight:600;">📍 Share Location</div>
+  <div id="menu-bookingreqs" onclick="nav('bookingreqs')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:none;align-items:center;gap:.75rem;font-weight:600;">📋 Booking Requests<span id="menu-bookingreqs-badge" style="display:none;background:#dc2626;color:#fff;font-size:.66rem;font-weight:700;border-radius:50%;min-width:18px;height:18px;padding:0 4px;align-items:center;justify-content:center;line-height:18px;text-align:center;"></span></div>
   <div style="padding:.6rem 1.1rem .35rem;font-size:.66rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#7c5cbf;">Money</div>
   <div id="menu-income" onclick="nav('income')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">💰 Income &amp; earnings</div>
   <div style="padding:.6rem 1.1rem .35rem;font-size:.66rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#7c5cbf;">Admin</div>
@@ -1064,6 +1065,18 @@ input,select,textarea{font-size:16px;}
       </div>
       <div style="font-size:.68rem;color:var(--mid);margin-top:5px;line-height:1.4;">Downloads only what hasn't been exported yet, so pressing this again never re-adds duplicates. Cancelled rides are skipped automatically.</div>
     </div>
+  </div>
+
+  <!-- BOOKING REQUESTS -->
+  <div class="page" id="page-bookingreqs">
+    <div class="page-title">📋 Booking Requests</div>
+    <div style="font-size:.82rem;color:var(--mid);line-height:1.5;margin-bottom:1rem;">Everything that's come in through a booking link, tracked until it's actually scheduled or declined — not just until the notification gets tapped.</div>
+    <div style="display:flex;gap:.5rem;border-bottom:2px solid var(--light);padding-bottom:.75rem;margin-bottom:1rem;flex-wrap:wrap;">
+      <button class="cal-tab active" id="brqtab-pending" onclick="switchBookingReqTab('pending',this)">Pending <span id="brqtab-pending-count"></span></button>
+      <button class="cal-tab" id="brqtab-scheduled" onclick="switchBookingReqTab('scheduled',this)">Scheduled</button>
+      <button class="cal-tab" id="brqtab-denied" onclick="switchBookingReqTab('denied',this)">Denied</button>
+    </div>
+    <div id="brq-list"></div>
   </div>
 
   <!-- MY ACCOUNT -->
@@ -2328,7 +2341,15 @@ function setupRealtimeListeners(){
   }
   // Listen for client request changes
   fbRef('nda/kat/clientRequests').on('value', snap=>{
-    if(snap.exists()){ clientRequests = snap.val()||{}; updateNotifBadge(); }
+    if(snap.exists()){
+      clientRequests = snap.val()||{};
+      updateNotifBadge();
+      try{ if(typeof updateBookingRequestsBadge==='function') updateBookingRequestsBadge(); }catch(e){}
+      try{
+        var _brqPage=document.getElementById('page-bookingreqs');
+        if(_brqPage && _brqPage.classList.contains('active') && typeof renderBookingRequestsPage==='function') renderBookingRequestsPage();
+      }catch(e){}
+    }
   });
   // Listen for shared documents changes
   fbRef('nda/kat/documents').on('value', snap=>{
@@ -3124,7 +3145,9 @@ const TIP_DATA={
 
   dashboard:{icon:'🏠',title:'Dashboard',text:'Your income summary sits up top, then your action lists and upcoming rides. Tap any card to open the full details. Swipe left or right to jump between Home, Quote, Calendar, Clients, and Chat. '+_MTIP_HINT},
 
-  cal:{icon:'📅',title:'Calendar',text:'Tap any ride to see its full details. Creators and admins can also edit or cancel it from there. Search by client, phone, driver, or type. '+_MTIP_HINT},
+  cal:{icon:'📅',title:'Calendar',text:'Tap any ride to see its full details. The client\u2019s owner or the assigned driver can edit it; the creator or an admin can cancel or delete it. Search by client, phone, driver, or type. '+_MTIP_HINT},
+
+  bookingreqs:{icon:'📋',title:'Booking Requests',text:'Everything that\u2019s come in through a booking link, tracked from the moment it arrives until it\u2019s actually scheduled or declined \u2014 not just until the notification gets tapped and cleared. Schedule opens the same prefilled form a notification does; Deny takes an optional reason. '+_MTIP_HINT},
 
   myrides:{icon:'📋',title:'My Rides & Confirmations',text:'The To Confirm tab shows tomorrow\'s rides needing a day-before text. After Arrived, Mark Paid moves it into income \u2014 or Client Invoiced if they\'re billed later instead. A round trip works differently: Pause once dropped off, Resume heading back, and the app adds both legs together. '+_MTIP_HINT},
   clients:{icon:'👥',title:'Client List',text:'Your client list is 100% private \u2014 no other driver or admin can see it. Added automatically when you book, or import a spreadsheet. Each client has an owner, which decides who earns the fee if someone else drives them. '+_MTIP_HINT},
@@ -5722,6 +5745,12 @@ async function saveQuote(){
   var _qAddClient=document.getElementById('q-add-client');
   if(!_qAddClient||_qAddClient.checked){ await upsertClientFromRide(ride); }
   _notifyOwnerOfForeignSchedule(ride);
+  // Marks the originating booking-link request (if this Quote form was opened from one) as
+  // 'scheduled' — same as the Quick Add path. (Note: for a recurring series, `ride` itself
+  // is never actually pushed into `rides` — only its per-instance copies are — an existing
+  // quirk shared with the addNotification call for that branch above, not introduced here.
+  // Resolving still points at ride.id for consistency with that established behavior.)
+  await _resolveClientRequestAsScheduled(ride.id);
   // Reset the repeat control back to a single ride so it never carries over to the next booking
   const rp=document.getElementById('q-repeat'); if(rp) rp.value='none';
   const rpo=document.getElementById('q-repeat-opts'); if(rpo) rpo.style.display='none';
@@ -6864,7 +6893,7 @@ var _NOTIF_PAGE_ROUTES = {
 // setting .value directly does not fire onchange, so without this the surcharge auto-detection,
 // mileage lookup, and price calculation would all sit stale on a form that LOOKS filled in -
 // which is worse than an empty form, because it looks finished.
-function _prefillFromClientRequest(req){
+function _prefillFromClientRequest(req, clientRequestId){
   if(!req) return;
   var isQuote = (req.requestType === 'quote');
   var P = isQuote ? 'q' : 'qa';
@@ -6875,6 +6904,7 @@ function _prefillFromClientRequest(req){
   };
   setTimeout(function(){
     try{
+      window._activeClientRequestId = clientRequestId || null;
       // Type first - it drives which other fields are even visible on both forms.
       var typeEl = document.getElementById(P+'-type');
       if(typeEl && req.type){
@@ -6950,10 +6980,8 @@ function handleNotifHistoryClick(el){
   if(type==='client_request' && _req){
     if(_req.requestType === 'quote'){ nav('quote'); }
     else { nav('calendar'); setTimeout(function(){ try{ openQuickAddModal(); }catch(e){} }, 150); }
-    _prefillFromClientRequest(_req);
+    _prefillFromClientRequest(_req, n.clientRequestId);
     return;
-  }
-  if(type==='chat'){
     nav("chat");
     if(channel && channel!=='group') setTimeout(function(){ try{ switchChatChannel(channel); }catch(e){} }, 220);
     return;
@@ -6995,7 +7023,7 @@ function handleNotifClick(el){
       nav('calendar');
       setTimeout(function(){ try{ openQuickAddModal(); }catch(e){} }, 150);
     }
-    _prefillFromClientRequest(_req);
+    _prefillFromClientRequest(_req, n.clientRequestId);
     return;
   }
   // Route to wherever the notification came from
@@ -7834,6 +7862,113 @@ function switchMyTab(tab, el){
   else renderMyCal();
 }
 
+// ── BOOKING REQUESTS PAGE ─────────────────────────────────────────────────────────────
+let bookingReqTab = 'pending';
+function switchBookingReqTab(tab, el){
+  bookingReqTab = tab;
+  document.querySelectorAll('#page-bookingreqs .cal-tab').forEach(t=>t.classList.remove('active'));
+  if(el) el.classList.add('active');
+  renderBookingRequestsPage();
+}
+// Same scoping as updateBookingRequestsBadge: admins see every driver's booking-link
+// requests, a non-admin driver sees only the ones that came through their own link.
+function _myBookingRequests(){
+  const admin = currentUser && currentUser.role === 'admin';
+  const myLogin = admin ? null : (typeof _loginForDriver==='function' ? _loginForDriver(getMyDriverName()) : null);
+  return Object.keys(clientRequests||{})
+    .map(function(id){ return Object.assign({id:id}, clientRequests[id]); })
+    .filter(function(r){ return isBookingLinkRequest(r) && (admin || !myLogin || (r.loginName||'').toLowerCase()===myLogin.toLowerCase()); });
+}
+function renderBookingRequestsPage(){
+  const all = _myBookingRequests();
+  const pending = all.filter(function(r){ return !r.resolution || r.resolution==='pending'; })
+    .sort(function(a,b){ return (a.ts||0)-(b.ts||0); }); // oldest first — nothing quietly sits at the bottom
+  const scheduled = all.filter(function(r){ return r.resolution==='scheduled'; })
+    .sort(function(a,b){ return (b.resolvedAt||0)-(a.resolvedAt||0); });
+  const denied = all.filter(function(r){ return r.resolution==='denied'; })
+    .sort(function(a,b){ return (b.resolvedAt||0)-(a.resolvedAt||0); });
+
+  const countEl=document.getElementById('brqtab-pending-count');
+  if(countEl) countEl.textContent = pending.length ? '('+pending.length+')' : '';
+
+  const list=document.getElementById('brq-list');
+  if(!list) return;
+  const shown = bookingReqTab==='pending' ? pending : bookingReqTab==='scheduled' ? scheduled : denied;
+  if(!shown.length){
+    const emptyMsg = bookingReqTab==='pending' ? 'Nothing pending \u2014 you\u2019re caught up.'
+      : bookingReqTab==='scheduled' ? 'Nothing scheduled from a booking-link request yet.'
+      : 'Nothing declined.';
+    list.innerHTML='<div style="text-align:center;padding:2.5rem 1rem;color:var(--mid);font-size:.9rem;">'+emptyMsg+'</div>';
+    return;
+  }
+  list.innerHTML = shown.map(function(r){ return _bookingReqCardHTML(r); }).join('');
+}
+function _bookingReqCardHTML(r){
+  const kind = r.requestType==='quote' ? 'Quote request' : 'Ride request';
+  const ageMs = Date.now() - (r.ts||Date.now());
+  const ageDays = Math.floor(ageMs/86400000), ageHrs = Math.floor(ageMs/3600000);
+  const age = ageDays>0 ? (ageDays+'d ago') : ageHrs>0 ? (ageHrs+'h ago') : 'just now';
+  const tripLine = (r.pickup||'?')+' → '+(r.destination||'?')+(r.date?' · '+fmtDateShort(r.date):'')+(r.time?' '+r.time:'');
+  const badgeColor = r.resolution==='scheduled' ? '#15803d' : r.resolution==='denied' ? '#b91c1c' : 'var(--gold)';
+  const badgeBg = r.resolution==='scheduled' ? '#f0fdf4' : r.resolution==='denied' ? '#fef2f2' : 'var(--gold-pale)';
+  let footer = '';
+  if(!r.resolution || r.resolution==='pending'){
+    footer = '<div style="display:flex;gap:.5rem;margin-top:.75rem;">'
+      +'<button onclick="_scheduleBookingReq(\''+r.id+'\')" style="flex:1;padding:.55rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:inherit;font-weight:700;font-size:.85rem;cursor:pointer;">Schedule</button>'
+      +'<button onclick="_openDenyBookingReq(\''+r.id+'\')" style="flex:1;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;font-family:inherit;font-weight:700;font-size:.85rem;cursor:pointer;color:var(--black);">Deny</button>'
+      +'</div>';
+  } else if(r.resolution==='scheduled'){
+    footer = '<div style="margin-top:.65rem;font-size:.78rem;color:#15803d;">✓ Scheduled by '+escHtml(r.resolvedBy||'')+' · <span onclick="openRideModal('+(r.resolvedRideId||'null')+')" style="text-decoration:underline;cursor:pointer;">View ride</span></div>';
+  } else if(r.resolution==='denied'){
+    footer = '<div style="margin-top:.65rem;font-size:.78rem;color:#b91c1c;">Declined by '+escHtml(r.resolvedBy||'')+(r.deniedReason?': “'+escHtml(r.deniedReason)+'”':'')+'</div>';
+  }
+  return '<div style="border:1.5px solid var(--light);border-radius:12px;padding:.9rem 1rem;margin-bottom:.7rem;">'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem;margin-bottom:.4rem;">'
+      +'<div><div style="font-weight:700;font-size:.95rem;color:var(--black);">'+escHtml(r.clientName||'Unnamed client')+'</div>'
+      +'<div style="font-size:.76rem;color:var(--mid);">'+kind+' · '+age+'</div></div>'
+      +'<span style="font-size:.68rem;font-weight:700;color:'+badgeColor+';background:'+badgeBg+';border-radius:6px;padding:2px 8px;white-space:nowrap;">'+(r.resolution||'pending').toUpperCase()+'</span>'
+    +'</div>'
+    +'<div style="font-size:.85rem;color:var(--black);margin-bottom:.3rem;">'+escHtml(tripLine)+'</div>'
+    +(r.clientPhone?'<div style="font-size:.8rem;color:var(--mid);">📞 '+escHtml(r.clientPhone)+'</div>':'')
+    +(r.notes?'<div style="font-size:.8rem;color:var(--mid);margin-top:.25rem;">📝 '+escHtml(r.notes)+'</div>':'')
+    +footer
+    +'</div>';
+}
+// Reuses the exact same prefill path a tapped notification already uses — Schedule from
+// this page opens the same form, filled in the same way. window._activeClientRequestId gets
+// set inside _prefillFromClientRequest itself, so saving from here resolves this request
+// exactly like saving from a notification tap does.
+function _scheduleBookingReq(id){
+  const r=(clientRequests||{})[id]; if(!r) return;
+  if(r.requestType==='quote'){ nav('quote'); }
+  else { nav('calendar'); setTimeout(function(){ try{ openQuickAddModal(); }catch(e){} }, 150); }
+  _prefillFromClientRequest(r, id);
+}
+function _openDenyBookingReq(id){
+  const r=(clientRequests||{})[id]; if(!r) return;
+  const back=document.createElement('div');
+  back.id='deny-req-overlay';
+  back.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:14500;display:flex;align-items:center;justify-content:center;padding:1.1rem;';
+  back.onclick=function(e){ if(e.target===back) back.remove(); };
+  back.innerHTML='<div style="background:#fff;border-radius:14px;max-width:380px;width:100%;padding:1.1rem;">'
+    +'<div style="font-weight:800;font-size:1rem;margin-bottom:.3rem;">Deny request from '+escHtml(r.clientName||'this client')+'?</div>'
+    +'<div style="font-size:.78rem;color:var(--mid);margin-bottom:.8rem;">Reason is optional \u2014 add one if it\u2019ll help later, or leave it blank.</div>'
+    +'<textarea id="deny-req-reason" rows="3" placeholder="Optional reason\u2026" style="width:100%;padding:.55rem;border:1.5px solid var(--light);border-radius:8px;font-family:inherit;font-size:.85rem;resize:vertical;box-sizing:border-box;margin-bottom:.9rem;"></textarea>'
+    +'<div style="display:flex;gap:.5rem;">'
+    +'<button onclick="document.getElementById(\'deny-req-overlay\').remove()" style="flex:1;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;font-weight:700;">Cancel</button>'
+    +'<button onclick="_confirmDenyBookingReq(\''+id+'\')" style="flex:1;padding:.55rem;background:#b91c1c;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:700;">Deny</button>'
+    +'</div></div>';
+  document.body.appendChild(back);
+}
+async function _confirmDenyBookingReq(id){
+  const reason=(document.getElementById('deny-req-reason')||{}).value||'';
+  await denyClientRequest(id, reason);
+  const ov=document.getElementById('deny-req-overlay'); if(ov) ov.remove();
+  showToast('Request declined');
+  renderBookingRequestsPage();
+  updateBookingRequestsBadge();
+}
+
 // ═══════════════════════════════════════════
 // TOMORROW CONFIRMATIONS
 // Driver marks that they've texted each client to confirm tomorrow's ride.
@@ -8226,20 +8361,42 @@ function _markRideConfirmed(r){
   // Auto-advance the ride trail to Confirmed (only from Scheduled — never downgrade a paid ride).
   if(r.status==='scheduled' || !r.status){ r.status='confirmed'; r.driverChangedPending=false; }
 }
+// XXL bookings send ONE combined message covering both vehicles (see buildConfirmationText's
+// companion-vehicle note and textClient's two-card attach below) — so "confirmation sent"
+// has to be one shared fact across both linked rides, not two independently-tracked flags
+// that could drift apart (one showing confirmed, the other still "needs confirmation" for a
+// message that already went out and already named both vehicles). Whichever ride the send or
+// undo happens from, the other one follows automatically.
+function _markXXLPairConfirmed(r){
+  _markRideConfirmed(r);
+  if(r.xxlPairId){
+    var _p = (typeof getXXLPartner==='function') ? getXXLPartner(r) : null;
+    if(_p) _markRideConfirmed(_p);
+  }
+}
+function _unmarkXXLPairConfirmed(r){
+  function _unmarkOne(x){
+    x.confirmSent=false;
+    delete x.confirmSentBy;
+    delete x.confirmSentAt;
+    touchRide(x, 'unmarked confirmation');
+    if(x.status==='confirmed'){ x.status='scheduled'; }
+  }
+  _unmarkOne(r);
+  if(r.xxlPairId){
+    var _p = (typeof getXXLPartner==='function') ? getXXLPartner(r) : null;
+    if(_p && _p.confirmSent) _unmarkOne(_p);
+  }
+}
 
 async function toggleConfirmSent(id){
   await _ensureFresh();
   const r=_rideById(id);
   if(!r) return;
   if(r.confirmSent){
-    r.confirmSent=false;
-    delete r.confirmSentBy;
-    delete r.confirmSentAt;
-    touchRide(r, 'unmarked confirmation');
-    // Undoing the confirmation walks the trail back to Scheduled (but leaves a paid ride alone).
-    if(r.status==='confirmed'){ r.status='scheduled'; }
+    _unmarkXXLPairConfirmed(r);
   } else {
-    _markRideConfirmed(r);
+    _markXXLPairConfirmed(r);
     // Gentle fade before the card re-renders as its collapsed thumbnail
     const card=document.getElementById('conf-card-'+id);
     if(card){
@@ -8442,17 +8599,14 @@ function buildConfirmationText(r){
   if(customMsg)   message      = fillConfTemplate(customMsg, r, sender, assigned);
   if(customInstr) instructions = fillConfTemplate(customInstr, r, sender, assigned);
 
-  // Add companion-vehicle note to message if this ride is linked to another (XXL booking)
-  if(r.xxlPairId){
-    var _confPartner = (typeof getXXLPartner==='function') ? getXXLPartner(r) : null;
-    if(_confPartner){
-      const d2name=_confPartner.driver?driverShortName(_confPartner.driver):'2nd driver';
-      const d1name=r.driver?driverShortName(r.driver):'1st driver';
-      message += '\n\nNote: XXL booking — 2 vehicles required.\n'
-        +'  Vehicle 1: '+vehTag(r.vehicle||'?')+' ('+d1name+') — $'+(parseFloat(r.price)||0).toFixed(0)+'\n'
-        +'  Vehicle 2: '+vehTag(_confPartner.vehicle||'?')+' ('+d2name+') — $'+(parseFloat(_confPartner.price)||0).toFixed(0);
-    }
-  }
+  // NOTE: no XXL-specific text added to `message` here on purpose. Chase was explicit —
+  // the confirmation text for an XXL booking should read EXACTLY like any other ride's,
+  // same wording, same template, no visible mention of a 2nd vehicle in the body at all.
+  // The only differences are who the message reaches and what's attached: both drivers get
+  // texted (see _baseRideTextRecipients' xxlPairId branch) and both drivers' cards get
+  // attached (see textClient's xxlPairId branch) — never a change to the message content
+  // itself. An earlier version of this build added a "Note: XXL booking..." block with a
+  // per-vehicle price/phone breakdown; removed per direct correction.
   if(r.driverChangedPending){
     var _cn=((r.client||'there').split(' ')[0])||'there';
     var _dt=fmtDate(r.date), _tm=fmtTime12(r.time)||'the scheduled time';
@@ -8651,6 +8805,13 @@ function _baseRideTextRecipients(r){
   });
   // Assigned driver
   if(r.driver) add(driverShortName(r.driver), (DRIVER_PROFILES[r.driver]||{}).phone);
+  // XXL companion vehicle's driver — one combined message covers both vehicles (see
+  // buildConfirmationText's companion-vehicle note and textClient's two-card attach), so
+  // both drivers need to be in the same thread, not just this ride's own.
+  if(r.xxlPairId){
+    var _xpR = (typeof getXXLPartner==='function') ? getXXLPartner(r) : null;
+    if(_xpR && _xpR.driver) add(driverShortName(_xpR.driver), (DRIVER_PROFILES[_xpR.driver]||{}).phone);
+  }
   return { out, add };
 }
 function confirmationRecipients(r){
@@ -8800,6 +8961,24 @@ async function textClient(id, opts){
         if(cardImg) files=[cardImg];
       }catch(e){ files=[]; }
     }
+  }
+  // XXL companion vehicle: add ITS driver's card too, so one send carries both — regardless
+  // of which of the three branches above populated `files`, none of them know about the
+  // linked partner ride. navigator.share (the primary path just below, used by nearly all
+  // modern iOS/Android devices) natively supports multiple files in one share sheet, so both
+  // cards land in the same Messages thread together. The clipboard fallback further down
+  // only ever copies one image at a time (a real OS/Clipboard-API limit, not something this
+  // code can work around) — a known, minor degradation on the rare browser without Web
+  // Share support, not on the normal path everyone actually uses.
+  if(r.xxlPairId){
+    try{
+      const _xpT = (typeof getXXLPartner==='function') ? getXXLPartner(r) : null;
+      const _xpDriver = _xpT && _xpT.driver ? _xpT.driver.trim() : '';
+      if(_xpDriver){
+        const _xpCard = await warmDriverCardImage(_xpDriver);
+        if(_xpCard && files.indexOf(_xpCard)===-1) files = files.concat([_xpCard]);
+      }
+    }catch(e){}
   }
 
   const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
@@ -13274,6 +13453,63 @@ async function loadClientReqDriver(){ const d=await storageGet('kat:clientReqDri
 async function saveClientReqDriver(){ await storageSet('kat:clientReqDriver', clientReqDriver); }
 function _reqOwner(){ return (currentUser&&PROXY_MAP[currentUser.name])||getMyDriverName()||''; }
 function _reqKey(name){ return (_reqOwner()+'||'+(name||'').trim().toLowerCase()).replace(/[.#$\[\]\/]/g,'_'); }
+
+// ── Booking-link request lifecycle (added Aug 18, 2026) ─────────────────────────────────
+// `clientRequests` is shared by several unrelated request kinds — profile merges, driver
+// availability overrides, client transfers/releases — identified by their own `type` field.
+// Booking-link submissions (the ones a client sends through a driver's public booking page)
+// are the ones with `requestType` set instead ('schedule' or 'quote' — see processClientRequests
+// above). This isolates just those, so the new Booking Requests page and its badge count never
+// pick up an unrelated admin request by mistake.
+function isBookingLinkRequest(r){
+  return !!(r && (r.requestType==='schedule' || r.requestType==='quote'));
+}
+// Reported: the existing `status` field on a request ('pending'/'processed') only tracks
+// whether a NOTIFICATION has been generated for it — it flips to 'processed' the moment the
+// notification is created, not when anyone actually does anything about the request. That
+// meant a request could be marked "handled" the instant it arrived, before a human ever
+// looked at it, with nothing tracking whether it was ever actually scheduled or declined —
+// and the notification itself could be tapped, dismissed, and lost with the request still
+// fully unresolved. This adds a SEPARATE field, `resolution`, tracking the real-world outcome:
+// 'pending' (default, nothing done yet) until it's explicitly moved to 'scheduled' (a ride was
+// actually created from it — see _resolveClientRequestAsScheduled, called from both
+// saveQuickAddRide and saveQuote's success paths) or 'denied' (explicitly declined — see
+// denyClientRequest). `status` itself is untouched; it keeps doing its own, unrelated job.
+function _pendingBookingRequests(){
+  return Object.keys(clientRequests||{})
+    .map(function(id){ return Object.assign({id:id}, clientRequests[id]); })
+    .filter(function(r){ return isBookingLinkRequest(r) && (!r.resolution || r.resolution==='pending'); });
+}
+// Called right after a ride is actually created and saved — NOT when the notification is
+// merely tapped/opened. window._activeClientRequestId is set by _prefillFromClientRequest
+// (only when the form was actually opened FROM a client request) and cleared here, in
+// openQuickAddModal (a fresh form open), and in closeQuickAddModal (cancelling without
+// saving) — so a later, unrelated ride save can never accidentally get attributed to a stale
+// leftover request id from an earlier, abandoned prefill.
+async function _resolveClientRequestAsScheduled(rideId){
+  try{
+    var id = window._activeClientRequestId;
+    if(!id || !clientRequests || !clientRequests[id]) return;
+    clientRequests[id].resolution = 'scheduled';
+    clientRequests[id].resolvedRideId = rideId;
+    clientRequests[id].resolvedAt = Date.now();
+    clientRequests[id].resolvedBy = (currentUser && currentUser.name) || '';
+    await saveClientRequests();
+  }catch(e){ console.warn('_resolveClientRequestAsScheduled failed', e); }
+  finally{ window._activeClientRequestId = null; }
+}
+// Explicit decline, from the Booking Requests page. Reason is optional — Chase asked for it
+// to stay that way rather than requiring one, so declining something obviously not viable
+// (spam, out of service area) doesn't need a manufactured explanation.
+async function denyClientRequest(id, reason){
+  if(!clientRequests || !clientRequests[id]) return false;
+  clientRequests[id].resolution = 'denied';
+  clientRequests[id].deniedReason = (reason||'').trim();
+  clientRequests[id].resolvedAt = Date.now();
+  clientRequests[id].resolvedBy = (currentUser && currentUser.name) || '';
+  await saveClientRequests();
+  return true;
+}
 function getClientReqDriver(name){ return clientReqDriver[_reqKey(name)]||''; }
 async function setClientReqDriver(name,drv){ const k=_reqKey(name); if(drv) clientReqDriver[k]=drv; else delete clientReqDriver[k]; await saveClientReqDriver(); renderClients(); }
 // Resolve a free-text "requested driver" note to a real driver's full name.
@@ -13660,7 +13896,7 @@ function nav(id){
     }
   }
   // Show contextual tutorial tip for this page (first visit per session)
-  var _tipPages=['dashboard','quote','cal','myrides','clients','income','flights','chat','team','myprofile'];
+  var _tipPages=['dashboard','quote','cal','myrides','clients','income','flights','chat','team','myprofile','bookingreqs'];
   if(_tipPages.indexOf(id)>=0) setTimeout(function(){ showPageTip(id); }, 600);
   // Small delay so menu closes visually before page switches
   setTimeout(function(){
@@ -13849,6 +14085,29 @@ function setupHamburgerMenu(){
   if(inc) inc.style.display = 'block';
   const agd = document.getElementById('menu-admin-guide');
   if(agd) agd.style.display = admin ? 'flex' : 'none';
+  // Booking Requests — visible to anyone with a booking link (same eligibility
+  // processClientRequests already checks) or an admin who needs to see the full picture
+  // across every driver's link, not just their own.
+  const brq = document.getElementById('menu-bookingreqs');
+  const _brqEligible = admin || (dName && typeof BOOKING_LINK_ROLLOUT_ALLOWLIST!=='undefined' && BOOKING_LINK_ROLLOUT_ALLOWLIST.indexOf(dName)>=0);
+  if(brq) brq.style.display = _brqEligible ? 'flex' : 'none';
+  updateBookingRequestsBadge();
+}
+// Refreshes the hamburger menu's pending-count badge. Admins see the count across every
+// driver's booking link; a non-admin driver sees just their own (processClientRequests only
+// ever writes a request for the specific driver whose link it came through, via r.loginName —
+// same scoping already used to decide who gets notified about it in the first place).
+function updateBookingRequestsBadge(){
+  try{
+    const badge = document.getElementById('menu-bookingreqs-badge');
+    if(!badge) return;
+    const admin = currentUser && currentUser.role === 'admin';
+    const myLogin = admin ? null : (typeof _loginForDriver==='function' ? _loginForDriver(getMyDriverName()) : null);
+    const pending = (typeof _pendingBookingRequests==='function' ? _pendingBookingRequests() : [])
+      .filter(function(r){ return admin || !myLogin || (r.loginName||'').toLowerCase()===myLogin.toLowerCase(); });
+    if(pending.length>0){ badge.textContent=pending.length; badge.style.display='inline-flex'; }
+    else { badge.style.display='none'; }
+  }catch(e){}
 }
 
 // v660 fixed the CODE PATH that let a saved-quote or live-Quote-form AP Round Trip save as one
@@ -14906,6 +15165,11 @@ function hasPrivateRideConflict(driverName, dateStr){
 // ── QUICK ADD RIDE ──
 
 function openQuickAddModal(){
+  // Cleared here (a fresh open) and in closeQuickAddModal (cancelled without saving) —
+  // _prefillFromClientRequest sets this a few ms after this function runs when the form was
+  // opened FROM a client request specifically. Only actually used by
+  // _resolveClientRequestAsScheduled on a successful save.
+  window._activeClientRequestId = null;
   // Ensure address autocomplete is wired for this modal's fields
   if(window.google && google.maps) initAddressAutocomplete();
 
@@ -15067,6 +15331,7 @@ async function requestClientFromWarning(clientName){
 function closeQuickAddModal(){
   document.getElementById('quick-add-modal').classList.remove('show');
   resetQuickAddForm();
+  window._activeClientRequestId = null;
 }
 // Blank every field so closing with the X or Cancel (without saving) leaves nothing behind
 // for the next ride. saveQuickAddRide has already captured everything into the ride object
@@ -16231,6 +16496,9 @@ async function saveQuickAddRide(){
   var _addClient=document.getElementById('qa-add-client');
   if(!_addClient||_addClient.checked){ await upsertClientFromRide(ride); }
   _notifyOwnerOfForeignSchedule(ride);
+  // Marks the originating booking-link request (if this form was opened from one) as
+  // 'scheduled', pointing at this real ride — BEFORE closeQuickAddModal clears the tracker.
+  await _resolveClientRequestAsScheduled(ride.id);
   closeQuickAddModal();
   _reenableBtn();
   try{ setTimeout(function(){ if(ride.newClient){ if(typeof promptNewClientInfo==='function') promptNewClientInfo(ride); } else { _qaMaybeSaveTypedAddresses(ride); } }, 350); }catch(e){}
@@ -23243,8 +23511,10 @@ async function sendAllConf(id){
   // part of what got sent - sending just pickup instructions or just a driver card on their own
   // doesn't confirm anything. _markRideConfirmed no-ops if already confirmed, so re-sending an
   // already-confirmed ride's text (a driver double-checking, or after an edit) is harmless.
+  // _markXXLPairConfirmed (not the bare version) — an XXL send already covers both vehicles
+  // in one message, so both linked rides' confirmed status moves together.
   if(g('text')){
-    _markRideConfirmed(r);
+    _markXXLPairConfirmed(r);
     await saveRides();
     setTimeout(function(){
       renderConfirmations();
@@ -23789,8 +24059,9 @@ function _doSendConfText(id){
   markPartSent(id,'text');
   // Same fix as sendAllConf's batch path, for the other door to the same action - tapping
   // the "Confirmation text" row directly sends the exact same message and should mark the
-  // ride confirmed too, not just the bundled Send-everything button.
-  _markRideConfirmed(r);
+  // ride confirmed too, not just the bundled Send-everything button. _markXXLPairConfirmed —
+  // an XXL send already names and covers both linked vehicles in one message.
+  _markXXLPairConfirmed(r);
   saveRides().then(function(){
     setTimeout(function(){
       renderConfirmations();
@@ -26719,6 +26990,7 @@ function showPage(id, el){
   if(id==='myprofile'){ window._profileAs=null; var _adm=currentUser&&currentUser.role==='admin'; var _ta=document.getElementById('mptab-access'); if(_ta) _ta.style.display=_adm?'inline-block':'none'; var _tar=document.getElementById('mptab-archived'); if(_tar) _tar.style.display=_adm?'inline-block':'none'; var _tp=document.getElementById('mptab-pricing'); if(_tp) _tp.style.display=_adm?'inline-block':'none'; switchProfileTab('me'); if(typeof renderProfileDriverPicker==='function') renderProfileDriverPicker(); }
   if(id==='account') renderAccountPage();
   if(id==='income'){ renderIncome(); renderExpensesView(); }
+  if(id==='bookingreqs') renderBookingRequestsPage();
   document.querySelectorAll('#quicknav .qn').forEach(b=>b.classList.toggle('active', b.dataset.qn===id));
 }
 
@@ -27961,7 +28233,7 @@ function notifRoute(navData){
         try{ renderNotifPanel(); }catch(e){}
         if(_found.req.requestType==='quote'){ nav('quote'); }
         else { nav('calendar'); setTimeout(function(){ try{ openQuickAddModal(); }catch(e){} }, 150); }
-        _prefillFromClientRequest(_found.req);
+        _prefillFromClientRequest(_found.req, _found.clientRequestId);
         return;
       }
       nav('clients'); return;
