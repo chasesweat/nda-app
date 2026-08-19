@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191871">
+<meta name="version" content="202608191875">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1957,7 +1957,7 @@ let DRIVER_PROFILES = {
 // pendingAdminTutorial. The next time THEY log in, a friendly prompt offers the
 // admin tutorial (a button, so the popup isn't blocked), then clears the flag.
 let pendingAdminTutorial = [];
-async function savePendingAdminTutorial(){ try{ await storageSet('kat:pendingAdminTutorial', pendingAdminTutorial); }catch(e){} }
+async function savePendingAdminTutorial(){ try{ await storageSetArray('kat:pendingAdminTutorial', pendingAdminTutorial); }catch(e){} }
 async function loadPendingAdminTutorial(){ try{ const d=await storageGet('kat:pendingAdminTutorial'); if(Array.isArray(d)) pendingAdminTutorial=d; }catch(e){} }
 // A newly-promoted admin already did the driver tour — send them to the admin extras only.
 function _adminTutorialUrl(){ return 'nwda-admin-tutorial.html?adminonly=1'; }
@@ -2076,17 +2076,22 @@ async function ensureFbAuth(){
 }
 
 async function storageGet(key) {
+  // Every array load records what was in it, so storageSetArray can later tell "I deleted this"
+  // apart from "someone else added this" (v873). Done here rather than at each call site
+  // because there are dozens of loads and one missed seeding would silently turn the merge
+  // guard into a resurrect-deleted-items bug - worse than not having it.
+  var _seed = function(v){ try{ if(Array.isArray(v)) _seedArrayBaseline(key, v); }catch(e){} return v; };
   // Try Firebase first
   if(fbDB){
     try {
       const snap = await fbRef('nda/'+key.replace(/:/g,'/')).once('value');
-      if(snap.exists()) return snap.val();
+      if(snap.exists()) return _seed(snap.val());
     } catch(e){}
   }
   // Fallback to localStorage
   try {
     const v = localStorage.getItem(key);
-    if(v) return JSON.parse(v);
+    if(v) return _seed(JSON.parse(v));
   } catch(e) {}
   return null;
 }
@@ -2181,6 +2186,75 @@ function _auditFlush(){
     if(typeof addNotification==='function'){ addNotification('Chase Sweat', {}, 'admin_change', msg); if(typeof saveNotifs==='function') saveNotifs(); }
   }catch(e){}
 }
+// ── ARRAY COLLECTIONS: the other half of the clobber class (v873) ────────────────────────
+//
+// storageSetOne fixed collections keyed by name. It does nothing for ARRAYS - there is no key
+// to write to - and this app has ten of them: rides, savedQuotes, hiddenClients, cautiousList,
+// deceasedClients, docFolders, documents, addedDrivers, archivedDriverNames, ridesArchive.
+// Every one was still doing a whole-array .set(), which is exactly what lost a weekend of rides
+// in v862.
+//
+// This generalises the guard written for rides then: before replacing the server's array, read
+// it, and keep anything on it that we do not have AND have never seen. That second condition is
+// what preserves deletion - an item we knew about and no longer hold was deliberately removed
+// here, so it stays removed; an item we have never seen arrived from another device while we
+// held stale data, so it survives.
+//
+// "Have we seen it" needs a baseline, and getting that wrong in either direction is worse than
+// not doing this at all: too empty and deleted items come back from the dead, too full and real
+// additions get dropped. So the baseline is seeded automatically in storageGet below - every
+// load of an array records what was in it - rather than relying on each caller to remember.
+const _arrayBaseline = {};
+function _itemKey(it){
+  if(it==null) return null;
+  if(typeof it!=='object') return String(it);           // string/number arrays (e.g. archived names)
+  if(it.id!=null) return 'id:'+it.id;
+  if(it.fwUID) return 'fw:'+it.fwUID;
+  // Last resort for shapes with no identifier of their own (hiddenClients is {owner,name,ts}).
+  // Deliberately excludes nothing - two genuinely identical entries collapsing to one is the
+  // correct outcome for a de-duplicating merge.
+  try{ return 'j:'+JSON.stringify(it); }catch(e){ return null; }
+}
+function _seedArrayBaseline(key, arr){
+  try{
+    if(!Array.isArray(arr)) return;
+    var s = new Set();
+    arr.forEach(function(it){ var k=_itemKey(it); if(k) s.add(k); });
+    _arrayBaseline[key] = s;
+  }catch(e){}
+}
+async function storageSetArray(key, arr){
+  if(!Array.isArray(arr)) return await storageSet(key, arr);
+  var toWrite = arr;
+  try{
+    if(fbDB){
+      await ensureFbAuth();
+      var snap = await fbRef('nda/'+key.replace(/:/g,'/')).once('value');
+      var srvVal = snap.val();
+      if(srvVal){
+        var srv = Array.isArray(srvVal) ? srvVal : Object.values(srvVal);
+        var mine = new Set(); arr.forEach(function(it){ var k=_itemKey(it); if(k) mine.add(k); });
+        var known = _arrayBaseline[key] || new Set();
+        var rescued = srv.filter(function(it){
+          var k=_itemKey(it);
+          return k && !mine.has(k) && !known.has(k);
+        });
+        if(rescued.length){
+          console.warn('storageSetArray: kept '+rescued.length+' item(s) in '+key+' that this device had not loaded');
+          toWrite = arr.concat(rescued);
+        }
+      }
+    }
+  }catch(e){
+    // Fails open, same reasoning as the rides guard: refusing to save is itself data loss, so a
+    // failed pre-read degrades to the old behaviour rather than blocking the write.
+    console.warn('storageSetArray: pre-write merge check failed for '+key+', writing anyway', e);
+  }
+  var ok = await storageSet(key, toWrite);
+  _seedArrayBaseline(key, toWrite);
+  return ok;
+}
+
 async function storageSet(key, val) {
   // Write to Firebase
   var _ok = true;
@@ -3173,7 +3247,7 @@ const TIP_DATA={
   cal:{icon:'📅',title:'Calendar',text:'Tap any ride to see its full details. Creators and admins can also edit or cancel it from there. Search by client, phone, driver, or type. '+_MTIP_HINT},
 
   myrides:{icon:'📋',title:'My Rides & Confirmations',text:'The To Confirm tab shows tomorrow\'s rides needing a day-before text. After Arrived, Mark Paid moves it into income \u2014 or Client Invoiced if they\'re billed later instead. A round trip works differently: Pause once dropped off, Resume heading back, and the app adds both legs together. '+_MTIP_HINT},
-  clients:{icon:'👥',title:'Client List',text:'Your client list is 100% private \u2014 no other driver or admin can see it. Added automatically when you book, or import a spreadsheet. Each client has an owner, which decides who earns the fee if someone else drives them. '+_MTIP_HINT},
+  clients:{icon:'👥',title:'Client List',text:'Your client list is private \u2014 no other driver can see it, and an admin needs a second admin\u2019s approval before they can, for 24 hours. Added automatically when you book, or import a spreadsheet. Each client has an owner, which decides who earns the fee if someone else drives them. '+_MTIP_HINT},
 
   income:{icon:'💰',title:'Income & Receipts',text:'Track gross fares, expenses, and net take-home here. A ride counts as income only once it\'s marked paid, not the date it happened. Your mileage rate is yours to set, no admin needed, and can change mid-year. '+_MTIP_HINT},
 
@@ -3486,7 +3560,7 @@ async function saveRides(){
 // Quotes saved for later (NOT on the calendar) — each is a full ride-shaped object
 // plus a _quoteId. Scheduling one moves it into rides[].
 let savedQuotes = [];
-async function saveSavedQuotes(){ await storageSet('kat:savedQuotes', savedQuotes); }
+async function saveSavedQuotes(){ await storageSetArray('kat:savedQuotes', savedQuotes); }
 
 // ── RIDE ARCHIVE SYSTEM ───────────────────────────────────────────────────
 // To keep the live app fast as data grows, rides older than a cutoff can be moved
@@ -10887,7 +10961,7 @@ async function _mtSaveGasPrice(val){
   if(!DRIVER_PROFILES[dn])DRIVER_PROFILES[dn]={};
   DRIVER_PROFILES[dn].gasPrice=val;
   _mtGasPrice=val;
-  try{await storageSet('kat:driverProfiles',DRIVER_PROFILES);}catch(e){}
+  try{await storageSetOne('kat:driverProfiles',dn,DRIVER_PROFILES[dn],DRIVER_PROFILES);}catch(e){}
 }
 // ── RIDE NAVIGATION + MILE LOGGING ───────────────────────────────────────
 function _navEnc(addr){ return encodeURIComponent((addr||'').trim()); }
@@ -11015,7 +11089,7 @@ async function _maybeSaveDontAskAgain(){
   if(!dn) return;
   driverSettings[dn] = driverSettings[dn] || {};
   driverSettings[dn].skipOdometerPrompts = true;
-  try{ await storageSet('kat:driverSettings', driverSettings); }catch(e){}
+  try{ await storageSetOne('kat:driverSettings', dn, driverSettings[dn], driverSettings); }catch(e){}
 }
 
 async function _saveOdometerStart(rideId){
@@ -13093,7 +13167,7 @@ async function removeClientEntirely(name){
   // Use a hidden-clients list keyed per owner
   if(typeof hiddenClients==='undefined'){ window.hiddenClients=[]; }
   hiddenClients.push({owner:me,name:name.trim(),ts:Date.now()});
-  await storageSet('kat:hiddenClients',hiddenClients);
+  await storageSetArray('kat:hiddenClients',hiddenClients);
   // Also clear deceased flag if present
   await unmarkClientDeceased(name);
   renderClients();
@@ -15599,7 +15673,7 @@ async function saveOnboarding(){
   if(_onbGeneratedCard){
     if(typeof DRIVER_PHOTOS!=='undefined') DRIVER_PHOTOS[dn]=_onbGeneratedCard;
     if(Array.isArray(p.vehicles) && p.vehicles.length) p.vehicles[0].photo=_onbGeneratedCard;
-    try{ var _ov=await storageGet('kat:driverPhotoOverrides'); if(!_ov||typeof _ov!=='object')_ov={}; _ov[dn]=_onbGeneratedCard; await storageSet('kat:driverPhotoOverrides',_ov); }catch(e){}
+    try{ var _ov=await storageGet('kat:driverPhotoOverrides'); if(!_ov||typeof _ov!=='object')_ov={}; _ov[dn]=_onbGeneratedCard; await storageSetOne('kat:driverPhotoOverrides', dn, _ov[dn], _ov); }catch(e){}
     // Keeps the driver's OWN device from serving their old photo back to them out of the
     // v802 local cache after they've just uploaded a new one. Without this, a driver who
     // reopens the app later the same day (still inside the 24h window from an earlier Team
@@ -15613,9 +15687,10 @@ async function saveOnboarding(){
   p.onboardedAt = Date.now();
   // Persist everything
   try{
-    await storageSet('kat:driverProfiles', DRIVER_PROFILES);
-    await storageSet('kat:driverVenmo', driverVenmo);
-    await storageSet('kat:driverSettings', driverSettings);
+    // One driver's records - this is that driver's own onboarding, nobody else's (v874).
+    await storageSetOne('kat:driverProfiles', dn, DRIVER_PROFILES[dn], DRIVER_PROFILES);
+    await storageSetOne('kat:driverVenmo', dn, driverVenmo[dn], driverVenmo);
+    await storageSetOne('kat:driverSettings', dn, driverSettings[dn], driverSettings);
   }catch(e){ console.warn('onboarding save', e); }
 
   showToast('\u2713 Your info is saved');
@@ -17201,7 +17276,7 @@ async function saveAddedDriver(rec){
   if(!Array.isArray(added)) added = [];
   const i = added.findIndex(function(x){ return x && x.driverName===rec.driverName; });
   if(i>=0) added[i]=rec; else added.push(rec);
-  await storageSet('kat:addedDrivers', added);
+  await storageSetArray('kat:addedDrivers', added);
 }
 
 // ── ARCHIVE A DRIVER ────────────────────────────────────────────────────
@@ -17257,12 +17332,12 @@ async function _applyDriverArchive(name){
   let archived = await storageGet('kat:archivedDrivers');
   if(!Array.isArray(archived)) archived = [];
   archived.push(record);
-  await storageSet('kat:archivedDrivers', archived);
+  await storageSetArray('kat:archivedDrivers', archived);
 
   let names = await storageGet('kat:archivedDriverNames');
   if(!Array.isArray(names)) names = [];
   if(names.indexOf(name)<0) names.push(name);
-  await storageSet('kat:archivedDriverNames', names);
+  await storageSetArray('kat:archivedDriverNames', names);
 
   // Cut off login the same proven way Deactivate does.
   if(loginEntry){ loginEntry.disabled = true; await saveDisabled(); }
@@ -17271,7 +17346,7 @@ async function _applyDriverArchive(name){
   let added = await storageGet('kat:addedDrivers');
   if(Array.isArray(added)){
     const filtered = added.filter(function(x){ return !x || x.driverName!==name; });
-    if(filtered.length!==added.length) await storageSet('kat:addedDrivers', filtered);
+    if(filtered.length!==added.length) await storageSetArray('kat:addedDrivers', filtered);
   }
 
   _stripDriverFromLiveTables(name);
@@ -17368,18 +17443,18 @@ async function reactivateDriver(archiveId){
     let added = await storageGet('kat:addedDrivers');
     if(!Array.isArray(added)) added = [];
     added.push({ driverName: liveName, profile: d.profile||{}, color: d.color||'', photo: d.photo||'', login: d.login.name, password: d.login.password });
-    await storageSet('kat:addedDrivers', added);
+    await storageSetArray('kat:addedDrivers', added);
   }
 
   let names = await storageGet('kat:archivedDriverNames');
   if(!Array.isArray(names)) names = [];
   names = names.filter(function(n){ return n!==rec.name; });
-  await storageSet('kat:archivedDriverNames', names);
+  await storageSetArray('kat:archivedDriverNames', names);
 
   // Keep the archive record for audit history rather than deleting it - just stamp it reactivated
   // so the "browse archived drivers" list knows not to show it as currently archived.
   rec.reactivatedAt = Date.now();
-  await storageSet('kat:archivedDrivers', archived);
+  await storageSetArray('kat:archivedDrivers', archived);
 
   showToast('\u2705 '+liveName.split(' ')[0]+' reactivated');
   if(typeof renderAccessControl==='function') renderAccessControl();
@@ -17689,12 +17764,14 @@ async function saveDriverCards(){
   if(vehicles[0].gasPrice!=='') DRIVER_PROFILES[dn].gasPrice=vehicles[0].gasPrice;
   if(vehicles[0].maintRate!=='') DRIVER_PROFILES[dn].maintRate=vehicles[0].maintRate;
   if(typeof DRIVER_PHOTOS!=='undefined') DRIVER_PHOTOS[dn]=vehicles[0].photo||'';
-  try{ await storageSet('kat:driverProfiles', DRIVER_PROFILES); }catch(e){ console.warn('save profiles', e); }
+  try{ await storageSetOne('kat:driverProfiles', dn, DRIVER_PROFILES[dn], DRIVER_PROFILES); }catch(e){ console.warn('save profiles', e); }
   try{
     var overrides=await storageGet('kat:driverPhotoOverrides');
     if(!overrides || typeof overrides!=='object') overrides={};
     overrides[dn]=vehicles[0].photo||'';
-    await storageSet('kat:driverPhotoOverrides', overrides);
+    // Targeted (v872). This path already read the whole node first, so a whole-node write back
+    // reopened the gap between the read and the write for every OTHER driver's photo.
+    await storageSetOne('kat:driverPhotoOverrides', dn, overrides[dn], overrides);
     // Same reasoning as saveOnboarding's own cache-refresh: don't let this device's local
     // v802 cache serve a stale pre-edit photo back to whoever's looking at dn's card next,
     // on this device, before the 24h window would otherwise catch up on its own.
@@ -18954,7 +19031,7 @@ function emailDriverDocOnRemoval(loginName){
     if(email){
       if(!DRIVER_PROFILES[fullName]) DRIVER_PROFILES[fullName] = {};
       DRIVER_PROFILES[fullName].email = email;
-      storageSet('kat:driverProfiles', DRIVER_PROFILES);
+      storageSetOne('kat:driverProfiles', fullName, DRIVER_PROFILES[fullName], DRIVER_PROFILES);
     }
   }
 
@@ -19663,7 +19740,9 @@ async function saveVenmoFromModal(){
   if(!_vchk.ok){ showToast(_vchk.reason,'error'); return; }
   if(typeof driverVenmo==='undefined'){ driverVenmo={}; }
   driverVenmo[driverName] = _vchk.handle;   // exact case preserved — Venmo pay links are case-sensitive
-  try{ await storageSet('kat:driverVenmo', driverVenmo); }catch(e){ console.warn('venmo save', e); }
+  // One driver's handle, not the whole map (v872) - see storageSetOne's own note on the
+  // clobber class this closes.
+  try{ await storageSetOne('kat:driverVenmo', driverName, driverVenmo[driverName], driverVenmo); }catch(e){ console.warn('venmo save', e); }
   closeVenmoModal();
   if(_vchk.warn) showToast('Saved \u2014 but \u201c'+_vchk.handle+'\u201d looks like a name. If Venmo splits the payment, use the exact @username from your profile (Test it first).','error');
   else showToast('Venmo username updated \u2713');
@@ -19810,10 +19889,10 @@ async function saveDriverProfile(driverName){
       vcard:        !!_spEl('vcard').checked,
       card:         _spEl('card') ? !!_spEl('card').checked : ((driverSettings[driverName].sendParts||{}).card!==false)
     };
-    try{ await saveDriverSettings(); }catch(e){}
+    try{ await saveDriverSettings(driverName); }catch(e){}
   }
-  await storageSet('kat:driverProfiles', DRIVER_PROFILES);
-  await storageSet('kat:driverVenmo', driverVenmo);
+  await storageSetOne('kat:driverProfiles', driverName, DRIVER_PROFILES[driverName], DRIVER_PROFILES);
+  await storageSetOne('kat:driverVenmo', driverName, driverVenmo[driverName], driverVenmo);
   showToast(`${driverName.split(' ')[0]}'s profile saved ✓`);
   renderDriverMembers();
 }
@@ -20350,7 +20429,10 @@ function getMyExpenses(){
 // { driverName: [ {id, date, time, client, type, price, notes, ts} ] }
 let outsideRides = {};
 async function loadOutsideRides(){ const d=await storageGet('kat:outsideRides'); if(d) outsideRides=d; }
-async function saveOutsideRides(){ await storageSet('kat:outsideRides', outsideRides); }
+async function saveOutsideRides(dName){
+  if(dName!=null) return await storageSetOne('kat:outsideRides', dName, outsideRides[dName], outsideRides);
+  return await storageSet('kat:outsideRides', outsideRides);
+}
 
 function getMyOutsideRides(){
   const dName = getMyDriverName()||currentUser?.name;
@@ -20501,7 +20583,7 @@ async function saveOutsideRide(editId){
       date, time, client: client||'Outside ride', type, price:amount, miles, notes, editedAt:Date.now(),
       fare:_gf, tip:_tp, providerFee:_pf, payment:_pm,
     });
-    await saveOutsideRides();
+    await saveOutsideRides(dName);
     closeOutsideRideModal();
     renderIncome();
     showToast(`Outside ride updated — $${amount.toFixed(2)}`);
@@ -20512,7 +20594,7 @@ async function saveOutsideRide(editId){
     date, time, client: client||'Outside ride', type, price:amount, miles, notes, ts:Date.now(),
     fare:_gf, tip:_tp, providerFee:_pf, payment:_pm,
   });
-  await saveOutsideRides();
+  await saveOutsideRides(dName);
   closeOutsideRideModal();
   renderIncome();
   showToast(`Outside ride saved — $${amount.toFixed(2)}`);
@@ -20523,7 +20605,7 @@ async function deleteOutsideRide(id){
   if(!dName || !outsideRides[dName]) return;
   if(!confirm('Delete this outside ride?')) return;
   outsideRides[dName] = outsideRides[dName].filter(o=>o.id!==id);
-  await saveOutsideRides();
+  await saveOutsideRides(dName);
   renderIncome();
   showToast('Outside ride deleted');
 }
@@ -21350,14 +21432,19 @@ let hiddenClients=[];
 async function loadHiddenClients(){ const d=await storageGet('kat:hiddenClients'); if(Array.isArray(d)) hiddenClients=d; }
 function isClientHidden(name){ if(!name) return false; var me=_deceasedOwner(); var n=name.trim().toLowerCase(); return hiddenClients.some(function(e){return e.owner===me && e.name.trim().toLowerCase()===n;}); }
 async function loadDeceasedClients(){ const d=await storageGet('kat:deceasedClients'); if(Array.isArray(d)) deceasedClients=d; }
-async function saveDeceasedClients(){ await storageSet('kat:deceasedClients',deceasedClients); }
+async function saveDeceasedClients(){ await storageSetArray('kat:deceasedClients',deceasedClients); }
 function _deceasedOwner(){ return getMyDriverName()||currentUser?.name||''; }
 function isClientDeceased(name){ if(!name) return false; var me=_deceasedOwner(); var n=name.trim().toLowerCase(); return deceasedClients.some(function(e){return e.owner===me && e.name.trim().toLowerCase()===n;}); }
 async function markClientDeceased(name){ if(!name) return; var me=_deceasedOwner(); var n=name.trim().toLowerCase(); if(deceasedClients.some(function(e){return e.owner===me && e.name.trim().toLowerCase()===n;})) return; deceasedClients.push({owner:me,name:name.trim(),ts:Date.now()}); await saveDeceasedClients(); renderClients(); showToast('Marked as deceased'); }
 async function unmarkClientDeceased(name){ if(!name) return; var me=_deceasedOwner(); var n=name.trim().toLowerCase(); deceasedClients=deceasedClients.filter(function(e){return !(e.owner===me && e.name.trim().toLowerCase()===n);}); await saveDeceasedClients(); renderClients(); showToast('Status removed'); }
 async function loadCautiousList(){ const d=await storageGet('kat:cautiousList'); if(Array.isArray(d)) cautiousList=d; }
-async function saveCautiousList(){ await storageSet('kat:cautiousList',cautiousList); }
-async function saveClientOwners(){ try{ await storageSet('kat:clientOwners', clientOwners); }catch(e){} }
+async function saveCautiousList(){ await storageSetArray('kat:cautiousList',cautiousList); }
+async function saveClientOwners(key){
+  try{
+    if(key!=null) return await storageSetOne('kat:clientOwners', key, clientOwners[key], clientOwners);
+    await storageSet('kat:clientOwners', clientOwners);
+  }catch(e){}
+}
 async function loadClientOwners(){ try{ const d=await storageGet('kat:clientOwners'); if(d && typeof d==='object') clientOwners=d; }catch(e){} }
 
 async function saveLockedMileage(){ try{ await storageSet('kat:lockedMileage', lockedMileage); }catch(e){} }
@@ -21863,7 +21950,7 @@ registerAdminAction('rides_archive', async function(p){
     var existing=(await storageGet('kat:ridesArchive'))||[];
     var archivedIds=new Set(existing.map(function(r){ return r&&r.id; }));
     var merged=existing.concat(toArchive.filter(function(r){ return !archivedIds.has(r.id); }));
-    await storageSet('kat:ridesArchive', merged);
+    await storageSetArray('kat:ridesArchive', merged);
     var keepIds=new Set(toArchive.map(function(r){ return r.id; }));
     rides=rides.filter(function(r){ return !(r && r.date && r.date < cutoff && keepIds.has(r.id)); });
     await saveRides();
@@ -21923,7 +22010,7 @@ registerAdminAction('driver_add', async function(rec){
       var _addedOv=await storageGet('kat:driverPhotoOverrides');
       if(!_addedOv || typeof _addedOv!=='object') _addedOv={};
       _addedOv[name]=_newDriverPhotoToStore;
-      await storageSet('kat:driverPhotoOverrides', _addedOv);
+      await storageSetOne('kat:driverPhotoOverrides', name, _addedOv[name], _addedOv);
       // Same reasoning as the other two photo-write sites: keeps whoever's adding this driver
       // from having their OWN device's v802 cache serve a "no photo yet" stale result back for
       // this brand-new name, before the 24h window would otherwise catch up.
@@ -21993,7 +22080,7 @@ async function deleteSelectedClients(){
   var me=(typeof _deceasedOwner==='function')?_deceasedOwner():((currentUser&&PROXY_MAP[currentUser.name])||getMyDriverName());
   if(typeof hiddenClients==='undefined'){ window.hiddenClients=[]; }
   names.forEach(function(nm){ hiddenClients.push({owner:me,name:String(nm).trim(),ts:Date.now()}); });
-  try{ await storageSet('kat:hiddenClients',hiddenClients); }catch(e){}
+  try{ await storageSetArray('kat:hiddenClients',hiddenClients); }catch(e){}
   for(var i=0;i<names.length;i++){ try{ if(typeof unmarkClientDeceased==='function') await unmarkClientDeceased(names[i]); }catch(e){} }
   selectedClients.clear(); clientSelectMode=false;
   var b=document.getElementById('client-select-btn'); if(b){ b.textContent='Select'; b.style.borderColor='var(--light)'; b.style.color='var(--mid)'; }
@@ -22048,7 +22135,11 @@ function _ecDeleteAddr(key,i){
   if(!Array.isArray(s)||!s[i]) return;
   s.splice(i,1);
   if(s.length && !s.some(function(a){return a.isDefault;})) s[0].isDefault=true;
-  storageSet('kat:clientAddresses',clientAddressOverrides).catch(function(){});
+  // One client's addresses (v872). Client names CAN contain a period ("Dr. Smith"), which
+  // Firebase forbids in a path segment - storageSetOne detects that and falls back to the
+  // whole-collection write, so those clients keep the old behaviour rather than writing to a
+  // mangled path. Everyone else gets the targeted write.
+  storageSetOne('kat:clientAddresses', key, clientAddressOverrides[key], clientAddressOverrides).catch(function(){});
   renderClientAddressManager(key);
 }
 
@@ -22128,7 +22219,7 @@ async function submitEditClient(oldName){
     if(Array.isArray(cautiousList))   cautiousList.forEach(function(e){ if(e&&e.name&&e.name.trim().toLowerCase()===oldKey) e.name=newName; });
     if(clientTerminalPrefs[oldKey]!=null){ clientTerminalPrefs[newKey]=clientTerminalPrefs[oldKey]; delete clientTerminalPrefs[oldKey]; }
     try{ await saveDeceasedClients(); }catch(_e){}
-    try{ await storageSet('kat:hiddenClients',hiddenClients); }catch(_e){}
+    try{ await storageSetArray('kat:hiddenClients',hiddenClients); }catch(_e){}
     try{ await saveCautiousList(); }catch(_e){}
     try{ await saveClientTerminalPrefs(); }catch(_e){}
   }
@@ -22646,7 +22737,7 @@ function openBusinessLogoUpload(driverName){
     try{
       if(!DRIVER_PROFILES[driverName]) DRIVER_PROFILES[driverName]={};
       DRIVER_PROFILES[driverName].logo=dataUrl;
-      await storageSet('kat:driverProfiles', DRIVER_PROFILES);
+      await storageSetOne('kat:driverProfiles', driverName, DRIVER_PROFILES[driverName], DRIVER_PROFILES);
       if(typeof renderMyProfileCard==='function') renderMyProfileCard();
       showToast('\u2713 Business logo saved');
     }catch(err){ console.warn('logo save failed', err); showToast('Could not save logo','error'); }
@@ -24245,7 +24336,7 @@ async function setIrsMileageRate(periodFrom, rate){
   if(!DRIVER_PROFILES[who]) DRIVER_PROFILES[who]={};
   if(!DRIVER_PROFILES[who].irsRates) DRIVER_PROFILES[who].irsRates={};
   DRIVER_PROFILES[who].irsRates[periodFrom] = r;
-  try{ await storageSet('kat:driverProfiles', DRIVER_PROFILES); }catch(e){}
+  try{ await storageSetOne('kat:driverProfiles', who, DRIVER_PROFILES[who], DRIVER_PROFILES); }catch(e){}
   try{ var _b=document.getElementById('irs-rate-box'); if(_b) _b.innerHTML=_irsRatesAdminHTML(); }catch(e){}
   showToast('\u2713 Rate from '+periodFrom+': $'+r.toFixed(3)+'/mi');
   return true;
@@ -25511,7 +25602,7 @@ async function repairImportedClients(){
   if(doNames){
     await saveRides();
     try{ await saveDeceasedClients(); }catch(e){}
-    try{ await storageSet('kat:hiddenClients',hiddenClients); }catch(e){}
+    try{ await storageSetArray('kat:hiddenClients',hiddenClients); }catch(e){}
     try{ await saveCautiousList(); }catch(e){}
     try{ await saveClientOwners(); }catch(e){}
   }
@@ -26429,7 +26520,10 @@ async function loadReceipts(){
   const d = await storageGet('kat:receipts');
   if(d) receipts = d;
 }
-async function saveReceipts(){ await storageSet('kat:receipts', receipts); }
+async function saveReceipts(dName){
+  if(dName!=null) return await storageSetOne('kat:receipts', dName, receipts[dName], receipts);
+  return await storageSet('kat:receipts', receipts);
+}
 
 // ── SWITCH TAB TO RECEIPTS ──
 let incomeTab = 'monthly'; // default view: money made this month
@@ -26705,7 +26799,7 @@ async function saveReceipt(){
   };
 
   receipts[dName].unshift(rec);
-  await saveReceipts();
+  await saveReceipts(dName);
   receiptImageData = null;
   closeReceiptUpload();
   showToast('Receipt saved ✓');
@@ -26717,7 +26811,7 @@ async function deleteReceipt(id, driverName){
   const key = driverName || getMyDriverName() || currentUser?.name || '';
   if(!receipts[key]) return;
   receipts[key] = receipts[key].filter(r=>r.id!==id);
-  await saveReceipts();
+  await saveReceipts(key);
   showToast('Receipt deleted');
   renderReceipts();
 }
@@ -26820,7 +26914,7 @@ async function requestCombineOff(myLogin, partnerLogin){
 async function loadDocFolders(){
   try{const d=await storageGet('kat:docFolders');if(d)docFolders=Array.isArray(d)?d:Object.values(d);rebuildDocCategories();}catch(e){}
 }
-async function saveDocFolders(){ await storageSet('kat:docFolders',docFolders);rebuildDocCategories(); } // base64 images staged in the upload modal
+async function saveDocFolders(){ await storageSetArray('kat:docFolders',docFolders);rebuildDocCategories(); } // base64 images staged in the upload modal
 
 // ════════════════════════════════════════════
 // DEFAULT SELFIE — built-in fallback photo used when a driver has not set their own
@@ -26832,7 +26926,7 @@ async function loadDocs(){
   if(d) sharedDocs = Array.isArray(d) ? d : Object.values(d);
   await loadDocFolders();
 }
-async function saveDocs(){ await storageSet('kat:documents', sharedDocs); }
+async function saveDocs(){ await storageSetArray('kat:documents', sharedDocs); }
 
 function setDocFilter(cat){
   docFilter=cat;renderDocFilterTabs();renderDocuments();
