@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191875">
+<meta name="version" content="202608191876">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -787,6 +787,7 @@ input,select,textarea{font-size:16px;}
               <input type="number" id="q-repeat-count" value="8" min="1" max="52" style="width:64px;padding:.4rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.85rem;" />
               <span style="font-size:.82rem;color:var(--mid);">occurrences</span>
             </div>
+            <div id="q-repeat-aprt-note" style="display:none;font-size:.72rem;color:var(--mid);width:100%;margin-top:.3rem;">AP Round Trip can't repeat — book each date separately.</div>
           </div>
         </div>
         <div id="holiday-notice" style="display:none;background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:.5rem .75rem;font-size:.82rem;margin-bottom:.75rem;"></div>
@@ -5146,6 +5147,26 @@ function updateTripFields(){
   }
   const dz=document.getElementById('q-dropoff-group');
   if(dz) dz.style.display = (isOneWay||isRT||isAPRT||type==='AP RUN'||type==='AP PICK UP') ? 'block':'block';
+  // AP Round Trip can't be a recurring series — a single AP Round Trip correctly splits into
+  // outbound + return, but the recurring loop in saveQuote() never got that same split applied
+  // to each instance, so a recurring AP Round Trip would silently create one-way rides with no
+  // return leg for every occurrence. Rather than let that gap be reachable, Chase's call: it's
+  // not an option at all, not something to fix the splitting for. Disabled here, not just
+  // hidden, so it's clear this is deliberate rather than a rendering glitch — and forced back
+  // to "none" so a driver who picked a repeat option and then switched to AP Round Trip can't
+  // carry a stale recurring choice through to save.
+  const qRepeat = document.getElementById('q-repeat');
+  const qRepeatNote = document.getElementById('q-repeat-aprt-note');
+  if(qRepeat){
+    qRepeat.disabled = isAPRT;
+    qRepeat.style.opacity = isAPRT ? '.5' : '1';
+    qRepeat.style.cursor = isAPRT ? 'not-allowed' : '';
+    if(isAPRT && qRepeat.value!=='none'){
+      qRepeat.value='none';
+      const qro=document.getElementById('q-repeat-opts'); if(qro) qro.style.display='none';
+    }
+  }
+  if(qRepeatNote) qRepeatNote.style.display = isAPRT ? 'block' : 'none';
   updateSuggestedPickupTime();
 }
 
@@ -5598,6 +5619,14 @@ async function saveQuote(){
 
   // Recurrence — defaults to a SINGLE ride; only repeats if the user explicitly chose a repeat option
   const repeat = document.getElementById('q-repeat')?.value || 'none';
+  // Belt and braces alongside the disabled control in updateTripFields() — AP Round Trip is
+  // never allowed to be a recurring series (see that function for why). The UI shouldn't ever
+  // let this combination reach here, but this is the actual save path, so it gets its own check
+  // rather than trusting a disabled attribute nothing else can bypass.
+  if(repeat!=='none' && ride.type==='AP ROUND TRIP'){
+    showToast('AP Round Trip can\'t repeat \u2014 book each date separately', 'error');
+    return;
+  }
   const baseDate = ride.date;
   let _leg2=null;
   if(repeat==='none' || !baseDate){
