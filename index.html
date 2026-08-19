@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191867">
+<meta name="version" content="202608191871">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -566,6 +566,16 @@ input,select,textarea{font-size:16px;}
       <select id="user-select" aria-label="Select your profile" onchange="selectUser(this.value)" style="width:100%;padding:.65rem .85rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.95rem;background:var(--white);color:var(--black);cursor:pointer;appearance:auto;">
         <option value="">— Choose your name —</option>
       </select>
+      <!-- Manual entry fallback (v870). Reported: a newly added driver wasn't in this list and
+           there was no way to type a name, so he simply could not sign in. The underlying cause
+           (the add sitting unapproved) is fixed too, but a dropdown is a single point of failure
+           for getting into the app at all - if a name is missing for ANY reason, someone is
+           locked out with no path forward. Typing a name is not a security hole: the password
+           check is unchanged and an unknown name fails exactly as a wrong password does. -->
+      <div id="manual-user-wrap" style="margin-top:.5rem;">
+        <button type="button" id="manual-user-toggle" onclick="toggleManualUser()" style="background:none;border:none;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;padding:0;text-decoration:underline;">Name not listed? Type it instead</button>
+        <input type="text" id="manual-user-input" placeholder="Type your name exactly as set up" oninput="selectUser(this.value.trim())" style="display:none;width:100%;margin-top:.4rem;padding:.65rem .85rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.95rem;box-sizing:border-box;" />
+      </div>
     </div>
     <div class="form-group">
       <label>Password</label>
@@ -2186,6 +2196,47 @@ async function storageSet(key, val) {
   return _ok;
 }
 
+// Write ONE key of an object collection, instead of uploading the whole collection (v868).
+//
+// This is the fix for a bug class that has now cost real data twice: the whole-array rides
+// clobber (v862) and a driver's phone number silently reverting after an approval (v867). Both
+// had the same shape - a device uploads an ENTIRE collection, so any other device still holding
+// an older copy overwrites the change on its next unrelated write, and both writes report
+// success so nothing warns anyone.
+//
+// Why this needs its own function rather than just calling storageSet with a longer key:
+// storageSet does key.replace(/:/g,'/') on the WHOLE string, turning every colon into a path
+// separator. That is correct for its own 'kat:thing' namespacing, but feePayments keys look
+// like "Chase Sweat:recv:Kathleen Herringdine" - passing that through storageSet would shatter
+// one ledger entry into three nested levels and quietly corrupt the ledger. Here the collection
+// is translated and the key is appended verbatim.
+//
+// Falls back to a whole-collection write when the key contains a character Firebase forbids in
+// a path segment, so a bad key degrades to the old behaviour rather than throwing or writing to
+// a mangled location.
+const _FB_FORBIDDEN_KEY = /[.$#\[\]\/]/;
+async function storageSetOne(coll, key, val, wholeObj){
+  var k = String(key==null?'':key);
+  if(!k || _FB_FORBIDDEN_KEY.test(k)){
+    if(wholeObj!==undefined) return await storageSet(coll, wholeObj);
+    console.warn('storageSetOne: unsafe key and no whole object to fall back to', coll, k);
+    return false;
+  }
+  var _ok = true;
+  if(fbDB){
+    await ensureFbAuth();
+    try{ await fbRef('nda/'+String(coll).replace(/:/g,'/')+'/'+k).set(val); }
+    catch(e){ console.warn('Firebase targeted write failed:', e); _ok = false; }
+  }
+  // Keep the localStorage backup whole-collection shaped, matching what storageSet writes and
+  // what the loader expects - a partial cache would read back as a collection of one.
+  if(wholeObj!==undefined){
+    try{ localStorage.setItem(coll, JSON.stringify(wholeObj)); }catch(e){}
+  }
+  try{ _auditAdminChange(coll); }catch(e){}
+  return _ok;
+}
+
 // Real-time listener — updates rides/comments live across all devices
 function setupRealtimeListeners(){
   if(!fbDB) return;
@@ -2649,6 +2700,18 @@ function _revealAfterLoad(){
     }
   }catch(e){}
   try{ document.getElementById('loading-screen').style.display = 'none'; }catch(e){}
+  // Rebuild the login list now that loadAddedDrivers() has merged admin-added drivers into
+  // USERS (v871). buildUserChips() also runs at the bottom of the file during initial script
+  // evaluation, which is BEFORE any of that data has been fetched - so the dropdown was always
+  // built from the hardcoded USERS array alone and never rebuilt afterwards.
+  //
+  // That is why a driver could exist correctly in Firebase, with a login and password, and
+  // still have no row on the login screen: nothing ever asked the dropdown to look again. Every
+  // driver added through the UI since that list was hardcoded has been invisible here.
+  //
+  // Deliberately placed on the path that reveals the auth screen, so the rebuild always happens
+  // immediately before the list is shown rather than at some arbitrary earlier point.
+  try{ buildUserChips(); }catch(e){}
   if(!autoLoggedIn){ try{ document.getElementById('auth-screen').style.display = 'flex'; }catch(e){} }
   window._nwdaRevealedApp = autoLoggedIn;
   return autoLoggedIn;
@@ -2936,6 +2999,7 @@ async function processClientRequests(){
         pax: r.pax||1, checkedBags: r.checkedBags||0, carryOnBags: r.carryOnBags||0,
         notes: r.notes||''
       };
+      _markNotifDirty(myDriverName);
       notifications[myDriverName].unshift({ rideId:null, type:'client_request', channel:null, read:false, msg:msg, ts:Date.now(), createdBy:'', clientRequestId:id, req:_reqPayload });
       if(typeof sendPushToDriver==='function') sendPushToDriver(myDriverName, '\ud83d\udccb New request via your booking link', kind+' from '+(r.clientName||'a client'));
       _applyClientBookingRequestSideEffects(r);
@@ -3617,9 +3681,35 @@ async function loadRideHistory(){
     showToast('Could not load history','error');
   }
 }
+// Which drivers' notification lists have actually changed since the last save (v869).
+//
+// notifications is keyed by driver name, and saveNotifs() is called from 67 places - far too
+// many to convert individually with any confidence. But there are only SEVEN points that
+// actually mutate the object, so marking the key at each mutation is both smaller and safer
+// than threading a parameter through every call site.
+//
+// saveNotifs() then writes only the marked keys. When nothing is marked it falls back to the
+// whole-collection write, so any mutation path added later that forgets to mark still saves
+// correctly - it just doesn't get the targeted benefit. Fail-safe rather than fail-silent,
+// which matters because a lost notification means a driver never learns about a ride.
+let _notifDirty = new Set();
+function _markNotifDirty(driverName){ try{ if(driverName) _notifDirty.add(driverName); }catch(e){} }
 async function saveComments(){ await storageSet('kat:comments', comments); }
-async function saveNotifs()  { await storageSet('kat:notifications', notifications); }
-async function saveColors()  { await storageSet('kat:driverColors', driverColors); }
+async function saveNotifs()  {
+  var keys = Array.from(_notifDirty);
+  _notifDirty.clear();
+  if(!keys.length) return await storageSet('kat:notifications', notifications);
+  var ok = true;
+  for(var i=0;i<keys.length;i++){
+    var r = await storageSetOne('kat:notifications', keys[i], notifications[keys[i]], notifications);
+    if(!r) ok = false;
+  }
+  return ok;
+}
+async function saveColors(dName){
+  if(dName!=null) return await storageSetOne('kat:driverColors', dName, driverColors[dName], driverColors);
+  return await storageSet('kat:driverColors', driverColors);
+}
 
 // ═══════════════════════════════════════════
 // PRICING ENGINE
@@ -6320,6 +6410,7 @@ function addNotification(driverName, ride, action, customMsg, forceNow){
   const msg = customMsg || (action==='assigned'
     ? `New ride assigned: ${ride.client} on ${fmtDateShort(ride.date)} at ${ride.time||'—'} ($${ride.price})`
     : `Ride updated: ${ride.client}`);
+  _markNotifDirty(driverName);
   notifications[driverName].unshift({ rideId:ride.id, type:action, channel:(ride&&ride.channel)||null, read:false, msg, ts:Date.now(), createdBy:currentUser?.name||'' });
   // Fire push notification to driver's phone
   if(action==='assigned'){
@@ -7457,6 +7548,7 @@ function renderMyCal(){
     ul.innerHTML = html;
   }
   if(dName&&notifications[dName]){
+    _markNotifDirty(dName);
     notifications[dName].forEach(n=>n.read=true);
     saveNotifs(); updateNotifBadge();
   }
@@ -13481,6 +13573,7 @@ async function clearAllNotifications(){
   const dName = getMyDriverName();
   if(!dName) return;
   if(!confirm('Clear all notifications? You won\'t be able to bring them back.')) return;
+  _markNotifDirty(dName);
   notifications[dName] = [];
   await saveNotifs();
   updateNotifBadge();
@@ -13501,7 +13594,7 @@ function toggleNotifPanel(){
   try{ renderNotifPanel(); }catch(_e){ try{ console.warn('notif render failed', _e); }catch(_x){} if(!panel.innerHTML || panel.innerHTML.length<5){ panel.innerHTML='<div style="padding:1.5rem;text-align:center;color:#64748b;font-family:inherit;">Notifications unavailable right now.</div>'; } }
   panel.style.cssText='position:fixed;top:110px;right:8px;width:330px;max-width:92vw;max-height:74vh;overflow-y:auto;background:#fff;border:1.5px solid #e2e8f0;border-radius:14px;box-shadow:0 16px 44px rgba(20,8,40,.32);z-index:2147483600;display:block;';
   panel.setAttribute('data-open','1');
-  try{ var dName=getMyDriverName(); if(dName&&notifications[dName]){ notifications[dName].forEach(function(n){ n.read=true; }); saveNotifs(); updateNotifBadge(); } }catch(e){}
+  try{ var dName=getMyDriverName(); if(dName&&notifications[dName]){ _markNotifDirty(dName); notifications[dName].forEach(function(n){ n.read=true; }); saveNotifs(); updateNotifBadge(); } }catch(e){}
   setTimeout(function(){ try{ document.addEventListener('click', _notifOutsideClick, true); }catch(e){} }, 0);
 }
 function _notifOutsideClick(e){
@@ -14156,7 +14249,9 @@ function notifyChatMembers(channelKey, msg){
 function addChatBellNotif(driverName, msg, channel, osNotif){
   if(!driverName || !notifications) return;
   if(!notifications[driverName]) notifications[driverName] = [];
+  _markNotifDirty(driverName);
   notifications[driverName].unshift({ read:false, msg, ts: Date.now(), type:'chat', channel: channel||'group', osNotif: osNotif!==false });
+  _markNotifDirty(driverName);
   if(notifications[driverName].length > 50) notifications[driverName] = notifications[driverName].slice(0,50);
 }
 
@@ -16542,7 +16637,7 @@ async function markFeeRidePaid(owner, driver, rideId){
   if(pr.indexOf(rid)<0) pr.push(rid);
   feePayments[key].paid=true;
   feePayments[key].paidAt=new Date().toISOString();
-  await saveFeePayments();
+  await saveFeePayments(key);
   renderDashFees();
   showToast('\u2713 That ride\u2019s fee is marked paid');
 }
@@ -16554,7 +16649,7 @@ async function _feeUndoRide(owner, driver, rideId){
   if(fp.pendingRidesAt){ delete fp.pendingRidesAt[rideId]; }
   if(fp.paidRides){ const j=fp.paidRides.indexOf(rideId); if(j>=0) fp.paidRides.splice(j,1); }
   if((!fp.paidRides||!fp.paidRides.length)){ delete fp.paid; delete fp.paidAt; delete fp.legacyPaidThrough; }
-  await saveFeePayments(); try{ renderDashFees(); }catch(e){}
+  await saveFeePayments(key); try{ renderDashFees(); }catch(e){}
   showToast('\u21a9 Undone \u2014 that fee is owed again');
 }
 // Reset / mark the 15% fee from the OPEN ride card, then refresh the card so its status updates.
@@ -16570,7 +16665,7 @@ async function venmoAutoMarkRide(owner, payer, rideId){
   if(pend.indexOf(rid)<0) pend.push(rid);
   const pendAt=feePayments[key].pendingRidesAt=(feePayments[key].pendingRidesAt||{});
   pendAt[rid]=Date.now();
-  await saveFeePayments();
+  await saveFeePayments(key);
   try{ renderDashFees(); }catch(e){}
   showToast('\u23F3 Payment sent \u2014 it stays here until the recipient taps \u2713 Received');
 }
@@ -16624,7 +16719,7 @@ async function unwaiveDashFee(owner, driver){
   delete feePayments[key].waiveScope;
   delete feePayments[key].waiveUntil;
   delete feePayments[key].waiveFrom;
-  await saveFeePayments();
+  await saveFeePayments(key);
   renderDashFees();
   showToast('Fee restored \u2014 showing in Owed to you again');
 }
@@ -16672,7 +16767,7 @@ async function waiveOneRideFee(owner, driver, rideId, clientName){
   if(!feePayments[key]) feePayments[key]={};
   var wr=feePayments[key].waivedRides=(feePayments[key].waivedRides||[]);
   if(wr.indexOf(rideId)<0) wr.push(rideId);
-  try{ await saveFeePayments(); }catch(e){ showToast('Could not save that \u2014 try again','error'); return; }
+  try{ await saveFeePayments(key); }catch(e){ showToast('Could not save that \u2014 try again','error'); return; }
   // Tell the driver, same as an approved request would - otherwise a fee simply vanishes from
   // their dashboard with no explanation of why.
   try{
@@ -16762,7 +16857,7 @@ async function profileWaiveMonth(){
   feePayments[key].waiveScope='specificMonth';
   feePayments[key].waiveFrom=yr+'-'+mo+'-01';
   feePayments[key].waiveUntil=yr+'-'+mo+'-'+String(last).padStart(2,'0');
-  try{ await saveFeePayments(); }catch(e){}
+  try{ await saveFeePayments(key); }catch(e){}
   if(typeof renderDashFees==='function') renderDashFees();
   renderProfileWaive();
   var mn=['','January','February','March','April','May','June','July','August','September','October','November','December'][parseInt(mo,10)]||'';
@@ -17128,7 +17223,9 @@ async function archiveDriver(name){
   if(!name || DRIVERS.indexOf(name)<0){ showToast('Driver not found','error'); return; }
   if(!confirm('Archive '+name.split(' ')[0]+'?\n\nThey\u2019ll disappear from every driver list and lose app access. Their profile is kept and can be restored later from Archived Drivers.'+(_twoAdminRequired()?'\n\nA second admin must approve before it takes effect.':''))) return;
 
-  await queueAdminAction('driver_archive', {name: name}, 'Archive driver '+name);
+  // Archiving applies immediately as well - the counterpart to adding, and equally blocking
+  // when someone leaves and their access needs removing now rather than after an approval.
+  await queueAdminAction('driver_archive', {name: name}, 'Archive driver '+name, {noApproval:true});
 }
 
 // The actual archiving work, moved out of archiveDriver() itself so it can be gated the same
@@ -17368,22 +17465,19 @@ async function submitEditDriver(oldName){
   if(p.phone!==_cur.phone||p.email!==_cur.email) _bits.push('contact details');
   if(p.vehicle!==_cur.vehicle||p.vehicleYear!==_cur.vehicleYear) _bits.push('vehicle');
   var ov=document.getElementById('edit-driver-overlay'); if(ov) ov.remove();
-  // Profile edits apply immediately; a RENAME still goes for approval (v866). Chase asked for
-  // admins to edit driver profiles without a second approval, and phone / email / vehicle /
-  // colour are exactly that - routine corrections where waiting on another admin is friction
-  // with no upside.
+  // Driver edits NEVER wait for a second admin (v870). v866 exempted everything EXCEPT a
+  // rename, and that exception was still blocking a routine phone-number change for a driver
+  // out working. Two ways that happens: g('ed-name') trims, so a stored name carrying stray
+  // whitespace makes an ordinary edit compare as a rename; or a device simply hadn't picked up
+  // the build yet. Neither is worth an admin being unable to correct a phone number.
   //
-  // A rename is deliberately kept gated because it is not really a profile edit: the driver's
-  // NAME is used as a key across the app - fcmTokens are stored under it, fee ledger entries
-  // are keyed "owner:recv:driver", rides carry r.driver, client ownership maps to it. The
-  // rename path handles that, but it is a structural change to shared data rather than a
-  // correction to one person's details, and it is the one variant of this form where a second
-  // pair of eyes is worth the pause. Easily removed too if that's not wanted - it's this one
-  // condition.
-  var _isRename = (newName !== oldName);
+  // The rename caveat from v866 still holds technically - a driver's name is a key across
+  // fcmTokens, the fee ledger, r.driver and client ownership - but _applyDriverEdit already
+  // migrates every one of those, and a second approval never made that migration safer, only
+  // slower. Every edit still lands in the admin change log.
   await queueAdminAction('driver_edit', {oldName:oldName, newName:newName, profile:p, color:color, colorChanged:_colorChanged},
     'Edit driver '+oldName+(_bits.length?(' \u2014 '+_bits.join(', ')):''),
-    {noApproval: !_isRename});
+    {noApproval: true});
 }
 async function _applyDriverEdit(oldName, newName, p, color, _colorChanged){
   if(newName!==oldName){
@@ -17632,7 +17726,12 @@ async function submitNewDriver(){
   const color=g('nd-color')||pickUnusedColor();
   const rec={ driverName:finalName, login:login, password:password, profile:profile, color:color, photo:_newDriverPhoto||'' };
   const ov=document.getElementById('add-driver-overlay'); if(ov) ov.remove();
-  await queueAdminAction('driver_add', rec, 'Add driver '+finalName+' (login \u201c'+login+'\u201d)');
+  // Adding a driver applies immediately too (v870). A queued driver_add means the person does
+  // not exist yet - no login row, so they cannot appear in the login list and cannot sign in at
+  // all. That is what "I added a driver but he isn't on the login page" actually was: the add
+  // was sitting unapproved. A new hire being unable to start work until a second admin happens
+  // to open the app is not a safety property worth having.
+  await queueAdminAction('driver_add', rec, 'Add driver '+finalName+' (login \u201c'+login+'\u201d)', {noApproval:true});
 }
 
 function switchDriverTab(tab, el){
@@ -19204,7 +19303,7 @@ async function renderMyProfileCard(){
   const me=profileDriver();
   if(!me){ box.innerHTML='<div style="color:var(--mid);font-size:.9rem;padding:1rem;">Your login isn\u2019t linked to a driver profile yet. Ask an admin to link your account on the Team page.</div>'; return; }
   await _ensureDriverPhotoLoaded(me);
-  try{ var _pp=DRIVER_PROFILES[me]; if(_pp){ var _ch=migrateWeeklyOff(_pp); if(pruneExpiredDaysOff(_pp)) _ch=true; if(_ch) persistDriverProfiles(); } }catch(e){}
+  try{ var _pp=DRIVER_PROFILES[me]; if(_pp){ var _ch=migrateWeeklyOff(_pp); if(pruneExpiredDaysOff(_pp)) _ch=true; if(_ch) persistDriverProfiles(me); } }catch(e){}
   box.innerHTML=buildMemberCard(me,{forceEdit:true});
   // Move the settings block (receipt branding, payments, toggles, confirmation text) into the
   // Account Settings tab so My Info stays short. Fields keep their IDs, so Save still works.
@@ -19819,7 +19918,10 @@ function driverOptionsHTML(selected, dateStr){
     return `<option value="${d}"${sel}${style}${dis}>${label}</option>`;
   }).join('');
 }
-async function persistDriverProfiles(){ await storageSet('kat:driverProfiles', DRIVER_PROFILES); }
+async function persistDriverProfiles(dName){
+  if(dName!=null) return await storageSetOne('kat:driverProfiles', dName, DRIVER_PROFILES[dName], DRIVER_PROFILES);
+  return await storageSet('kat:driverProfiles', DRIVER_PROFILES);
+}
 function addUnavailHour(driverName){
   const myDriverName=getMyDriverName();
   if(!(isAdmin()||myDriverName===driverName)){showToast('You can only edit your own availability','error');return;}
@@ -19843,13 +19945,13 @@ function addUnavailHour(driverName){
   // Clear the inputs so a leftover date doesn't silently override the next block you add.
   if(fromEl) fromEl.value=''; if(toEl) toEl.value=''; if(dateEl) dateEl.value='';
   dayEls.forEach(function(e){ e.checked=false; });
-  persistDriverProfiles(); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
+  persistDriverProfiles(driverName); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
   showToast(blk.date?('Blocked '+fmtDateShort(blk.date)+' \u2713'):'Time block added \u2713');
 }
 function removeUnavailHour(driverName,id){
   const prof=DRIVER_PROFILES[driverName]||{};
   prof.unavailHours=(prof.unavailHours||[]).filter(b=>b.id!==id);
-  persistDriverProfiles(); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
+  persistDriverProfiles(driverName); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
 }
 
 // Weekday abbreviations a driver is off every week — unions legacy weeklyOff with
@@ -19899,7 +20001,7 @@ function removeRecurringOff(driverName, date, repeat){
   if(!(isAdmin() || myDriverName===driverName)){ showToast('You can only edit your own availability','error'); return; }
   const prof = DRIVER_PROFILES[driverName]; if(!prof || !Array.isArray(prof.recurringOff)) return;
   prof.recurringOff = prof.recurringOff.filter(function(x){ return !(x && x.date===date && x.repeat===repeat); });
-  persistDriverProfiles(); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
+  persistDriverProfiles(driverName); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
 }
 // Removes a driver's own hearted-ride status from any ride whose time actually falls inside a
 // newly-saved, specific-date time block - the time-range counterpart to addUnavailDate()'s
@@ -19938,7 +20040,7 @@ async function addUnavailDate(driverName){
     prof.unavailableDates = [...set].sort();
   }
   pruneExpiredDaysOff(prof);
-  persistDriverProfiles(); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
+  persistDriverProfiles(driverName); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
 
   // Being marked unavailable on a date makes any hearted (interested-in) ride on that SAME
   // date stale - the driver said they wanted to cover it, but they've just said they can't.
@@ -19964,7 +20066,7 @@ async function addUnavailDate(driverName){
 function removeUnavailDate(driverName, date){
   const prof = DRIVER_PROFILES[driverName]||{};
   prof.unavailableDates = (prof.unavailableDates||[]).filter(x=>x!==date);
-  persistDriverProfiles(); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
+  persistDriverProfiles(driverName); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
 }
 // "Available anyway" exceptions — a specific date the driver CAN drive despite a
 // standing day off. Overrides weekly-off / blocked-hours for that one date only.
@@ -19979,13 +20081,13 @@ function addAvailableDate(driverName){
   prof.unavailableDates = (prof.unavailableDates||[]).filter(x=>x!==val);
   const set = new Set(prof.availableDates||[]); set.add(val);
   prof.availableDates = [...set].sort();
-  persistDriverProfiles(); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
+  persistDriverProfiles(driverName); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
   showToast('\u2713 Marked available on '+fmtDateShort(val));
 }
 function removeAvailableDate(driverName, date){
   const prof = DRIVER_PROFILES[driverName]||{};
   prof.availableDates = (prof.availableDates||[]).filter(x=>x!==date);
-  persistDriverProfiles(); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
+  persistDriverProfiles(driverName); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
 }
 
 // ── PER-DRIVER VEHICLES (each with its own costs + card photo) ──
@@ -22512,8 +22614,14 @@ async function loadDriverSettings(){
   await _restoreKatTemplatesV2();
 }
 
-async function saveDriverSettings(){
-  try{ await storageSet('kat:driverSettings', driverSettings); }catch(e){}
+// Pass the driver whose settings you changed and only their record is written (v869).
+// Driver names are verified safe as Firebase path segments (no . $ # [ ] /), and
+// storageSetOne falls back to a whole-collection write for anything that isn't.
+async function saveDriverSettings(dName){
+  try{
+    if(dName!=null) return await storageSetOne('kat:driverSettings', dName, driverSettings[dName], driverSettings);
+    await storageSet('kat:driverSettings', driverSettings);
+  }catch(e){}
 }
 
 function getDriverSelfie(driverName){
@@ -23473,7 +23581,14 @@ function toggleCautiousList(){
   if(btn) btn.classList.toggle('is-active', open);
   if(open) renderCautiousList();
 }
-async function saveFeePayments(){ await storageSet('kat:feePayments', feePayments); }
+// Pass the ledger key you changed and only that entry is written; omit it and the whole ledger
+// goes up as before. Money is the worst thing to lose to a stale-copy overwrite (v867's class),
+// so every caller that knows which entry it touched should pass it - and all of them do know,
+// since they build the key to mutate it in the first place.
+async function saveFeePayments(key){
+  if(key!=null) return await storageSetOne('kat:feePayments', key, feePayments[key], feePayments);
+  return await storageSet('kat:feePayments', feePayments);
+}
 
 async function handleFeePaidChange(cb){
   const row=cb.closest('[data-dname]'); if(!row) return;
@@ -23483,7 +23598,7 @@ async function handleFeePaidChange(cb){
   feePayments[key].paidAt=cb.checked?new Date().toISOString():null;
   const methodSel=row.querySelector('.fee-method-sel');
   if(methodSel) feePayments[key].method=methodSel.value;
-  await saveFeePayments();
+  await saveFeePayments(key);
   // update strike-through inline without re-render (avoids focus flicker)
   const amtEl=row.querySelector('.fee-amount-val');
   if(amtEl) amtEl.style.textDecoration=cb.checked?'line-through':'none';
@@ -23497,7 +23612,7 @@ async function handleFeeMethodChange(sel){
   const key=row.dataset.dname+':'+row.dataset.dir+':'+row.dataset.cp;
   if(!feePayments[key]) feePayments[key]={};
   feePayments[key].method=sel.value;
-  await saveFeePayments();
+  await saveFeePayments(key);
 }
 
 // Shows who owes you (clients you own, driven by others) and who you owe (others' clients you drove).
@@ -25966,6 +26081,25 @@ function renderClients(){
 }
 
 let selectedUser=null;
+function toggleManualUser(){
+  var inp=document.getElementById('manual-user-input');
+  var sel=document.getElementById('user-select');
+  var btn=document.getElementById('manual-user-toggle');
+  if(!inp) return;
+  var showing = inp.style.display !== 'none';
+  if(showing){
+    inp.style.display='none'; inp.value='';
+    if(sel) sel.style.display='';
+    if(btn) btn.textContent='Name not listed? Type it instead';
+    selectUser(sel?sel.value:'');
+  } else {
+    inp.style.display='block';
+    if(sel){ sel.style.display='none'; sel.value=''; }
+    if(btn) btn.textContent='\u2190 Back to the list';
+    selectUser('');
+    try{ inp.focus(); }catch(e){}
+  }
+}
 function selectUser(name){
   selectedUser=name||null;
   document.getElementById('auth-error').textContent='';
@@ -28061,7 +28195,7 @@ function saveEditHour(driverName, id){
   else{showToast('Select days or a date','error');return;}
   prof.unavailHours[idx]=blk;
   document.getElementById('edit-hour-backdrop')?.remove();
-  persistDriverProfiles(); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
+  persistDriverProfiles(driverName); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
   showToast('Time block updated \u2713');
 }
 
