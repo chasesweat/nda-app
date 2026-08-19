@@ -8115,18 +8115,42 @@ function buildConfirmationText(r){
   const driverLine = sameDriver
     ? 'I will be driving you.'
     : 'My partner '+assigned+' will be driving you on my behalf. '+assigned+' is copied on this message.';
+  // One-sentence variant — AP Pick Up and Round Trip use this shorter phrasing; AP Run and
+  // One Way keep the two-sentence `driverLine` above. Two different wordings, each used by
+  // two ride types, per Chase's exact templates for each.
+  const driverLineShort = sameDriver
+    ? 'I will be driving you.'
+    : 'My partner '+assigned+' will be driving you on my behalf and is copied on this message.';
   const contact = 'Contact Information:\n\n'+assigned+'\n'+assignedPhone;
 
   // Kat keeps her branded sign-off; every other driver signs with their first name.
   const sig = (sender.toLowerCase()==='kathleen herringdine') ? 'Kathleen \u201cKat\u201d' : (sender.split(' ')[0]||'Your driver');
 
+  // AP RUN / AP PICK UP sign with the CLIENT OWNER's name, not the sender's — Chase's explicit
+  // instruction: the confirmation should read as coming from whoever owns the client
+  // relationship, regardless of who's actually sending or driving this particular ride.
+  // Falls back to the sender's own sig if this client has no recorded owner.
+  const ownerNameRaw = (typeof clientOwners!=='undefined' && r && r.client)
+    ? (clientOwners[(r.client||'').trim().toLowerCase()] || '')
+    : '';
+  const ownerSig = ownerNameRaw
+    ? (ownerNameRaw.toLowerCase()==='kathleen herringdine' ? 'Kathleen \u201cKat\u201d' : (ownerNameRaw.split(' ')[0]||ownerNameRaw))
+    : sig;
+
   let message='', instructions='';
 
-  if(type==='AP RUN' || type==='LOCAL'){
-    message = 'I am confirming your pickup scheduled for tomorrow at '+time+'.\n\n'+
-              driverLine+'\n\n'+contact+'\n\n'+
-              'Many thanks,\n\n'+sig+'\n\n'+
-              'Trip cost: '+amount+' (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)';
+  if(type==='AP RUN'){
+    // Real terminal name when the ride has one ("North"/"South"/"International" + " Terminal"),
+    // matching how this used to read before it was lost — falls back to a generic "the Airport"
+    // rather than an empty destination if no terminal was recorded on this ride.
+    const destPart = terminalVal ? (terminalVal+' Terminal') : 'the Airport';
+    const pickupPart = start ? (' at '+start) : '';
+    message = 'I am confirming your pickup scheduled for tomorrow at '+time+pickupPart+', going to '+destPart+'.\n\n'+
+              driverLine+'\n\n'+
+              'The Driver: Please review the attached contact card to see what your driver and their vehicle look like.\n\n'+
+              'Safety: If there is a driver change, it will be communicated through this text thread only.\n\n'+
+              'Many thanks,\n\n'+ownerSig+'\n\n'+
+              'Trip cost: '+amount+' (Tips are not mandatory but always appreciated.)';
   }
   else if(type==='AP PICK UP'){
     const termUpper = terminalVal.toUpperCase();
@@ -8137,14 +8161,47 @@ function buildConfirmationText(r){
     } else if(termUpper.includes('INTERNATIONAL') || termUpper.includes('INTL')){
       instructions = '\ud83d\udec2 International (Middle Island)\nStep 1: Text your driver once you have your bags.\nStep 2: Walk out the main doors and cross the first road to the Middle Island.\nStep 3: Walk all the way to the VERY LAST A2 sign at the far end of the island.\nStep 4: Keep your ringer on!';
     }
-    message = 'I am confirming your pickup scheduled for tomorrow at '+time+' from the airport, Flight # '+flight+'.\n\n'+
-              driverLine+'\n\n'+contact+'\n\n'+
+    // Pick Up leads with flight + arrival terminal, not the destination address — matches
+    // Chase's exact template.
+    const termPart = terminalVal ? (', the '+terminalVal+' Terminal') : '';
+    message = 'I am confirming your pickup scheduled for tomorrow at '+time+' from Flight # '+flight+termPart+'.\n\n'+
+              driverLineShort+'\n\n'+
+              'The Driver: Please review the attached contact card to see what your driver and their vehicle look like.\n\n'+
+              'Safety: If there is a driver change, it will be communicated through this text thread only.\n\n'+
+              'The Selfie: Please send a quick selfie on the day you travel so your driver can easily recognize you at the curb!\n\n'+
               flightLink+
-              'Many thanks,\n\n'+sig+'\n\n'+
-              'Trip cost: '+amount+' (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)';
+              'Many thanks,\n\n'+ownerSig+'\n\n'+
+              'Trip cost: '+amount+' (Tips are not mandatory but always appreciated.)';
+  }
+  else if(type==='ROUND TRIP'){
+    // Round trip always returns to the original pickup address (see _openStartRideWithHome's
+    // resume-leg logic — the return leg goes back to where the client started), so the
+    // "returning to" address is `start`, not a separately-tracked field. `r.rt` is the
+    // existing return-time field. Return time is omitted gracefully if not yet set.
+    const going = dest || '(destination)';
+    const returnPart = r.rt ? (' at '+fmtTime12(r.rt)) : '';
+    message = 'I am confirming your pickup scheduled for tomorrow at '+time+' at '+start+' going to '+going+
+              ' returning to '+start+returnPart+'.\n\n'+
+              driverLineShort+'\n\n'+
+              'The Driver: Please review the attached contact card to see what your driver and their vehicle look like.\n\n'+
+              'Safety: If there is a driver change, it will be communicated through this text thread only.\n\n'+
+              'Many thanks,\n\n'+ownerSig+'\n\n'+
+              'Trip cost: '+amount+' (Tips are not mandatory but always appreciated.)';
+  }
+  else if(type==='ONE WAY'){
+    // Same structure as AP RUN, per Chase's instruction to reuse that text for One Way —
+    // ground pickup/destination in place of AP RUN's pickup/terminal.
+    const going = dest || '(destination)';
+    message = 'I am confirming your pickup scheduled for tomorrow at '+time+' at '+start+', going to '+going+'.\n\n'+
+              driverLine+'\n\n'+
+              'The Driver: Please review the attached contact card to see what your driver and their vehicle look like.\n\n'+
+              'Safety: If there is a driver change, it will be communicated through this text thread only.\n\n'+
+              'Many thanks,\n\n'+ownerSig+'\n\n'+
+              'Trip cost: '+amount+' (Tips are not mandatory but always appreciated.)';
   }
   else {
-    // ROUND TRIP / ONE WAY / AP ROUND TRIP / other
+    // AP ROUND TRIP / anything else — not yet given an updated template, left on the
+    // original generic wording on purpose rather than guessed at.
     const going = dest || '(destination)';
     const fromPart = start ? ' from '+start : '';
     message = 'I am confirming your pickup scheduled for tomorrow at '+time+fromPart+', going to '+going+'.\n\n'+
