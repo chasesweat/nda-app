@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191902">
+<meta name="version" content="202608191903">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -19144,17 +19144,52 @@ async function _showStaleConfirmReviewModal(){
       + '<div style="font-size:.85rem;font-weight:700;color:var(--black);">'+escHtml(r.client||'(no client name)')+'</div>'
       + '<div style="font-size:.72rem;color:var(--mid);">'+dateStr+(timeStr?' '+timeStr:'')+' \u00b7 driver: '+escHtml(r.driver||'(unassigned)')+'</div>'
       + '<div style="font-size:.72rem;color:#b45309;margin-top:.15rem;">\u2709\ufe0f Sent by '+escHtml(r.confirmSentBy||'?')+(sentWhen?' \u00b7 '+sentWhen:'')+' \u00b7 status now: '+escHtml(r.status||'scheduled')+'</div>'
+      + '<div style="display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap;">'
+      + '<button onclick="var b=document.getElementById(\'stale-confirm-modal-back\');if(b)b.remove();openRideModal('+r.id+')" style="padding:.35rem .6rem;background:none;border:1.5px solid var(--light);color:var(--black);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;">Open ride</button>'
+      + '<button onclick="_resendStaleConfirm('+r.id+')" style="padding:.35rem .6rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;">\u2709\ufe0f Re-send</button>'
+      + '<button onclick="_acceptStaleConfirm('+r.id+')" style="padding:.35rem .6rem;background:none;border:1.5px solid var(--green);color:var(--green);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;">Still holds \u2014 mark confirmed</button>'
       + '</div>'
-      + '<button onclick="var b=document.getElementById(\'stale-confirm-modal-back\');if(b)b.remove();openRideModal('+r.id+')" style="flex-shrink:0;padding:.4rem .7rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;">Open ride</button>'
+      + '</div>'
       + '</div>';
   }).join('') : '<div style="padding:1rem;text-align:center;color:var(--mid);font-size:.85rem;">No rides with mismatched confirmation status found.</div>';
   back.innerHTML='<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;padding:1.25rem;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
     +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\u2709\ufe0f Review confirmation mismatches</div>'
-    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.7rem;line-height:1.45;">'+matches.length+' '+(matches.length===1?'ride shows':'rides show')+' a confirmation sent in the past whose current status doesn\u2019t match \u2014 left over from before driver changes stopped resetting this. Each one needs its own look, not a blanket fix: the driver may have changed since, so whether the old confirmation still holds is a judgment call. Tap a ride to open it and decide \u2014 re-send if anything\u2019s changed, leave it if it hasn\u2019t.</div>'
+    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.7rem;line-height:1.45;">'+matches.length+' '+(matches.length===1?'ride shows':'rides show')+' a confirmation sent in the past whose current status doesn\u2019t match \u2014 left over from before driver changes stopped resetting this. Each one needs its own look, not a blanket fix: the driver may have changed since, so whether the old confirmation still holds is a judgment call. Re-send if anything\u2019s changed \u2014 that sends a fresh text and updates the record. Still holds if nothing has \u2014 that just corrects the status, no new text sent.</div>'
     +'<div style="flex:1;overflow-y:auto;margin-bottom:.7rem;">'+rowsHtml+'</div>'
     +'<button onclick="var b=document.getElementById(\'stale-confirm-modal-back\');if(b)b.remove();" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">Close</button>'
     +'</div>';
   document.body.appendChild(back);
+}
+
+// Sends a fresh confirmation (reusing textClient — the exact same send path used everywhere
+// else in the app, not a new one) and then marks it sent, correctly setting fresh
+// confirmSentBy/confirmSentAt and advancing status to 'confirmed' — the same two-step
+// send-then-mark sequence a person would do manually, just triggered from one button since
+// they've already made the judgment call that a fresh send is warranted.
+async function _resendStaleConfirm(id){
+  const r = _rideById(id); if(!r) return;
+  await textClient(id);
+  if(typeof _markRideConfirmed==='function') _markRideConfirmed(r);
+  await saveRides();
+  showToast('\u2713 Confirmation re-sent and marked confirmed');
+  const back=document.getElementById('stale-confirm-modal-back'); if(back) back.remove();
+  _showStaleConfirmReviewModal();
+}
+
+// The lighter option — no new text sent, just corrects the status to match what
+// confirmSentBy/confirmSentAt already say genuinely happened. For a ride where nothing's
+// actually changed since the original confirmation went out, re-sending would be a real,
+// unnecessary text to a real client for no reason.
+async function _acceptStaleConfirm(id){
+  const r = _rideById(id); if(!r) return;
+  r.confirmSent = true;
+  if(r.status==='scheduled' || !r.status) r.status = 'confirmed';
+  touchRide(r, 'confirmation status corrected \u2014 original confirmation confirmed still valid');
+  await saveRides();
+  showToast('\u2713 Marked confirmed \u2014 no new text sent');
+  refreshDash(); renderCal();
+  const back=document.getElementById('stale-confirm-modal-back'); if(back) back.remove();
+  _showStaleConfirmReviewModal();
 }
 
 async function _showFamilyWallReviewModal(){
