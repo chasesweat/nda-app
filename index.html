@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191911">
+<meta name="version" content="202608191914">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1654,7 +1654,7 @@ input,select,textarea{font-size:16px;}
            particular was cramped on a phone - it has to fit hours, minutes, AND the AM/PM
            selector into half a row, which is also why its label carries a "(check AM/PM)"
            warning: an easy thing to get wrong at a glance. -->
-      <div class="form-group" style="grid-column:1/-1;"><label>Date</label><input type="date" id="qa-date" onchange="onQaDateTimeChange();checkPriceShopping('qa')" /></div>
+      <div class="form-group" style="grid-column:1/-1;"><label>Date</label><input type="date" id="qa-date" onchange="onQaDateTimeChange();checkPriceShopping('qa');updateQaSuggestedPickupTime()" /></div>
       <div class="form-group" style="grid-column:1/-1;"><label>Time <span style="font-weight:600;color:var(--mid);font-size:.72rem;">(check AM/PM)</span></label><input type="time" id="qa-time" onchange="onQaDateTimeChange()" /></div>
       <div class="form-group"><label>Travel Type</label>
         <select id="qa-type" onchange="qaTypeChanged()">
@@ -1771,7 +1771,7 @@ input,select,textarea{font-size:16px;}
      under Flight #, which reads as an afterthought and hides the cause of the autofill from
      the person using it. Reported from the live Quote page. -->
       <div class="form-group" id="qa-terminal-group"><label>Terminal</label>
-        <select id="qa-terminal" onchange="qaAutoFillTerminalAddress()">
+        <select id="qa-terminal" onchange="qaAutoFillTerminalAddress();updateQaSuggestedPickupTime()">
           <option value="">—</option>
           <option>North Domestic</option>
           <option>South Domestic</option>
@@ -1785,6 +1785,15 @@ input,select,textarea{font-size:16px;}
           <div id="qa-mileage-status" style="font-size:.76rem;color:var(--mid);"></div>
         </div>
       </div>
+      <!-- AP Run only, ported from the Quote form's own version (v912) - see
+           applyAirportFieldVisibility()'s existing prefix-generic show/hide, which was already
+           trying to show/hide these two elements under the 'qa' prefix before they existed here
+           at all; it just safely no-op'd on the missing IDs until now. -->
+      <div class="form-group" id="qa-flight-dep-group" style="display:none;">
+        <label>Flight Departure Time <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(optional — for a suggested pickup time)</span></label>
+        <input type="time" id="qa-flight-dep-time" aria-label="Flight departure time" oninput="updateQaSuggestedPickupTime()" />
+      </div>
+      <div id="qa-suggested-pickup-box" style="display:none;background:#f3eeff;border:1px solid #d9c9f5;border-radius:8px;padding:.6rem .75rem;margin-bottom:.75rem;font-size:.8rem;color:var(--black);"></div>
       <div class="form-group" id="qa-flight-group"><label>Flight #</label><input type="text" id="qa-flight" placeholder="e.g. DL1234" /></div>
 
       <div style="grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;"><div class="form-group"><label>Passengers</label><input type="number" id="qa-pax" min="1" max="14" value="1" /></div><div class="form-group"><label>Checked Bags</label><input type="number" id="qa-checked-bags" min="0" value="0" /></div><div class="form-group"><label>Carry-on Bags</label><input type="number" id="qa-carryon-bags" min="0" value="0" /></div></div>
@@ -4347,6 +4356,7 @@ async function _qaCalcMileage(){
     // frozen at whatever it was computed as before mileage was known (i.e. no overage
     // ever gets added, since recalcQa() only runs when OTHER fields change).
     try{ recalcQa(); }catch(e){}
+    try{ if(typeof updateQaSuggestedPickupTime==='function') updateQaSuggestedPickupTime(); }catch(e){}
   }catch(e){
     if(st) st.textContent='Could not calculate distance';
     console.warn('qa mileage', e);
@@ -4869,6 +4879,57 @@ function applySuggestedPickupTime(){
   if(typeof onDateChange==='function') onDateChange();
   if(typeof onTimeChange==='function') onTimeChange();
   if(typeof calcQuote==='function') calcQuote();
+  showToast('\u2713 Pickup time set');
+}
+
+// Ported from updateSuggestedPickupTime()/applySuggestedPickupTime() above for Quick Add
+// (v912) - same logic verbatim, just qa- field IDs and Quick Add's own recalc functions in
+// place of the Quote page's. applyAirportFieldVisibility('qa') already handles showing/hiding
+// qa-flight-dep-group and qa-suggested-pickup-box; this only handles the calculation itself.
+function updateQaSuggestedPickupTime(){
+  const box = document.getElementById('qa-suggested-pickup-box');
+  if(!box) return;
+  const type = document.getElementById('qa-type')?.value;
+  if(type !== 'AP RUN'){ box.style.display='none'; return; }
+  const depTimeVal = document.getElementById('qa-flight-dep-time')?.value;
+  const dateVal     = document.getElementById('qa-date')?.value;
+  const terminal    = document.getElementById('qa-terminal')?.value;
+  const pickup      = document.getElementById('qa-pickup')?.value.trim();
+  const dest        = document.getElementById('qa-home')?.value.trim();
+  if(!depTimeVal || !dateVal || !terminal || !pickup || !dest){ box.style.display='none'; return; }
+  const route = (typeof getLockedRoute==='function') ? getLockedRoute(pickup, dest) : null;
+  if(!route || !route.seconds){
+    box.innerHTML = '<span style="color:var(--mid);">Suggested pickup time will appear once the distance above finishes calculating.</span>';
+    box.style.display='block';
+    return;
+  }
+  const flightDep = new Date(dateVal+'T'+depTimeVal+':00');
+  if(isNaN(flightDep.getTime())){ box.style.display='none'; return; }
+  const bufferHrs = terminal==='International' ? 3 : 2;
+  var suggested = new Date(flightDep.getTime() - bufferHrs*3600*1000 - route.seconds*1000);
+  const rushHour = _isAtlantaRushHour(suggested);
+  if(rushHour) suggested = new Date(suggested.getTime() - 20*60*1000);
+  const suggestedDateStr = suggested.getFullYear()+'-'+String(suggested.getMonth()+1).padStart(2,'0')+'-'+String(suggested.getDate()).padStart(2,'0');
+  const dayNote = (suggestedDateStr !== dateVal) ? ' <strong>(the day before)</strong>' : '';
+  const timeStr = suggested.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+  const driveMin = Math.round(route.seconds/60);
+  box.dataset.suggestedDate = suggestedDateStr;
+  box.dataset.suggestedTime = String(suggested.getHours()).padStart(2,'0')+':'+String(suggested.getMinutes()).padStart(2,'0');
+  box.innerHTML = '\ud83d\udd52 Suggested pickup: <strong>'+timeStr+'</strong>'+dayNote
+    + '<div style="font-size:.72rem;color:var(--mid);margin-top:.15rem;">'+bufferHrs+'hr '+(terminal==='International'?'international':'domestic')+' buffer + '+driveMin+'min drive to '+escHtml(terminal)+(rushHour?' + 20min rush-hour buffer':'')+'</div>'
+    + '<button type="button" onclick="applyQaSuggestedPickupTime()" style="margin-top:.4rem;font-size:.72rem;padding:.3rem .7rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Use this time</button>';
+  box.style.display='block';
+}
+
+function applyQaSuggestedPickupTime(){
+  const box = document.getElementById('qa-suggested-pickup-box');
+  if(!box || !box.dataset.suggestedTime) return;
+  const dateEl = document.getElementById('qa-date');
+  const timeEl = document.getElementById('qa-time');
+  if(dateEl && box.dataset.suggestedDate) dateEl.value = box.dataset.suggestedDate;
+  if(timeEl) timeEl.value = box.dataset.suggestedTime;
+  if(typeof onQaDateTimeChange==='function') onQaDateTimeChange();
+  if(typeof recalcQa==='function') recalcQa();
   showToast('\u2713 Pickup time set');
 }
 
@@ -6896,11 +6957,31 @@ function _prefillFromClientRequest(req){
     if(isQuote){
       try{ onDateChange(); }catch(e){}
       try{ onTimeChange(); }catch(e){}
+      // Reported directly: total showing $0.00 on a prefilled Quote form. Real cause -
+      // onDateChange()/onTimeChange() (needed for their own reason, surcharge auto-detection)
+      // already call calcQuote() each, and this used to call it a THIRD time right here -
+      // every one of those runs with q-miles still at 0, since debounceMileage() only ever
+      // STARTS a 1200ms timer, it doesn't calculate anything itself. calcMileage() (fired by
+      // that timer) already calls calcQuote() again on its own once real mileage is known -
+      // this extra, redundant call was just producing a wrong $0.00 that sat there confusingly
+      // until the real one overwrote it a second-plus later. Removed; the real recalculation
+      // downstream of debounceMileage() is the only one needed.
       try{ debounceMileage(); }catch(e){}
-      try{ calcQuote(); }catch(e){}
     } else {
+      // Reported directly: distance never calculated on a prefilled Quick Add form. Real
+      // cause - qa-pickup/qa-home have no oninput handler at all; the mileage trigger only
+      // ever fires from Google autocomplete's own "place selected" event, which setting
+      // .value directly (a few lines above) can never produce. The Quote branch right above
+      // already correctly calls its own equivalent (debounceMileage()) - this was the one
+      // asymmetry between the two paths, now matched.
+      try{ if(typeof _qaDebounceMileage==='function') _qaDebounceMileage(); }catch(e){}
+      // onQaDateTimeChange() already calls recalcQa() internally - a second, explicit call
+      // right here used to run with qa-miles still at 0 (the debounce above only STARTS a
+      // 600ms timer, same class of premature-recalc bug just fixed for the Quote branch
+      // above). _qaCalcMileage() already calls recalcQa() again on its own once real mileage
+      // is known, so the extra call here was redundant and only ever produced a
+      // momentarily-wrong price. Removed.
       try{ onQaDateTimeChange(); }catch(e){}
-      try{ recalcQa(); }catch(e){}
     }
     var _msg = '\u2713 Filled in from '+(req.clientName||'the client')+'\u2019s request \u2014 check it over before saving';
     if(req.notes && !_notesLanded) _msg += ' \u00b7 Their note: \u201c'+req.notes+'\u201d';
@@ -15021,6 +15102,8 @@ function openQuickAddModal(){
   const qaPriv=document.getElementById('qa-private'); if(qaPriv) qaPriv.checked=false;
   const xswEl=document.getElementById('qa-xstop-addr-wrap'); if(xswEl) xswEl.style.display='none';
   const wtEl=document.getElementById('qa-wait'); if(wtEl) wtEl.value=0;
+  const fdtEl=document.getElementById('qa-flight-dep-time'); if(fdtEl) fdtEl.value='';
+  const spbEl=document.getElementById('qa-suggested-pickup-box'); if(spbEl) spbEl.style.display='none';
   const pxEl=document.getElementById('qa-pax'); if(pxEl) pxEl.value=1;
   const cbEl=document.getElementById('qa-checked-bags'); if(cbEl) cbEl.value=0;
   const coEl=document.getElementById('qa-carryon-bags'); if(coEl) coEl.value=0;
@@ -29110,6 +29193,7 @@ function qaTypeChanged(){
   recalcQa(); // the fare depends on the ride type now, so reprice on every type change
   try{ qaAutoFillTerminalAddress(); }catch(e){}
   try{ renderQaAddrPickers(); }catch(e){}
+  try{ updateQaSuggestedPickupTime(); }catch(e){}
 }
 function qaCheckLegs(){
   const t=document.getElementById('qa-type')?.value;
