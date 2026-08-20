@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191909">
+<meta name="version" content="202608191911">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -951,6 +951,7 @@ input,select,textarea{font-size:16px;}
         <span class="mtip-btn-wrap-inline"><button onclick="document.getElementById('client-csv-input').click()" class="tb-btn">⬆ Import CSV</button><span class="mtip-dot mtip-dot-badge" id="mtd-cl-import" onclick="toggleMtip('cl-import')" title="What&#8217;s this?">i</span></span><div class="mtip-pop" id="mtp-cl-import">Any column order works &mdash; it sorts names, phones, emails, and addresses into the right fields automatically.</div>
         <span class="mtip-btn-wrap-inline"><button onclick="repairImportedClients()" class="tb-btn" title="Fix imported contacts (misfiled phone/email/address) and strip leftover ride labels from client names">&#x1F527; Clean up</button><span class="mtip-dot mtip-dot-badge" id="mtd-cl-cleanup" onclick="toggleMtip('cl-cleanup')" title="What&#8217;s this?">i</span></span><div class="mtip-pop" id="mtp-cl-cleanup">Fixes misfiled contact info, strips leftover ride labels (like &ldquo;2XL &hellip; 1 of 2&rdquo;) from names, and merges duplicates.</div>
         <button onclick="shareMyBookingLink()" id="share-booking-link-btn" class="tb-btn" title="Send your booking link to a client">&#128279; Share booking link</button>
+        <button onclick="_showBookingRequestsModal()" id="booking-requests-btn" class="tb-btn" title="Review what clients have submitted through your booking link">&#128203; Booking requests</button>
         <button onclick="exportClientsToCSV()" class="tb-btn">⬇ Export</button>
       </div>
     </div>
@@ -5622,6 +5623,7 @@ function textQuoteToClient(){
       else { var _q=_gatherQuoteRide(); _q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); _q.savedAt=Date.now(); _q.sentAt=Date.now(); savedQuotes.push(_q); }
       if(typeof saveSavedQuotes==='function') saveSavedQuotes();
       if(typeof renderSavedQuotes==='function') renderSavedQuotes();
+      if(typeof _markBookingRequestHandled==='function') _markBookingRequestHandled();
       showToast('\u2713 Quote saved & texted');
     }
   }catch(e){}
@@ -5713,6 +5715,7 @@ async function saveQuote(){
   const rpo=document.getElementById('q-repeat-opts'); if(rpo) rpo.style.display='none';
   const qnc=document.getElementById('q-new-client'); if(qnc) qnc.checked=false;
   refreshDash(); updateNotifBadge(); renderCal();
+  try{ await _markBookingRequestHandled(); }catch(e){}
   _afterRideScheduled(ride);
 }
 
@@ -6026,6 +6029,7 @@ async function quoteAsPdfFromForm(){
       else { var _q=_gatherQuoteRide(); _q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); _q.savedAt=Date.now(); _q.sentAt=Date.now(); savedQuotes.push(_q); }
       if(typeof saveSavedQuotes==='function') await saveSavedQuotes();
       if(typeof renderSavedQuotes==='function') renderSavedQuotes();
+      try{ await _markBookingRequestHandled(); }catch(e){}
     }
   }catch(e){}
   openQuoteDocument(null);
@@ -6834,6 +6838,12 @@ var _NOTIF_PAGE_ROUTES = {
 // which is worse than an empty form, because it looks finished.
 function _prefillFromClientRequest(req){
   if(!req) return;
+  // Tracks which booking-request record (if any) this prefill came from, so whichever save/
+  // send action eventually completes it can mark that specific request as handled — see
+  // _markBookingRequestHandled(), called from saveQuote(), saveQuickAddRide(), and both quote-
+  // texted auto-save spots. Cleared as soon as it's consumed, so a LATER, unrelated save in the
+  // same session never gets mistakenly attributed to an old request.
+  window._prefillSourceRequestId = req._id || null;
   var isQuote = (req.requestType === 'quote');
   var P = isQuote ? 'q' : 'qa';
   var set = function(suffix, val){
@@ -6909,6 +6919,10 @@ function handleNotifClick(el){
   // Capture routing info, then REMOVE this notification from the list entirely
   const type=n.type, rideId=n.rideId, channel=n.channel, msg=n.msg||n.message||"";
   const _req = n.req || null;
+  // clientRequestId lives on the notification wrapper, not inside req itself (see
+  // processClientRequests()) — attached here so _prefillFromClientRequest() can tag which
+  // request this came from, needed for _markBookingRequestHandled() to work from this path too.
+  if(_req && n.clientRequestId) _req._id = n.clientRequestId;
   notifList.splice(idx,1);
   saveNotifs(); updateNotifBadge();
   try{ renderNotifPanel(); }catch(e){}
@@ -16294,6 +16308,7 @@ async function saveQuickAddRide(){
   var _addClient=document.getElementById('qa-add-client');
   if(!_addClient||_addClient.checked){ await upsertClientFromRide(ride); }
   _notifyOwnerOfForeignSchedule(ride);
+  try{ await _markBookingRequestHandled(); }catch(e){}
   closeQuickAddModal();
   _reenableBtn();
   try{ setTimeout(function(){ if(ride.newClient){ if(typeof promptNewClientInfo==='function') promptNewClientInfo(ride); } else { _qaMaybeSaveTypedAddresses(ride); } }, 350); }catch(e){}
@@ -20026,6 +20041,110 @@ async function _shareBookingLink(link, clientName){
     catch(e){ if(e && e.name==='AbortError') return; }
   }
   _copyBookingLink(link);
+}
+
+// Finds this driver's own booking-link requests from the last 30 days — both still-pending
+// and already-processed ones. Chase asked for this directly after a real prefill bug: once a
+// request notification is tapped, it's removed from the notification list entirely and the
+// data only ever lived on that one notification's payload — there was genuinely nowhere else
+// to see what a client actually submitted, or to re-open a request if something about the
+// first attempt (like the timing bug just fixed) went wrong.
+// Marks the currently-tracked source booking request (see _prefillFromClientRequest) as
+// scheduled/completed, so it drops out of the Booking Requests list per Chase's direct ask —
+// once a request has actually turned into something (a real ride, or a texted quote), it
+// shouldn't keep sitting in the "needs attention" list. Called from every place a request can
+// genuinely be finished: saveQuote() and saveQuickAddRide() (a real ride got created), and
+// both quote-texted-to-client auto-save spots (a quote-type request doesn't become a ride, but
+// texting the quote IS how that kind of request gets completed). Clears the tracked id
+// immediately either way, so a later, unrelated save in the same session is never mistakenly
+// attributed to an old request.
+async function _markBookingRequestHandled(){
+  var id = window._prefillSourceRequestId;
+  window._prefillSourceRequestId = null;
+  if(!id) return;
+  try{
+    if(!clientRequests || !clientRequests[id]) return;
+    clientRequests[id].status = 'scheduled';
+    await storageSet('kat:clientRequests', clientRequests);
+  }catch(e){ console.warn('mark booking request handled failed', e); }
+}
+
+function _findRecentBookingRequests(){
+  var myDriverName = getMyDriverName();
+  if(!myDriverName) return [];
+  var myLogin = _loginForDriver(myDriverName);
+  if(!myLogin) return [];
+  var cutoff = Date.now() - 30*24*60*60*1000;
+  return Object.keys(clientRequests||{}).map(function(id){
+    var r = clientRequests[id]; if(!r) return null;
+    r._id = id; return r;
+  }).filter(function(r){
+    if(!r) return false;
+    if((r.loginName||'').toLowerCase() !== myLogin.toLowerCase()) return false;
+    if(!r.submittedAt || r.submittedAt < cutoff) return false;
+    if(r.status === 'scheduled') return false; // handled — disappears per Chase's direct ask
+    return true;
+  }).sort(function(a,b){ return (b.submittedAt||0) - (a.submittedAt||0); });
+}
+
+async function _showBookingRequestsModal(){
+  var matches = _findRecentBookingRequests();
+  var back=document.createElement('div'); back.id='booking-requests-modal-back';
+  back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13500;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  var rowsHtml = matches.length ? matches.map(function(r){
+    var when = '';
+    try{ when = new Date(r.submittedAt).toLocaleDateString(undefined,{month:'short',day:'numeric'})+' '+new Date(r.submittedAt).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}); }catch(e){}
+    var kind = r.requestType==='quote' ? 'Quote request' : 'Ride request';
+    var tripBits = [];
+    if(r.type) tripBits.push(r.type);
+    if(r.pickup||r.destination) tripBits.push((r.pickup||'?')+' \u2192 '+(r.destination||'?'));
+    if(r.date) tripBits.push(r.date+(r.time?' '+r.time:''));
+    var isPending = r.status==='pending';
+    return '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.6rem;padding:.6rem .5rem;border-bottom:1px solid var(--light);">'
+      + '<div style="flex:1;min-width:0;">'
+      + '<div style="font-size:.85rem;font-weight:700;color:var(--black);">'+escHtml(r.clientName||'(no name given)')+' <span style="font-weight:400;color:var(--mid);font-size:.72rem;">\u00b7 '+escHtml(r.clientPhone||'no phone')+'</span></div>'
+      + '<div style="font-size:.72rem;color:var(--mid);margin-top:.1rem;">'+kind+' \u00b7 '+escHtml(tripBits.join(' \u00b7 '))+'</div>'
+      + '<div style="font-size:.68rem;color:var(--mid);margin-top:.15rem;">'+when+' \u00b7 '+(isPending?'<span style="color:#b45309;font-weight:700;">\u23f3 Pending</span>':'<span style="color:var(--green);font-weight:700;">\u2713 Handled</span>')+'</div>'
+      + '</div>'
+      + '<button onclick="var b=document.getElementById(\'booking-requests-modal-back\');if(b)b.remove();_openBookingRequestFromReview(\''+r._id+'\')" style="flex-shrink:0;padding:.4rem .7rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;">Open</button>'
+      + '</div>';
+  }).join('') : '<div style="padding:1rem;text-align:center;color:var(--mid);font-size:.85rem;">No booking requests in the last 30 days.</div>';
+  back.innerHTML='<div style="background:#fff;border-radius:16px;max-width:480px;width:100%;padding:1.25rem;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
+    +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\uD83D\uDCCB Booking requests \u2014 last 30 days</div>'
+    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.7rem;line-height:1.45;">'+matches.length+' '+(matches.length===1?'request':'requests')+' via your booking link. Tap Open to re-fill a Quote or ride from exactly what the client submitted \u2014 handy to double-check one, or re-open one that didn\u2019t fill in right the first time.</div>'
+    +'<div style="flex:1;overflow-y:auto;margin-bottom:.7rem;">'+rowsHtml+'</div>'
+    +'<button onclick="var b=document.getElementById(\'booking-requests-modal-back\');if(b)b.remove();" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">Close</button>'
+    +'</div>';
+  document.body.appendChild(back);
+}
+
+// Reuses the exact same open-and-prefill flow a notification tap uses (nav to the right page,
+// open Quick Add if needed, then _prefillFromClientRequest — now a plain synchronous call,
+// not a second independently-timed operation, per the fix this tool exists because of).
+function _openBookingRequestFromReview(id){
+  var r = (clientRequests||{})[id]; if(!r) return;
+  var _req = {
+    _id: id,
+    requestType: r.requestType||'schedule',
+    clientName: r.clientName||'', clientPhone: r.clientPhone||'', clientEmail: r.clientEmail||'',
+    type: r.type||'', vehicle: r.vehicle||'',
+    pickup: r.pickup||'', destination: r.destination||'',
+    date: r.date||'', time: r.time||'',
+    rtDate: r.rtDate||'', rtTime: r.rtTime||'',
+    flight: r.flight||'', terminal: r.terminal||'', rtFlight: r.rtFlight||'', rtTerminal: r.rtTerminal||'',
+    pax: r.pax||1, checkedBags: r.checkedBags||0, carryOnBags: r.carryOnBags||0,
+    notes: r.notes||''
+  };
+  if(_req.requestType === 'quote'){
+    nav('quote');
+    setTimeout(function(){ try{ _prefillFromClientRequest(_req); }catch(e){} }, 260);
+  } else {
+    nav('calendar');
+    setTimeout(function(){
+      try{ openQuickAddModal(); }catch(e){}
+      try{ _prefillFromClientRequest(_req); }catch(e){}
+    }, 150);
+  }
 }
 
 function shareMyBookingLink(){ _shareBookingLink(myBookingLink(), ''); }
