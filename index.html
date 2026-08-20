@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191885">
+<meta name="version" content="202608191887">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -832,6 +832,7 @@ input,select,textarea{font-size:16px;}
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;justify-content:center;">
         <button id="cal-familywall-btn" onclick="manualICSPaste()" style="background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;padding:.5rem .85rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">⬆ Import from FamilyWall</button>
         <button id="cal-feed-btn" onclick="_showCalendarFeedModal()" style="background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;padding:.5rem .85rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">📅 Subscribe my calendar</button>
+        <button id="fw-review-btn" onclick="_showFamilyWallReviewModal()" style="display:none;background:none;border:1.5px solid #f0997b;color:#f0997b;border-radius:8px;padding:.5rem .85rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">🧹 Review FamilyWall imports</button>
         <button id="cal-quickadd-btn" onclick="openQuickAddModal()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">+ Add Ride</button>
       </div>
     </div>
@@ -18883,6 +18884,97 @@ async function clearTemplateField(scope, key){
 // Templates tab, which is only visible to Chase or a driver who already has a custom message
 // saved (see the templatesTab gating logic). This feature is for every driver, so it needed
 // its own reachable entry point, not one buried behind a gate most drivers would never pass.
+// Finds FamilyWall-imported rides (r.fwUID is the marker every FamilyWall import sets, whether
+// from the one-time bulk import or the paste-your-own-.ics flow) that look like non-ride
+// calendar noise rather than real bookings. Two signals combined, not one — checked directly
+// against real production data before combining them, not assumed:
+//
+// 1. Client name doesn't mention a ride-type word (run, pickup, round trip, one way, RT, OW).
+//    On its own this catches every real example of junk but ALSO flags most genuine clients,
+//    since ordinary people's names don't happen to include those words either — ~98% of a real
+//    batch of legitimate historical rides matched this condition alone, which makes it useless
+//    by itself as anything but a first pass.
+// 2. No pickup/destination address AND no real price (0, blank, or missing). Checked against
+//    actual live data (a real downloaded calendar feed): every confirmed-junk entry ("HOLIDAY
+//    FEE $30", "Monster Jam - Gas South", concert/venue names) had neither an address nor a
+//    real price; every real ride had both. This is the signal that actually separates junk from
+//    real clients who simply don't happen to have a ride-word in their name.
+//
+// Both conditions required together - real rides with a $0 comp fare but a real pickup address
+// (or vice versa) are correctly left alone.
+function _findSuspiciousFamilyWallRides(){
+  // RT and OW checked case-sensitively as whole uppercase words — lowercase "rt"/"ow" show up
+  // inside ordinary text far too often (e.g. "restart", "own") to use as a reliable signal at
+  // that length; every real example seen in this data uses them as deliberate uppercase tags.
+  const wordRe = /\brun\b|\bpickup\b|\bround\s*trip\b|\bone\s*way\b/i;
+  const abbrevRe = /\bRT\b|\bOW\b/;
+  return rides.filter(function(r){
+    if(!r || !r.fwUID) return false;
+    const client = r.client || '';
+    const hasKeyword = wordRe.test(client) || abbrevRe.test(client);
+    if(hasKeyword) return false;
+    const hasAddress = !!(r.pickup || r.home);
+    const hasRealPrice = !!(r.price && Number(r.price) !== 0);
+    if(hasAddress || hasRealPrice) return false;
+    return true;
+  });
+}
+
+async function _showFamilyWallReviewModal(){
+  if(!currentUser || currentUser.name!=='Chase'){ showToast('Chase only','error'); return; }
+  const matches = _findSuspiciousFamilyWallRides();
+  var back=document.createElement('div'); back.id='fw-review-modal-back';
+  back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13500;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  const rowsHtml = matches.length ? matches.map(function(r){
+    const dateStr = r.date ? fmtDateShort(r.date) : '(no date)';
+    const timeStr = r.time ? fmtTime12(r.time) : '';
+    return '<label style="display:flex;align-items:flex-start;gap:.5rem;padding:.5rem;border-bottom:1px solid var(--light);cursor:pointer;">'
+      + '<input type="checkbox" class="fw-review-check" value="'+r.id+'" style="margin-top:.2rem;accent-color:#f0997b;">'
+      + '<div style="flex:1;min-width:0;">'
+      + '<div style="font-size:.85rem;font-weight:700;color:var(--black);">'+escHtml(r.client||'(no client name)')+'</div>'
+      + '<div style="font-size:.72rem;color:var(--mid);">'+escHtml(r.type||'')+' \u00b7 '+dateStr+(timeStr?' '+timeStr:'')+' \u00b7 $'+(r.price!==undefined?r.price:'?')+' \u00b7 driver: '+escHtml(r.driver||'(unassigned)')+'</div>'
+      + '</div></label>';
+  }).join('') : '<div style="padding:1rem;text-align:center;color:var(--mid);font-size:.85rem;">No suspicious FamilyWall imports found \u2014 everything on record mentions a ride-type word in the client name.</div>';
+  back.innerHTML='<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;padding:1.25rem;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
+    +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\uD83E\uDDF9 Review FamilyWall imports</div>'
+    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.7rem;line-height:1.45;">'+matches.length+' FamilyWall-imported '+(matches.length===1?'ride':'rides')+' with no ride-type word in the client name AND no address or real price \u2014 likely non-ride calendar noise (holiday fees, concerts, notes), but check before deleting. This deletes immediately, no second-admin approval, no undo.</div>'
+    +(matches.length ? '<label style="display:flex;align-items:center;gap:.5rem;padding:.4rem .5rem;font-size:.78rem;font-weight:700;color:var(--black);border-bottom:2px solid var(--light);"><input type="checkbox" id="fw-review-selectall" onchange="document.querySelectorAll(\'.fw-review-check\').forEach(function(c){c.checked=this.checked}.bind(this))" style="accent-color:#f0997b;">Select all</label>' : '')
+    +'<div style="flex:1;overflow-y:auto;margin-bottom:.7rem;">'+rowsHtml+'</div>'
+    +(matches.length ? '<button type="button" onclick="_deleteSelectedFamilyWallRides()" style="width:100%;padding:.6rem;background:#f0997b;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.85rem;margin-bottom:.5rem;">Delete selected</button>' : '')
+    +'<button onclick="var b=document.getElementById(\'fw-review-modal-back\');if(b)b.remove();" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">Close</button>'
+    +'</div>';
+  document.body.appendChild(back);
+}
+
+async function _deleteSelectedFamilyWallRides(){
+  if(!currentUser || currentUser.name!=='Chase'){ showToast('Chase only','error'); return; }
+  const checked = Array.from(document.querySelectorAll('.fw-review-check:checked'));
+  if(!checked.length){ showToast('Nothing selected','error'); return; }
+  const ids = checked.map(function(c){ return c.value; });
+  const _ok = await showConfirmModal({
+    icon:'\uD83E\uDDF9', iconColor:'#f0997b', iconBg:'#3a1a1a',
+    title:'Delete '+ids.length+' ride'+(ids.length===1?'':'s')+'?',
+    message:'This permanently removes '+ids.length+' FamilyWall-imported ride'+(ids.length===1?'':'s')+' and cannot be undone.',
+    buttons:[
+      {label:'Cancel', style:'neutral', value:false},
+      {label:'Delete '+ids.length, style:'danger', value:true}
+    ]
+  });
+  if(!_ok) return;
+  for(const id of ids){
+    const r=_rideById(id);
+    // noApproval:true — this is deliberate cleanup of recognized import noise, not a normal
+    // operational ride deletion, so it's exempt from the usual "someone else's ride needs a
+    // second admin" rule (see deleteRide() above for the normal path this intentionally
+    // bypasses). Reuses the exact same registered ride_delete handler either way, so the
+    // actual deletion logic itself can never drift out of sync between the two paths.
+    await queueAdminAction('ride_delete', {id: id}, 'FamilyWall cleanup: delete '+((r&&r.client)||'a ride'), {noApproval: true});
+  }
+  showToast('\u2713 Deleted '+ids.length+' ride'+(ids.length===1?'':'s'));
+  const back=document.getElementById('fw-review-modal-back'); if(back) back.remove();
+  _showFamilyWallReviewModal();
+}
+
 async function _showCalendarFeedModal(){
   if(!currentUser){ showToast('Sign in first','error'); return; }
   const myName = getMyDriverName();
@@ -25817,6 +25909,12 @@ function enterApp(){
   // Access Control tab — admins only
   const accessTab = document.getElementById('mptab-access');
   if(accessTab) accessTab.style.display = admin ? 'inline-block' : 'none';
+  const fwReviewBtn = document.getElementById('fw-review-btn');
+  // Chase-only, not admin-only — the same currentUser.name==='Chase' check already used for
+  // the Message Templates tab and the owner-override toggle, not isAdmin() (which also covers
+  // Kat and Morgan). Deliberate: this deletes data immediately with no approval and no undo,
+  // scoped tighter than the rest of the admin surface on purpose.
+  if(fwReviewBtn) fwReviewBtn.style.display = (currentUser && currentUser.name==='Chase') ? 'inline-block' : 'none';
   const archivedTab2=document.getElementById('mptab-archived'); if(archivedTab2) archivedTab2.style.display=admin?'inline-block':'none';
   const pricingTab2=document.getElementById('mptab-pricing'); if(pricingTab2) pricingTab2.style.display=admin?'inline-block':'none';
   const templatesTab=document.getElementById('mptab-templates');
