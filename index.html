@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191901">
+<meta name="version" content="202608191902">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -834,6 +834,7 @@ input,select,textarea{font-size:16px;}
         <button id="cal-familywall-btn" onclick="manualICSPaste()" style="background:var(--accent);border:1.5px solid var(--accent);color:#fff;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">⬆ Import from FamilyWall</button>
         <button id="cal-feed-btn" onclick="_showCalendarFeedModal()" style="background:var(--accent);border:1.5px solid var(--accent);color:#fff;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">📅 Subscribe my calendar</button>
         <button id="fw-review-btn" onclick="_showFamilyWallReviewModal()" style="display:none;background:#f0997b;border:1.5px solid #f0997b;color:#fff;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">🧹 Review FamilyWall imports</button>
+        <button id="stale-confirm-btn" onclick="_showStaleConfirmReviewModal()" style="display:none;background:var(--accent);border:1.5px solid var(--accent);color:#fff;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">✉️ Review confirmation mismatches</button>
         <button id="cal-quickadd-btn" onclick="openQuickAddModal()" style="background:var(--gold);color:#fff;border:1.5px solid var(--gold);border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">+ Add Ride</button>
       </div>
     </div>
@@ -19115,6 +19116,47 @@ function _findSuspiciousFamilyWallRides(){
   });
 }
 
+// Finds rides where a confirmation was genuinely sent at some point (confirmSentBy/
+// confirmSentAt set) but the ride's current status doesn't reflect it — the exact mismatch
+// left behind by the pre-v900 driver-change bug. Excludes rides where this wouldn't matter
+// either way: cancelled/placeholder aren't active bookings, and paid/completed have already
+// moved well past the confirmation stage regardless of this specific field.
+function _findStaleConfirmRides(){
+  return rides.filter(function(r){
+    if(!r) return false;
+    if(!(r.confirmSentBy || r.confirmSentAt)) return false;
+    return r.status!=='confirmed' && r.status!=='paid' && r.status!=='completed' && r.status!=='cancelled' && r.status!=='placeholder';
+  });
+}
+
+async function _showStaleConfirmReviewModal(){
+  if(!isAdmin()){ showToast('Admins only','error'); return; }
+  const matches = _findStaleConfirmRides();
+  var back=document.createElement('div'); back.id='stale-confirm-modal-back';
+  back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13500;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  const rowsHtml = matches.length ? matches.map(function(r){
+    const dateStr = r.date ? fmtDateShort(r.date) : '(no date)';
+    const timeStr = r.time ? fmtTime12(r.time) : '';
+    let sentWhen = '';
+    try{ if(r.confirmSentAt){ const d=new Date(r.confirmSentAt); if(!isNaN(d.getTime())) sentWhen = d.toLocaleDateString(undefined,{month:'short',day:'numeric'}); } }catch(e){}
+    return '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.6rem;padding:.6rem .5rem;border-bottom:1px solid var(--light);">'
+      + '<div style="flex:1;min-width:0;">'
+      + '<div style="font-size:.85rem;font-weight:700;color:var(--black);">'+escHtml(r.client||'(no client name)')+'</div>'
+      + '<div style="font-size:.72rem;color:var(--mid);">'+dateStr+(timeStr?' '+timeStr:'')+' \u00b7 driver: '+escHtml(r.driver||'(unassigned)')+'</div>'
+      + '<div style="font-size:.72rem;color:#b45309;margin-top:.15rem;">\u2709\ufe0f Sent by '+escHtml(r.confirmSentBy||'?')+(sentWhen?' \u00b7 '+sentWhen:'')+' \u00b7 status now: '+escHtml(r.status||'scheduled')+'</div>'
+      + '</div>'
+      + '<button onclick="var b=document.getElementById(\'stale-confirm-modal-back\');if(b)b.remove();openRideModal('+r.id+')" style="flex-shrink:0;padding:.4rem .7rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;">Open ride</button>'
+      + '</div>';
+  }).join('') : '<div style="padding:1rem;text-align:center;color:var(--mid);font-size:.85rem;">No rides with mismatched confirmation status found.</div>';
+  back.innerHTML='<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;padding:1.25rem;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
+    +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\u2709\ufe0f Review confirmation mismatches</div>'
+    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.7rem;line-height:1.45;">'+matches.length+' '+(matches.length===1?'ride shows':'rides show')+' a confirmation sent in the past whose current status doesn\u2019t match \u2014 left over from before driver changes stopped resetting this. Each one needs its own look, not a blanket fix: the driver may have changed since, so whether the old confirmation still holds is a judgment call. Tap a ride to open it and decide \u2014 re-send if anything\u2019s changed, leave it if it hasn\u2019t.</div>'
+    +'<div style="flex:1;overflow-y:auto;margin-bottom:.7rem;">'+rowsHtml+'</div>'
+    +'<button onclick="var b=document.getElementById(\'stale-confirm-modal-back\');if(b)b.remove();" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">Close</button>'
+    +'</div>';
+  document.body.appendChild(back);
+}
+
 async function _showFamilyWallReviewModal(){
   if(!currentUser || currentUser.name!=='Chase'){ showToast('Chase only','error'); return; }
   const matches = _findSuspiciousFamilyWallRides();
@@ -26254,6 +26296,8 @@ function enterApp(){
   // Kat and Morgan). Deliberate: this deletes data immediately with no approval and no undo,
   // scoped tighter than the rest of the admin surface on purpose.
   if(fwReviewBtn) fwReviewBtn.style.display = (currentUser && currentUser.name==='Chase') ? 'inline-block' : 'none';
+  const staleConfirmBtn = document.getElementById('stale-confirm-btn');
+  if(staleConfirmBtn) staleConfirmBtn.style.display = admin ? 'inline-block' : 'none';
   const archivedTab2=document.getElementById('mptab-archived'); if(archivedTab2) archivedTab2.style.display=admin?'inline-block':'none';
   const pricingTab2=document.getElementById('mptab-pricing'); if(pricingTab2) pricingTab2.style.display=admin?'inline-block':'none';
   const templatesTab=document.getElementById('mptab-templates');
