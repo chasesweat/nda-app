@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191905">
+<meta name="version" content="202608191908">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -11200,6 +11200,22 @@ function _buildRouteUrlsFrom(r, startAddr, endAddr, linkRide){
   // the client
   // is dropped AT the terminal, so the terminal is the DROP-OFF.
   var termAddr = terminalToAddress(r.terminal);
+  // Real bug, reported directly: a driver got routed only from her location to the client's
+  // address on an airport ride — the airport stop had silently vanished, no warning at all.
+  // terminalToAddress() is deliberately, correctly designed to return '' rather than guess at
+  // a street address for an unresolved terminal (see its own comment) — the caller is SUPPOSED
+  // to fall back to r.home in that case. But for a typical airport ride, r.home is often never
+  // filled in at all, since the terminal selection was meant to BE the address — so when the
+  // terminal doesn't resolve, the fallback has nothing to fall back to either, and the stop
+  // just disappears from stops.filter(Boolean) with nobody ever told. Surfacing that here
+  // instead of leaving it silent.
+  var routeWarning = '';
+  if(r.terminal && !termAddr && (t==='AP RUN' || t==='AP PICK UP' || t==='AP ROUND TRIP')){
+    var _willFallBack = (t==='AP PICK UP') ? !!pickup : !!dropoff;
+    if(!_willFallBack){
+      routeWarning = 'This ride\u2019s terminal ("'+r.terminal+'") isn\u2019t recognized, and there\u2019s no backup address saved \u2014 the airport stop is missing from this route. Add an address to the ride before driving, or navigate there separately.';
+    }
+  }
   if(termAddr){
     if(t==='AP PICK UP') pickup = termAddr;
     else if(t==='AP RUN' || t==='AP ROUND TRIP') dropoff = termAddr;
@@ -11236,15 +11252,26 @@ function _buildRouteUrlsFrom(r, startAddr, endAddr, linkRide){
   var gmStops = stops.map(_navEnc).join('/');
   var gmUrl   = 'https://www.google.com/maps/dir/'+gmStops;
 
-  // Apple Maps: only supports single destination; use first→last leg
-  var apUrl   = 'https://maps.apple.com/?saddr='+_navEnc(stops[0])
-    + stops.slice(1).map(function(s){ return '&daddr='+_navEnc(s); }).join('');
+  // Apple Maps: was using the legacy ?saddr=&daddr= scheme with a daddr repeated once per
+  // stop, on the assumption (per the comment this replaces) that Apple Maps only supports a
+  // single destination and would just use the last one. Reported directly: it actually used
+  // only the FIRST daddr and stopped there — a driver only ever got routed to the pickup,
+  // never the rest of the trip. Checked Apple's current documentation before assuming a fix:
+  // confirmed the legacy scheme genuinely has no real multi-stop support, but Apple shipped a
+  // new, official /directions endpoint (iOS 18.4+) specifically for this, with a `waypoint`
+  // parameter that can be repeated for each intermediate stop — real multi-stop routing, not
+  // a workaround. source = current location, destination = the actual final stop, waypoint =
+  // every stop in between, one repeated param per stop.
+  var apUrl = 'https://maps.apple.com/directions?source='+_navEnc(stops[0])
+    + '&destination='+_navEnc(stops[stops.length-1])
+    + stops.slice(1,-1).map(function(s){ return '&waypoint='+_navEnc(s); }).join('')
+    + '&mode=driving';
 
   // Waze: only supports single destination (the first non-home stop)
   var wzDest  = pickup || dropoff;
   var wzUrl   = 'https://waze.com/ul?q='+_navEnc(wzDest)+'&navigate=yes';
 
-  return {gm:gmUrl, ap:apUrl, wz:wzUrl, stops:stops};
+  return {gm:gmUrl, ap:apUrl, wz:wzUrl, stops:stops, warning:routeWarning};
 }
 
 function _closeNavModal(){ var o=document.getElementById('nav-modal-overlay'); if(o)o.remove(); }
@@ -11844,6 +11871,13 @@ function _openStartRideWithHome(rideId, startAddr, endAddr, swapPickupDropoff){
     +'</div>'
     +'<button onclick="_closeNavModal()" style="background:none;border:none;font-size:1.5rem;color:#94a3b8;cursor:pointer;">&times;</button>'
     +'</div>'
+
+    +(urls.warning
+      ? '<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:.7rem .85rem;margin-bottom:.85rem;display:flex;gap:.5rem;align-items:flex-start;">'
+        +'<span style="font-size:1rem;flex-shrink:0;">\u26a0\ufe0f</span>'
+        +'<span style="font-size:.78rem;color:#991b1b;line-height:1.4;">'+escHtml(urls.warning)+'</span>'
+        +'</div>'
+      : '')
 
     // Route preview
     +'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:.75rem;margin-bottom:.85rem;">'
@@ -26216,7 +26250,21 @@ function enterApp(){
   // Multi-account safety: immediately remove this device from any OTHER driver's
   // push tokens so you never get pushes for an account you previously tested.
   setTimeout(function(){ try{ _purgeDeviceTokens(getMyDriverName()); }catch(e){} }, 300);
-  setTimeout(function(){ try{ maybeShowOnboarding(); }catch(e){} }, 800);
+  // Was a fixed 800ms delay, same class of bug the very next block's comment already
+  // describes and already fixed differently: enterApp() can run from a stale, locally-cached
+  // snapshot, and a fixed delay has no real relationship to when DRIVER_PROFILES/driverVenmo
+  // actually finish loading. On a normal warm boot 800ms was usually enough to mask this; on
+  // a cold boot (no cached snapshot - forced on EVERY open during a day with this much deploy
+  // churn) it routinely isn't, so this ran against an empty profile, saw no homeAddress/mpg/
+  // Venmo yet, and wrongly concluded onboarding was never completed - even though the real,
+  // correctly-saved data was moments away from loading. Reported directly: onboarding
+  // reappearing on every fresh open despite saving repeatedly. Now waits on the exact same
+  // window._dataFreshPromise the code just below already uses for this same class of problem,
+  // instead of a second, different-but-equally-arbitrary timing guess.
+  (async function(){
+    try{ if(window._dataFreshPromise) await window._dataFreshPromise; }catch(e){}
+    try{ maybeShowOnboarding(); }catch(e){}
+  })();
   // Waits for genuinely fresh Firebase data before syncing - enterApp() can run from a stale,
   // locally-cached snapshot (the warm-cache startup path), and syncing from THAT risked
   // silently overwriting a driver's correct, previously-published businessName/logo with
