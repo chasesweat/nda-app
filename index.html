@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191876">
+<meta name="version" content="202608191881">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -3181,7 +3181,13 @@ async function approveMerge(reqId){
   if(!driverSettings[req.toDriver]) driverSettings[req.toDriver]={};
   driverSettings[req.fromDriver].linkedWith=req.toDriver;
   driverSettings[req.toDriver].linkedWith=req.fromDriver;
-  await saveClientRequests(); await saveDriverSettings();
+  await saveClientRequests();
+  // Exactly two drivers change here (the merge pair) — two targeted writes, never the whole
+  // collection. A whole-collection save on a routine merge approval could silently overwrite
+  // any other driver's in-flight settings change, the same clobber class fixed everywhere
+  // else in v862-874.
+  await saveDriverSettings(req.fromDriver);
+  await saveDriverSettings(req.toDriver);
   // Notify both drivers
   [req.fromDriver, req.toDriver].forEach(function(d){
     addNotification(d,{id:reqId},'merge_approved','\uD83D\uDD17 Profiles linked! You can now view '+(d===req.fromDriver?req.toDriver:req.fromDriver).split(' ')[0]+'\'s clients, rides, and income. Both profiles stay completely separate.');
@@ -3203,7 +3209,10 @@ async function unlinkProfiles(driverName){
   const partner=(driverSettings[driverName]||{}).linkedWith;
   if(driverSettings[driverName]) delete driverSettings[driverName].linkedWith;
   if(partner&&driverSettings[partner]) delete driverSettings[partner].linkedWith;
-  await saveDriverSettings();
+  // The two affected drivers, targeted individually — never the whole collection, same
+  // reasoning as approveMerge just above.
+  await saveDriverSettings(driverName);
+  if(partner) await saveDriverSettings(partner);
   if(partner){ addNotification(partner,{},'transfer_denied','Your profile link with '+driverName.split(' ')[0]+' has been removed.'); await saveNotifs(); updateNotifBadge(); }
   showToast('Profiles unlinked');
   closeMenu();
@@ -8116,6 +8125,90 @@ function fmtTime12(t){
 
 // Returns { message, instructions } — message is the confirmation text to send the
 // client; instructions is the separate terminal pickup message (AP PICK UP only).
+// The per-type default message logic, factored out of buildConfirmationText() so it can be
+// called directly — by that function for real sends, and by the Settings screen for a
+// "here's the actual built-in default" preview that can never drift out of sync with what
+// really sends, since it's the literal same code either way. `ctx` carries every precomputed
+// value the branches need (time/driverLine/ownerSig/etc.) so this stays a pure function of
+// its inputs rather than reaching into outer scope.
+function _buildRawConfirmDefaults(r, ctx){
+  const { type, time, driverLine, driverLineShort, contact, sig, ownerSig, amount, terminalVal, flight, flightLink, dest, start } = ctx;
+  let message='', instructions='';
+
+  if(type==='AP RUN'){
+    // Real terminal name when the ride has one ("North"/"South"/"International" + " Terminal"),
+    // matching how this used to read before it was lost — falls back to a generic "the Airport"
+    // rather than an empty destination if no terminal was recorded on this ride.
+    const destPart = terminalVal ? (terminalVal+' Terminal') : 'the Airport';
+    const pickupPart = start ? (' at '+start) : '';
+    message = 'I am confirming your pickup scheduled for tomorrow at '+time+pickupPart+', going to '+destPart+'.\n\n'+
+              driverLine+'\n\n'+
+              'The Driver: Please review the attached photo to see what your driver and their vehicle look like.\n\n'+
+              'Safety: If there is a driver change, it will be communicated through this text thread only.\n\n'+
+              'Many thanks,\n\n'+ownerSig+'\n\n'+
+              'Trip cost: '+amount+' (Tips are not mandatory but always appreciated.)';
+  }
+  else if(type==='AP PICK UP'){
+    const termUpper = terminalVal.toUpperCase();
+    if(termUpper.includes('NORTH')){
+      instructions = '\ud83d\udeeb North Terminal (LN1)\nStep 1: Text your driver once you have your bags.\nStep 2: Go to the Lower Level (LN1) using the elevators or escalators near Doors N2 & N3.\nStep 3: Text the driver when you are heading out to the curb.\nStep 4: Wait at the curb just before the crosswalk.';
+    } else if(termUpper.includes('SOUTH')){
+      instructions = '\ud83d\udeec South Terminal (LS1)\nStep 1: Text your driver after you get your bags.\nStep 2: Go to the Lower Level (LS1) using the elevators or escalators between Doors S2 & S3.\nStep 3: Text the driver when you are heading out to the curb.\nStep 4: Wait at the curb just before the crosswalk.';
+    } else if(termUpper.includes('INTERNATIONAL') || termUpper.includes('INTL')){
+      instructions = '\ud83d\udec2 International (Middle Island)\nStep 1: Text your driver once you have your bags.\nStep 2: Walk out the main doors and cross the first road to the Middle Island.\nStep 3: Walk all the way to the VERY LAST A2 sign at the far end of the island.\nStep 4: Keep your ringer on!';
+    }
+    // Pick Up leads with flight + arrival terminal, not the destination address — matches
+    // Chase's exact template.
+    const termPart = terminalVal ? (', the '+terminalVal+' Terminal') : '';
+    message = 'I am confirming your pickup scheduled for tomorrow at '+time+' from Flight # '+flight+termPart+'.\n\n'+
+              driverLineShort+'\n\n'+
+              'The Driver: Please review the attached photo to see what your driver and their vehicle look like.\n\n'+
+              'Safety: If there is a driver change, it will be communicated through this text thread only.\n\n'+
+              'The Selfie: Please send a quick selfie on the day you travel so your driver can easily recognize you at the curb!\n\n'+
+              flightLink+
+              'Many thanks,\n\n'+ownerSig+'\n\n'+
+              'Trip cost: '+amount+' (Tips are not mandatory but always appreciated.)';
+  }
+  else if(type==='ROUND TRIP'){
+    // Round trip always returns to the original pickup address (see _openStartRideWithHome's
+    // resume-leg logic — the return leg goes back to where the client started), so the
+    // "returning to" address is `start`, not a separately-tracked field. `r.rt` is the
+    // existing return-time field. Return time is omitted gracefully if not yet set.
+    const going = dest || '(destination)';
+    const returnPart = r.rt ? (' at '+fmtTime12(r.rt)) : '';
+    message = 'I am confirming your pickup scheduled for tomorrow at '+time+' at '+start+' going to '+going+
+              ' returning to '+start+returnPart+'.\n\n'+
+              driverLineShort+'\n\n'+
+              'The Driver: Please review the attached photo to see what your driver and their vehicle look like.\n\n'+
+              'Safety: If there is a driver change, it will be communicated through this text thread only.\n\n'+
+              'Many thanks,\n\n'+ownerSig+'\n\n'+
+              'Trip cost: '+amount+' (Tips are not mandatory but always appreciated.)';
+  }
+  else if(type==='ONE WAY'){
+    // Same structure as AP RUN, per Chase's instruction to reuse that text for One Way —
+    // ground pickup/destination in place of AP RUN's pickup/terminal.
+    const going = dest || '(destination)';
+    message = 'I am confirming your pickup scheduled for tomorrow at '+time+' at '+start+', going to '+going+'.\n\n'+
+              driverLine+'\n\n'+
+              'The Driver: Please review the attached photo to see what your driver and their vehicle look like.\n\n'+
+              'Safety: If there is a driver change, it will be communicated through this text thread only.\n\n'+
+              'Many thanks,\n\n'+ownerSig+'\n\n'+
+              'Trip cost: '+amount+' (Tips are not mandatory but always appreciated.)';
+  }
+  else {
+    // AP ROUND TRIP / anything else — not yet given an updated template, left on the
+    // original generic wording on purpose rather than guessed at.
+    const going = dest || '(destination)';
+    const fromPart = start ? ' from '+start : '';
+    message = 'I am confirming your pickup scheduled for tomorrow at '+time+fromPart+', going to '+going+'.\n\n'+
+              driverLine+'\n\n'+contact+'\n\n'+
+              flightLink+
+              'Many thanks,\n\n'+sig+'\n\n'+
+              'Trip cost: '+amount+' (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)';
+  }
+  return { message, instructions };
+}
+
 function buildConfirmationText(r){
   // The confirmation is sent BY whoever is logged in and signed with their name — not
   // hardcoded to Kat. "I will be driving you" is used only when that same person is also
@@ -8166,79 +8259,11 @@ function buildConfirmationText(r){
     ? (ownerNameRaw.toLowerCase()==='kathleen herringdine' ? 'Kathleen \u201cKat\u201d' : (ownerNameRaw.split(' ')[0]||ownerNameRaw))
     : sig;
 
-  let message='', instructions='';
-
-  if(type==='AP RUN'){
-    // Real terminal name when the ride has one ("North"/"South"/"International" + " Terminal"),
-    // matching how this used to read before it was lost — falls back to a generic "the Airport"
-    // rather than an empty destination if no terminal was recorded on this ride.
-    const destPart = terminalVal ? (terminalVal+' Terminal') : 'the Airport';
-    const pickupPart = start ? (' at '+start) : '';
-    message = 'I am confirming your pickup scheduled for tomorrow at '+time+pickupPart+', going to '+destPart+'.\n\n'+
-              driverLine+'\n\n'+
-              'The Driver: Please review the attached contact card to see what your driver and their vehicle look like.\n\n'+
-              'Safety: If there is a driver change, it will be communicated through this text thread only.\n\n'+
-              'Many thanks,\n\n'+ownerSig+'\n\n'+
-              'Trip cost: '+amount+' (Tips are not mandatory but always appreciated.)';
-  }
-  else if(type==='AP PICK UP'){
-    const termUpper = terminalVal.toUpperCase();
-    if(termUpper.includes('NORTH')){
-      instructions = '\ud83d\udeeb North Terminal (LN1)\nStep 1: Text your driver once you have your bags.\nStep 2: Go to the Lower Level (LN1) using the elevators or escalators near Doors N2 & N3.\nStep 3: Text the driver when you are heading out to the curb.\nStep 4: Wait at the curb just before the crosswalk.';
-    } else if(termUpper.includes('SOUTH')){
-      instructions = '\ud83d\udeec South Terminal (LS1)\nStep 1: Text your driver after you get your bags.\nStep 2: Go to the Lower Level (LS1) using the elevators or escalators between Doors S2 & S3.\nStep 3: Text the driver when you are heading out to the curb.\nStep 4: Wait at the curb just before the crosswalk.';
-    } else if(termUpper.includes('INTERNATIONAL') || termUpper.includes('INTL')){
-      instructions = '\ud83d\udec2 International (Middle Island)\nStep 1: Text your driver once you have your bags.\nStep 2: Walk out the main doors and cross the first road to the Middle Island.\nStep 3: Walk all the way to the VERY LAST A2 sign at the far end of the island.\nStep 4: Keep your ringer on!';
-    }
-    // Pick Up leads with flight + arrival terminal, not the destination address — matches
-    // Chase's exact template.
-    const termPart = terminalVal ? (', the '+terminalVal+' Terminal') : '';
-    message = 'I am confirming your pickup scheduled for tomorrow at '+time+' from Flight # '+flight+termPart+'.\n\n'+
-              driverLineShort+'\n\n'+
-              'The Driver: Please review the attached contact card to see what your driver and their vehicle look like.\n\n'+
-              'Safety: If there is a driver change, it will be communicated through this text thread only.\n\n'+
-              'The Selfie: Please send a quick selfie on the day you travel so your driver can easily recognize you at the curb!\n\n'+
-              flightLink+
-              'Many thanks,\n\n'+ownerSig+'\n\n'+
-              'Trip cost: '+amount+' (Tips are not mandatory but always appreciated.)';
-  }
-  else if(type==='ROUND TRIP'){
-    // Round trip always returns to the original pickup address (see _openStartRideWithHome's
-    // resume-leg logic — the return leg goes back to where the client started), so the
-    // "returning to" address is `start`, not a separately-tracked field. `r.rt` is the
-    // existing return-time field. Return time is omitted gracefully if not yet set.
-    const going = dest || '(destination)';
-    const returnPart = r.rt ? (' at '+fmtTime12(r.rt)) : '';
-    message = 'I am confirming your pickup scheduled for tomorrow at '+time+' at '+start+' going to '+going+
-              ' returning to '+start+returnPart+'.\n\n'+
-              driverLineShort+'\n\n'+
-              'The Driver: Please review the attached contact card to see what your driver and their vehicle look like.\n\n'+
-              'Safety: If there is a driver change, it will be communicated through this text thread only.\n\n'+
-              'Many thanks,\n\n'+ownerSig+'\n\n'+
-              'Trip cost: '+amount+' (Tips are not mandatory but always appreciated.)';
-  }
-  else if(type==='ONE WAY'){
-    // Same structure as AP RUN, per Chase's instruction to reuse that text for One Way —
-    // ground pickup/destination in place of AP RUN's pickup/terminal.
-    const going = dest || '(destination)';
-    message = 'I am confirming your pickup scheduled for tomorrow at '+time+' at '+start+', going to '+going+'.\n\n'+
-              driverLine+'\n\n'+
-              'The Driver: Please review the attached contact card to see what your driver and their vehicle look like.\n\n'+
-              'Safety: If there is a driver change, it will be communicated through this text thread only.\n\n'+
-              'Many thanks,\n\n'+ownerSig+'\n\n'+
-              'Trip cost: '+amount+' (Tips are not mandatory but always appreciated.)';
-  }
-  else {
-    // AP ROUND TRIP / anything else — not yet given an updated template, left on the
-    // original generic wording on purpose rather than guessed at.
-    const going = dest || '(destination)';
-    const fromPart = start ? ' from '+start : '';
-    message = 'I am confirming your pickup scheduled for tomorrow at '+time+fromPart+', going to '+going+'.\n\n'+
-              driverLine+'\n\n'+contact+'\n\n'+
-              flightLink+
-              'Many thanks,\n\n'+sig+'\n\n'+
-              'Trip cost: '+amount+' (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)';
-  }
+  // Extracted so this exact logic can also be called directly for a "here's the real
+  // built-in default" preview (Settings screen) without picking up whatever custom template
+  // the viewing driver may have already saved — see _buildRawConfirmDefaults below.
+  const _raw = _buildRawConfirmDefaults(r, { type, time, driverLine, driverLineShort, contact, sig, ownerSig, amount, terminalVal, flight, flightLink, dest, start });
+  let message = _raw.message, instructions = _raw.instructions;
 
   // Per-driver custom templates override the defaults ONLY when the sender has set them.
   // Supports placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}
@@ -8719,8 +8744,18 @@ async function textClient(id, opts){
     try{ await navigator.clipboard.write([new ClipboardItem({'image/png':cardFile})]); _cardCopied=true; }catch(e){ console.warn('clipboard write failed',e); }
   }
 
+  // The share sheet is the only way to send MULTIPLE files in one action (the clipboard can
+  // only hold one image at a time), but it can't pre-address Messages — the sender has to pick
+  // the recipient themselves. That's a real cost, so it's only worth paying when there's
+  // actually more than one file to bundle (driver card + day-of selfie, on AP Pick Up / AP
+  // Round Trip rides). A single file always goes the copy+paste route below instead: pre-
+  // addressed thread, correct group text, the one image already on the clipboard to paste in.
+  // Chase's explicit call, weighing the selfie-gets-dropped tradeoff against always needing to
+  // pick the recipient by hand.
+  const _multiFile = files.length > 1;
+
   // ── iOS: single navigator.share call — image + vCard + text all land in iMessage ──
-  if(isIOS && navigator.canShare && files.length){
+  if(isIOS && navigator.canShare && _multiFile){
     const shareData={files:files, text:_fullMsg};
     try{
       if(navigator.canShare(shareData)){
@@ -8736,7 +8771,7 @@ async function textClient(id, opts){
 
   // ── Android: navigator.share handles image + vCard together via share sheet ──
   // Falls back to clipboard+SMS if share isn't available
-  if(!isIOS && navigator.canShare && files.length){
+  if(!isIOS && navigator.canShare && _multiFile){
     const shareData={files:files, text:_fullMsg};
     try{
       if(navigator.canShare(shareData)){
@@ -16122,7 +16157,7 @@ async function _saveOwnMsgEditor(){
   var p=((document.getElementById('own-pk')||{}).value||'').trim();
   if(c) driverSettings[me].ownConfTemplate=c; else delete driverSettings[me].ownConfTemplate;
   if(p) driverSettings[me].ownPickupInstructions=p; else delete driverSettings[me].ownPickupInstructions;
-  try{ await saveDriverSettings(); }catch(e){}
+  try{ await saveDriverSettings(me); }catch(e){}
   var b=document.getElementById('own-msg-back'); if(b) b.remove();
   showToast('\u2713 Saved your own-client message set');
 }
@@ -16165,7 +16200,7 @@ async function _savePolicyEditor(){
   if(!driverSettings[currentUser.name]) driverSettings[currentUser.name]={};
   if(custom){ var t=((document.getElementById('pol-tpl')||{}).value||'').trim(); if(!t){ showToast('Add your message or choose Default','error'); return; } driverSettings[currentUser.name].policyTemplate=t; }
   else { delete driverSettings[currentUser.name].policyTemplate; }
-  try{ await saveDriverSettings(); }catch(e){}
+  try{ await saveDriverSettings(currentUser.name); }catch(e){}
   var b=document.getElementById('policy-editor-back'); if(b) b.remove();
   showToast(custom?'\u2713 Custom scheduling message saved':'Using the default scheduling message');
 }
@@ -16183,13 +16218,13 @@ async function _saveSchedulingField(){
   driverSettings[currentUser.name].policyTemplate = val;
   var _promotedToDefault = false;
   try{
-    await saveDriverSettings();
+    await saveDriverSettings(currentUser.name);
     if(val && currentUser.name==='Chase'){
       globalSettings = globalSettings || {};
       globalSettings.defaultPolicyTemplate = val;
       await storageSet('kat:globalSettings', globalSettings);
       driverSettings[currentUser.name].policyTemplate = '';
-      await saveDriverSettings();
+      await saveDriverSettings(currentUser.name);
       _promotedToDefault = true;
     }
     showToast(_promotedToDefault ? '\u2713 Saved \u2014 now the default for every driver' : '\u2713 Saved');
@@ -17683,7 +17718,20 @@ async function _applyDriverEdit(oldName, newName, p, color, _colorChanged){
       await storageSet('kat:driverProfiles/'+oldName, p);
     }
     await storageSet('kat:driverColors', driverColors);
-    if(typeof saveDriverSettings==='function') await saveDriverSettings();
+    // driverSettings only actually changes in the rename branch above (the key gets moved
+    // from oldName to newName) — a non-rename edit (phone number, vehicle, etc.) never
+    // touches driverSettings at all, so saving it unconditionally here was a pure-risk,
+    // no-benefit whole-collection write on every single driver edit: any other device's
+    // uncommitted driverSettings change (a custom message being edited, say) could be
+    // silently overwritten by a stale copy, triggered by an edit that had nothing to do with
+    // driverSettings in the first place. Scoped to only the case that actually needs it.
+    // The write itself still has to be whole-object here, not targeted — same reasoning as
+    // driverProfiles just above: a rename moves a key and deletes the old one, which a single
+    // targeted key write can't express. Matches the accepted exception already documented for
+    // this exact rename branch.
+    if(newName!==oldName && typeof driverSettings!=='undefined'){
+      await storageSet('kat:driverSettings', driverSettings);
+    }
   }catch(e){ console.warn('edit driver save', e); }
   if(typeof refreshDash==='function') refreshDash();
   if(typeof renderCal==='function') renderCal();
@@ -18618,6 +18666,78 @@ function renderMessageTemplates(){
       +'</div>';
   }
 
+  // Sample rides used only to compute what each type's real built-in default looks like.
+  // Deliberately fictional ("Jane Doe", generic addresses) so this never displays a real
+  // client's information as a preview. sameDriver stays true (own name as driver) so the
+  // preview shows the simpler "I will be driving you" line rather than a made-up partner name.
+  const _TYPE_PREVIEW_RIDES = {
+    'AP RUN':     { type:'AP RUN',     driver:myName, client:'Jane Doe', pickup:'123 Main St', home:'Airport', terminal:'North', time:'2:00 PM', price:120 },
+    'AP PICK UP': { type:'AP PICK UP', driver:myName, client:'Jane Doe', pickup:'Airport', home:'456 Oak Ave', terminal:'South', flight:'DL123', time:'4:00 PM', price:95 },
+    'ROUND TRIP': { type:'ROUND TRIP', driver:myName, client:'Jane Doe', pickup:'123 Main St', home:'456 Event Center', time:'10:00 AM', rt:'4:30 PM', price:265 },
+    'ONE WAY':    { type:'ONE WAY',    driver:myName, client:'Jane Doe', pickup:'123 Main St', home:'456 Oak Ave', time:'6:00 PM', price:85 },
+  };
+
+  // Computes the real built-in default for a ride type by calling the exact same function
+  // that builds it for a real send (_buildRawConfirmDefaults) — not a hand-copied example
+  // string. Hand-copied text is exactly what went stale before: the old single generic
+  // preview described only the AP Run version, drifted out of sync with what actually sent,
+  // and had no per-type view at all outside onboarding. Computing this live means it is
+  // physically impossible for the preview to say something different from what really sends.
+  function _typeDefaultPreview(type){
+    try{
+      const sampleR = _TYPE_PREVIEW_RIDES[type];
+      const sender = myName, assigned = myName, sameDriver = true;
+      const time = fmtTime12(sampleR.time);
+      const amount = '$'+sampleR.price;
+      const flight = (sampleR.flight||'').trim();
+      const terminalVal = (sampleR.terminal||'').trim();
+      const start = sampleR.pickup||'', dest = sampleR.home||'';
+      const driverLine = 'I will be driving you.';
+      const driverLineShort = 'I will be driving you.';
+      const contact = 'Contact Information:\n\n'+assigned+'\n'+((DRIVER_PROFILES[assigned]||{}).phone||'');
+      const sig = (sender||'').split(' ')[0]||'Your driver';
+      const ownerSig = sig; // preview always signs as the viewing driver, no owner lookup needed
+      const flightLink = ''; // tracking link is a live send-time extra, not relevant to a text preview
+      return _buildRawConfirmDefaults(sampleR, { type, time, driverLine, driverLineShort, contact, sig, ownerSig, amount, terminalVal, flight, flightLink, dest, start }).message;
+    }catch(e){ console.warn('_typeDefaultPreview failed for', type, e); return ''; }
+  }
+
+  // A dedicated field for one ride type's confirmation text, writing to
+  // driverSettings[myName].confTemplateByType[type] — the same key buildConfirmationText()
+  // already reads via _byType, so a saved value here takes effect immediately, no other
+  // wiring needed. Mirrors field()'s look, with its own save/clear pair since the storage
+  // shape (nested by type) doesn't fit _TEMPLATE_FIELD_MAP's flat personal-field model.
+  function typeField(type, label){
+    const id = 'msgtpl-bytype-'+type.replace(/\s+/g,'');
+    const bodyId = id+'-body';
+    const arrowId = id+'-arrow';
+    const byType = (myCustom.confTemplateByType)||{};
+    const value = byType[type]||'';
+    const defaultText = _typeDefaultPreview(type);
+    const isSet = !!(value.trim());
+    const statusColor = isSet ? '#15803d' : 'var(--mid)';
+    const statusBg = isSet ? '#e8f5ee' : 'var(--surface)';
+    const statusText = isSet ? 'Custom set' : 'Using built-in default';
+    const placeholderText = escAttr(defaultText.replace(/\n/g,' '));
+    return '<div style="border:1.5px solid var(--light);border-radius:10px;margin-bottom:.6rem;overflow:hidden;">'
+      +'<button type="button" onclick="toggleMsgTplField(\''+id+'\')" style="width:100%;text-align:left;background:var(--surface);border:none;padding:.65rem .8rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-family:\'DM Sans\',sans-serif;">'
+      +'<span style="font-size:.82rem;font-weight:700;color:var(--black);">'+label+'</span>'
+      +'<span style="display:flex;align-items:center;gap:.5rem;flex-shrink:0;">'
+      +'<span style="font-size:.66rem;font-weight:700;color:'+statusColor+';background:'+statusBg+';border-radius:10px;padding:2px 8px;">'+statusText+'</span>'
+      +'<span id="'+arrowId+'" style="font-size:.7rem;color:var(--mid);">\u25be</span>'
+      +'</span></button>'
+      +'<div id="'+bodyId+'" style="display:none;padding:.75rem .8rem;">'
+      +'<div style="display:flex;align-items:center;justify-content:'+(isSet?'flex-end':'space-between')+';margin-bottom:.2rem;gap:.5rem;">'
+      +(isSet?'<button onclick="clearConfirmTypeField(\''+type+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Clear (use default)</button>':'<button onclick="startFromDefault(\''+id+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Start from this default</button>')
+      +'<button onclick="saveConfirmTypeField(\''+type+'\').then(renderMessageTemplates)" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Save</button>'
+      +'</div>'
+      +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">This is the real message '+label.replace(' confirmation text','')+' rides send today, shown exactly as it would go out (with example client/address/time filled in). Placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}</div>'
+      +'<textarea id="'+id+'" rows="8" placeholder="'+placeholderText+'" data-default="'+escAttr(defaultText)+'" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(value||'')+'</textarea>'
+      +'<div style="font-size:.66rem;color:var(--mid);margin-top:.35rem;line-height:1.4;">'+(isSet?'This is your current wording for this ride type, live and editable above. "Clear (use default)" empties this field and saves, switching back to the built-in text.':'Shown above (grayed out, in the box) is the actual current built-in text \u2014 leave blank to keep using it exactly as shown, or tap "Start from this default" to copy it in and edit from there.')+'</div>'
+      +'</div>'
+      +'</div>';
+  }
+
   let html = '';
 
   // Personal section always builds now (v812) - reaching this point already guarantees myName
@@ -18643,7 +18763,11 @@ function renderMessageTemplates(){
       + '</div>';
     html += '<div style="font-size:.72rem;color:var(--mid);margin-bottom:1rem;line-height:1.5;background:#f3eeff;border:1px solid #d9c9f5;border-radius:8px;padding:.7rem .85rem;">'
       + 'Your own current wording, shown exactly as it\'ll be sent — fix a typo without retyping the whole thing. This always wins over the app-wide default below. Tap a message to open it.</div>'
-      + field('personal','confirm', 'My confirmation text', 'Placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}', myCustom.confTemplate, 5)
+      + field('personal','confirm', 'My confirmation text (general fallback)', 'Only used for ride types with nothing of their own set below — Round Trip, One Way, AP Run, and AP Pick Up each have real built-in text and their own box now. Placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}', myCustom.confTemplate, 5)
+      + typeField('AP RUN',     'AP Run confirmation text')
+      + typeField('AP PICK UP', 'AP Pick Up confirmation text')
+      + typeField('ROUND TRIP', 'Round Trip confirmation text')
+      + typeField('ONE WAY',    'One Way confirmation text')
       + field('personal','pickup', 'My pickup instructions', 'For AP Run, One Way, and Round Trip rides only \u2014 AP Pick Up always uses the per-terminal instructions below instead. Folded into the confirmation text. Same placeholders as above.', myCustom.pickupInstructions, 3, _byTypeHtml)
       + (function(){
           // Compares against the live shared default first, hardcoded default as fallback -
@@ -18745,6 +18869,39 @@ async function clearTemplateField(scope, key){
   await saveTemplateField(scope, key);
   renderMessageTemplates();
 }
+// Per-ride-type confirmation text — separate from saveTemplateField/clearTemplateField above
+// because those write a single flat field per _TEMPLATE_FIELD_MAP, while these write into
+// driverSettings[myName].confTemplateByType[type], the nested-by-type structure
+// buildConfirmationText() already reads via _byType. Saving here takes effect immediately,
+// no other wiring needed — it's the same storage key the app has used since AP Pick Up's
+// per-type override was first built, just newly exposed for the other three ride types too.
+async function saveConfirmTypeField(type){
+  const id = 'msgtpl-bytype-'+type.replace(/\s+/g,'');
+  const el = document.getElementById(id); if(!el) return;
+  const val = el.value.trim();
+  const myName = getMyDriverName(); if(!myName) return;
+  driverSettings[myName] = driverSettings[myName] || {};
+  driverSettings[myName].confTemplateByType = driverSettings[myName].confTemplateByType || {};
+  driverSettings[myName].confTemplateByType[type] = val;
+  try{
+    // Targeted write (storageSetOne, via the dName argument) — not the whole-collection
+    // saveDriverSettings() the older saveTemplateField still uses. This whole session's other
+    // major thread was closing exactly this class of bug (v862-874): a whole-object write here
+    // would silently overwrite any other device's driverSettings changes made since this page
+    // loaded. No reason to introduce a new instance of a bug class that was just spent a full
+    // session eliminating everywhere else.
+    await saveDriverSettings(myName);
+    showToast('\u2713 Saved');
+  }catch(e){ console.warn('saveConfirmTypeField failed', e); const err=document.getElementById('msgtpl-personal-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
+}
+async function clearConfirmTypeField(type){
+  const id = 'msgtpl-bytype-'+type.replace(/\s+/g,'');
+  const el = document.getElementById(id); if(!el) return;
+  if(!confirm('Clear this message and switch back to the built-in default? This deletes your current wording immediately \u2014 it can\'t be recovered afterward.')) return;
+  el.value = '';
+  await saveConfirmTypeField(type);
+  renderMessageTemplates();
+}
 function toggleMsgTplField(id){
   const body = document.getElementById(id+'-body');
   const arrow = document.getElementById(id+'-arrow');
@@ -18766,7 +18923,13 @@ async function saveTemplateField(scope, key){
   driverSettings[myName][map.personal] = val;
   var _promotedToDefault = false;
   try{
-    await saveDriverSettings();
+    // Targeted write (storageSetOne, via the dName argument) — this used to be a
+    // whole-collection saveDriverSettings() with no argument, meaning saving YOUR OWN
+    // confirmation text could silently overwrite another driver's already-saved custom
+    // messages if this browser's in-memory copy of driverSettings was stale for them (the
+    // exact bug class closed everywhere else in v862-874, just missed here). Fixed the same
+    // way: write only this driver's own key, never touch anyone else's saved data.
+    await saveDriverSettings(myName);
     // Chase's own edits to his personal confirm/pickup/arrival text also become the
     // app-wide default automatically, so he only has to edit one place - the same
     // relationship the v619 promotion and v622 Chase-only restriction already established,
@@ -18781,7 +18944,7 @@ async function saveTemplateField(scope, key){
       // "Custom set" for text that's now just a duplicate of the default he controls -
       // exactly the redundant-duplicate confusion the v624 cleanup addressed.
       driverSettings[myName][map.personal] = '';
-      await saveDriverSettings();
+      await saveDriverSettings(myName);
       _promotedToDefault = true;
     }
     // A plain "Saved" here, followed by the field going blank the moment the page
@@ -18818,7 +18981,7 @@ async function savePerTypePickupInstructions(silent){
   const ow = gv('msgtpl-pickup-oneway');    if(ow) byType['ONE WAY'] = ow;
   const rt = gv('msgtpl-pickup-roundtrip'); if(rt) byType['ROUND TRIP'] = rt;
   driverSettings[myName].pickupInstructionsByType = byType;
-  try{ await saveDriverSettings(); if(!silent) showToast('\u2713 Saved'); }
+  try{ await saveDriverSettings(myName); if(!silent) showToast('\u2713 Saved'); }
   catch(e){ console.warn('savePerTypePickupInstructions failed', e); const err=document.getElementById('msgtpl-personal-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
 }
 // AP Pick Up's per-terminal instructions (North/South/International) - the ONLY pickup
@@ -18837,7 +19000,7 @@ async function savePerTerminalPickupInstructions(silent){
   const i = gv('msgtpl-pickup-term-intl');  if(i) byTerm['International'] = i;
   driverSettings[myName].pickupInstructionsByTerminal = byTerm;
   try{
-    await saveDriverSettings();
+    await saveDriverSettings(myName);
     // Same auto-promote-to-shared-default mechanism saveTemplateField already uses for
     // confirm/pickup/arrival (v808) - this function is a separate save path (per-terminal
     // instructions were never routed through the generic field()/_TEMPLATE_FIELD_MAP system),
@@ -18854,7 +19017,7 @@ async function savePerTerminalPickupInstructions(silent){
       // "Custom set" for text that's now just a duplicate of the default he controls - same
       // redundant-duplicate cleanup saveTemplateField already does for the other templates.
       driverSettings[myName].pickupInstructionsByTerminal = {};
-      await saveDriverSettings();
+      await saveDriverSettings(myName);
       _promotedToDefault = true;
     }
     // Same reasoning as saveTemplateField's matching fix - a plain "Saved" here, immediately
@@ -22754,7 +22917,7 @@ async function _clearChasePersonalDuplicates(){
   if(chase.confTemplate && chase.confTemplate===globalSettings.defaultConfirmTemplate){ delete chase.confTemplate; changed=true; }
   if(chase.arrivalTemplate && chase.arrivalTemplate===globalSettings.defaultArrivalTemplate){ delete chase.arrivalTemplate; changed=true; }
   globalSettings._chasePersonalDuplicatesCleared = true;
-  try{ await storageSet('kat:globalSettings', globalSettings); if(changed) await saveDriverSettings(); }
+  try{ await storageSet('kat:globalSettings', globalSettings); if(changed) await saveDriverSettings('Chase Sweat'); }
   catch(e){ console.warn('Chase personal duplicate cleanup failed', e); }
 }
 // Two pickup-instructions seed migrations used to live here (v793-era) - removed in v807, since
@@ -22780,7 +22943,12 @@ async function _restoreKatTemplatesV2(){
       if(!s.pickupInstructions) s.pickupInstructions=FB;
       s._katTemplatesV2=true; s._katAprunRestored=true;
     });
-    if(typeof saveDriverSettings==='function') await saveDriverSettings();
+    // Exactly Kat and Morgan by name, not a roster loop — two targeted writes, not a
+    // whole-collection save. (Distinct from _migrateLegacyProfileTemplates above, which
+    // genuinely does loop the full driver roster and keeps its whole-object write for that
+    // reason — a targeted write there would only ever save whichever driver iterated last.)
+    await saveDriverSettings('Kathleen Herringdine');
+    await saveDriverSettings('Morgan Newton');
   }catch(e){}
 }
 async function loadDriverSettings(){
@@ -22833,8 +23001,7 @@ function openBusinessLogoUpload(driverName){
 function openDriverSelfieUpload(driverName){
   _pickAndReadImage({ resize:false, cleanupDelayMs:5000, onResult: async function(dataUrl){
     if(!driverSettings[driverName]) driverSettings[driverName]={};
-    driverSettings[driverName].selfie=dataUrl;
-    await saveDriverSettings();
+    await saveDriverSettings(driverName);
     renderDriverMembers();
     showToast('\u2713 Day-of-travel selfie updated for '+driverName.split(' ')[0]);
   }});
@@ -23369,7 +23536,7 @@ async function toggleConfText(driverName){
   if(!driverSettings[driverName]) driverSettings[driverName]={};
   const cur = driverSettings[driverName].confEnabled !== false;
   driverSettings[driverName].confEnabled = !cur;
-  await saveDriverSettings();
+  await saveDriverSettings(driverName);
   renderDriverMembers();
   if(typeof renderDashConfirmations==='function') renderDashConfirmations();
   if(typeof renderConfirmations==='function' && document.getElementById('my-confirm-panel')){ try{ renderConfirmations(); }catch(e){} }
@@ -23404,7 +23571,7 @@ async function toggleTrackingLink(driverName){
   if(!driverSettings[driverName]) driverSettings[driverName]={};
   const cur = driverSettings[driverName].trackingLink !== false;
   driverSettings[driverName].trackingLink = !cur;
-  await saveDriverSettings();
+  await saveDriverSettings(driverName);
   if(typeof renderDriverMembers==='function') renderDriverMembers();
   showToast('Flight tracking link '+(driverSettings[driverName].trackingLink?'will be included in confirmations':'will be left out of confirmations'));
 }
@@ -23422,7 +23589,7 @@ async function toggleAutoSurcharge(driverName, type){
   if(!ds.autoOff){ ds.autoOff={}; if(ds.autoSurchargesOff===true){ ['premium','traffic','holiday','christmas','fuel'].forEach(function(x){ ds.autoOff[x]=true; }); } }
   delete ds.autoSurchargesOff;
   ds.autoOff[type] = !ds.autoOff[type];
-  await saveDriverSettings();
+  await saveDriverSettings(driverName);
   if(typeof renderMyProfileCard==='function') renderMyProfileCard();
   var human={premium:'Premium hours',traffic:'Traffic',holiday:'Holiday',christmas:'Christmas',fuel:'Fuel'}[type]||type;
   showToast(ds.autoOff[type]?(human+' auto-add OFF \u2014 you can still add it manually'):(human+' auto-add ON'));
@@ -26937,7 +27104,7 @@ async function requestCombineIncome(myLogin, partnerLogin){
   // Store pending request in my settings
   if(!driverSettings[myLogin]) driverSettings[myLogin]={};
   driverSettings[myLogin].combineRequest={to:partnerLogin,ts:Date.now()};
-  await saveDriverSettings();
+  await saveDriverSettings(myLogin);
   // Notify partner
   addNotification(partnerLogin,{combine:true},'combine_request',
     '🔗 '+myLogin.split(' ')[0]+' wants to combine income views with you. Tap to approve.');
@@ -26957,7 +27124,8 @@ async function approveCombineIncome(requesterLogin){
   driverSettings[myLogin].combineRequest=null;
   driverSettings[requesterLogin].combineEnabled=true;
   driverSettings[requesterLogin].combineRequest=null;
-  await saveDriverSettings();
+  await saveDriverSettings(myLogin);
+  await saveDriverSettings(requesterLogin);
   window._showCombinedIncome=true;
   addNotification(requesterLogin,{combine:true},'combine_approved',
     '✅ '+myLogin.split(' ')[0]+' approved combined income. It is now ON for both of you.');
@@ -26971,7 +27139,7 @@ async function denyCombineIncome(requesterLogin){
   const myLogin=getMyDriverName()||currentUser?.name||'';
   if(!driverSettings[requesterLogin]) driverSettings[requesterLogin]={};
   driverSettings[requesterLogin].combineRequest=null;
-  await saveDriverSettings();
+  await saveDriverSettings(requesterLogin);
   addNotification(requesterLogin,{combine:true},'combine_denied',
     '❌ '+myLogin.split(' ')[0]+' declined the combined income request.');
   await saveNotifs();
@@ -26987,7 +27155,8 @@ async function requestCombineOff(myLogin, partnerLogin){
   driverSettings[partnerLogin].combineEnabled=false;
   driverSettings[myLogin].combineRequest=null;
   driverSettings[partnerLogin].combineRequest=null;
-  await saveDriverSettings();
+  await saveDriverSettings(myLogin);
+  await saveDriverSettings(partnerLogin);
   window._showCombinedIncome=false;
   addNotification(partnerLogin,{combine:true},'combine_off',
     '🔗 '+myLogin.split(' ')[0]+' turned off combined income view.');
@@ -27747,7 +27916,7 @@ async function toggleDriverPref(key, def){
   if(!driverSettings[dn]) driverSettings[dn]={};
   var cur=(driverSettings[dn][key]===undefined)?def:!!driverSettings[dn][key];
   driverSettings[dn][key]=!cur;
-  try{ await saveDriverSettings(); }catch(e){}
+  try{ await saveDriverSettings(dn); }catch(e){}
   renderNotifPrefs();
 }
 function _sosSoundOn(){ try{ return localStorage.getItem('nda_sos_sound')!=='0'; }catch(e){ return true; } }
