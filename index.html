@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191881">
+<meta name="version" content="202608191883">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -18740,6 +18740,20 @@ function renderMessageTemplates(){
 
   let html = '';
 
+  // Calendar feed — lives at the top of this panel since it's the first thing worth finding,
+  // not buried under message templates. One-time setup per driver: get the link, add it as a
+  // *subscribed* calendar (not a one-time import) in Google or Apple's calendar app.
+  html += '<div style="border:1.5px solid var(--light);border-radius:10px;padding:.85rem;margin-bottom:1rem;background:var(--surface);">'
+    + '<div style="font-size:.85rem;font-weight:700;color:var(--black);margin-bottom:.3rem;">\uD83D\uDCC5 Calendar Feed</div>'
+    + '<div style="font-size:.72rem;color:var(--mid);margin-bottom:.6rem;line-height:1.45;">Subscribe once and your rides stay current on your phone\'s calendar automatically \u2014 no more tapping "Add to calendar" per ride. Not instant: most calendar apps only re-check a subscribed feed every hour or so, on their own schedule.</div>'
+    + '<div id="cal-feed-link-box" style="display:none;background:var(--white);border:1px solid var(--light);border-radius:8px;padding:.5rem .65rem;margin-bottom:.5rem;font-size:.74rem;word-break:break-all;color:var(--black);"></div>'
+    + '<button type="button" onclick="_showCalendarFeedLink()" id="cal-feed-btn" style="padding:.5rem .9rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer;font-family:\'DM Sans\',sans-serif;">\uD83D\uDCC5 Get my calendar link</button>'
+    + '<div id="cal-feed-instructions" style="display:none;font-size:.7rem;color:var(--mid);margin-top:.65rem;line-height:1.55;">'
+    + '<strong>Google Calendar:</strong> open the Calendar app \u2192 menu \u2192 Settings \u2192 Add calendar \u2192 "From URL" \u2192 paste the link.<br>'
+    + '<strong>Apple Calendar (iPhone):</strong> open the Settings app \u2192 Calendar \u2192 Accounts \u2192 Add Account \u2192 Other \u2192 Add Subscribed Calendar \u2192 paste the link.'
+    + '</div>'
+    + '</div>';
+
   // Personal section always builds now (v812) - reaching this point already guarantees myName
   // is valid (the early return above catches the only case where it wouldn't be). The old
   // hasOwnCustomText/admin gate here is gone for the same reason it's gone above: nothing left
@@ -18875,6 +18889,35 @@ async function clearTemplateField(scope, key){
 // buildConfirmationText() already reads via _byType. Saving here takes effect immediately,
 // no other wiring needed — it's the same storage key the app has used since AP Pick Up's
 // per-type override was first built, just newly exposed for the other three ride types too.
+// Shows this driver's calendar-feed link, generating it on first use (idempotent —
+// _getOrCreateCalendarToken returns the SAME token on every later call, so re-clicking this
+// button never issues a second link that orphans one already added to someone's phone).
+async function _showCalendarFeedLink(){
+  const myName = getMyDriverName(); if(!myName) return;
+  const box = document.getElementById('cal-feed-link-box');
+  const instr = document.getElementById('cal-feed-instructions');
+  const btn = document.getElementById('cal-feed-btn');
+  if(!box) return;
+  box.style.display = 'block';
+  box.textContent = 'Generating your link\u2026';
+  if(btn) btn.disabled = true;
+  const token = await _getOrCreateCalendarToken(myName);
+  if(btn) btn.disabled = false;
+  if(!token){
+    box.textContent = 'Could not generate your link \u2014 check your connection and try again.';
+    return;
+  }
+  const url = CALENDAR_FEED_BASE_URL + '?token=' + token;
+  box.innerHTML = '<div style="margin-bottom:.4rem;">'+escHtml(url)+'</div>'
+    + '<button type="button" onclick="_copyCalendarFeedLink()" id="cal-feed-copy-btn" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">\uD83D\uDCCB Copy link</button>';
+  window._calFeedUrl = url;
+  if(instr) instr.style.display = 'block';
+}
+async function _copyCalendarFeedLink(){
+  if(!window._calFeedUrl) return;
+  try{ await navigator.clipboard.writeText(window._calFeedUrl); showToast('\u2713 Link copied'); }
+  catch(e){ showToast('Could not copy \u2014 long-press the link above to copy it manually'); }
+}
 async function saveConfirmTypeField(type){
   const id = 'msgtpl-bytype-'+type.replace(/\s+/g,'');
   const el = document.getElementById(id); if(!el) return;
@@ -19433,6 +19476,16 @@ function renderProfileDriverPicker(){
 // .booksOwnClients (collected at onboarding) becomes the real, permanent gate instead.
 var BOOKING_LINK_ROLLOUT_ALLOWLIST = ['Chase Sweat', 'Morgan Newton'];
 
+// The calendarFeed Cloud Function's base URL. Region confirmed against the real
+// functions/index.js (checked directly, not guessed a second time): sendPush has no .region()
+// call anywhere in it, meaning this project deploys to Firebase's default region —
+// us-central1. That resolves the earlier uncertainty about where functions in this project
+// land. What's still unconfirmed is the URL itself, since calendarFeed hasn't been deployed
+// yet — this is the correctly-formatted URL calendarFeed WILL have once deployed, but
+// double-check it against Firebase's actual deploy output the first time, since a typo'd
+// project ID would fail silently here (every request would just 404).
+var CALENDAR_FEED_BASE_URL = 'https://us-central1-nda-transportation.cloudfunctions.net/calendarFeed';
+
 function renderBookingLinkCard(me){
   var box = document.getElementById('booking-link-card');
   if(!box) return;
@@ -19541,6 +19594,33 @@ async function _getOrCreateClientBookingToken(clientName, driverLogin){
     await fbRef('nda/kat/bookingLinkTokens/'+token).set(_entry);
     await fbRef('nda/kat/bookingLinkTokensByClient/'+loginKey+'/'+_fbSafeKey(clientKey)).set(token);
   }catch(e){ console.warn('booking token create failed', e); return ''; }
+  return token;
+}
+
+// One stable, unguessable token per driver — not per-client like the booking link above,
+// since a calendar feed is one URL a driver adds once to their phone's calendar app and
+// leaves alone, not something regenerated per relationship. Same entropy and encoding as
+// _getOrCreateClientBookingToken (18 random bytes, base36), same "look up existing first,
+// only generate if none exists yet" idempotency, so calling this repeatedly (e.g. every time
+// Settings renders) never issues a new link and silently orphans the one already added to
+// someone's phone.
+async function _getOrCreateCalendarToken(driverName){
+  var driverKey = (driverName||'').trim().toLowerCase();
+  if(!driverKey || typeof fbRef!=='function') return '';
+  try{
+    var existing = await fbRef('nda/kat/calendarTokenByDriver/'+_fbSafeKey(driverKey)).once('value');
+    if(existing.exists() && existing.val()) return existing.val();
+  }catch(e){ console.warn('calendar token lookup failed', e); }
+  var token;
+  try{
+    var bytes = new Uint8Array(18);
+    (window.crypto||window.msCrypto).getRandomValues(bytes);
+    token = Array.from(bytes).map(function(b){ return b.toString(36).padStart(2,'0'); }).join('').slice(0,24);
+  }catch(e){ console.warn('calendar token random generation failed', e); return ''; }
+  try{
+    await fbRef('nda/kat/calendarTokens/'+token).set({ driverName: (driverName||'').trim(), createdAt: Date.now() });
+    await fbRef('nda/kat/calendarTokenByDriver/'+_fbSafeKey(driverKey)).set(token);
+  }catch(e){ console.warn('calendar token create failed', e); return ''; }
   return token;
 }
 
