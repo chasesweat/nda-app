@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191904">
+<meta name="version" content="202608191905">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -59,7 +59,6 @@ button, input, select, textarea{ font-family:inherit; }
 #auth-screen .form-group label{color:#3a2960;}
 #auth-screen .auth-box{box-shadow:0 10px 40px rgba(26,13,46,.10);}
 .user-select{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center;margin-bottom:1.5rem;}
-.user-chip.active{border-color:var(--gold);background:var(--gold-pale);color:var(--gold);}
 .auth-error{color:var(--red);font-size:.85rem;margin-top:1rem;min-height:1.2rem;}
 
 /* FORMS */
@@ -115,7 +114,6 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
 /* DASHBOARD */
 .page-title{font-family:'Playfair Display',serif;font-size:1.75rem;margin-bottom:.25rem;}
 .page-sub{color:var(--mid);font-size:.88rem;margin-bottom:2rem;}
-.stat-val.gold{color:var(--gold);}
 .ride-date{min-width:80px;font-size:.78rem;font-weight:600;color:var(--gold);flex-shrink:0;}
 /* Reported: two ride cards on the dashboard rendered completely differently - a short name
    ("Wendy Newberry") laid out on one clean row, while a longer one ("Sally Woods" on an AP RUN)
@@ -151,7 +149,6 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
 .addon-chip{padding:.5rem .75rem;border:1.5px solid var(--light);border-radius:8px;background:var(--white);color:var(--mid);font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;text-align:center;transition:all .15s;}
 .addon-chip.on{border-color:var(--gold);background:var(--gold-pale);color:var(--gold);font-weight:600;}
 .addon-chip.disabled{opacity:.4;cursor:not-allowed;pointer-events:none;}
-.toggle-btn.on{border-color:var(--gold);background:var(--gold-pale);color:var(--gold);font-weight:600;}
 .quote-line{display:flex;justify-content:space-between;font-size:.88rem;padding:.4rem 0;border-bottom:1px solid #3d1f6e;}
 .quote-total{margin-top:1.25rem;padding-top:1rem;border-top:2px solid var(--gold);display:flex;justify-content:space-between;align-items:center;}
 
@@ -2090,7 +2087,21 @@ async function storageGet(key) {
   // Try Firebase first
   if(fbDB){
     try {
-      const snap = await fbRef('nda/'+key.replace(/:/g,'/')).once('value');
+      // Real bug, reported directly: on a weak/flaky connection, .once('value') can sit
+      // pending forever - it never resolves AND never rejects, so the try/catch below does
+      // nothing to protect against it. _loadAppData() bundles dozens of these into
+      // Promise.all() batches at boot; a single hung read blocks the entire batch, and on a
+      // first-time/no-cache boot there was no timeout anywhere in that chain - the loading
+      // screen just never went away. The instant-paint path (returning users with a cached
+      // snapshot) already had this exact protection via Promise.race against an 1800ms timer;
+      // this brings the same guarantee to the one read function every path funnels through,
+      // so it can never be missed at a new call site again. 8s chosen to comfortably outlast
+      // a genuinely slow-but-working connection while still failing fast enough that nobody's
+      // staring at a stuck screen for an unreasonable time.
+      const snap = await Promise.race([
+        fbRef('nda/'+key.replace(/:/g,'/')).once('value'),
+        new Promise(function(_, reject){ setTimeout(function(){ reject(new Error('storageGet timeout: '+key)); }, 8000); })
+      ]);
       if(snap.exists()) return _seed(snap.val());
     } catch(e){}
   }
@@ -28050,7 +28061,6 @@ async function exportReceiptsPDF(){
     .receipt-amount{float:right;font-size:16px;font-weight:700;color:#1a0d2e;}
     .receipt-date{font-size:12px;color:var(--mid);margin-bottom:4px;}
     .receipt-notes{font-size:12px;color:#555;}
-    .page-break{page-break-before:always;}
     @media print{body{padding:0;}}
   </style></head><body>
   <div style="margin-bottom:8px;"><img src="${(document.querySelector('.topbar-logo img')||{}).src||''}" alt="NWDA" style="height:60px;width:auto;" /></div><h1 style="margin-top:0;">NWDA Transportation — Receipt Report</h1>
