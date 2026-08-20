@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191883">
+<meta name="version" content="202608191884">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -831,6 +831,7 @@ input,select,textarea{font-size:16px;}
       <div class="page-title" style="margin-bottom:.6rem;">Calendar</div>
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;justify-content:center;">
         <button id="cal-familywall-btn" onclick="manualICSPaste()" style="background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;padding:.5rem .85rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">⬆ Import from FamilyWall</button>
+        <button id="cal-feed-btn" onclick="_showCalendarFeedModal()" style="background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;padding:.5rem .85rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">📅 Subscribe my calendar</button>
         <button id="cal-quickadd-btn" onclick="openQuickAddModal()" style="background:var(--gold);color:#fff;border:none;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">+ Add Ride</button>
       </div>
     </div>
@@ -18740,20 +18741,6 @@ function renderMessageTemplates(){
 
   let html = '';
 
-  // Calendar feed — lives at the top of this panel since it's the first thing worth finding,
-  // not buried under message templates. One-time setup per driver: get the link, add it as a
-  // *subscribed* calendar (not a one-time import) in Google or Apple's calendar app.
-  html += '<div style="border:1.5px solid var(--light);border-radius:10px;padding:.85rem;margin-bottom:1rem;background:var(--surface);">'
-    + '<div style="font-size:.85rem;font-weight:700;color:var(--black);margin-bottom:.3rem;">\uD83D\uDCC5 Calendar Feed</div>'
-    + '<div style="font-size:.72rem;color:var(--mid);margin-bottom:.6rem;line-height:1.45;">Subscribe once and your rides stay current on your phone\'s calendar automatically \u2014 no more tapping "Add to calendar" per ride. Not instant: most calendar apps only re-check a subscribed feed every hour or so, on their own schedule.</div>'
-    + '<div id="cal-feed-link-box" style="display:none;background:var(--white);border:1px solid var(--light);border-radius:8px;padding:.5rem .65rem;margin-bottom:.5rem;font-size:.74rem;word-break:break-all;color:var(--black);"></div>'
-    + '<button type="button" onclick="_showCalendarFeedLink()" id="cal-feed-btn" style="padding:.5rem .9rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer;font-family:\'DM Sans\',sans-serif;">\uD83D\uDCC5 Get my calendar link</button>'
-    + '<div id="cal-feed-instructions" style="display:none;font-size:.7rem;color:var(--mid);margin-top:.65rem;line-height:1.55;">'
-    + '<strong>Google Calendar:</strong> open the Calendar app \u2192 menu \u2192 Settings \u2192 Add calendar \u2192 "From URL" \u2192 paste the link.<br>'
-    + '<strong>Apple Calendar (iPhone):</strong> open the Settings app \u2192 Calendar \u2192 Accounts \u2192 Add Account \u2192 Other \u2192 Add Subscribed Calendar \u2192 paste the link.'
-    + '</div>'
-    + '</div>';
-
   // Personal section always builds now (v812) - reaching this point already guarantees myName
   // is valid (the early return above catches the only case where it wouldn't be). The old
   // hasOwnCustomText/admin gate here is gone for the same reason it's gone above: nothing left
@@ -18892,11 +18879,34 @@ async function clearTemplateField(scope, key){
 // Shows this driver's calendar-feed link, generating it on first use (idempotent —
 // _getOrCreateCalendarToken returns the SAME token on every later call, so re-clicking this
 // button never issues a second link that orphans one already added to someone's phone).
+// Opens as a real modal from the Calendar page toolbar — NOT tucked inside the Message
+// Templates tab, which is only visible to Chase or a driver who already has a custom message
+// saved (see the templatesTab gating logic). This feature is for every driver, so it needed
+// its own reachable entry point, not one buried behind a gate most drivers would never pass.
+async function _showCalendarFeedModal(){
+  if(!currentUser){ showToast('Sign in first','error'); return; }
+  const myName = getMyDriverName();
+  if(!myName){ showToast('Your login isn\u2019t linked to a driver profile yet \u2014 ask an admin to link it on the Team page','error'); return; }
+  var back=document.createElement('div'); back.id='cal-feed-modal-back';
+  back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13500;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  back.innerHTML='<div style="background:#fff;border-radius:16px;max-width:460px;width:100%;padding:1.25rem;max-height:90vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
+    +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.4rem;">\uD83D\uDCC5 Subscribe your calendar</div>'
+    +'<div style="font-size:.78rem;color:var(--mid);margin-bottom:.8rem;line-height:1.5;">Subscribe once and your rides stay current on your phone\u2019s calendar automatically \u2014 no more tapping Add to Calendar per ride. Not instant: most calendar apps only re-check a subscribed feed every hour or so, on their own schedule, not live.</div>'
+    +'<div id="cal-feed-link-box" style="display:none;background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.6rem .7rem;margin-bottom:.6rem;font-size:.78rem;word-break:break-all;color:var(--black);"></div>'
+    +'<button type="button" onclick="_showCalendarFeedLink()" id="cal-feed-link-btn" style="width:100%;padding:.6rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.85rem;">Get my calendar link</button>'
+    +'<div id="cal-feed-instructions" style="display:none;font-size:.72rem;color:var(--mid);margin-top:.75rem;line-height:1.55;">'
+    +'<strong>Google Calendar:</strong> open the Calendar app \u2192 menu \u2192 Settings \u2192 Add calendar \u2192 "From URL" \u2192 paste the link.<br>'
+    +'<strong>Apple Calendar (iPhone):</strong> open the Settings app \u2192 Calendar \u2192 Accounts \u2192 Add Account \u2192 Other \u2192 Add Subscribed Calendar \u2192 paste the link.'
+    +'</div>'
+    +'<button onclick="var b=document.getElementById(\'cal-feed-modal-back\');if(b)b.remove();" style="width:100%;margin-top:.9rem;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">Close</button>'
+    +'</div>';
+  document.body.appendChild(back);
+}
 async function _showCalendarFeedLink(){
   const myName = getMyDriverName(); if(!myName) return;
   const box = document.getElementById('cal-feed-link-box');
   const instr = document.getElementById('cal-feed-instructions');
-  const btn = document.getElementById('cal-feed-btn');
+  const btn = document.getElementById('cal-feed-link-btn');
   if(!box) return;
   box.style.display = 'block';
   box.textContent = 'Generating your link\u2026';
