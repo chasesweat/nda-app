@@ -4,12 +4,6 @@ const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
 admin.initializeApp();
 
-// v2 HTTPS trigger, coexisting with the v1 database trigger above — firebase-functions ^6.0.0
-// (see package.json) supports both styles exported from the same file/deploy. Reuses the
-// `admin` app already initialized above rather than calling admin.initializeApp() a second
-// time, which would throw.
-const { onRequest } = require('firebase-functions/v2/https');
-
 exports.sendPush = functions.database
   .ref('/nda/kat/pushQueue/{id}')
   .onCreate(async (snap) => {
@@ -112,143 +106,10 @@ exports.sendPush = functions.database
     return null;
   });
 
-// ============================================================================================
-// calendarFeed — new addition, appended below sendPush. First HTTPS-triggered function in this
-// project; see NWDA-APP-HANDOFF.md v882 for the full "why" and the client-side half of this
-// feature (token generation, the Settings UI). Deploy with:
-//   firebase deploy --only functions:calendarFeed
-// After deploying, Firebase prints the real URL — confirm it matches the us-central1 guess
-// already in index.html's CALENDAR_FEED_BASE_URL (no .region() call anywhere in this file, so
-// the deploy should land on Firebase's default region, us-central1 — but confirm against the
-// actual printed URL rather than trusting that inference a second time).
-// ============================================================================================
-
-exports.calendarFeed = onRequest({ cors: true }, async (req, res) => {
-  try {
-    const token = (req.query.token || '').toString().trim();
-    if (!token) { res.status(400).send('Missing token'); return; }
-
-    const db = admin.database();
-
-    // Token → driver name. Written by index.html's _getOrCreateCalendarToken() to
-    // nda/kat/calendarTokens/{token} = { driverName, createdAt }.
-    const tokenSnap = await db.ref('nda/kat/calendarTokens/' + token).once('value');
-    if (!tokenSnap.exists()) { res.status(404).send('Invalid or expired calendar link'); return; }
-    const driverName = (tokenSnap.val() || {}).driverName || '';
-    if (!driverName) { res.status(404).send('Invalid or expired calendar link'); return; }
-
-    // Same node the app itself reads (kat:rides → nda/kat/rides), stored as an array.
-    const ridesSnap = await db.ref('nda/kat/rides').once('value');
-    const ridesRaw = ridesSnap.val() || [];
-    const rides = Array.isArray(ridesRaw) ? ridesRaw : Object.values(ridesRaw);
-
-    // This driver's rides only, with a real date, and not more than a day in the past —
-    // nobody needs six months of history clogging their phone calendar. No upper bound going
-    // forward; if it's scheduled, it shows.
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    const relevant = rides.filter(function (r) {
-      if (!r || !r.date) return false;
-      if (((r.driver || '').trim()) !== driverName) return false;
-      const dt = parseRideDateTime(r.date, r.time);
-      return dt && dt.getTime() > cutoff;
-    });
-
-    const ics = buildICS(relevant, driverName);
-    res.set('Content-Type', 'text/calendar; charset=utf-8');
-    // Calendar apps decide their own re-check interval regardless of this header on most
-    // platforms, but it costs nothing to be explicit about intent.
-    res.set('Cache-Control', 'no-cache, max-age=0');
-    res.status(200).send(ics);
-  } catch (err) {
-    console.error('calendarFeed error', err);
-    res.status(500).send('Server error building calendar feed');
-  }
-});
-
-// ---------------------------------------------------------------------------- helpers
-
-function parseRideDateTime(dateStr, timeStr) {
-  try {
-    const t = (timeStr || '00:00').trim() || '00:00';
-    const d = new Date(dateStr + 'T' + t + ':00');
-    return isNaN(d.getTime()) ? null : d;
-  } catch (e) { return null; }
-}
-
-// UTC, no separators — the DTSTAMP/DTSTART/DTEND format RFC 5545 requires.
-function icsStamp(date) {
-  return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-}
-
-// RFC 5545 §3.3.11 — commas, semicolons, backslashes, and newlines must be escaped in text
-// fields (SUMMARY, DESCRIPTION, LOCATION), or the file is invalid and some calendar apps will
-// refuse the whole feed rather than just mangling one field.
-function escapeICS(text) {
-  return String(text || '')
-    .replace(/\\/g, '\\\\')
-    .replace(/;/g, '\\;')
-    .replace(/,/g, '\\,')
-    .replace(/\n/g, '\\n');
-}
-
-// A ride has no tracked end time — this app has never needed one, since the schedule/quote
-// screens only ever store a start time. Default the calendar block to 1 hour, which is long
-// enough to be visible on a day view without implying false precision about when a ride
-// actually wraps up.
-const DEFAULT_EVENT_MINUTES = 60;
-
-function buildICS(rides, driverName) {
-  const now = new Date();
-  const lines = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//NWDA//Calendar Feed//EN',
-    'CALSCALE:GREGORIAN',
-    'METHOD:PUBLISH',
-    'X-WR-CALNAME:NWDA Rides \u2014 ' + escapeICS(driverName),
-    // Advisory hints some calendar apps (notably Google) honor for how often to re-check a
-    // subscribed feed. Not a guarantee — see the file-level comment above.
-    'REFRESH-INTERVAL;VALUE=DURATION:PT1H',
-    'X-PUBLISHED-TTL:PT1H',
-  ];
-
-  rides.forEach(function (r) {
-    const start = parseRideDateTime(r.date, r.time);
-    if (!start) return; // already filtered upstream, but never trust a second time for free
-    const end = new Date(start.getTime() + DEFAULT_EVENT_MINUTES * 60000);
-
-    const client = (r.client || 'Client').trim();
-    const type = (r.type || 'Ride').trim();
-    const summary = escapeICS(type + ' \u2014 ' + client);
-    const location = escapeICS(r.pickup || r.home || '');
-
-    const descParts = [];
-    if (r.pickup) descParts.push('Pickup: ' + r.pickup);
-    if (r.home && r.home !== r.pickup) descParts.push('Destination: ' + r.home);
-    if (r.flight) descParts.push('Flight: ' + r.flight);
-    if (r.terminal) descParts.push('Terminal: ' + r.terminal);
-    if (r.price !== undefined && r.price !== null && r.price !== '') descParts.push('Price: $' + r.price);
-    const description = escapeICS(descParts.join('\n'));
-
-    lines.push(
-      'BEGIN:VEVENT',
-      'UID:' + (r.id !== undefined ? r.id : (client + start.getTime())) + '@nwda-calendar-feed',
-      'DTSTAMP:' + icsStamp(now),
-      'DTSTART:' + icsStamp(start),
-      'DTEND:' + icsStamp(end),
-      'SUMMARY:' + summary,
-      (location ? 'LOCATION:' + location : null),
-      (description ? 'DESCRIPTION:' + description : null),
-      'END:VEVENT'
-    );
-  });
-
-  lines.push('END:VCALENDAR');
-  // RFC 5545 requires CRLF line endings, not bare \n.
-  return lines.filter(function (l) { return l !== null; }).join('\r\n');
-}
-
-// Exported for testing without deploying — see calendarFeed-test.js.
-module.exports.buildICS = buildICS;
-module.exports.escapeICS = escapeICS;
-module.exports.parseRideDateTime = parseRideDateTime;
+// calendarFeed used to live here too, but that code was never actually what got deployed.
+// The real, working calendarFeed is a separate Cloud Run service (created directly through
+// Cloud Run's console, using @google-cloud/functions-framework, not the firebase-functions SDK
+// this file uses) — see NWDA-APP-HANDOFF.md, v885, for the full story of why and what it took
+// to get it actually working. It is not tracked in this repo. If it's ever moved into proper
+// source control, it needs its own file/package.json (different runtime style than sendPush
+// above, so it cannot simply be pasted back into this file without conflicts).
