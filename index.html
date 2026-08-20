@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191897">
+<meta name="version" content="202608191899">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -834,7 +834,6 @@ input,select,textarea{font-size:16px;}
         <button id="cal-familywall-btn" onclick="manualICSPaste()" style="background:var(--accent);border:1.5px solid var(--accent);color:#fff;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">⬆ Import from FamilyWall</button>
         <button id="cal-feed-btn" onclick="_showCalendarFeedModal()" style="background:var(--accent);border:1.5px solid var(--accent);color:#fff;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">📅 Subscribe my calendar</button>
         <button id="fw-review-btn" onclick="_showFamilyWallReviewModal()" style="display:none;background:#f0997b;border:1.5px solid #f0997b;color:#fff;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">🧹 Review FamilyWall imports</button>
-        <button id="xxl-migrate-btn" onclick="_showXXLMigrationModal()" style="display:none;background:var(--gold);border:1.5px solid var(--gold);color:#fff;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">🔀 Migrate XXL rides</button>
         <button id="cal-quickadd-btn" onclick="openQuickAddModal()" style="background:var(--gold);color:#fff;border:1.5px solid var(--gold);border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">+ Add Ride</button>
       </div>
     </div>
@@ -6123,6 +6122,13 @@ function splitXXLRide(ride, xxlInfo){
   var ride2 = Object.assign({}, ride, {
     id: nextId++,
     pairId: pairId,
+    // Distinguishes this pairId from an AP Round Trip's (splitApRoundTripRide never sets
+    // this). Both features share the pairId mechanism for "two records, one linked trip,"
+    // but several places elsewhere in the app assumed pairId ALWAYS meant a round-trip leg
+    // pair specifically — showing "\u2708\ufe0f [type] \u2014 leg 2 of 2" and a "View outbound/
+    // return leg" button on an XXL-split ride, which isn't a leg of anything, just the 2nd
+    // vehicle for the same one trip. Reported directly: a ONE WAY ride showing "leg 2 of 2."
+    xxlPair: true,
     driver: xxlInfo.driver2,
     vehicle: xxlInfo.vehicle2,
     price: price2,
@@ -6139,6 +6145,7 @@ function splitXXLRide(ride, xxlInfo){
     trail: [],
   });
   ride.pairId = pairId;
+  ride.xxlPair = true;
   ride.price = price1;
   ride.xxl = false; ride.vehicle2 = ''; ride.driver2 = ''; ride.price2 = 0;
   return ride2;
@@ -9213,7 +9220,7 @@ function renderRideView(r){
   // no separate DOM write needed (it used to live in its own #rm-share-loc-btn div,
   // far from every other action button; consolidated so it can't render twice).
   var _slLocalType=(r.type==='ONE WAY'||r.type==='ROUND TRIP');
-  const _pairedRide = r.pairId ? (rides||[]).find(function(x){ return x.id!==r.id && x.pairId===r.pairId; }) : null;
+  const _pairedRide = (r.pairId && !r.xxlPair) ? (rides||[]).find(function(x){ return x.id!==r.id && x.pairId===r.pairId; }) : null;
   // Which leg is actually first is now an explicit choice made at scheduling (rtLegNumber),
   // not something inferable from type alone - a round trip can genuinely start with either
   // an AP Run or an AP Pickup, depending on whether the client is departing or arriving first.
@@ -9244,7 +9251,7 @@ function renderRideView(r){
     : '';
   if(!window._offeredRides) window._offeredRides=new Set();
   const _alreadyOffered=window._offeredRides.has(r.id);
-  const _pairedRideForBtn=(r.pairId&&rides)?rides.find(function(x){return x.id!==r.id&&x.pairId===r.pairId;}):null;
+  const _pairedRideForBtn=(r.pairId&&!r.xxlPair&&rides)?rides.find(function(x){return x.id!==r.id&&x.pairId===r.pairId;}):null;
   // Post to Offerings — creator (Kat↔Morgan treated as same), the assigned driver, or any
   // admin. This stays in the main ride card, not the Dispatch Tools panel below — it's a
   // "someone needs help" action for whoever's looking at this ride, not a reassignment
@@ -19100,84 +19107,6 @@ function _findSuspiciousFamilyWallRides(){
   });
 }
 
-// Finds legacy combined-XXL rides — ones still carrying the old xxl/driver2/vehicle2/price2
-// fields on a single record, from before splitXXLRide() started converting these into two
-// independent rides on every new save. Only relevant for existing data; any ride edited going
-// forward through the normal Edit form is already handled automatically.
-function _findLegacyXXLRides(){
-  return rides.filter(function(r){ return r && r.xxl && r.driver2; });
-}
-
-async function _showXXLMigrationModal(){
-  if(!isAdmin()){ showToast('Admins only','error'); return; }
-  const matches = _findLegacyXXLRides();
-  var back=document.createElement('div'); back.id='xxl-migration-modal-back';
-  back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13500;display:flex;align-items:center;justify-content:center;padding:1rem;';
-  const rowsHtml = matches.length ? matches.map(function(r){
-    const dateStr = r.date ? fmtDateShort(r.date) : '(no date)';
-    const timeStr = r.time ? fmtTime12(r.time) : '';
-    return '<label style="display:flex;align-items:flex-start;gap:.5rem;padding:.5rem;border-bottom:1px solid var(--light);cursor:pointer;">'
-      + '<input type="checkbox" class="xxl-migrate-check" value="'+r.id+'" checked style="margin-top:.2rem;accent-color:var(--gold);">'
-      + '<div style="flex:1;min-width:0;">'
-      + '<div style="font-size:.85rem;font-weight:700;color:var(--black);">'+escHtml(r.client||'(no client name)')+'</div>'
-      + '<div style="font-size:.72rem;color:var(--mid);">'+dateStr+(timeStr?' '+timeStr:'')+' \u00b7 '+escHtml(r.driver||'(unassigned)')+' + '+escHtml(r.driver2||'?')+' \u00b7 $'+(r.price!==undefined?r.price:'?')+' total ($'+(r.price2!==undefined?r.price2:'?')+' to 2nd driver)</div>'
-      + '</div></label>';
-  }).join('') : '<div style="padding:1rem;text-align:center;color:var(--mid);font-size:.85rem;">No legacy combined-XXL rides found \u2014 everything on record is already split into independent rides.</div>';
-  back.innerHTML='<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;padding:1.25rem;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
-    +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\uD83D\uDD00 Migrate XXL rides</div>'
-    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.7rem;line-height:1.45;">'+matches.length+' existing combined-XXL '+(matches.length===1?'ride':'rides')+' can be split into two independent rides each \u2014 same client, same trip, same total price, one for each driver. Nothing about the trip itself changes, only how it\u2019s recorded. Selected by default; uncheck any you don\u2019t want touched yet.</div>'
-    +(matches.length ? '<label style="display:flex;align-items:center;gap:.5rem;padding:.4rem .5rem;font-size:.78rem;font-weight:700;color:var(--black);border-bottom:2px solid var(--light);"><input type="checkbox" id="xxl-migrate-selectall" checked onchange="document.querySelectorAll(\'.xxl-migrate-check\').forEach(function(c){c.checked=this.checked}.bind(this))" style="accent-color:var(--gold);">Select all</label>' : '')
-    +'<div style="flex:1;overflow-y:auto;margin-bottom:.7rem;">'+rowsHtml+'</div>'
-    +(matches.length ? '<button type="button" onclick="_migrateSelectedXXLRides()" style="width:100%;padding:.6rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.85rem;margin-bottom:.5rem;">Split selected into independent rides</button>' : '')
-    +'<button onclick="var b=document.getElementById(\'xxl-migration-modal-back\');if(b)b.remove();" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">Close</button>'
-    +'</div>';
-  document.body.appendChild(back);
-}
-
-async function _migrateSelectedXXLRides(){
-  if(!isAdmin()){ showToast('Admins only','error'); return; }
-  const checked = Array.from(document.querySelectorAll('.xxl-migrate-check:checked'));
-  if(!checked.length){ showToast('Nothing selected','error'); return; }
-  const ids = checked.map(function(c){ return c.value; });
-  const _ok = await showConfirmModal({
-    icon:'\uD83D\uDD00', iconColor:'var(--gold)', iconBg:'#3a2a10',
-    title:'Split '+ids.length+' ride'+(ids.length===1?'':'s')+'?',
-    message:'This converts '+ids.length+' combined-XXL ride'+(ids.length===1?'':'s')+' into '+(ids.length===1?'two independent rides':(ids.length*2)+' independent rides')+'. Same trip, same total price, just recorded as separate rides per driver going forward.',
-    buttons:[
-      {label:'Cancel', style:'neutral', value:false},
-      {label:'Split '+ids.length, style:'primary', value:true}
-    ]
-  });
-  if(!_ok) return;
-  let migrated=0, failed=0;
-  for(const idStr of ids){
-    const id = isNaN(Number(idStr)) ? idStr : Number(idStr);
-    const r = _rideById(id);
-    if(!r || !r.xxl || !r.driver2){ continue; } // already migrated or gone since the modal opened
-    const xxlInfo = { vehicle2: r.vehicle2, driver2: r.driver2, price2: r.price2 };
-    try{
-      const ride2 = splitXXLRide(r, xxlInfo);
-      touchRide(r, 'migrated to two independent rides');
-      touchRide(ride2, 'created (XXL migration)');
-      rides.push(ride2);
-      if(ride2.driver) addNotification(ride2.driver, ride2, 'assigned');
-      migrated++;
-    }catch(e){
-      console.warn('XXL migration failed for ride', id, e);
-      failed++;
-    }
-  }
-  try{ await saveRides(); await saveNotifs(); }catch(e){
-    console.warn('XXL migration save failed', e);
-    showToast('\u26a0\ufe0f Migration did not save \u2014 check your connection and try again', 'error');
-    return;
-  }
-  showToast('\u2713 Split '+migrated+' ride'+(migrated===1?'':'s')+' into independent rides'+(failed?' \u2014 '+failed+' failed':''));
-  refreshDash(); renderCal();
-  const back=document.getElementById('xxl-migration-modal-back'); if(back) back.remove();
-  _showXXLMigrationModal();
-}
-
 async function _showFamilyWallReviewModal(){
   if(!currentUser || currentUser.name!=='Chase'){ showToast('Chase only','error'); return; }
   const matches = _findSuspiciousFamilyWallRides();
@@ -26317,12 +26246,6 @@ function enterApp(){
   // Kat and Morgan). Deliberate: this deletes data immediately with no approval and no undo,
   // scoped tighter than the rest of the admin surface on purpose.
   if(fwReviewBtn) fwReviewBtn.style.display = (currentUser && currentUser.name==='Chase') ? 'inline-block' : 'none';
-  // Admin-gated, not Chase-only — unlike Review FamilyWall imports (which permanently
-  // deletes data), migrating an XXL ride preserves everything, just restructures it into two
-  // records. Matches the access level of the rest of Dispatch Tools rather than the tighter
-  // scope the delete tool deliberately used.
-  const xxlMigrateBtn = document.getElementById('xxl-migrate-btn');
-  if(xxlMigrateBtn) xxlMigrateBtn.style.display = admin ? 'inline-block' : 'none';
   const archivedTab2=document.getElementById('mptab-archived'); if(archivedTab2) archivedTab2.style.display=admin?'inline-block':'none';
   const pricingTab2=document.getElementById('mptab-pricing'); if(pricingTab2) pricingTab2.style.display=admin?'inline-block':'none';
   const templatesTab=document.getElementById('mptab-templates');
