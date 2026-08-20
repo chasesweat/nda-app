@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191908">
+<meta name="version" content="202608191909">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -6841,63 +6841,61 @@ function _prefillFromClientRequest(req){
     if(el && val!=null && val!=='') el.value = val;
     return el;
   };
-  setTimeout(function(){
-    try{
-      // Type first - it drives which other fields are even visible on both forms.
-      var typeEl = document.getElementById(P+'-type');
-      if(typeEl && req.type){
-        typeEl.value = req.type;
-        try{ isQuote ? updateTripFields() : qaTypeChanged(); }catch(e){}
-      }
-      set('client', req.clientName);
-      set('phone', req.clientPhone);
-      set('email', req.clientEmail);
-      set('vehicle', req.vehicle);
-      set('date', req.date);
-      set('time', req.time);
-      set('flight', req.flight);
-      set('terminal', req.terminal);
-      set('rt-date', req.rtDate);
-      set('rt-time', req.rtTime);
-      set('rt-flight', req.rtFlight);
-      set('rt-terminal', req.rtTerminal);
-      set('pax', req.pax);
-      set('checked-bags', req.checkedBags);
-      set('carryon-bags', req.carryOnBags);
-      // Address field names differ between the two forms - Quote uses pickup/dropoff, Quick Add
-      // uses pickup/home. Mapped explicitly rather than assumed identical. (Note qa-leg-pickup
-      // is a CHECKBOX, not an address field, despite the name - writing an address into it
-      // would silently corrupt the form.)
-      if(isQuote){
-        set('pickup', req.pickup);
-        set('dropoff', req.destination);
-      } else {
-        set('pickup', req.pickup);
-        var _hm = document.getElementById('qa-home'); if(_hm && req.destination) _hm.value = req.destination;
-      }
-      // Notes: qa-notes exists; a q-notes element is referenced elsewhere in the file but isn't
-      // actually in the Quote markup, so set() safely no-ops there. Rather than silently drop
-      // what the client wrote, surface it in the toast below when there's nowhere to put it.
-      var _notesLanded = false;
-      if(req.notes){
-        var _nEl = document.getElementById(P+'-notes');
-        if(_nEl){ _nEl.value = req.notes; _notesLanded = true; }
-      }
-      // Now trigger the real recalculation chain, exactly as if a person had typed these.
-      if(isQuote){
-        try{ onDateChange(); }catch(e){}
-        try{ onTimeChange(); }catch(e){}
-        try{ debounceMileage(); }catch(e){}
-        try{ calcQuote(); }catch(e){}
-      } else {
-        try{ onQaDateTimeChange(); }catch(e){}
-        try{ recalcQa(); }catch(e){}
-      }
-      var _msg = '\u2713 Filled in from '+(req.clientName||'the client')+'\u2019s request \u2014 check it over before saving';
-      if(req.notes && !_notesLanded) _msg += ' \u00b7 Their note: \u201c'+req.notes+'\u201d';
-      showToast(_msg);
-    }catch(e){ console.warn('prefill from client request failed', e); }
-  }, isQuote ? 260 : 160); // let the page/sheet finish opening before writing into it
+  try{
+    // Type first - it drives which other fields are even visible on both forms.
+    var typeEl = document.getElementById(P+'-type');
+    if(typeEl && req.type){
+      typeEl.value = req.type;
+      try{ isQuote ? updateTripFields() : qaTypeChanged(); }catch(e){}
+    }
+    set('client', req.clientName);
+    set('phone', req.clientPhone);
+    set('email', req.clientEmail);
+    set('vehicle', req.vehicle);
+    set('date', req.date);
+    set('time', req.time);
+    set('flight', req.flight);
+    set('terminal', req.terminal);
+    set('rt-date', req.rtDate);
+    set('rt-time', req.rtTime);
+    set('rt-flight', req.rtFlight);
+    set('rt-terminal', req.rtTerminal);
+    set('pax', req.pax);
+    set('checked-bags', req.checkedBags);
+    set('carryon-bags', req.carryOnBags);
+    // Address field names differ between the two forms - Quote uses pickup/dropoff, Quick Add
+    // uses pickup/home. Mapped explicitly rather than assumed identical. (Note qa-leg-pickup
+    // is a CHECKBOX, not an address field, despite the name - writing an address into it
+    // would silently corrupt the form.)
+    if(isQuote){
+      set('pickup', req.pickup);
+      set('dropoff', req.destination);
+    } else {
+      set('pickup', req.pickup);
+      var _hm = document.getElementById('qa-home'); if(_hm && req.destination) _hm.value = req.destination;
+    }
+    // Notes: qa-notes exists; a q-notes element is referenced elsewhere in the file but isn't
+    // actually in the Quote markup, so set() safely no-ops there. Rather than silently drop
+    // what the client wrote, surface it in the toast below when there's nowhere to put it.
+    var _notesLanded = false;
+    if(req.notes){
+      var _nEl = document.getElementById(P+'-notes');
+      if(_nEl){ _nEl.value = req.notes; _notesLanded = true; }
+    }
+    // Now trigger the real recalculation chain, exactly as if a person had typed these.
+    if(isQuote){
+      try{ onDateChange(); }catch(e){}
+      try{ onTimeChange(); }catch(e){}
+      try{ debounceMileage(); }catch(e){}
+      try{ calcQuote(); }catch(e){}
+    } else {
+      try{ onQaDateTimeChange(); }catch(e){}
+      try{ recalcQa(); }catch(e){}
+    }
+    var _msg = '\u2713 Filled in from '+(req.clientName||'the client')+'\u2019s request \u2014 check it over before saving';
+    if(req.notes && !_notesLanded) _msg += ' \u00b7 Their note: \u201c'+req.notes+'\u201d';
+    showToast(_msg);
+  }catch(e){ console.warn('prefill from client request failed', e); }
 }
 
 function handleNotifClick(el){
@@ -6918,14 +6916,30 @@ function handleNotifClick(el){
   // (v851) - a quote request goes to the Quote page, a ride request to the Quick Add sheet.
   // Falls through to the old behaviour if an older notification has no payload attached, so
   // notifications created before this build still route somewhere sensible instead of breaking.
+  //
+  // Real bug, reported directly: date/time (and only date/time) came up blank in the opened
+  // form, even though the notification's own summary text correctly showed both. Root cause:
+  // this used to fire _prefillFromClientRequest() via its OWN separate setTimeout(160ms),
+  // racing against openQuickAddModal()'s separate setTimeout(150ms) - which has its own
+  // "default date to today if empty" reset logic. Two independently-scheduled timers only 10ms
+  // apart is not a guaranteed order, just a usual one; when openQuickAddModal()'s own
+  // synchronous setup work (rendering driver options, wiring autocomplete, etc.) took long
+  // enough to spill past the 10ms gap, the prefill's own timer could fire and set the correct
+  // date, only for openQuickAddModal() to still be mid-reset and stamp over it with today's
+  // date moments later. Fixed by removing the race entirely: prefill is now called directly
+  // inside openQuickAddModal()'s own callback, guaranteed to run only after its reset has
+  // fully finished, not timed to merely usually land after it.
   if(type==='client_request' && _req){
     if(_req.requestType === 'quote'){
       nav('quote');
+      setTimeout(function(){ try{ _prefillFromClientRequest(_req); }catch(e){} }, 260);
     } else {
       nav('calendar');
-      setTimeout(function(){ try{ openQuickAddModal(); }catch(e){} }, 150);
+      setTimeout(function(){
+        try{ openQuickAddModal(); }catch(e){}
+        try{ _prefillFromClientRequest(_req); }catch(e){}
+      }, 150);
     }
-    _prefillFromClientRequest(_req);
     return;
   }
   // Route to wherever the notification came from
