@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191899">
+<meta name="version" content="202608191901">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -16498,9 +16498,17 @@ async function assignDriver(){
   if(newDriver!==oldDriver) touchRide(r, newDriver ? 'assigned to '+newDriver.split(' ')[0] : 'unassigned');
   var _wasConfirmed=(r.confirmSent||r.status==='confirmed');
   var _shouldNotify = (newDriver!==oldDriver && _wasConfirmed && newDriver);
+  // Chase's explicit call: a driver change no longer resets confirmSent/status/
+  // confirmSentBy/confirmSentAt at all. Previously this demoted an already-confirmed ride
+  // back to Scheduled (and, as of the fix right before this one, also cleared the "sent by"
+  // attribution to match) — but the actual ask, once clarified, was the opposite direction:
+  // don't reset any of it, keep the ride showing as confirmed straight through a driver
+  // change. driverChangedPending still gets set below — that's a different, narrower signal
+  // (lets a future re-send of the confirmation text mention the driver changed) that doesn't
+  // touch status or the checkmark, so it stays.
   if(newDriver!==oldDriver && _wasConfirmed){
-    r.confirmSent=false; if(r.status==='confirmed') r.status='scheduled'; r.driverChangedPending=true;
-    touchRide(r, 'driver changed \u2014 confirmation reset to Scheduled');
+    r.driverChangedPending=true;
+    touchRide(r, 'driver changed');
   }
   await saveRides();
   await saveNotifs();
@@ -16528,7 +16536,7 @@ async function assignDriver(){
     try{ if(typeof renderConfirmations==='function') renderConfirmations(); }catch(e){}
     try{ if(typeof renderDashConfirmations==='function') renderDashConfirmations(); }catch(e){}
   }
-  if(newDriver!==oldDriver && _wasConfirmed){ showToast('Driver changed \u2014 ride set back to Scheduled. Re-send the confirmation to notify the client.'); }
+  if(newDriver!==oldDriver && _wasConfirmed){ showToast('Driver changed \u2014 the client\u2019s confirmation still shows the old driver until you re-send it.'); }
   if(_driverNeedsOverride) await sendAvailOverrideRequest(r, currentUser?.name||'');
 }
 
