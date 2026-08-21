@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191925">
+<meta name="version" content="202608191927">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1680,8 +1680,8 @@ input,select,textarea{font-size:16px;}
            particular was cramped on a phone - it has to fit hours, minutes, AND the AM/PM
            selector into half a row, which is also why its label carries a "(check AM/PM)"
            warning: an easy thing to get wrong at a glance. -->
-      <div class="form-group" style="grid-column:1/-1;"><label>Date</label><input type="date" id="qa-date" onchange="onQaDateTimeChange();checkPriceShopping('qa');updateQaSuggestedPickupTime();qaCheckLegs()" /></div>
-      <div class="form-group" style="grid-column:1/-1;"><label>Time <span style="font-weight:600;color:var(--mid);font-size:.72rem;">(check AM/PM)</span></label><input type="time" id="qa-time" onchange="onQaDateTimeChange()" /></div>
+      <div class="form-group" style="grid-column:1/-1;"><label id="qa-date-lbl">Date</label><input type="date" id="qa-date" onchange="onQaDateTimeChange();checkPriceShopping('qa');updateQaSuggestedPickupTime();qaCheckLegs()" /></div>
+      <div class="form-group" style="grid-column:1/-1;"><label id="qa-time-lbl">Time <span style="font-weight:600;color:var(--mid);font-size:.72rem;">(check AM/PM)</span></label><input type="time" id="qa-time" onchange="onQaDateTimeChange()" /></div>
       <div class="form-group"><label>Travel Type</label>
         <select id="qa-type" onchange="qaTypeChanged()">
           <option>AP ROUND TRIP</option>
@@ -1691,6 +1691,27 @@ input,select,textarea{font-size:16px;}
           <option>ONE WAY</option>
           <option value="MEDICAL">Medical Transport</option>
         </select>
+      </div>
+      <!-- Reported directly: this used to live inside qa-rt-section, sandwiched between Leg 1's
+           mileage box and Leg 2's own fields - meaning it appeared AFTER a driver had already
+           filled in Leg 1's addresses, despite being the exact thing that decides what those
+           addresses mean. Moved here, right after Travel Type, so the decision comes before any
+           address field it actually governs - qaRtFirstLegChanged() itself needed no changes,
+           since it operates entirely through getElementById() lookups with no dependency on
+           where this toggle physically sits in the page. -->
+      <div id="qa-rt-first-section" class="form-group" style="grid-column:1/-1;display:none;background:#fff;border:1.5px solid #d8b4fe;border-radius:8px;padding:.6rem .7rem;">
+        <div style="font-size:.72rem;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#7c3aed;margin-bottom:.4rem;">Which happens first?</div>
+        <div style="font-size:.68rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Most trips start with dropping someone off. If your client is arriving first and you're picking them up before the return leg, choose that instead — this decides which address fields mean what below, so getting it right here keeps the two legs from getting swapped.</div>
+        <div style="display:flex;gap:.5rem;">
+          <label style="flex:1;display:flex;align-items:center;gap:.4rem;padding:.45rem .6rem;border:1.5px solid #7c3aed;border-radius:7px;background:#7c3aed;color:#fff;cursor:pointer;font-size:.78rem;font-weight:600;" id="qa-rt-first-run-label">
+            <input type="radio" name="qa-rt-first" id="qa-rt-first-run" value="AP RUN" checked onchange="qaRtFirstLegChanged()" style="margin:0;">
+            AP Run (dropping off)
+          </label>
+          <label style="flex:1;display:flex;align-items:center;gap:.4rem;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:7px;background:#fff;color:var(--black);cursor:pointer;font-size:.78rem;font-weight:600;" id="qa-rt-first-pickup-label">
+            <input type="radio" name="qa-rt-first" id="qa-rt-first-pickup" value="AP PICK UP" onchange="qaRtFirstLegChanged()" style="margin:0;">
+            AP Pickup (picking up)
+          </label>
+        </div>
       </div>
       <div class="form-group"><label>Vehicle</label>
         <select id="qa-vehicle" onchange="recalcQa()">
@@ -1802,20 +1823,6 @@ input,select,textarea{font-size:16px;}
            appeared BEFORE those fields even existed on screen, asking to confirm a leg was
            ready before its own details had been shown at all. -->
       <div id="qa-rt-section" style="grid-column:1/-1;display:none;background:#f9f4ff;border-radius:10px;padding:.75rem;margin-top:.25rem;">
-        <div style="background:#fff;border:1.5px solid #d8b4fe;border-radius:8px;padding:.6rem .7rem;margin-bottom:.75rem;">
-          <div style="font-size:.72rem;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#7c3aed;margin-bottom:.4rem;">Which happens first?</div>
-          <div style="font-size:.68rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Most trips start with dropping someone off. If your client is arriving first and you're picking them up before the return leg, choose that instead — this decides which address fields mean what above, so getting it right here keeps the two legs from getting swapped.</div>
-          <div style="display:flex;gap:.5rem;">
-            <label style="flex:1;display:flex;align-items:center;gap:.4rem;padding:.45rem .6rem;border:1.5px solid #7c3aed;border-radius:7px;background:#7c3aed;color:#fff;cursor:pointer;font-size:.78rem;font-weight:600;" id="qa-rt-first-run-label">
-              <input type="radio" name="qa-rt-first" id="qa-rt-first-run" value="AP RUN" checked onchange="qaRtFirstLegChanged()" style="margin:0;">
-              AP Run (dropping off)
-            </label>
-            <label style="flex:1;display:flex;align-items:center;gap:.4rem;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:7px;background:#fff;color:var(--black);cursor:pointer;font-size:.78rem;font-weight:600;" id="qa-rt-first-pickup-label">
-              <input type="radio" name="qa-rt-first" id="qa-rt-first-pickup" value="AP PICK UP" onchange="qaRtFirstLegChanged()" style="margin:0;">
-              AP Pickup (picking up)
-            </label>
-          </div>
-        </div>
         <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#7c3aed;margin-bottom:.6rem;" id="qa-rt-section-label">Return Leg (AP Pickup)</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
           <div class="form-group"><label>Return Date</label><input type="date" id="qa-rt-date" onchange="onQaReturnLegDateTimeChange();qaCheckLegs()" /></div>
@@ -15256,6 +15263,14 @@ function openQuickAddModal(){
   const qrfrEl=document.getElementById('qa-rt-first-run'); if(qrfrEl) qrfrEl.checked=true;
   const qrfpEl=document.getElementById('qa-rt-first-pickup'); if(qrfpEl) qrfpEl.checked=false;
   try{ qaRtFirstLegChanged(); }catch(e){}
+  // Found while moving the "which happens first" toggle: qa-type itself was never reset here
+  // either - the SAME gap, one level up. A previous ride's trip type (e.g. AP Round Trip)
+  // could carry over onto an unrelated new one, including keeping the round-trip-only sections
+  // (qa-rt-section, qa-rt-first-section) visible for a ride that isn't a round trip at all.
+  // Reset to the default (AP Run) and re-run qaTypeChanged() so everything depending on type -
+  // section visibility, labels, medical-hours field - re-applies correctly for a fresh ride.
+  const qtEl=document.getElementById('qa-type'); if(qtEl) qtEl.value='AP RUN';
+  try{ qaTypeChanged(); }catch(e){}
   renderQaAddons(); recalcQa();
   // Default date to today
   const dEl=document.getElementById('qa-date');
@@ -15272,6 +15287,7 @@ function openQuickAddModal(){
   // did, so without this the fields would sit visible on a freshly-opened Run until the user
   // happened to change the type.
   try{ applyAirportFieldVisibility('qa'); }catch(e){}
+  try{ qaUpdateDateTimeLabels(); }catch(e){}
   try{ renderQaAddrPickers(); }catch(e){}
 }
 
@@ -29550,11 +29566,33 @@ function qaRtFirstLegChanged(){
   try{ qaCheckLegs(); }catch(e){}
 }
 
+// Reported directly: the main Date/Time field's meaning was ambiguous - could read as either
+// the pickup time or the flight's own departure time, with nothing on screen to tell a driver
+// which. Quote already had this exact distinction correctly labeled ("Departing Date & Time"
+// vs "Arrival Date & Time" for AP Pick Up specifically, since a client arriving on a flight has
+// nothing "departing" from the driver's side) - Quick Add just never got the same treatment.
+// Matched verbatim, adapted for Quick Add's two separate Date/Time fields instead of Quote's
+// one combined label. AP Pick Up is the only type where this field means the flight's own
+// arrival, not the pickup/departure time - everything else (including AP Round Trip's outbound
+// leg, and non-airport types) keeps "Departing". Extracted as its own minimal function, safe to
+// call from openQuickAddModal() on a fresh open without also triggering qaTypeChanged()'s other
+// side effects (recalcQa, address autofill, etc.) this early in the reset sequence.
+function qaUpdateDateTimeLabels(){
+  const t=document.getElementById('qa-type')?.value;
+  const qaDateLbl=document.getElementById('qa-date-lbl');
+  const qaTimeLbl=document.getElementById('qa-time-lbl');
+  const _isArrival=(t==='AP PICK UP');
+  if(qaDateLbl) qaDateLbl.textContent = _isArrival ? 'Arrival Date' : 'Departing Date';
+  if(qaTimeLbl) qaTimeLbl.innerHTML = (_isArrival ? 'Arrival Time' : 'Departing Time') + ' <span style="font-weight:600;color:var(--mid);font-size:.72rem;">(check AM/PM)</span>';
+}
 function qaTypeChanged(){
   const t=document.getElementById('qa-type')?.value;
   const sec=document.getElementById('qa-rt-section');
   if(sec) sec.style.display=(t==='AP ROUND TRIP')?'block':'none';
+  const secFirst=document.getElementById('qa-rt-first-section');
+  if(secFirst) secFirst.style.display=(t==='AP ROUND TRIP')?'block':'none';
   try{ qaUpdateHomeAddrCbLabel(); }catch(e){}
+  try{ qaUpdateDateTimeLabels(); }catch(e){}
   // Medical transport is billed hourly, so it needs its own hours field (same as the Quote form).
   const mhg=document.getElementById('qa-med-hours-group');
   if(mhg) mhg.style.display=(t==='MEDICAL')?'block':'none';
