@@ -280,7 +280,7 @@
         <div class="section-lbl">Coming back</div>
         <div class="field"><label>Date arriving</label><input id="f-rt-date" type="date"></div>
         <div class="field"><label>What time does your flight land?</label><input id="f-rt-time" type="time"></div>
-        <div class="field" id="rt-flight-field"><label>Return flight # <span style="font-weight:600;color:var(--mid);font-size:.78rem;">(optional)</span></label><input id="f-rt-flight" placeholder="e.g. DL5678">
+        <div class="field" id="rt-flight-field"><label>Return flight #</label><input id="f-rt-flight" placeholder="e.g. DL5678">
           <div class="hint">Lets your driver track your flight and adjust for delays.</div>
         </div>
         <!-- Terminals differ per leg far more often than clients expect - flying out of one and
@@ -349,6 +349,7 @@ const firebaseConfig = {
 let fbDB = null;
 let driverLogin = '';
 let driverInfo = null;
+let submittingDriverName = '';
 let requestType = 'schedule';
 let tripType = 'AP ROUND TRIP';
 // Set only when a valid per-client booking token resolves (see init()) - clientKeyFromToken
@@ -467,6 +468,12 @@ async function init(){
     const snap = await fbDB.ref('nda/kat/publicDriverDirectory/'+driverLogin).once('value');
     if(!snap.exists()){ goScreen('s-invalid'); return; }
     driverInfo = snap.val();
+    // Captured here, before any token-based branding override below can replace
+    // driverInfo.displayName with the CLIENT OWNER's name for personalized links. The push
+    // notification on submit needs to reach the actual driver tied to this driverLogin/link —
+    // the same one the in-app notification already correctly goes to — not whichever name is
+    // currently showing on the page for branding purposes.
+    submittingDriverName = driverInfo.displayName || '';
   }catch(e){
     console.warn('Directory lookup failed:', e.message);
     goScreen('s-invalid');
@@ -925,6 +932,11 @@ async function submitRequest(){
   const isRet = RETURN_TYPES.indexOf(tripType) >= 0;
 
   if(!name || !phone){ showFormError('Please enter your name and phone number.'); return; }
+  // The label used to say "(optional)" but drivers genuinely need this to track a delayed
+  // return flight — reported directly. Only enforced when the field is actually relevant
+  // (airport + round trip, matching the exact same isAir/isRet condition already used just
+  // below to decide whether rtFlight even gets sent at all).
+  if(isAir && isRet && !rtFlight){ showFormError('Please enter your return flight number so your driver can track it for delays.'); return; }
   document.getElementById('form-error').style.display = 'none';
 
   // Established client (has a token) typed something that doesn't match any of their saved
@@ -988,6 +1000,32 @@ async function submitRequest(){
     showFormError('Something went wrong sending this \u2014 please try again in a moment.');
     return;
   }
+
+  // Reported directly: no push notification when a client submits a request. Traced
+  // precisely - the actual push, before this, only ever got queued by processClientRequests(),
+  // a function that lives entirely in the main app and only runs on a 60-second client-side
+  // poll while someone happens to have that app open. Nothing server-side ever triggered it on
+  // its own. The sendPush Cloud Function itself is already solid - a database onCreate
+  // trigger, fires the instant anything appears in pushQueue, no polling, no app needed - it
+  // just never had anything written there for a brand-new request until some driver's app
+  // later happened to be open. Fixed at the real source: this page already has a live
+  // connection to the same Firebase project, so it queues the push itself, the same moment it
+  // submits the request, using the exact entry shape sendPushToDriver() already writes
+  // elsewhere in the main app - independent of anyone's app being open at all. Wrapped in its
+  // own try/catch and never blocks the actual submission above, which already succeeded and
+  // is the part that actually matters if this one step fails.
+  try{
+    var _kind = requestType==='quote' ? 'Quote request' : 'Ride request';
+    if(submittingDriverName){
+      var _pushId = Date.now()+'_'+Math.random().toString(36).slice(2,7);
+      await fbDB.ref('nda/kat/pushQueue/'+_pushId).set({
+        to: submittingDriverName,
+        title: '\ud83d\udccb New request via your booking link',
+        body: _kind+' from '+(name||'a client'),
+        ts: Date.now()
+      });
+    }
+  }catch(e){ console.warn('Push enqueue failed (request itself already submitted fine):', e.message); }
 
   const isQuote = requestType==='quote';
   const firstName = (driverInfo.displayName||'your driver').split(' ')[0];
