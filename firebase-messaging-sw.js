@@ -51,20 +51,32 @@ self.addEventListener('activate', function (e) { e.waitUntil(self.clients.claim(
 self.addEventListener('push', function (event) {
   let title = 'Northwest Drivers';
   let body = '';
+  let data = {};
 
   try {
     if (event.data) {
       const payload = event.data.json();
       // sendPush sends data-only, but read notification too so this keeps working if the
       // server side is ever changed to include one.
-      const d = payload.data || {};
+      data = payload.data || {};
       const n = payload.notification || {};
-      title = n.title || d.title || title;
-      body  = n.body  || d.body  || body;
+      title = n.title || data.title || title;
+      body  = n.body  || data.body  || body;
     }
   } catch (err) {
     // A malformed or non-JSON payload must NOT stop us showing something - a generic
     // notification is recoverable, a silent push on iOS costs the permission.
+  }
+
+  // Silent update-check push (nightlyUpdateCheck / functions-index.js, added v926). Not a
+  // driver-facing alert - sendPush sends this as {type:'force-update'} with no title/body, so
+  // without this branch it would fall through to the generic notification below and show an
+  // empty "Northwest Drivers" alert every night for no reason. Instead: no visible
+  // notification at all, just ask this worker to check for a newer deploy, matching the exact
+  // contract documented in functions-index.js's sendPush/nightlyUpdateCheck comments.
+  if (data.type === 'force-update') {
+    event.waitUntil(self.registration.update());
+    return;
   }
 
   // Tag derived from the message content, not a timestamp. Two DIFFERENT messages get
