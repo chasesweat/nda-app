@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191917">
+<meta name="version" content="202608191925">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -656,6 +656,7 @@ input,select,textarea{font-size:16px;}
     <div onclick="openPlaceholderModal()" style="display:inline-flex;align-items:center;gap:.35rem;margin:.5rem 0 .3rem;padding:.35rem .7rem;background:var(--surface);border:1.5px dashed var(--mid);border-radius:20px;font-size:.78rem;color:var(--mid);font-weight:600;cursor:pointer;">📌 Not sure yet? Just reserve the day</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:1rem;">
       <div>
+        <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--gold-text,#7c3aed);margin-bottom:.4rem;">Personal Info</div>
         <div class="form-group">
           <label>Client name</label>
           <input type="text" id="q-client" placeholder="Full name" list="q-client-list" autocomplete="off" oninput="checkClientConflict();maybeAutofillClient('q');renderAddrPickers('q');checkPriceShopping('q')" /><div id="q-priceshop-alert" style="display:none;font-size:.8rem;font-weight:600;color:#92400e;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:.5rem .7rem;margin-top:.5rem;line-height:1.4;"></div>
@@ -666,9 +667,20 @@ input,select,textarea{font-size:16px;}
           <input type="checkbox" id="q-new-client" onclick="this.dataset.userTouched='1'" style="width:15px;height:15px;cursor:pointer;accent-color:var(--gold);" />
           <label for="q-new-client" style="font-size:.82rem;cursor:pointer;color:var(--black);">New client — first time with NWDA</label>
         </div>
+        <!-- Home address, matching Quick Add's own version - feeds the SAME clientAddressOverrides
+             store setTripType() already reads from to auto-place a client's saved address into
+             Pickup (AP Run) or Destination (AP Pick Up) whenever the type changes. No separate
+             checkbox needed here the way Quick Add has one - the Quote page already does this
+             placement automatically, this field just makes the address visible and editable up
+             front rather than only ever appearing indirectly further down the form. -->
+        <div class="form-group"><label>Home Address <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(auto-fills Pickup/Destination below)</span></label>
+          <input type="text" id="q-home-address" placeholder="Start typing…" oninput="qHomeAddressChanged()" />
+        </div>
         <div class="form-group"><label>Phone</label><input type="text" id="q-phone" placeholder="404-555-0100" onblur="this.value=formatPhoneUS(this.value);checkCautiousForForm('q')" /></div>
         <div class="form-group"><label>Additional numbers on confirmation <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(comma-separated)</span></label><input type="text" id="q-extra-phones" placeholder="404-555-0102 (spouse), 770-555-0188 (assistant)" /></div>
         <div class="form-group"><label>Email</label><input type="email" id="q-email" placeholder="client@email.com" /></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;"><div class="form-group"><label>Passengers</label><input type="number" id="q-pax" aria-label="Number of passengers" value="1" min="1" max="14" oninput="calcQuote()" /></div><div class="form-group"><label>Checked Bags</label><input type="number" id="q-checked-bags" aria-label="Checked bags" value="0" min="0" /></div><div class="form-group"><label>Carry-on Bags</label><input type="number" id="q-carryon-bags" aria-label="Carry-on bags" value="0" min="0" /></div></div>
+        <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--gold-text,#7c3aed);margin:.75rem 0 .4rem;">Leg 1 &mdash; Trip Details</div>
         <div class="form-group">
           <label>Travel type<span class="mtip-dot" id="mtd-q-type" onclick="toggleMtip('q-type')" title="What&#8217;s this?">i</span><div class="mtip-pop" id="mtp-q-type">Picking this first decides which way the trip runs — the app fills Pickup &amp; Destination for you (home on one side, airport terminal on the other) and shows a <b>Flow</b> line so you can see the direction at a glance.</div></label>
           <div class="toggle-group" id="q-type-group">
@@ -741,6 +753,7 @@ input,select,textarea{font-size:16px;}
           <div class="addon-grid" id="q-addons"></div>
         </div>
         <div id="q-ap-rt-fields" style="display:none;">
+          <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--gold-text,#7c3aed);margin:.75rem 0 .4rem;">Leg 2 &mdash; Return</div>
           <div class="form-group">
             <label>Return Date &amp; Time</label>
             <div style="display:flex;gap:.5rem;">
@@ -750,7 +763,11 @@ input,select,textarea{font-size:16px;}
           </div>
           <div class="form-group"><label>Return flight #</label><input type="text" id="q-rt-flight" placeholder="e.g. DL1234" oninput="calcQuote()" /></div>
           <div class="form-group"><label>Return terminal</label>
-            <select id="q-rt-terminal" aria-label="Return terminal" onchange="rtTerminalPicked('q');calcQuote();"><option value="">—</option><option>North Domestic</option><option>South Domestic</option><option>International</option></select>
+            <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.35rem;">
+              <input type="checkbox" id="q-rt-terminal-same" checked onchange="qRtTerminalSameChanged()" style="width:15px;height:15px;cursor:pointer;accent-color:#7c3aed;" />
+              <label for="q-rt-terminal-same" style="font-size:.76rem;cursor:pointer;color:var(--black);">Same as leg 1</label>
+            </div>
+            <select id="q-rt-terminal" aria-label="Return terminal" onchange="rtTerminalPicked('q');calcQuote();" style="display:none;"><option value="">—</option><option>North Domestic</option><option>South Domestic</option><option>International</option></select>
           </div>
           <div class="form-group" id="q-addons-leg2-group" style="display:none;">
             <label>Surcharges — Leg 2 (return)</label>
@@ -758,9 +775,6 @@ input,select,textarea{font-size:16px;}
             <div class="addon-grid" id="q-addons-leg2"></div>
           </div>
         </div>
-        <div class="form-group"><label>Passengers</label><input type="number" id="q-pax" aria-label="Number of passengers" value="1" min="1" max="14" oninput="calcQuote()" /></div>
-        <div class="form-group"><label>Checked Bags</label><input type="number" id="q-checked-bags" aria-label="Checked bags" value="0" min="0" /></div>
-        <div class="form-group"><label>Carry-on Bags</label><input type="number" id="q-carryon-bags" aria-label="Carry-on bags" value="0" min="0" /></div>
         <div class="form-group" id="q-wait-group"><label>Wait time (hrs)</label><input type="number" id="q-wait" aria-label="Wait time in hours" value="0" min="0" step="0.25" oninput="calcQuote()" /></div>
         <!-- Stops moved to the address-row list below (#q-stops-wrap) as of v662. Each stop now
              gets its own address field AND drives the $10/stop fee - previously these were two
@@ -1640,21 +1654,33 @@ input,select,textarea{font-size:16px;}
     </div>
     <div onclick="closeQuickAddModal();openPlaceholderModal();" style="display:inline-flex;align-items:center;gap:.35rem;margin-bottom:.9rem;padding:.35rem .7rem;background:var(--surface);border:1.5px dashed var(--mid);border-radius:20px;font-size:.78rem;color:var(--mid);font-weight:600;cursor:pointer;">📌 Not sure yet? Just reserve the day</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-      <div class="form-group"><label>Client Name</label><input type="text" id="qa-client" placeholder="Full name" list="qa-client-list" autocomplete="off" oninput="checkQaClientOwnership();maybeAutofillClient('qa');renderQaAddrPickers();checkPriceShopping('qa')" /><datalist id="qa-client-list"></datalist><div id="qa-priceshop-alert" style="display:none;font-size:.8rem;font-weight:600;color:#92400e;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:.5rem .7rem;margin-top:.5rem;line-height:1.4;"></div></div>
-      <div class="form-group"><label>Phone</label><input type="text" id="qa-phone" placeholder="404-555-0100" oninput="checkPhoneFieldHint('qa')" onblur="checkCautiousForForm('qa')" /><div id="qa-phone-hint" style="display:none;font-size:.72rem;color:#b45309;margin-top:.25rem;">&#9888; That looks like an address. Phone numbers go here &mdash; put the address in the <b>Pickup Address</b> / <b>Drop-off</b> fields lower in this form.</div></div>
-      <div class="form-group" style="grid-column:1/-1;"><label>Email</label><input type="email" id="qa-email" placeholder="client@email.com" /></div>
+      <div style="grid-column:1/-1;font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--gold-text,#7c3aed);margin-bottom:.2rem;">Personal Info</div>
+      <div class="form-group" style="grid-column:1/-1;"><label>Client Name</label><input type="text" id="qa-client" placeholder="Full name" list="qa-client-list" autocomplete="off" oninput="checkQaClientOwnership();maybeAutofillClient('qa');renderQaAddrPickers();checkPriceShopping('qa')" /><datalist id="qa-client-list"></datalist><div id="qa-priceshop-alert" style="display:none;font-size:.8rem;font-weight:600;color:#92400e;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:.5rem .7rem;margin-top:.5rem;line-height:1.4;"></div></div>
       <div style="grid-column:1/-1;display:flex;align-items:center;gap:.5rem;margin-top:-.25rem;">
         <input type="checkbox" id="qa-new-client" onclick="this.dataset.userTouched='1'" style="width:15px;height:15px;cursor:pointer;accent-color:var(--gold);" />
         <label for="qa-new-client" style="font-size:.82rem;cursor:pointer;color:var(--black);">New client — first time with NWDA</label>
       </div>
       <div id="qa-client-warn" style="display:none;grid-column:1/-1;font-size:.85rem;font-weight:600;color:#92400e;background:#fef3c7;border:1.5px solid #f59e0b;border-radius:9px;padding:.6rem .85rem;line-height:1.55;margin-bottom:.25rem;"></div>
+      <!-- Home address, reported directly as a new field - feeds the SAME clientAddressOverrides
+           store renderAddrPickers() already reads for the pickup/destination saved-address
+           dropdowns further down, rather than a second, separate address concept. Typing a new
+           address here and saving the ride saves it as this client's default "Home" - so the
+           existing pickup-field dropdown (which already auto-selects a client's default saved
+           address whenever the field is empty) picks it up automatically, no separate wiring
+           needed for the "picking up from home" autofill this was built for. -->
+      <div class="form-group" style="grid-column:1/-1;"><label>Home Address <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(used to auto-fill pickup below)</span></label>
+        <input type="text" id="qa-home-address" placeholder="Start typing…" oninput="qaHomeAddressChanged()" />
+      </div>
+      <div class="form-group"><label>Phone</label><input type="text" id="qa-phone" placeholder="404-555-0100" oninput="checkPhoneFieldHint('qa')" onblur="checkCautiousForForm('qa')" /><div id="qa-phone-hint" style="display:none;font-size:.72rem;color:#b45309;margin-top:.25rem;">&#9888; That looks like an address. Phone numbers go here &mdash; put the address in the <b>Pickup Address</b> / <b>Drop-off</b> fields lower in this form.</div></div>
+      <div class="form-group"><label>Email</label><input type="email" id="qa-email" placeholder="client@email.com" /></div>
+      <div style="grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;"><div class="form-group"><label>Passengers</label><input type="number" id="qa-pax" min="1" max="14" value="1" /></div><div class="form-group"><label>Checked Bags</label><input type="number" id="qa-checked-bags" min="0" value="0" /></div><div class="form-group"><label>Carry-on Bags</label><input type="number" id="qa-carryon-bags" min="0" value="0" /></div></div>
       <!-- Date and Time each span the full grid width so Time sits BELOW Date rather than
            beside it (v847, Chase's request). Same grid-column:1/-1 pattern the Email field and
            the client-warning banner above already use. Side by side, the time input in
            particular was cramped on a phone - it has to fit hours, minutes, AND the AM/PM
            selector into half a row, which is also why its label carries a "(check AM/PM)"
            warning: an easy thing to get wrong at a glance. -->
-      <div class="form-group" style="grid-column:1/-1;"><label>Date</label><input type="date" id="qa-date" onchange="onQaDateTimeChange();checkPriceShopping('qa');updateQaSuggestedPickupTime()" /></div>
+      <div class="form-group" style="grid-column:1/-1;"><label>Date</label><input type="date" id="qa-date" onchange="onQaDateTimeChange();checkPriceShopping('qa');updateQaSuggestedPickupTime();qaCheckLegs()" /></div>
       <div class="form-group" style="grid-column:1/-1;"><label>Time <span style="font-weight:600;color:var(--mid);font-size:.72rem;">(check AM/PM)</span></label><input type="time" id="qa-time" onchange="onQaDateTimeChange()" /></div>
       <div class="form-group"><label>Travel Type</label>
         <select id="qa-type" onchange="qaTypeChanged()">
@@ -1665,47 +1691,6 @@ input,select,textarea{font-size:16px;}
           <option>ONE WAY</option>
           <option value="MEDICAL">Medical Transport</option>
         </select>
-      </div>
-      <div id="qa-rt-section" style="grid-column:1/-1;display:none;background:#f9f4ff;border-radius:10px;padding:.75rem;margin-top:.25rem;">
-        <div style="background:#fff;border:1.5px solid #d8b4fe;border-radius:8px;padding:.6rem .7rem;margin-bottom:.75rem;">
-          <div style="font-size:.72rem;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#7c3aed;margin-bottom:.4rem;">Which happens first?</div>
-          <div style="font-size:.68rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Most trips start with dropping someone off. If your client is arriving first and you're picking them up before the return leg, choose that instead — this decides which address fields mean what below, so getting it right here keeps the two legs from getting swapped.</div>
-          <div style="display:flex;gap:.5rem;">
-            <label style="flex:1;display:flex;align-items:center;gap:.4rem;padding:.45rem .6rem;border:1.5px solid #7c3aed;border-radius:7px;background:#7c3aed;color:#fff;cursor:pointer;font-size:.78rem;font-weight:600;" id="qa-rt-first-run-label">
-              <input type="radio" name="qa-rt-first" id="qa-rt-first-run" value="AP RUN" checked onchange="qaRtFirstLegChanged()" style="margin:0;">
-              AP Run (dropping off)
-            </label>
-            <label style="flex:1;display:flex;align-items:center;gap:.4rem;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:7px;background:#fff;color:var(--black);cursor:pointer;font-size:.78rem;font-weight:600;" id="qa-rt-first-pickup-label">
-              <input type="radio" name="qa-rt-first" id="qa-rt-first-pickup" value="AP PICK UP" onchange="qaRtFirstLegChanged()" style="margin:0;">
-              AP Pickup (picking up)
-            </label>
-          </div>
-        </div>
-        <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#7c3aed;margin-bottom:.6rem;" id="qa-rt-section-label">Return Leg (AP Pickup)</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-          <div class="form-group"><label>Return Date</label><input type="date" id="qa-rt-date" onchange="onQaReturnLegDateTimeChange()" /></div>
-          <div class="form-group"><label>Return Time</label><input type="time" id="qa-rt-time" onchange="onQaReturnLegDateTimeChange()" /></div>
-          <div class="form-group"><label id="qa-rt-flight-label">Return Flight #</label><input type="text" id="qa-rt-flight" placeholder="e.g. DL1234" /></div>
-          <div class="form-group"><label id="qa-rt-terminal-label">Return Terminal</label>
-            <select id="qa-rt-terminal" onchange="rtTerminalPicked('qa')"><option value="">—</option><option>North Domestic</option><option>South Domestic</option><option>International</option></select>
-          </div>
-          <div class="form-group" style="grid-column:1/-1;">
-            <label id="qa-addons-leg2-label">Surcharges &mdash; Leg 2 (return)</label>
-            <div style="font-size:.68rem;color:var(--mid);margin-bottom:.4rem;">Set independently from the outbound leg above &mdash; auto-filled from the return date/time, adjust as needed.</div>
-            <div class="addon-grid" id="qa-addons-leg2"></div>
-          </div>
-        </div>
-        <div style="margin-top:.6rem;padding:.5rem;background:#fff;border-radius:8px;border:1.5px solid #d8b4fe;">
-          <div style="font-size:.75rem;font-weight:600;color:#7c3aed;margin-bottom:.4rem;">Both legs must be confirmed before saving</div>
-          <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;">
-            <input type="checkbox" id="qa-leg-run" style="width:15px;height:15px;accent-color:#7c3aed;cursor:pointer;" onchange="qaCheckLegs()" />
-            <label for="qa-leg-run" id="qa-leg-run-label" style="font-size:.82rem;cursor:pointer;">AP Run — outbound leg ready</label>
-          </div>
-          <div style="display:flex;align-items:center;gap:.5rem;">
-            <input type="checkbox" id="qa-leg-pickup" style="width:15px;height:15px;accent-color:#7c3aed;cursor:pointer;" onchange="qaCheckLegs()" />
-            <label for="qa-leg-pickup" id="qa-leg-pickup-label" style="font-size:.82rem;cursor:pointer;">AP Pickup — return leg ready</label>
-          </div>
-        </div>
       </div>
       <div class="form-group"><label>Vehicle</label>
         <select id="qa-vehicle" onchange="recalcQa()">
@@ -1752,9 +1737,21 @@ input,select,textarea{font-size:16px;}
       <div class="form-group" style="grid-column:1/-1;"><label id="qa-addons-label">Surcharges</label>
         <div class="addon-grid" id="qa-addons"></div>
       </div>
+      <div style="grid-column:1/-1;font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--gold-text,#7c3aed);margin:.5rem 0 .2rem;" id="qa-leg1-lbl">Leg 1 &mdash; Trip Details</div>
+      <!-- Type-aware: home applies to PICKUP for AP RUN/ONE WAY/ROUND TRIP (client starts from
+           home), but to DESTINATION for AP PICK UP (client is dropped off at home after
+           landing). qaHomeAddrCheckboxChanged() resolves which field to fill based on the
+           current qa-type each time it's checked, rather than a fixed field. Only shown when
+           there's actually a home address to copy from. -->
+      <div class="form-group" style="grid-column:1/-1;display:none;" id="qa-home-addr-cb-group">
+        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
+          <input type="checkbox" id="qa-home-addr-cb" onchange="qaHomeAddrCheckboxChanged()" style="width:16px;height:16px;accent-color:#7c3aed;" />
+          <span style="font-size:.82rem;font-weight:600;" id="qa-home-addr-cb-label">&#127968; Same as home address above</span>
+        </label>
+      </div>
       <div class="form-group" style="grid-column:1/-1;"><label>Pickup</label>
         <select id="qa-pickup-mode" onchange="addrModeChanged('qa','pickup')" style="display:none;width:100%;margin-bottom:.4rem;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-size:.88rem;background:var(--white);"></select>
-        <input type="text" id="qa-pickup" placeholder="Start typing…" />
+        <input type="text" id="qa-pickup" placeholder="Start typing…" oninput="qaCheckLegs()" />
       </div>
       <div class="form-group" style="grid-column:1/-1;"><label>Gate code <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(optional — only you and the assigned driver see this)</span></label>
         <input type="text" id="qa-gate-code" placeholder="e.g. #1234" />
@@ -1763,7 +1760,7 @@ input,select,textarea{font-size:16px;}
       </div>
       <div class="form-group" style="grid-column:1/-1;"><label>Destination</label>
         <select id="qa-home-mode" onchange="addrModeChanged('qa','dest')" style="display:none;width:100%;margin-bottom:.4rem;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-size:.88rem;background:var(--white);"></select>
-        <input type="text" id="qa-home" placeholder="Start typing…" />
+        <input type="text" id="qa-home" placeholder="Start typing…" oninput="qaCheckLegs()" />
       </div>
 <!-- Terminal sits immediately below Destination because it is the field that DECIDES the
      airport address: picking it calls autoFillTerminalAddress()/qaAutoFillTerminalAddress()
@@ -1795,8 +1792,61 @@ input,select,textarea{font-size:16px;}
       </div>
       <div id="qa-suggested-pickup-box" style="display:none;background:#f3eeff;border:1px solid #d9c9f5;border-radius:8px;padding:.6rem .75rem;margin-bottom:.75rem;font-size:.8rem;color:var(--black);"></div>
       <div class="form-group" id="qa-flight-group"><label>Flight #</label><input type="text" id="qa-flight" placeholder="e.g. DL1234" /></div>
+      <!-- Moved here (was between Travel Type and Vehicle) - reported directly as "shoved in
+           the middle": both leg-ready checkboxes live in this one block since which checkbox
+           means "leg 1" vs "leg 2" dynamically relabels based on the Which Happens First toggle
+           (qaRtFirstLegChanged() below) - they can't be physically split across two separate
+           form sections without risking a checkbox appearing in the wrong place relative to
+           what it currently means. Moving the WHOLE block here instead, right after Leg 1's own
+           fields (Pickup through Flight #) end, fixes the real problem: previously this
+           appeared BEFORE those fields even existed on screen, asking to confirm a leg was
+           ready before its own details had been shown at all. -->
+      <div id="qa-rt-section" style="grid-column:1/-1;display:none;background:#f9f4ff;border-radius:10px;padding:.75rem;margin-top:.25rem;">
+        <div style="background:#fff;border:1.5px solid #d8b4fe;border-radius:8px;padding:.6rem .7rem;margin-bottom:.75rem;">
+          <div style="font-size:.72rem;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#7c3aed;margin-bottom:.4rem;">Which happens first?</div>
+          <div style="font-size:.68rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Most trips start with dropping someone off. If your client is arriving first and you're picking them up before the return leg, choose that instead — this decides which address fields mean what above, so getting it right here keeps the two legs from getting swapped.</div>
+          <div style="display:flex;gap:.5rem;">
+            <label style="flex:1;display:flex;align-items:center;gap:.4rem;padding:.45rem .6rem;border:1.5px solid #7c3aed;border-radius:7px;background:#7c3aed;color:#fff;cursor:pointer;font-size:.78rem;font-weight:600;" id="qa-rt-first-run-label">
+              <input type="radio" name="qa-rt-first" id="qa-rt-first-run" value="AP RUN" checked onchange="qaRtFirstLegChanged()" style="margin:0;">
+              AP Run (dropping off)
+            </label>
+            <label style="flex:1;display:flex;align-items:center;gap:.4rem;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:7px;background:#fff;color:var(--black);cursor:pointer;font-size:.78rem;font-weight:600;" id="qa-rt-first-pickup-label">
+              <input type="radio" name="qa-rt-first" id="qa-rt-first-pickup" value="AP PICK UP" onchange="qaRtFirstLegChanged()" style="margin:0;">
+              AP Pickup (picking up)
+            </label>
+          </div>
+        </div>
+        <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#7c3aed;margin-bottom:.6rem;" id="qa-rt-section-label">Return Leg (AP Pickup)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+          <div class="form-group"><label>Return Date</label><input type="date" id="qa-rt-date" onchange="onQaReturnLegDateTimeChange();qaCheckLegs()" /></div>
+          <div class="form-group"><label>Return Time</label><input type="time" id="qa-rt-time" onchange="onQaReturnLegDateTimeChange();qaCheckLegs()" /></div>
+          <div class="form-group"><label id="qa-rt-flight-label">Return Flight #</label><input type="text" id="qa-rt-flight" placeholder="e.g. DL1234" /></div>
+          <div class="form-group"><label id="qa-rt-terminal-label">Return Terminal</label>
+            <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.35rem;">
+              <input type="checkbox" id="qa-rt-terminal-same" checked onchange="qaRtTerminalSameChanged()" style="width:15px;height:15px;cursor:pointer;accent-color:#7c3aed;" />
+              <label for="qa-rt-terminal-same" style="font-size:.76rem;cursor:pointer;color:var(--black);">Same as leg 1</label>
+            </div>
+            <select id="qa-rt-terminal" onchange="rtTerminalPicked('qa')" style="display:none;"><option value="">—</option><option>North Domestic</option><option>South Domestic</option><option>International</option></select>
+          </div>
+          <div class="form-group" style="grid-column:1/-1;">
+            <label id="qa-addons-leg2-label">Surcharges &mdash; Leg 2 (return)</label>
+            <div style="font-size:.68rem;color:var(--mid);margin-bottom:.4rem;">Set independently from the outbound leg above &mdash; auto-filled from the return date/time, adjust as needed.</div>
+            <div class="addon-grid" id="qa-addons-leg2"></div>
+          </div>
+        </div>
+        <div style="margin-top:.6rem;padding:.5rem;background:#fff;border-radius:8px;border:1.5px solid #d8b4fe;">
+          <div style="font-size:.75rem;font-weight:600;color:#7c3aed;margin-bottom:.4rem;">Both legs must be confirmed before saving <span style="font-weight:400;color:var(--mid);">(auto-checks once the required info for each leg is filled in)</span></div>
+          <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;">
+            <input type="checkbox" id="qa-leg-run" style="width:15px;height:15px;accent-color:#7c3aed;cursor:pointer;" onchange="qaCheckLegs(true)" />
+            <label for="qa-leg-run" id="qa-leg-run-label" style="font-size:.82rem;cursor:pointer;">AP Run — outbound leg ready</label>
+          </div>
+          <div style="display:flex;align-items:center;gap:.5rem;">
+            <input type="checkbox" id="qa-leg-pickup" style="width:15px;height:15px;accent-color:#7c3aed;cursor:pointer;" onchange="qaCheckLegs(true)" />
+            <label for="qa-leg-pickup" id="qa-leg-pickup-label" style="font-size:.82rem;cursor:pointer;">AP Pickup — return leg ready</label>
+          </div>
+        </div>
+      </div>
 
-      <div style="grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;"><div class="form-group"><label>Passengers</label><input type="number" id="qa-pax" min="1" max="14" value="1" /></div><div class="form-group"><label>Checked Bags</label><input type="number" id="qa-checked-bags" min="0" value="0" /></div><div class="form-group"><label>Carry-on Bags</label><input type="number" id="qa-carryon-bags" min="0" value="0" /></div></div>
       <div class="form-group" style="grid-column:1/-1;"><label>Notes</label>
         <input type="text" id="qa-notes" placeholder="Any notes…" />
       </div>
@@ -1811,9 +1861,10 @@ input,select,textarea{font-size:16px;}
       <div id="qa-price-note" style="font-size:.74rem;color:var(--mid);margin-top:.35rem;"></div>
     </div>
     <div style="color:var(--red);font-size:.82rem;min-height:1rem;margin:.5rem 0;" id="qa-error"></div>
-    <div class="modal-footer">
+    <div class="modal-footer" style="grid-template-columns:1fr 1fr 1fr;">
       <button class="btn-secondary" onclick="closeQuickAddModal()">Cancel</button>
-      <button id="qa-save-btn" class="btn-primary" style="width:auto;padding:.65rem 1.5rem;" onclick="saveQuickAddRide()">Save Ride</button>
+      <button id="qa-quote-btn" class="btn-secondary" style="width:auto;padding:.65rem 1.1rem;" onclick="saveQuickAddAsQuote()">Save as Quote</button>
+      <button id="qa-save-btn" class="btn-primary" style="width:auto;padding:.65rem 1.5rem;" onclick="saveQuickAddRide()">Schedule</button>
     </div>
   </div>
 </div>
@@ -3010,6 +3061,24 @@ async function checkForActiveSOSOnLogin(){
   setTimeout(function(){ showSOSActivePopup(); }, 1800);
 }
 
+// Reported directly: no way to keep the saved-quotes list from growing forever with quotes
+// nobody ever scheduled. Runs once per app open (unlike the 60-second client-request poll
+// above - this isn't time-critical the way a fresh notification is, so once per open is
+// plenty to keep things tidy over time). Only ever removes a quote by its own savedAt
+// timestamp - never touches anything that's already been scheduled into a real ride, since
+// scheduleSavedQuote() removes it from savedQuotes entirely at that point anyway, so there's
+// nothing here left to accidentally purge.
+async function _purgeOldSavedQuotes(){
+  try{
+    var cutoff = Date.now() - 30*24*60*60*1000;
+    var before = (savedQuotes||[]).length;
+    savedQuotes = (savedQuotes||[]).filter(function(q){ return q && q.savedAt && q.savedAt >= cutoff; });
+    if(savedQuotes.length !== before){
+      await saveSavedQuotes();
+      if(typeof renderSavedQuotes==='function') renderSavedQuotes();
+    }
+  }catch(e){ console.warn('_purgeOldSavedQuotes failed', e); }
+}
 // Poll for SOS updates every 90 seconds while app is open
 // Poll for new client requests every 60 seconds while the app is open - same pattern as
 // startSOSPolling() for SOS alerts. Only ever looks at requests addressed to the CURRENT
@@ -3093,7 +3162,7 @@ async function processClientRequests(){
         requestType: r.requestType||'schedule',
         clientName: r.clientName||'', clientPhone: r.clientPhone||'', clientEmail: r.clientEmail||'',
         type: r.type||'', vehicle: r.vehicle||'',
-        pickup: r.pickup||'', destination: r.destination||'',
+        pickup: r.pickup||'', destination: r.destination||'', gateCode: r.gateCode||'',
         date: r.date||'', time: r.time||'',
         rtDate: r.rtDate||'', rtTime: r.rtTime||'',
         flight: r.flight||'', terminal: r.terminal||'', rtFlight: r.rtFlight||'', rtTerminal: r.rtTerminal||'',
@@ -5263,6 +5332,54 @@ function setActiveTog(btn){
   btn.parentElement.querySelectorAll('.tog').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
 }
+// Shared by setTripType() (already existed - re-places the client's home into the correct
+// field whenever the type changes) and qHomeAddressChanged() (new - re-places it whenever the
+// home address field itself changes). Extracted rather than duplicated, so the two triggers
+// can never drift apart on what "place the home address correctly" actually means. The new
+// q-home-address field takes priority as the source when it has a value (it's the visible,
+// directly-editable one now); getClientDefaultAddress()/c.address stay as the fallback for a
+// client who hasn't had this new field populated yet (an older saved quote, or before
+// maybeAutofillClient() has run). Only ever moves autofilled/empty values, never a manual entry.
+function _qPlaceHomeAddress(t){
+  if(!(t==='AP RUN'||t==='AP PICK UP'||t==='AP ROUND TRIP')) return;
+  var _ck=((document.getElementById('q-client')||{}).value||'').trim().toLowerCase();
+  var _homeFieldVal=(document.getElementById('q-home-address')||{}).value||'';
+  var _home=_homeFieldVal.trim() || (_ck ? (getClientDefaultAddress(_ck)||((buildClientDB(clientLookupScope())[_ck]||{}).address)||'') : '');
+  if(!_home) return;
+  var homeField=(t==='AP PICK UP')?'q-dropoff':'q-pickup';
+  var otherField=(t==='AP PICK UP')?'q-pickup':'q-dropoff';
+  var oel=document.getElementById(otherField);
+  if(oel && oel.value===_home){ oel.value=''; if(typeof _autofilledVals!=='undefined') _autofilledVals[otherField]=''; }
+  var hel=document.getElementById(homeField);
+  if(hel && (hel.value==='' || hel.value===(_autofilledVals&&_autofilledVals[homeField]) || hel.value===_home)){
+    hel.value=_home; if(typeof _autofilledVals!=='undefined') _autofilledVals[homeField]=_home;
+  }
+  try{ if(typeof debounceMileage==='function') debounceMileage(); }catch(e){}
+}
+// Reported directly, matching Quick Add's own version - typing/editing the home address should
+// re-place it into whichever field currently needs it, without waiting for the type to also
+// change. No separate checkbox needed here the way Quick Add has one - the Quote page's
+// existing placement logic (via setTripType(), now shared through _qPlaceHomeAddress()) already
+// runs automatically; this just triggers that same placement whenever the address itself changes.
+function qHomeAddressChanged(){
+  var t=(document.getElementById('q-type')||{}).value||'';
+  try{ _qPlaceHomeAddress(t); }catch(e){}
+}
+// "Same as leg 1" for the return terminal, matching Quick Add's own version exactly - cuts down
+// on retyping when the client flies in and out of the same terminal, the common case.
+function qRtTerminalSameChanged(){
+  var cb=document.getElementById('q-rt-terminal-same');
+  var sel=document.getElementById('q-rt-terminal');
+  if(!cb||!sel) return;
+  if(cb.checked){
+    sel.style.display='none';
+    sel.value=(document.getElementById('q-terminal')||{}).value||'';
+  } else {
+    sel.style.display='';
+  }
+  try{ rtTerminalPicked('q'); }catch(e){}
+  try{ calcQuote(); }catch(e){}
+}
 function setTripType(t, btn){
   const el=document.getElementById('q-type'); if(el) el.value=t;
   setActiveTog(btn);
@@ -5281,26 +5398,8 @@ function setTripType(t, btn){
     }
   }
   if(typeof autoFillTerminalAddress==='function') autoFillTerminalAddress();
-  // Re-place the client's home into the correct field for the new type (Pickup for AP Run,
-  // Destination for AP Pick Up). Only moves autofilled/empty values, never a manual entry.
-  try{
-    var _ck=((document.getElementById('q-client')||{}).value||'').trim().toLowerCase();
-    if(_ck && (t==='AP RUN'||t==='AP PICK UP'||t==='AP ROUND TRIP')){
-      var _home=getClientDefaultAddress(_ck)||((buildClientDB(clientLookupScope())[_ck]||{}).address)||'';
-      if(_home){
-        var homeField=(t==='AP PICK UP')?'q-dropoff':'q-pickup';
-        var otherField=(t==='AP PICK UP')?'q-pickup':'q-dropoff';
-        var oel=document.getElementById(otherField);
-        if(oel && oel.value===_home){ oel.value=''; if(typeof _autofilledVals!=='undefined') _autofilledVals[otherField]=''; }
-        var hel=document.getElementById(homeField);
-        if(hel && (hel.value==='' || hel.value===(_autofilledVals&&_autofilledVals[homeField]) || hel.value===_home)){
-          hel.value=_home; if(typeof _autofilledVals!=='undefined') _autofilledVals[homeField]=_home;
-        }
-        if(typeof autoFillTerminalAddress==='function') autoFillTerminalAddress();
-      }
-    }
-    if(typeof debounceMileage==='function') debounceMileage();
-  }catch(e){}
+  try{ _qPlaceHomeAddress(t); }catch(e){}
+  try{ if(typeof debounceMileage==='function') debounceMileage(); }catch(e){}
   calcQuote();
 }
 // VEHICLE SELECTION - multi-select as of v655.
@@ -5786,7 +5885,7 @@ function _gatherQuoteRide(){
   const client=document.getElementById('q-client').value.trim();
   const driverVal=document.getElementById('q-driver').value || defaultRideDriver();
   const total=calcQuote();
-  return {
+  const ride = {
     client, driver:driverVal,
     pickup:document.getElementById('q-pickup').value,gateCode:document.getElementById('q-gate-code')?.value.trim()||'',private:!!document.getElementById('q-private')?.checked,
     home:document.getElementById('q-dropoff').value,
@@ -5819,6 +5918,20 @@ function _gatherQuoteRide(){
     confirmed:false, createdBy:currentUser?.name||'',
     newClient: !!(document.getElementById('q-new-client')?.checked),
   };
+  // Same pattern as _gatherQaRide()'s own version - save the home address to this client's
+  // saved addresses if it's new or different, so setTripType()/_qPlaceHomeAddress() and the
+  // existing pickup/destination dropdowns pick it up as the default on every future ride for
+  // this client, not just this one. Never writes unconditionally on every gather.
+  var _homeAddrEl = document.getElementById('q-home-address');
+  var _homeAddrVal = (_homeAddrEl && _homeAddrEl.value || '').trim();
+  if(_homeAddrVal && client){
+    var _hKey = client.trim().toLowerCase();
+    var _existingDefault = (typeof getClientDefaultAddress==='function') ? getClientDefaultAddress(_hKey) : '';
+    if(_existingDefault !== _homeAddrVal){
+      try{ setClientAddress(_hKey, 'Home', _homeAddrVal, true); }catch(e){}
+    }
+  }
+  return ride;
 }
 
 // ── PRICE-SHOPPING ALERT ────────────────────────────────────────────────────
@@ -6920,6 +7033,12 @@ function _prefillFromClientRequest(req){
       try{ isQuote ? updateTripFields() : qaTypeChanged(); }catch(e){}
     }
     set('client', req.clientName);
+    // Reported directly: New Client checkbox never auto-checks on a booking-request-prefilled
+    // form. Real cause, same class found before: maybeAutofillClient() is only ever wired to
+    // the client field's own oninput handler, which setting .value directly (right above)
+    // never fires. Triggered explicitly here so a name genuinely not on the client list still
+    // gets the checkbox correctly checked, exactly as it would if someone had typed it by hand.
+    try{ if(typeof maybeAutofillClient==='function') maybeAutofillClient(P); }catch(e){}
     set('phone', req.clientPhone);
     set('email', req.clientEmail);
     set('vehicle', req.vehicle);
@@ -6934,6 +7053,7 @@ function _prefillFromClientRequest(req){
     set('pax', req.pax);
     set('checked-bags', req.checkedBags);
     set('carryon-bags', req.carryOnBags);
+    set('gate-code', req.gateCode);
     // Address field names differ between the two forms - Quote uses pickup/dropoff, Quick Add
     // uses pickup/home. Mapped explicitly rather than assumed identical. (Note qa-leg-pickup
     // is a CHECKBOX, not an address field, despite the name - writing an address into it
@@ -8876,10 +8996,10 @@ function prebuildAllDriverCardImages(){
 
 function _setConfInstKey(id,val){ window._confInstKey=window._confInstKey||{}; window._confInstKey[id]=val; }
 async function textClient(id, opts){
-  if(!confirmTextGate()) return;
-  const r=_rideById(id); if(!r) return;
+  if(!confirmTextGate()) return false;
+  const r=_rideById(id); if(!r) return false;
   const nums=confirmationRecipients(r).map(x=>x.phone);
-  if(!nums.length){ showToast('No phone numbers to text \u2014 add the client\u2019s number first','error'); return; }
+  if(!nums.length){ showToast('No phone numbers to text \u2014 add the client\u2019s number first','error'); return false; }
   const _conf=buildConfirmationText(r);
   // Per-part toggles from the CLIENT OWNER's settings (missing = on).
   const _sp=(driverSettings[feeOwnerFor(r.createdBy)||(r.driver||'').trim()]||{}).sendParts||{};
@@ -8931,10 +9051,14 @@ async function textClient(id, opts){
       if(navigator.canShare(shareData)){
         await navigator.share(shareData);
         if(_cardCopied) setTimeout(function(){ showToast('\uD83D\uDDBC\uFE0F Driver card also copied \u2014 long-press to paste it if it is missing'); },900);
-        return;
+        return true;
       }
     }catch(e){
-      if(e.name==='AbortError') return;
+      // Same real bug as sendArrivalText() had, same fix: every exit point now reports what
+      // actually happened instead of returning undefined either way, so sendAllConf() (the
+      // caller) can tell a genuine cancel/failure apart from a real send before marking a ride
+      // confirmed. A user-cancelled share sheet is a real "nothing sent," not a success.
+      if(e.name==='AbortError') return false;
       console.warn('iOS share failed',e);
     }
   }
@@ -8947,10 +9071,10 @@ async function textClient(id, opts){
       if(navigator.canShare(shareData)){
         await navigator.share(shareData);
         if(_cardCopied) setTimeout(function(){ showToast('\uD83D\uDDBC\uFE0F Driver card also copied \u2014 long-press to paste it if it is missing'); },900);
-        return;
+        return true;
       }
     }catch(e){
-      if(e.name==='AbortError') return;
+      if(e.name==='AbortError') return false;
       console.warn('Android share failed, trying clipboard fallback',e);
     }
   }
@@ -8961,6 +9085,7 @@ async function textClient(id, opts){
   if(_cardCopied) toasts.push('\uD83D\uDDBC\uFE0F Card copied \u2014 long-press to paste in Messages');
   window.location.href=smsURL;
   if(toasts.length) setTimeout(function(){ showToast(toasts.join(' \u00b7 ')); },800);
+  return true;
 }
 
 function closeDayModal(){document.getElementById('day-modal').classList.remove('show');}
@@ -15107,6 +15232,30 @@ function openQuickAddModal(){
   const pxEl=document.getElementById('qa-pax'); if(pxEl) pxEl.value=1;
   const cbEl=document.getElementById('qa-checked-bags'); if(cbEl) cbEl.value=0;
   const coEl=document.getElementById('qa-carryon-bags'); if(coEl) coEl.value=0;
+  // Home address + its "same as home" checkbox, reset on every fresh open like everything
+  // else here - otherwise a stale address or checked box from a previous ride in the same
+  // session could carry over onto an unrelated new one.
+  const haEl=document.getElementById('qa-home-address'); if(haEl) haEl.value='';
+  const hacbEl=document.getElementById('qa-home-addr-cb'); if(hacbEl) hacbEl.checked=false;
+  const hacbgEl=document.getElementById('qa-home-addr-cb-group'); if(hacbgEl) hacbgEl.style.display='none';
+  // Return-leg terminal defaults back to "same as leg 1" (checked, picker hidden) on every
+  // fresh open, matching its own default state rather than whatever was left from a previous
+  // AP Round Trip in the same session.
+  const rtsEl=document.getElementById('qa-rt-terminal-same'); if(rtsEl) rtsEl.checked=true;
+  const rttEl=document.getElementById('qa-rt-terminal'); if(rttEl) rttEl.style.display='none';
+  // Reported directly as a real, pre-existing gap made more important by the new auto-check
+  // logic - these were never reset here at all before this. A stale "checked" leg-ready state
+  // carried over from a previous AP Round Trip in the same session could incorrectly enable
+  // saving a genuinely incomplete new one.
+  const qlrEl=document.getElementById('qa-leg-run'); if(qlrEl) qlrEl.checked=false;
+  const qlpEl=document.getElementById('qa-leg-pickup'); if(qlpEl) qlpEl.checked=false;
+  // Same pre-existing gap as the leg-ready checkboxes above - the "which happens first" toggle
+  // was never reset either, so a previous round trip's choice (e.g. AP Pick Up selected first)
+  // could carry over onto an unrelated new one. Reset to the default (AP Run first) and
+  // re-apply everything that depends on it (section labels, surcharge labels, styling).
+  const qrfrEl=document.getElementById('qa-rt-first-run'); if(qrfrEl) qrfrEl.checked=true;
+  const qrfpEl=document.getElementById('qa-rt-first-pickup'); if(qrfpEl) qrfpEl.checked=false;
+  try{ qaRtFirstLegChanged(); }catch(e){}
   renderQaAddons(); recalcQa();
   // Default date to today
   const dEl=document.getElementById('qa-date');
@@ -16227,6 +16376,46 @@ async function _confirmIfSameAddress(prefix){
   });
   return choice==='continue';
 }
+// Reported directly: give the driver a way to say "picking up from home" so the app can
+// autofill the address, cutting down on retyping an address that's already on file. Feeds the
+// SAME clientAddressOverrides store renderAddrPickers() below already reads for its own saved-
+// address dropdowns - not a second, parallel address system - so a home address entered here
+// becomes available everywhere that already understands a client's saved addresses, not just
+// this one checkbox.
+function qaHomeAddressChanged(){
+  var homeVal = (document.getElementById('qa-home-address')||{}).value||'';
+  var grp = document.getElementById('qa-home-addr-cb-group');
+  if(grp) grp.style.display = homeVal.trim() ? '' : 'none';
+  if(!homeVal.trim()){
+    var cb = document.getElementById('qa-home-addr-cb');
+    if(cb) cb.checked = false;
+  }
+  qaUpdateHomeAddrCbLabel();
+  // Keep the filled field in sync if they keep typing after already checking the box.
+  if((document.getElementById('qa-home-addr-cb')||{}).checked){ qaHomeAddrCheckboxChanged(); }
+}
+// Type-aware: home applies to PICKUP for AP RUN/ONE WAY/ROUND TRIP/MEDICAL (client starts from
+// home), but to DESTINATION for AP PICK UP specifically (client is dropped off at home after
+// landing). Re-run on every type change so the label/target stay correct if the driver picks a
+// type after already entering a home address, not just the first time.
+function qaUpdateHomeAddrCbLabel(){
+  var lbl = document.getElementById('qa-home-addr-cb-label');
+  if(!lbl) return;
+  var type = (document.getElementById('qa-type')||{}).value||'';
+  lbl.textContent = (type==='AP PICK UP') ? '\ud83c\udfe0 Drop off at home address above' : '\ud83c\udfe0 Same as home address above';
+}
+function qaHomeAddrCheckboxChanged(){
+  var cb = document.getElementById('qa-home-addr-cb');
+  if(!cb || !cb.checked) return;
+  var homeVal = (document.getElementById('qa-home-address')||{}).value||'';
+  var type = (document.getElementById('qa-type')||{}).value||'';
+  var targetId = (type==='AP PICK UP') ? 'qa-home' : 'qa-pickup';
+  var el = document.getElementById(targetId);
+  if(el){ el.value = homeVal; }
+  try{ renderQaAddrPickers(); }catch(e){}
+  try{ if(typeof recalcQa==='function') recalcQa(); }catch(e){}
+  try{ if(typeof qaCheckLegs==='function') qaCheckLegs(); }catch(e){}
+}
 function renderAddrPickers(prefix){
   var list=_addrListFor(prefix);
   var type=(document.getElementById(prefix+'-type')||{}).value||'';
@@ -16303,30 +16492,15 @@ async function _qaMaybeSaveTypedAddresses(ride){
   }catch(e){ console.warn('save address prompt failed', e); }
 }
 
-async function saveQuickAddRide(){
-  const saveBtn=document.getElementById('qa-save-btn');
-  const _reenableBtn=()=>{ if(saveBtn){ saveBtn.disabled=false; saveBtn.style.opacity='1'; } };
-  if(saveBtn&&saveBtn.disabled) return;   // already submitting
-  const client=document.getElementById('qa-client').value.trim();
-  if(!window._qaOwnerResolved && typeof _maybePromptClientOwner==='function' && _maybePromptClientOwner(client,'qa')){ return; }
-  window._qaOwnerResolved=false;
-  const date  =document.getElementById('qa-date').value;
-  const errEl =document.getElementById('qa-error');
-  if(!client){errEl.textContent='Client name is required.'; _reenableBtn(); return;}
-  if(!date)  {errEl.textContent='Date is required.'; _reenableBtn(); return;}
-  errEl.textContent='';
-  if(saveBtn){ saveBtn.disabled=true; saveBtn.style.opacity='0.55'; }
-  const qaType = document.getElementById('qa-type').value;
-  if(!(await _confirmIfSameAddress('qa'))){ _reenableBtn(); return; }
-  if(qaType==='AP ROUND TRIP'){
-    if(!document.getElementById('qa-leg-run')?.checked||!document.getElementById('qa-leg-pickup')?.checked){
-      errEl.textContent='Check both leg confirmation boxes before saving.'; _reenableBtn(); return;
-    }
-  }
+// Shared by saveQuickAddRide() and saveQuickAddAsQuote() - the exact same field-gathering
+// logic, extracted once rather than duplicated, so the two save paths can never quietly drift
+// out of sync with each other over time (the same class of risk found and fixed repeatedly
+// this session when Quote/Quick Add/Edit Ride each had their own separate copy of something).
+function _gatherQaRide(client, qaType){
   const ride={
     id:nextId++, client,
     phone:   formatPhoneUS(document.getElementById('qa-phone').value),
-    date, time: document.getElementById('qa-time').value,
+    date: document.getElementById('qa-date').value, time: document.getElementById('qa-time').value,
     type:    qaType,
     vehicle: document.getElementById('qa-vehicle').value,
     xxl:     document.getElementById('qa-xxl')?.checked||false,
@@ -16347,6 +16521,88 @@ async function saveQuickAddRide(){
   };
   touchRide(ride, 'created');
   ride.clientOwner = getClientFeeOwner(ride.client, ride.driver) || (USER_DRIVER_MAP[currentUser?.name]||getMyDriverName()||'');
+  // Save the home address to this client's saved addresses if it's new or different, so the
+  // existing pickup/destination dropdowns (renderAddrPickers) pick it up as the default option
+  // on every future ride for this client, not just this one - the same pattern used for a
+  // typed address anywhere else in the app. Never writes on every save unconditionally, only
+  // when it's actually new information worth remembering.
+  var _homeAddrEl = document.getElementById('qa-home-address');
+  var _homeAddrVal = (_homeAddrEl && _homeAddrEl.value || '').trim();
+  if(_homeAddrVal && client){
+    var _hKey = client.trim().toLowerCase();
+    var _existingDefault = (typeof getClientDefaultAddress==='function') ? getClientDefaultAddress(_hKey) : '';
+    if(_existingDefault !== _homeAddrVal){
+      try{ setClientAddress(_hKey, 'Home', _homeAddrVal, true); }catch(e){}
+    }
+  }
+  return ride;
+}
+// "Save as Quote" - reported directly, a real gap: Quick Add could only ever create an actual
+// scheduled ride, with no way to save a price estimate for a client who isn't ready to commit
+// yet. Reuses _gatherQaRide() (the same helper saveQuickAddRide() now uses) so the two paths
+// can never drift apart on what data actually gets captured. Deliberately skips everything
+// that only makes sense for a REAL, committed booking - driver availability checks, the XXL
+// split, the AP Round Trip leg split, "assigned" notifications - since none of that applies to
+// a quote nobody's committed to yet. scheduleSavedQuote() already discards and reassigns a
+// fresh id when a saved quote later gets converted into a real ride, so the throwaway id
+// _gatherQaRide() assigns here is harmless - confirmed directly rather than assumed.
+async function saveQuickAddAsQuote(){
+  const saveBtn=document.getElementById('qa-save-btn');
+  const quoteBtn=document.getElementById('qa-quote-btn');
+  const _reenableBtns=()=>{
+    if(saveBtn){ saveBtn.disabled=false; saveBtn.style.opacity='1'; }
+    if(quoteBtn){ quoteBtn.disabled=false; quoteBtn.style.opacity='1'; }
+  };
+  if(quoteBtn&&quoteBtn.disabled) return; // already submitting
+  const client=document.getElementById('qa-client').value.trim();
+  const errEl=document.getElementById('qa-error');
+  if(!client){ errEl.textContent='Client name is required.'; return; }
+  errEl.textContent='';
+  if(quoteBtn){ quoteBtn.disabled=true; quoteBtn.style.opacity='0.55'; }
+  if(saveBtn){ saveBtn.disabled=true; saveBtn.style.opacity='0.55'; }
+  const qaType=document.getElementById('qa-type').value;
+  const q=_gatherQaRide(client, qaType);
+  q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000);
+  q.savedAt=Date.now();
+  try{
+    savedQuotes.push(q);
+    await saveSavedQuotes();
+  }catch(e){
+    console.warn('Save as quote failed', e);
+    var _idx=savedQuotes.indexOf(q); if(_idx>-1) savedQuotes.splice(_idx,1);
+    showToast('\u26a0\ufe0f Quote did not save \u2014 check your connection and try again', 'error');
+    _reenableBtns();
+    return;
+  }
+  var _addClient=document.getElementById('qa-add-client');
+  if(!_addClient||_addClient.checked){ try{ await upsertClientFromRide(q); }catch(e){} }
+  try{ await _markBookingRequestHandled(); }catch(e){}
+  closeQuickAddModal();
+  _reenableBtns();
+  showToast('\u2713 Saved as a quote for '+client);
+  if(typeof renderSavedQuotes==='function') renderSavedQuotes();
+}
+async function saveQuickAddRide(){
+  const saveBtn=document.getElementById('qa-save-btn');
+  const _reenableBtn=()=>{ if(saveBtn){ saveBtn.disabled=false; saveBtn.style.opacity='1'; } };
+  if(saveBtn&&saveBtn.disabled) return;   // already submitting
+  const client=document.getElementById('qa-client').value.trim();
+  if(!window._qaOwnerResolved && typeof _maybePromptClientOwner==='function' && _maybePromptClientOwner(client,'qa')){ return; }
+  window._qaOwnerResolved=false;
+  const date  =document.getElementById('qa-date').value;
+  const errEl =document.getElementById('qa-error');
+  if(!client){errEl.textContent='Client name is required.'; _reenableBtn(); return;}
+  if(!date)  {errEl.textContent='Date is required.'; _reenableBtn(); return;}
+  errEl.textContent='';
+  if(saveBtn){ saveBtn.disabled=true; saveBtn.style.opacity='0.55'; }
+  const qaType = document.getElementById('qa-type').value;
+  if(!(await _confirmIfSameAddress('qa'))){ _reenableBtn(); return; }
+  if(qaType==='AP ROUND TRIP'){
+    if(!document.getElementById('qa-leg-run')?.checked||!document.getElementById('qa-leg-pickup')?.checked){
+      errEl.textContent='Check both leg confirmation boxes before saving.'; _reenableBtn(); return;
+    }
+  }
+  const ride=_gatherQaRide(client, qaType);
   let _driverNeedsOverride = false;
   if(ride.driver && !isDriverAvailable(ride.driver, ride.date, ride.time)){
     _reenableBtn();
@@ -16565,9 +16821,14 @@ function policyTextMessage(firstName, rideDate, rideTime, ridePrice){
 function clearQuoteForm(){
   _fuelUserTouched = false; // fresh quote — let fuel default on again (until the driver chooses otherwise)
   _addonTouched = { premium:false, traffic:false, holiday:false, christmas:false }; // fresh quote — auto-surcharges can re-detect
-  ['q-client','q-phone','q-pickup','q-dropoff','q-miles','q-flight','q-rt-flight','q-notes','q-wait','q-gate-code']
+  ['q-client','q-phone','q-pickup','q-dropoff','q-miles','q-flight','q-rt-flight','q-notes','q-wait','q-gate-code','q-home-address']
     .forEach(function(id){ const el=document.getElementById(id); if(el) el.value=''; });
   const qPriv=document.getElementById('q-private'); if(qPriv) qPriv.checked=false;
+  // Matches Quick Add's own reset - the return terminal defaults back to "same as leg 1"
+  // (checked, picker hidden) on a fresh quote rather than carrying over a previous quote's
+  // unchecked/manually-picked state in the same session.
+  const qrtsEl=document.getElementById('q-rt-terminal-same'); if(qrtsEl) qrtsEl.checked=true;
+  const qrttEl=document.getElementById('q-rt-terminal'); if(qrttEl) qrttEl.style.display='none';
   if(typeof restoreStopRows==='function') restoreStopRows('q', 0, ''); var _qac=document.getElementById('q-add-client'); if(_qac) _qac.checked=true;
   const qDate=document.getElementById('q-date'); if(qDate) qDate.value='';
   const qTime=document.getElementById('q-time'); if(qTime) qTime.value='';
@@ -17084,23 +17345,14 @@ async function saveFeeWaiveRequests(){ try{ await storageSet('kat:feeWaiveReques
 // it queues here for the client's OWNER to review first, same shape as a fee waiver request.
 let cautiousFlagRequests = {};   // { id: {id,name,phoneLast4,phone,reason,flaggedBy,owner,at,status,resolvedAt} }
 async function saveCautiousFlagRequests(){ try{ await storageSet('kat:cautiousFlagRequests', cautiousFlagRequests); }catch(e){} }
-function _feeWaiveOwnerFor(r){ return (typeof getClientOwner==='function' && getClientOwner(r.client)) || (typeof feeOwnerFor==='function' && feeOwnerFor(r.createdBy)) || ''; }
-async function requestFeeWaive(rideId){
-  var r=(rides||[]).find(function(x){ return x&&(x.id===rideId||String(x.id)===String(rideId)); }); if(!r) return;
-  var owner=_feeWaiveOwnerFor(r); var driver=r.driver||getMyDriverName();
-  if(!owner||owner===driver){ showToast('No fee owed on this ride'); return; }
-  if(feeWaiveRequests[r.id] && feeWaiveRequests[r.id].status==='pending'){ showToast('Waiver already requested'); return; }
-  var reason=window.prompt('Ask '+(owner.split(' ')[0])+' to waive the 15% fee on this ride?\n\nAdd a reason (optional):','');
-  if(reason===null) return;
-  feeWaiveRequests[r.id]={ rideId:r.id, driver:driver, owner:owner, client:r.client||'', date:r.date||'', reason:(reason||'').trim(), at:Date.now(), status:'pending' };
-  await saveFeeWaiveRequests();
-  var _who=(typeof driverDisplayName==='function'?driverDisplayName(driver):driver)||driver;
-  var _msg=_who+' is requesting the 15% fee be waived for '+(r.client||'a client')+'\u2019s ride on '+(typeof fmtDateShort==='function'?fmtDateShort(r.date):r.date)+((reason||'').trim()?(' \u2014 \u201c'+(reason.trim())+'\u201d'):'');
-  try{ addNotification(owner, r, 'fee_waive_request', _msg); await saveNotifs(); updateNotifBadge(); }catch(e){}
-  showToast('\u2713 Waiver requested \u2014 '+(owner.split(' ')[0])+' was notified');
-  try{ if(typeof activeRideId!=='undefined' && activeRideId!=null && typeof openRideModal==='function') openRideModal(activeRideId); }catch(e){}
-  try{ refreshDash(); }catch(e){}
-}
+// requestFeeWaive() and its only helper (_feeWaiveOwnerFor) removed entirely — reported
+// directly that a driver shouldn't be able to request a waiver on a fee they owe at all; that
+// decision belongs solely to the client owner, on their own initiative. approveFeeWaive()/
+// denyFeeWaive() below are kept alive on purpose, not as dead code — if any request already
+// existed in the live data before this change, the owner still needs a way to resolve it
+// rather than have it stuck pending forever with nothing able to act on it. No new request can
+// ever be created going forward, so this naturally stops mattering as any existing ones get
+// resolved.
 async function approveFeeWaive(rideId){
   var req=feeWaiveRequests[rideId]||feeWaiveRequests[String(rideId)]; if(!req) return;
   var owner=req.owner, driver=req.driver, key=owner+':recv:'+driver;
@@ -17178,10 +17430,16 @@ function promptFeePaymentMethod(owner, driver, rideId){
   // Fees between drivers are restricted to instant/peer payment methods only — Chase's call.
   // Credit Card and Check aren't valid for settling a fee even though they're valid ways a
   // CLIENT can pay a ride's fare (PAYMENT_METHODS, used elsewhere on the Income page, still
-  // includes those — this list is deliberately narrower and fee-specific). Venmo isn't
-  // listed here since it already has its own dedicated button next to this one.
+  // includes those — this list is deliberately narrower and fee-specific). Venmo is normally
+  // excluded here since it has its own dedicated button next to this one — but that button
+  // only exists when the owner has a Venmo handle saved in the app (venmoPayRideBtn() needs
+  // one to build a deep link). Not having a handle on file doesn't mean they don't have
+  // Venmo — the payer may know it some other way (texted, already saved as a contact, etc.)
+  // and still want to pay that way and record it correctly. Reported directly. Falls back to
+  // including Venmo here whenever the dedicated button wouldn't have anywhere to send someone.
   const FEE_PAYMENT_METHODS=['Venmo','Zelle','CashApp','Apple Pay'];
-  const methods=FEE_PAYMENT_METHODS.filter(function(m){ return m!=='Venmo'; });
+  const _ownerHasVenmo = !!(typeof driverVenmo!=='undefined' && (driverVenmo[owner]||'').trim());
+  const methods=FEE_PAYMENT_METHODS.filter(function(m){ return m!=='Venmo' || !_ownerHasVenmo; });
   const btns=methods.map(function(m){
     return '<button onclick="_confirmFeePaymentMethod(\''+escAttr(owner)+'\',\''+escAttr(driver)+'\','+_feeIdArg(rideId)+',\''+escAttr(m)+'\')" '
       +'style="padding:.6rem;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;text-align:left;">'+escHtml(m)+'</button>';
@@ -17521,7 +17779,7 @@ function renderDashFees(){
     return escHtml(ri.client||'Ride')+(ri.date?' \u00b7 '+ri.date.slice(5).replace('-','/'):'')+' \u00b7 $'+ri.fee.toFixed(2);
   }
 
-  let html=_cautHtml+_waiveHtml+'<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">Client Fees — To Be Paid '+mtipDot('dash-fees','The fifteen percent applies to fare and surcharges only \u2014 never tips, and is only ever settled by Venmo, Zelle, CashApp, or Apple Pay. Pay by Venmo and it shows Awaiting confirmation until the person owed taps Received. Any other method, tap \u2713 Paid (or \u2713 Received) and you\u2019ll be asked which one. Waive forgives a single ride\'s fee; Waive [name]\u2019s sets a standing arrangement for that person. On a fee you owe, Request waiver asks the owner to forgive it.')+'</div>'
+  let html=_cautHtml+_waiveHtml+'<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">Client Fees — To Be Paid '+mtipDot('dash-fees','The fifteen percent applies to fare and surcharges only \u2014 never tips, and is only ever settled by Venmo, Zelle, CashApp, or Apple Pay. Pay by Venmo and it shows Awaiting confirmation until the person owed taps Received. Any other method, tap \u2713 Paid (or \u2713 Received) and you\u2019ll be asked which one. Waive forgives a single ride\'s fee; Waive [name]\u2019s sets a standing arrangement for that person \u2014 only the person owed the fee can waive it.')+'</div>'
     +'<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:12px;overflow:hidden;">';
 
   if(hasOwed){
@@ -17567,24 +17825,17 @@ function renderDashFees(){
       (v.rides||[]).forEach(function(ri){
         var _fpo=feePayments[name+':recv:'+dName]||{};
         var _pend=_feeRidePending(_fpo, ri.id);
-        var _wq=(typeof feeWaiveRequests!=='undefined')?feeWaiveRequests[ri.id]:null;
-        // The "Requested" indicator is deliberately a same-day thing on the REQUESTING
-        // driver's own dashboard - Chase's own call: they already know they asked (they got
-        // a toast confirming it at the time), so it falls away after that calendar day rather
-        // than sitting there indefinitely while the owner still hasn't responded. This is
-        // purely what THIS driver sees - the request itself stays genuinely 'pending' in the
-        // data, and the owner's own approve/deny section (_renderFeeWaiveRequestsHTML above)
-        // is completely unaffected, still showing it until they actually act on it.
-        var _wqIsToday = _wq && _wq.at && (typeof toDateStr==='function') && toDateStr(new Date(_wq.at))===toDateStr(new Date());
-        var _waiveBtn=(_wq && _wq.status==='pending' && _wqIsToday)
-          ? '<span style="flex:1;min-width:78px;text-align:center;font-size:.7rem;color:#b45309;font-weight:700;align-self:center;">\u2696\uFE0F Requested</span>'
-          : '<button onclick="requestFeeWaive('+_feeIdArg(ri.id)+')" style="flex:1;min-width:78px;padding:.42rem;background:none;border:1.5px dashed var(--gold);color:var(--gold);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:600;cursor:pointer;white-space:nowrap;">\u2696\uFE0F Waive?</button>';
+        // Reported directly: a driver requesting a waiver on a fee they OWE isn't right —
+        // that decision belongs solely to the client owner, made on their own initiative, not
+        // prompted by a request from the person who'd benefit from it. Removed entirely, not
+        // just relabeled — requestFeeWaive() no longer has any call site. The owner already
+        // has a direct, unprompted way to waive what's owed to them (the Waive / Waive
+        // [name]'s buttons in the "Owed to you" section above), which is the only path now.
         var _actions = _pend
           ? '<span style="flex:1;min-width:78px;font-size:.7rem;color:#b45309;font-weight:700;align-self:center;">\u23F3 Awaiting confirmation</span>'
             +'<button onclick="_feeUndoRide(\''+escAttr(name)+'\',\''+escAttr(dName)+'\','+_feeIdArg(ri.id)+')" style="flex:1;min-width:78px;padding:.42rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:600;cursor:pointer;">\u21a9 Undo</button>'
           : venmoPayRideBtn(name, ri.fee, dName, ri.id)
-            +'<button onclick="promptFeePaymentMethod(\''+escAttr(name)+'\',\''+escAttr(dName)+'\','+_feeIdArg(ri.id)+')" style="flex:1;min-width:78px;padding:.42rem;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;">\u2713 Paid</button>'
-            +_waiveBtn;
+            +'<button onclick="promptFeePaymentMethod(\''+escAttr(name)+'\',\''+escAttr(dName)+'\','+_feeIdArg(ri.id)+')" style="flex:1;min-width:78px;padding:.42rem;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;">\u2713 Paid</button>';
         html+='<div style="padding:.4rem .85rem .55rem 1.4rem;border-bottom:1px solid var(--light);">'
           +'<div style="font-size:.74rem;color:var(--mid);margin-bottom:.42rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_rideLabel(ri)+'</div>'
           +'<div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:stretch;">'+_actions+'</div>'
@@ -20266,7 +20517,7 @@ function _openBookingRequestFromReview(id){
     requestType: r.requestType||'schedule',
     clientName: r.clientName||'', clientPhone: r.clientPhone||'', clientEmail: r.clientEmail||'',
     type: r.type||'', vehicle: r.vehicle||'',
-    pickup: r.pickup||'', destination: r.destination||'',
+    pickup: r.pickup||'', destination: r.destination||'', gateCode: r.gateCode||'',
     date: r.date||'', time: r.time||'',
     rtDate: r.rtDate||'', rtTime: r.rtTime||'',
     flight: r.flight||'', terminal: r.terminal||'', rtFlight: r.rtFlight||'', rtTerminal: r.rtTerminal||'',
@@ -24093,8 +24344,15 @@ async function sendAllConf(id){
   const files=[];
   if(g('card')&&fm.card) files.push(fm.card);
   if(_selfieApplies&&g('selfie')&&fm.selfie) files.push(fm.selfie);
+  // Same real bug as sendArrivalText() had, same fix: textClient() already correctly detects
+  // and warns when there's genuinely nobody to text (client has no saved number and the
+  // sender's own number is deliberately excluded from the recipient list) - but its result
+  // was being discarded here, so a ride with no working recipient still got marked confirmed
+  // and still showed the "Everything sent!" popup even though nothing was ever sent. Captured
+  // now so the rest of this function can tell a real send apart from a silent no-op.
+  var _texted = true; // stays true if this branch never ran - nothing to have failed
   if(g('text')||g('inst')||files.length){
-    await textClient(id, { msgOn:g('text'), instOn:g('inst'), files:files });
+    _texted = await textClient(id, { msgOn:g('text'), instOn:g('inst'), files:files });
   }
   // The Send button is the thing that actually sends the confirmation text - using it
   // correctly should BE confirming, not a separate step someone has to remember afterward.
@@ -24106,7 +24364,9 @@ async function sendAllConf(id){
   // part of what got sent - sending just pickup instructions or just a driver card on their own
   // doesn't confirm anything. _markRideConfirmed no-ops if already confirmed, so re-sending an
   // already-confirmed ride's text (a driver double-checking, or after an edit) is harmless.
-  if(g('text')){
+  // Now also requires _texted - a ride whose text never actually sent must never be marked
+  // confirmed, regardless of which box was checked.
+  if(g('text') && _texted){
     _markRideConfirmed(r);
     await saveRides();
     setTimeout(function(){
@@ -24124,10 +24384,18 @@ async function sendAllConf(id){
     if(k==='selfie'&&!_selfieApplies) return;
     if(k==='vcard'&&!_vcardApplies) return;
     if(!g(k)) return;
+    // text/inst/card/selfie all went through the one textClient() call above - if that
+    // didn't actually send, none of them did either. vcard is a genuinely separate function
+    // call (sendClientVCardToDriver, just above) and stays independent of _texted.
+    if(k!=='vcard' && !_texted) return;
     if(document.getElementById('cpart-'+id+'-'+k)){ markPartSent(id,k); sent.push(k); }
   });
   if(_phoneApplies&&g('phone')){ setTimeout(function(){ try{ sendClientPhone(id); markPartSent(id,'phone'); }catch(e){} }, 900); sent.push('phone'); }
-  showAllSentConfirm(id, sent);
+  // If nothing actually sent (textClient failed and there was no separate vcard/phone send
+  // either), openArrivalThread/openGroupThread/textClient already showed the real reason why -
+  // showing "Everything sent!" right after that would directly contradict the warning the
+  // person just read.
+  if(sent.length) showAllSentConfirm(id, sent);
 }
 // Clear confirmation that the whole confirmation went out.
 function showAllSentConfirm(id, sentKeys){
@@ -24212,10 +24480,10 @@ function arrivalTextRecipients(r){
   return _baseRideTextRecipients(r).out;
 }
 function openArrivalThread(id, body){
-  const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
+  const r=rides.find(function(x){ return x.id===id; }); if(!r) return false;
   const recips=arrivalTextRecipients(r);
   const nums=recips.map(function(x){ return x.phone; });
-  if(!nums.length){ showToast('\u26a0 No phone numbers found for this ride \u2014 add the client\'s number first'); return; }
+  if(!nums.length){ showToast('\u26a0 No phone numbers found for this ride \u2014 add the client\'s number first'); return false; }
   const cp=(clientPhoneFor(r)||'').replace(/[^0-9+]/g,'');
   const cp10=cp.replace(/\D/g,'').slice(-10);
   const clientIn = !!cp10 && recips.some(function(x){ return (x.phone||'').replace(/\D/g,'').slice(-10)===cp10; });
@@ -24224,12 +24492,13 @@ function openArrivalThread(id, body){
   }
   const sep=/iphone|ipad|ipod|mac/i.test(navigator.userAgent)?'&':'?';
   window.location.href='sms:'+nums.join(',')+sep+'body='+encodeURIComponent(body||'');
+  return true;
 }
 function openGroupThread(id, body){
-  const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
+  const r=rides.find(function(x){ return x.id===id; }); if(!r) return false;
   const recips=confirmationRecipients(r);
   const nums=recips.map(function(x){ return x.phone; });
-  if(!nums.length){ showToast('\u26a0 No phone numbers found for this ride \u2014 add the client\'s number first'); return; }
+  if(!nums.length){ showToast('\u26a0 No phone numbers found for this ride \u2014 add the client\'s number first'); return false; }
   // Make sure the CLIENT is actually in the thread — texting only drivers is a silent miss.
   const cp=(clientPhoneFor(r)||'').replace(/[^0-9+]/g,'');
   const cp10=cp.replace(/\D/g,'').slice(-10);
@@ -24239,6 +24508,7 @@ function openGroupThread(id, body){
   }
   const sep=/iphone|ipad|ipod|mac/i.test(navigator.userAgent)?'&':'?';
   window.location.href='sms:'+nums.join(',')+sep+'body='+encodeURIComponent(body||'');
+  return true;
 }
 
 // ── Helper: copy image data-url to clipboard silently ────────────────
@@ -24575,7 +24845,19 @@ function sendArrivalText(id){
   if(typeof confirmTextGate==='function' && !confirmTextGate()) return;
   var r=_rideById(id);
   if(!r){ showToast('Ride not found','error'); return; }
-  openArrivalThread(id, buildArrivalText(r));
+  // Reported directly: got the "opened" toast and the ride got marked arrival-sent, but
+  // Messages never actually launched. Real cause, traced precisely: openArrivalThread()
+  // already correctly detects when there's genuinely nobody to text and shows its own "No
+  // phone numbers found" warning - happens specifically when the client has no saved number
+  // (a FamilyWall import with no phone, exactly this case) AND the sender is the assigned
+  // driver, since the app deliberately excludes the sender's own number from the recipient
+  // list ("never text the sender themselves") - both potential recipients end up filtered out,
+  // leaving nothing to text at all. But this function never checked openArrivalThread()'s
+  // outcome - it showed its own unconditional "success" toast and marked the ride arrival-sent
+  // regardless of whether anything actually opened. Now respects the real result instead of
+  // assuming success.
+  var _opened = openArrivalThread(id, buildArrivalText(r));
+  if(!_opened) return; // openArrivalThread already showed the specific reason why
   try{ markPartSent(id,'arrival'); }catch(e){}
   r.arrivalSentAt=Date.now(); try{ saveRides(); }catch(e){}
   try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
@@ -24648,7 +24930,12 @@ function sendConfText(id){
 function _doSendConfText(id){
   const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
   const conf=buildConfirmationText(r);
-  openGroupThread(id, conf.message);
+  // Same real bug as sendArrivalText() had, same fix: openGroupThread() already correctly
+  // detects and warns when there's genuinely nobody to text (client has no saved number and
+  // the sender's own number is deliberately excluded), but this used to ignore that outcome
+  // entirely and mark the ride confirmed regardless of whether anything actually sent.
+  const _opened = openGroupThread(id, conf.message);
+  if(!_opened) return;
   markPartSent(id,'text');
   // Same fix as sendAllConf's batch path, for the other door to the same action - tapping
   // the "Confirmation text" row directly sends the exact same message and should mark the
@@ -24697,7 +24984,7 @@ function sendConfInstructions(id){
   const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
   const conf=buildConfirmationText(r);
   if(!conf.instructions){ showToast('No pickup instructions for this ride type'); return; }
-  openGroupThread(id, conf.instructions);
+  if(!openGroupThread(id, conf.instructions)) return;
   markPartSent(id,'inst');
 }
 
@@ -24707,8 +24994,10 @@ async function sendSelfiePic(id){
   const selfieDataUrl=_vehCard || getDriverSelfie(feeOwnerFor(r.createdBy)||(r.driver||'').trim());
   if(!selfieDataUrl){ showToast('No selfie card available','error'); return; }
   const copied=await copyImageToClipboard(selfieDataUrl);
-  openGroupThread(id, '');
-  markPartSent(id,'selfie');
+  const _opened=openGroupThread(id, '');
+  if(_opened) markPartSent(id,'selfie');
+  // Both clipboard toasts fire either way - they're reporting on the clipboard copy itself,
+  // a genuinely separate operation from whether a Messages thread opened.
   if(copied) setTimeout(function(){ showToast('\uD83D\uDCCB Selfie card on clipboard \u2014 long-press in Messages to paste'); },700);
   else setTimeout(function(){ showToast('Selfie card could not be copied on this browser'); },700);
 }
@@ -24728,8 +25017,8 @@ async function sendDriverCard(id){
       copied=true;
     }catch(e){ console.warn('clipboard write failed',e); }
   }
-  openGroupThread(id, '');
-  markPartSent(id,'card');
+  const _opened=openGroupThread(id, '');
+  if(_opened) markPartSent(id,'card');
   const msg=copied
     ?'\uD83D\uDDBC\uFE0F Driver card on clipboard \u2014 long-press in Messages to paste'
     :'Driver card sharing not supported on this browser \u2014 use the preview above';
@@ -26573,6 +26862,16 @@ function enterApp(){
   const sosBtnEl=document.getElementById('sos-btn'); if(sosBtnEl) sosBtnEl.style.display='flex';
   if(typeof startSOSPolling==='function') startSOSPolling();
   if(typeof startClientRequestPolling==='function') startClientRequestPolling();
+  // Same real risk as the two _dataFreshPromise-awaiting calls just above this block, and
+  // arguably more severe here: this function reads AND overwrites savedQuotes. Running before
+  // the real data has finished loading (enterApp() can run from a stale, locally-cached
+  // snapshot) would filter and then persist a stale-or-empty savedQuotes back to Firebase,
+  // permanently destroying any genuinely existing saved quotes rather than just missing a
+  // purge for one cycle. Caught before shipping, not after.
+  (async function(){
+    try{ if(window._dataFreshPromise) await window._dataFreshPromise; }catch(e){}
+    try{ if(typeof _purgeOldSavedQuotes==='function') await _purgeOldSavedQuotes(); }catch(e){}
+  })();
   setTimeout(maybShowTutorialBanner, 1200);
   // Combine income state comes from driverSettings (Firebase), not localStorage
   const _myDS=driverSettings[currentUser?.name||'']||{};
@@ -27095,6 +27394,19 @@ function maybeAutofillClient(prefix){
   const _clientKey2=(nameEl.value||'').trim().toLowerCase();
   const _phoneAsAddr=(c.phone && !_extractPhone(c.phone)) ? c.phone : '';
   const _defaultAddr=getClientDefaultAddress(_clientKey2)||c.address||_phoneAsAddr||'';
+  // q-home-address/qa-home-address both exist now (v923/v922) - fill() safely no-ops on
+  // prefixes without it (edit still has neither).
+  fill(prefix+'-home-address', _defaultAddr);
+  // Reported directly, caught while re-verifying this exact behavior: this used to call
+  // qaHomeAddressChanged() unconditionally regardless of prefix - correct when prefix==='qa',
+  // but when prefix==='q' (typing a client name on the Quote page) it was incorrectly touching
+  // the Quick Add modal's own hidden fields (qa-pickup/qa-home) instead of the Quote page's own
+  // placement logic. Routed to the correct form-specific handler based on which form actually
+  // triggered this call.
+  try{
+    if(prefix==='qa' && typeof qaHomeAddressChanged==='function') qaHomeAddressChanged();
+    else if(prefix==='q' && typeof qHomeAddressChanged==='function') qHomeAddressChanged();
+  }catch(e){}
   {
     // A SECOND saved-address dropdown used to be built here, injected next to the address input,
     // for Add Ride only. Between it, the `-mode` select, and the always-visible text box, one
@@ -29242,6 +29554,7 @@ function qaTypeChanged(){
   const t=document.getElementById('qa-type')?.value;
   const sec=document.getElementById('qa-rt-section');
   if(sec) sec.style.display=(t==='AP ROUND TRIP')?'block':'none';
+  try{ qaUpdateHomeAddrCbLabel(); }catch(e){}
   // Medical transport is billed hourly, so it needs its own hours field (same as the Quote form).
   const mhg=document.getElementById('qa-med-hours-group');
   if(mhg) mhg.style.display=(t==='MEDICAL')?'block':'none';
@@ -29268,10 +29581,56 @@ function qaTypeChanged(){
   try{ renderQaAddrPickers(); }catch(e){}
   try{ updateQaSuggestedPickupTime(); }catch(e){}
 }
-function qaCheckLegs(){
+// Reported directly: once the mandatory info for a leg is filled in, its "ready" checkbox
+// should check itself rather than requiring a separate manual tap. Deliberately only ever
+// turns a checkbox ON, never OFF - if a driver manually unchecks one themselves (their own
+// call that something isn't actually ready despite the fields being filled), this never
+// silently re-checks it against their own choice; it only fires again once they change a
+// field, giving them a fresh, deliberate chance to leave it checked or not.
+// The round trip's address fields are shared by both legs (same client, same two addresses,
+// just reversed direction) - only the FIRST leg (per qaRtFirstLegType()) has its own pickup/
+// destination to fill in; the second leg's own fields are just its date and time.
+function _qaLegFieldsReady(legType){
+  var first = qaRtFirstLegType();
+  if(legType === first){
+    var pickup=(document.getElementById('qa-pickup')||{}).value||'';
+    var dest=(document.getElementById('qa-home')||{}).value||'';
+    var date=(document.getElementById('qa-date')||{}).value||'';
+    return !!(pickup.trim() && dest.trim() && date);
+  } else {
+    var rtDate=(document.getElementById('qa-rt-date')||{}).value||'';
+    var rtTime=(document.getElementById('qa-rt-time')||{}).value||'';
+    return !!(rtDate && rtTime);
+  }
+}
+function qaAutoCheckLegs(){
+  if((document.getElementById('qa-type')||{}).value !== 'AP ROUND TRIP') return;
+  var runCb=document.getElementById('qa-leg-run');
+  var pickupCb=document.getElementById('qa-leg-pickup');
+  if(runCb && !runCb.checked && _qaLegFieldsReady('AP RUN')) runCb.checked=true;
+  if(pickupCb && !pickupCb.checked && _qaLegFieldsReady('AP PICK UP')) pickupCb.checked=true;
+  qaCheckLegs(true);
+}
+// "Same as leg 1" for the return terminal - reported directly, cuts down on retyping when the
+// client flies in and out of the same terminal, the common case. Unchecking reveals the picker
+// for the (less common) case where they differ.
+function qaRtTerminalSameChanged(){
+  var cb=document.getElementById('qa-rt-terminal-same');
+  var sel=document.getElementById('qa-rt-terminal');
+  if(!cb||!sel) return;
+  if(cb.checked){
+    sel.style.display='none';
+    sel.value=(document.getElementById('qa-terminal')||{}).value||'';
+  } else {
+    sel.style.display='';
+  }
+  try{ rtTerminalPicked('qa'); }catch(e){}
+}
+function qaCheckLegs(skipAutoCheck){
   const t=document.getElementById('qa-type')?.value;
   const saveBtn=document.getElementById('qa-save-btn');
   if(t!=='AP ROUND TRIP'){ if(saveBtn) saveBtn.disabled=false; return; }
+  if(!skipAutoCheck){ try{ qaAutoCheckLegs(); }catch(e){} }
   const runOk=document.getElementById('qa-leg-run')?.checked;
   const pickupOk=document.getElementById('qa-leg-pickup')?.checked;
   if(saveBtn){ saveBtn.disabled=!(runOk&&pickupOk); saveBtn.style.opacity=(runOk&&pickupOk)?'1':'0.45'; }
