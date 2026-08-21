@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191927">
+<meta name="version" content="202608191929">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -5695,6 +5695,50 @@ function addRideToCalendar(rideId){
   showToast('\uD83D\uDCC5 Calendar file ready \u2014 open it to add this ride');
 }
 
+// ============================================================================
+// FAMILYWALL EXPORT (single ride) — START. Temporary, Chase/Morgan-only, remove entirely once
+// the FamilyWall migration is done: this block (canExportToFamilyWall + exportRideToFamilyWall),
+// the button markup + _hasActions clause it adds in the ride modal's Actions section (search
+// "FAMILYWALL EXPORT BUTTON"), and nothing else — no shared state, no other file depends on it.
+// Deliberately duplicates addRideToCalendar()'s small ICS-building logic just above instead of
+// factoring out a shared helper, so removing this block can never risk touching that function.
+function canExportToFamilyWall(){
+  return !!(currentUser && (currentUser.name==='Chase' || currentUser.name==='Morgan'));
+}
+function exportRideToFamilyWall(rideId){
+  var r=_rideById(rideId);
+  if(!r){ showToast('Ride not found','error'); return; }
+  var pad=function(n){return String(n).padStart(2,'0');};
+  var toICS=function(ds,ts){ var p=(ds||'').split('-'); var t=(ts||'09:00').split(':'); return p[0]+pad(p[1])+pad(p[2])+'T'+pad(t[0])+pad(t[1])+'00'; };
+  var startDs=r.date, startTs=r.time||'09:00';
+  var start=toICS(startDs,startTs);
+  var eh=(parseInt((startTs).split(':')[0])||9)+1; if(eh>23) eh=23;
+  var end=toICS(startDs, pad(eh)+':'+((startTs).split(':')[1]||'00'));
+  var now=new Date();
+  var stamp=now.getUTCFullYear()+pad(now.getUTCMonth()+1)+pad(now.getUTCDate())+'T'+pad(now.getUTCHours())+pad(now.getUTCMinutes())+pad(now.getUTCSeconds())+'Z';
+  var summary=icsEscape((r.client||'Ride')+(r.type?' \u2014 '+r.type:''));
+  var descParts=[];
+  if(r.driver) descParts.push('Driver: '+r.driver);
+  if(r.pickup) descParts.push('Pickup: '+r.pickup);
+  if(r.home) descParts.push('Drop-off: '+r.home);
+  if(r.flight) descParts.push('Flight: '+r.flight);
+  if(r.phone) descParts.push('Phone: '+r.phone);
+  if(r.price!==undefined && r.price!==null && r.price!=='') descParts.push('Price: $'+r.price);
+  var desc=icsEscape(descParts.join('\n'));
+  var loc=icsEscape(r.pickup||r.home||'');
+  // UID prefixed nda-fw- (not nda-, which addRideToCalendar uses) so the two exports can never
+  // collide as "the same event" if both are ever imported into the same calendar.
+  var ics='BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//NWDA Transportation//EN\r\nCALSCALE:GREGORIAN\r\n'
+    +'BEGIN:VEVENT\r\nUID:nda-fw-'+r.id+'@nda\r\nDTSTAMP:'+stamp+'\r\nDTSTART:'+start+'\r\nDTEND:'+end+'\r\n'
+    +'SUMMARY:'+summary+'\r\nDESCRIPTION:'+desc+'\r\nLOCATION:'+loc+'\r\nEND:VEVENT\r\nEND:VCALENDAR';
+  var safeName2=((r.client||'ride').replace(/[^a-z0-9]+/gi,'-').toLowerCase())+'-'+(r.date||'');
+  downloadTextFile(ics, 'familywall-'+safeName2+'.ics', 'text/calendar');
+  showToast('\uD83D\uDCC5 Saved \u2014 in FamilyWall: Calendar \u2192 \u2699\uFE0F gear icon \u2192 Import event from ICS');
+}
+// FAMILYWALL EXPORT (single ride) — END
+// ============================================================================
+
+
 
 // Default driver for a NEW ride: Morgan dispatches to Kat; everyone else gets themselves.
 function defaultRideDriver(){
@@ -9712,13 +9756,15 @@ function renderRideView(r){
     <!-- ═══ ACTIONS ═══ -->
     ${(()=>{
       const _hasActions = !!((getMyDriverName()===r.driver) || (canSeeContact&&hasIncomeAccess()&&_slLocalType)
-        || (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP') || _pairedRideForBtn || shareOfferingsBtn);
+        || (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP') || _pairedRideForBtn || shareOfferingsBtn
+        || canExportToFamilyWall()); // FAMILYWALL EXPORT BUTTON — remove this clause when the block goes
       if(!_hasActions) return '';
       return `<div class="detail-row" style="grid-column:1/-1;">
         <div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Actions</div>
         <div style="display:flex;flex-direction:column;gap:.5rem;">
           ${(getMyDriverName()===r.driver) ? `<div><button onclick="addRideToCalendar(${r.id})" style="width:100%;padding:.6rem;font-size:.88rem;font-weight:700;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:.4rem;background:none;border:1.5px solid #7c3aed;color:#7c3aed;cursor:pointer;font-family:'DM Sans',sans-serif;">&#128197; Add to calendar<span onclick="event.stopPropagation();toggleInfoBubble('cal-add-info-${r.id}')" style="cursor:pointer;width:15px;height:15px;border-radius:50%;background:rgba(124,58,237,.15);color:#7c3aed;font-size:.62rem;display:inline-flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0;">i</span></button>
           <div id="cal-add-info-${r.id}" style="display:none;font-size:.68rem;color:var(--mid);text-align:center;margin-top:3px;background:var(--surface);border-radius:6px;padding:.4rem .5rem;">Opens a file you can add to Apple, Google, Outlook, or Skylight</div></div>` : ''}
+          ${canExportToFamilyWall() ? `<button onclick="event.stopPropagation();exportRideToFamilyWall(${r.id})" style="width:100%;padding:.6rem;font-size:.88rem;font-weight:700;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:.4rem;background:none;border:1.5px solid #7c3aed;color:#7c3aed;cursor:pointer;font-family:'DM Sans',sans-serif;">&#128228; Export to FamilyWall</button>` /* FAMILYWALL EXPORT BUTTON — remove this line when the block goes */ : ''}
           ${canSeeContact&&hasIncomeAccess()&&_slLocalType?'<button onclick="shareLocationToClient('+r.id+')" style="padding:.45rem .75rem;background:#0f172a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;">&#128205; Share Location \u2014 let the client see you coming</button>':''}
           ${((r.type==='AP PICK UP'||r.type==='AP ROUND TRIP') && getMyDriverName()===r.driver && _isRideWithinHoursSymmetric(r,6))?`<button onclick="dashSendArrival(${r.id})" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.6rem;background:none;border:1.5px solid #7c3aed;border-radius:8px;color:#7c3aed;font-weight:700;font-size:.88rem;cursor:pointer;font-family:'DM Sans',sans-serif;">\u2708\uFE0F Send arrival text to ${escHtml((r.client||'client').split(' ')[0])}</button>`:''}
           ${(r.arrivalSentAt && getMyDriverName()===r.driver)?`<div onclick="resetArrivalSent(${r.id})" style="text-align:center;font-size:.68rem;color:var(--mid);text-decoration:underline;cursor:pointer;margin-top:-.15rem;">Arrival text sent by mistake? Reset</div>`:''}
@@ -10123,6 +10169,16 @@ async function _saveMarkPaidCombined(rideId){
     // background now, tracked as pending so a stale, in-flight Firebase snapshot can't
     // quietly revert this change before it lands; see setupRealtimeListeners().
     window._pendingUnsavedRideIds.add(r.id);
+    // SAFETY NET (added after a reported cross-device sync gap): the only way this ID used to
+    // leave the pending set was a SUCCESSFUL save below - a failed or thrown save left it here
+    // permanently, and for as long as it sat there, setupRealtimeListeners() would keep
+    // discarding every future live update for this ride on this device and re-showing this
+    // device's own frozen local copy instead, silently, with no indication anything was wrong
+    // beyond a banner that's easy to miss. 90s comfortably covers a normal retry/slow-network
+    // round trip; past that, continuing to block live truth for this ride is worse than the
+    // rare case of a very slow save's local optimistic copy getting overwritten by an
+    // incoming snapshot before it lands - which self-corrects on the next save anyway.
+    setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
     var _saveDone = saveRides().then(function(ok){
       if(ok){ window._pendingUnsavedRideIds.delete(r.id); }
       try{ renderDashSaveFailed(); }catch(e){}
