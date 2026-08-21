@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191914">
+<meta name="version" content="202608191917">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -16357,6 +16357,32 @@ async function saveQuickAddRide(){
   }
   rides.push(ride);
   if(ride.driver) addNotification(ride.driver,ride,'assigned');
+  // Real gap found during a drift check across Quote/Quick Add/Edit Ride: splitXXLRide() was
+  // only ever called from saveRideEdits() (converting an EXISTING ride to XXL). A brand-new
+  // XXL ride created directly here - which already has a full qa-driver2 field, a real,
+  // working way to assign the 2nd vehicle's driver - never actually split into two
+  // independent rides at all. ride.xxl/vehicle2/driver2/price2 just sat there as dead-end
+  // fields on one combined record, the exact bug splitXXLRide() was built to fix, silently
+  // still present for this one creation path. Fixed by applying the identical pattern
+  // saveRideEdits() already uses, including the same preserve-then-restore-on-failure safety.
+  var _qaXxlLeg2 = null;
+  if(ride.xxl && ride.driver2){
+    var _preQaXxlPrice = ride.price, _preQaXxlPairId = ride.pairId;
+    try{
+      _qaXxlLeg2 = splitXXLRide(ride, { vehicle2: ride.vehicle2, driver2: ride.driver2, price2: ride.price2 });
+      touchRide(_qaXxlLeg2, 'created');
+      rides.push(_qaXxlLeg2);
+      if(_qaXxlLeg2.driver) addNotification(_qaXxlLeg2.driver, _qaXxlLeg2, 'assigned');
+    }catch(e){
+      console.warn('Quick Add XXL split failed', e);
+      ride.price = _preQaXxlPrice; ride.pairId = _preQaXxlPairId;
+      if(_qaXxlLeg2){ var _qaXIdx=rides.indexOf(_qaXxlLeg2); if(_qaXIdx>-1) rides.splice(_qaXIdx,1); }
+      var _qaXIdx1 = rides.indexOf(ride); if(_qaXIdx1>-1) rides.splice(_qaXIdx1,1);
+      showToast('\u26a0\ufe0f Ride did not save \u2014 check your connection and try again', 'error');
+      _reenableBtn();
+      return;
+    }
+  }
   let ride2=null;
   // Wrapped (v818) - this whole block used to have zero error handling between pushing the
   // ride into memory and actually persisting it. If splitApRoundTripRide (or anything it calls
@@ -20141,6 +20167,31 @@ async function _shareBookingLink(link, clientName){
 // texting the quote IS how that kind of request gets completed). Clears the tracked id
 // immediately either way, so a later, unrelated save in the same session is never mistakenly
 // attributed to an old request.
+// Manual "this isn't going anywhere" action, reported directly as missing — a rejected quote
+// or a request that just never turns into anything currently has no way off this list short of
+// the 30-day window expiring on its own. Deliberately its own status ('dismissed'), not reusing
+// 'scheduled' — that value means something specific and real happened (a ride got booked, a
+// quote got sent); calling a rejected request "scheduled" would be actively misleading if this
+// data is ever read elsewhere later. A light confirm since there's no undo once it's off this
+// list — the underlying record isn't deleted, just no longer surfaced here.
+async function _dismissBookingRequest(id){
+  var r = (clientRequests||{})[id]; if(!r) return;
+  var _ok = await showConfirmModal({
+    icon:'\u2715', iconColor:'var(--mid)', iconBg:'#2a2a2a',
+    title:'Dismiss this request?',
+    message:'Removes it from this list. Nothing gets deleted \u2014 just marks it as not needing action.',
+    buttons:[
+      {label:'Cancel', style:'neutral', value:false},
+      {label:'Dismiss', style:'primary', value:true}
+    ]
+  });
+  if(!_ok) return;
+  r.status = 'dismissed';
+  try{ await storageSet('kat:clientRequests', clientRequests); }catch(e){ console.warn('dismiss booking request failed', e); }
+  var back=document.getElementById('booking-requests-modal-back'); if(back) back.remove();
+  _showBookingRequestsModal();
+}
+
 async function _markBookingRequestHandled(){
   var id = window._prefillSourceRequestId;
   window._prefillSourceRequestId = null;
@@ -20166,6 +20217,7 @@ function _findRecentBookingRequests(){
     if((r.loginName||'').toLowerCase() !== myLogin.toLowerCase()) return false;
     if(!r.submittedAt || r.submittedAt < cutoff) return false;
     if(r.status === 'scheduled') return false; // handled — disappears per Chase's direct ask
+    if(r.status === 'dismissed') return false; // manually cleared — see _dismissBookingRequest
     return true;
   }).sort(function(a,b){ return (b.submittedAt||0) - (a.submittedAt||0); });
 }
@@ -20189,7 +20241,10 @@ async function _showBookingRequestsModal(){
       + '<div style="font-size:.72rem;color:var(--mid);margin-top:.1rem;">'+kind+' \u00b7 '+escHtml(tripBits.join(' \u00b7 '))+'</div>'
       + '<div style="font-size:.68rem;color:var(--mid);margin-top:.15rem;">'+when+' \u00b7 '+(isPending?'<span style="color:#b45309;font-weight:700;">\u23f3 Pending</span>':'<span style="color:var(--green);font-weight:700;">\u2713 Handled</span>')+'</div>'
       + '</div>'
-      + '<button onclick="var b=document.getElementById(\'booking-requests-modal-back\');if(b)b.remove();_openBookingRequestFromReview(\''+r._id+'\')" style="flex-shrink:0;padding:.4rem .7rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;">Open</button>'
+      + '<div style="display:flex;flex-direction:column;gap:.35rem;flex-shrink:0;">'
+      + '<button onclick="var b=document.getElementById(\'booking-requests-modal-back\');if(b)b.remove();_openBookingRequestFromReview(\''+r._id+'\')" style="padding:.4rem .7rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;">Open</button>'
+      + '<button onclick="_dismissBookingRequest(\''+r._id+'\')" style="padding:.3rem .7rem;background:none;border:1.5px solid var(--light);color:var(--mid);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.68rem;font-weight:700;cursor:pointer;">Dismiss</button>'
+      + '</div>'
       + '</div>';
   }).join('') : '<div style="padding:1rem;text-align:center;color:var(--mid);font-size:.85rem;">No booking requests in the last 30 days.</div>';
   back.innerHTML='<div style="background:#fff;border-radius:16px;max-width:480px;width:100%;padding:1.25rem;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
@@ -23575,12 +23630,30 @@ function qaXXLChanged(){
   const on=document.getElementById('qa-xxl')?.checked;
   const grp=document.getElementById('qa-vehicle2-group');
   if(grp) grp.style.display=on?'block':'none';
+  // Chase's direct call: both vehicles on an XXL booking should default to the client owner,
+  // not one to whoever's logged in and the other to a blank "-- 2nd Driver --" placeholder
+  // requiring a manual pick every time. The client owner is the one actually responsible for
+  // this client either way - reassigning either vehicle afterward through the normal Dispatch
+  // Tools flow (already how every other ride gets reassigned) still works exactly the same.
+  // Falls back to whoever's logged in for a brand-new client with no established owner yet -
+  // same fallback defaultRideDriver() already uses, not a new invented default.
+  if(on){
+    const cName=(document.getElementById('qa-client')||{}).value||'';
+    const owner=getClientFeeOwner(cName, getMyDriverName()) || defaultRideDriver();
+    const dSel=document.getElementById('qa-driver');
+    if(dSel && owner) dSel.value=owner;
+  }
   // Populate driver2 dropdown with all drivers
   const d2sel=document.getElementById('qa-driver2');
   if(d2sel && d2sel.options.length<=1){
     d2sel.innerHTML='<option value="">-- 2nd Driver --</option>'+DRIVERS.map(function(d){
       return '<option value="'+d+'">'+d.split(' ')[0]+'</option>';
     }).join('');
+  }
+  if(on && d2sel){
+    const cName2=(document.getElementById('qa-client')||{}).value||'';
+    const owner2=getClientFeeOwner(cName2, getMyDriverName()) || defaultRideDriver();
+    if(owner2) d2sel.value=owner2;
   }
   recalcQa();
 }
