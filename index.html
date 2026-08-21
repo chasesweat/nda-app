@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191931">
+<meta name="version" content="202608191932">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -5632,14 +5632,18 @@ async function exportCalendar(target){
   if(!list.length){ showToast('No upcoming rides to export','error'); return; }
   if(!fresh.length){ showToast('✓ Already caught up — nothing new to export'); return; }
   const pad=n=>String(n).padStart(2,'0');
-  const toICS=(ds,ts)=>{ const[y,m,d]=ds.split('-'); const[hh,mm]=(ts||'09:00').split(':'); return y+pad(m)+pad(d)+'T'+pad(hh)+pad(mm)+'00'; };
   const stampNow=now.getUTCFullYear()+pad(now.getUTCMonth()+1)+pad(now.getUTCDate())+'T'+pad(now.getUTCHours())+pad(now.getUTCMinutes())+pad(now.getUTCSeconds())+'Z';
   let ics='BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//NWDA Transportation//EN\r\nCALSCALE:GREGORIAN\r\n';
   fresh.forEach(r=>{
-    const start=toICS(r.date,r.time);
-    const startHr=parseInt((r.time||'09:00').split(':')[0])||9;
-    const endHr=Math.min(startHr+1,23);
-    const end=toICS(r.date, pad(endHr)+':'+((r.time||'09:00').split(':')[1]||'00'));
+    // DST-aware UTC conversion (see _icsZonedTimeToUtc above) instead of a bare floating time -
+    // same fix as addRideToCalendar() and the FamilyWall export, applied here for the same
+    // reason: not every importer treats a floating time as "this business's local time," and a
+    // correctly-computed UTC instant converts back to the true Georgia time reliably for every
+    // driver viewing their own export, regardless of which app they import it into.
+    const startDt=_icsZonedTimeToUtc(r.date, r.time||'09:00', 'America/New_York');
+    const endDt=new Date(startDt.getTime()+60*60000);
+    const start=_icsStampUtc(startDt);
+    const end=_icsStampUtc(endDt);
     const summary=icsEscape((r.client||'Ride')+' · '+(r.type||''));
     const desc=icsEscape([r.driver?'Driver: '+r.driver:'',r.pickup?'Pickup: '+r.pickup:'',r.home?'Drop: '+r.home:'',r.phone?'Phone: '+r.phone:''].filter(Boolean).join('\n'));
     const loc=icsEscape(r.pickup||r.home||'');
@@ -5666,16 +5670,53 @@ function downloadTextFile(content, filename, mime){
 function icsEscape(str){
   return String(str||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\r?\n/g,'\\n');
 }
+// Shared by addRideToCalendar() and the bulk "export upcoming rides" function below - both
+// generate real .ics files consumed by outside calendar apps, so both need the same DST-aware
+// conversion from this business's actual local time (America/New_York) to a correct UTC
+// instant, rather than a bare "floating" time with no timezone marker at all. A floating time
+// is technically supposed to mean "show this literal number regardless of viewer," but not
+// every importer honors that - FamilyWall's importer reads a floating time as UTC outright,
+// which is exactly the 1 AM-instead-of-5 AM bug found and fixed for the FamilyWall export
+// (see that entry). Since every actual viewer of THESE exports (a driver, on their own device)
+// is physically in Georgia, a correctly-computed UTC instant converts back to the true Georgia
+// time reliably, everywhere, DST included - which is what "always Georgia time" actually
+// requires, not a floating string that different apps interpret inconsistently. Same technique
+// as calendarFeed-standalone.js and the FamilyWall export - deliberately shared here rather
+// than re-duplicated a third time, since neither of these two functions has the FamilyWall
+// block's temporary/removable-on-its-own constraint.
+function _icsZonedTimeToUtc(dateStr, timeStr, timeZone){
+  var parts0=(dateStr||'').split('-'); var y=Number(parts0[0]), m=Number(parts0[1]), d=Number(parts0[2]);
+  var t=(timeStr||'09:00').split(':'); var hh=Number(t[0])||0, mm=Number(t[1])||0;
+  var utcGuess=new Date(Date.UTC(y, (m||1)-1, d||1, hh, mm, 0));
+  var fmt=new Intl.DateTimeFormat('en-US', {
+    timeZone:timeZone, hour12:false,
+    year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', second:'2-digit'
+  });
+  var parts={};
+  fmt.formatToParts(utcGuess).forEach(function(p){ parts[p.type]=p.value; });
+  var hour24 = parts.hour==='24' ? '00' : parts.hour;
+  var asIfLocal=new Date(Date.UTC(
+    Number(parts.year), Number(parts.month)-1, Number(parts.day),
+    Number(hour24), Number(parts.minute), Number(parts.second)
+  ));
+  var diff=utcGuess.getTime()-asIfLocal.getTime();
+  return new Date(utcGuess.getTime()+diff);
+}
+function _icsStampUtc(dt){
+  var pad=function(n){return String(n).padStart(2,'0');};
+  return dt.getUTCFullYear()+pad(dt.getUTCMonth()+1)+pad(dt.getUTCDate())+'T'+pad(dt.getUTCHours())+pad(dt.getUTCMinutes())+pad(dt.getUTCSeconds())+'Z';
+}
 function addRideToCalendar(rideId){
   var r=_rideById(rideId);
   if(!r){ showToast('Ride not found','error'); return; }
   var pad=function(n){return String(n).padStart(2,'0');};
-  var toICS=function(ds,ts){ var p=(ds||'').split('-'); var t=(ts||'09:00').split(':'); return p[0]+pad(p[1])+pad(p[2])+'T'+pad(t[0])+pad(t[1])+'00'; };
   // 1-hour default block; calendars let the user adjust after import.
   var startDs=r.date, startTs=r.time||'09:00';
-  var start=toICS(startDs,startTs);
-  var eh=(parseInt((startTs).split(':')[0])||9)+1; if(eh>23) eh=23;
-  var end=toICS(startDs, pad(eh)+':'+((startTs).split(':')[1]||'00'));
+  var startDt=_icsZonedTimeToUtc(startDs, startTs, 'America/New_York');
+  var endDt=new Date(startDt.getTime()+60*60000);
+  var start=_icsStampUtc(startDt);
+  var end=_icsStampUtc(endDt);
   var now=new Date();
   var stamp=now.getUTCFullYear()+pad(now.getUTCMonth()+1)+pad(now.getUTCDate())+'T'+pad(now.getUTCHours())+pad(now.getUTCMinutes())+pad(now.getUTCSeconds())+'Z';
   var summary=icsEscape((r.client||'Ride')+(r.type?' \u2014 '+r.type:''));
