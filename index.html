@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191929">
+<meta name="version" content="202608191931">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -5705,15 +5705,48 @@ function addRideToCalendar(rideId){
 function canExportToFamilyWall(){
   return !!(currentUser && (currentUser.name==='Chase' || currentUser.name==='Morgan'));
 }
+// BUG (reported, first real use): a ride scheduled for the early morning imported into
+// FamilyWall showing 1 AM. Root cause: DTSTART/DTEND below were built as a bare "floating" ICS
+// time (no Z suffix, no TZID) - which RFC 5545 leaves deliberately ambiguous, meant to be
+// interpreted in whatever timezone the VIEWING app considers local. Native OS calendar apps
+// (Apple/Google/Outlook) generally default a floating time to the importing device's own
+// timezone, which happens to work by coincidence when that device is also in America/New_York -
+// but FamilyWall's importer reads it as UTC instead, so a ride actually at, say, 5:00 AM Eastern
+// landed at 5:00 UTC, which FamilyWall then displayed back in Eastern as 1:00 AM (5:00 - 4h
+// EDT) - exactly the reported symptom, and exactly the same underlying bug class as the
+// calendarFeed timezone fix (see the SERVER-ONLY entry above) - this export just never got that
+// same fix applied when it was built. Fixed the same way: the double-conversion technique,
+// DST-aware, no hardcoded offset - guess UTC from the naive local numbers, check what that
+// guess actually displays as in America/New_York, correct by the difference.
+function _fwZonedTimeToUtc(dateStr, timeStr, timeZone){
+  var parts0=(dateStr||'').split('-'); var y=Number(parts0[0]), m=Number(parts0[1]), d=Number(parts0[2]);
+  var t=(timeStr||'09:00').split(':'); var hh=Number(t[0])||0, mm=Number(t[1])||0;
+  var utcGuess=new Date(Date.UTC(y, (m||1)-1, d||1, hh, mm, 0));
+  var fmt=new Intl.DateTimeFormat('en-US', {
+    timeZone:timeZone, hour12:false,
+    year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', second:'2-digit'
+  });
+  var parts={};
+  fmt.formatToParts(utcGuess).forEach(function(p){ parts[p.type]=p.value; });
+  var hour24 = parts.hour==='24' ? '00' : parts.hour;
+  var asIfLocal=new Date(Date.UTC(
+    Number(parts.year), Number(parts.month)-1, Number(parts.day),
+    Number(hour24), Number(parts.minute), Number(parts.second)
+  ));
+  var diff=utcGuess.getTime()-asIfLocal.getTime();
+  return new Date(utcGuess.getTime()+diff);
+}
 function exportRideToFamilyWall(rideId){
   var r=_rideById(rideId);
   if(!r){ showToast('Ride not found','error'); return; }
   var pad=function(n){return String(n).padStart(2,'0');};
-  var toICS=function(ds,ts){ var p=(ds||'').split('-'); var t=(ts||'09:00').split(':'); return p[0]+pad(p[1])+pad(p[2])+'T'+pad(t[0])+pad(t[1])+'00'; };
+  var icsStampUtc=function(dt){ return dt.getUTCFullYear()+pad(dt.getUTCMonth()+1)+pad(dt.getUTCDate())+'T'+pad(dt.getUTCHours())+pad(dt.getUTCMinutes())+pad(dt.getUTCSeconds())+'Z'; };
   var startDs=r.date, startTs=r.time||'09:00';
-  var start=toICS(startDs,startTs);
-  var eh=(parseInt((startTs).split(':')[0])||9)+1; if(eh>23) eh=23;
-  var end=toICS(startDs, pad(eh)+':'+((startTs).split(':')[1]||'00'));
+  var startDt=_fwZonedTimeToUtc(startDs, startTs, 'America/New_York');
+  var endDt=new Date(startDt.getTime()+60*60000); // 1-hour default block, same as addRideToCalendar
+  var start=icsStampUtc(startDt);
+  var end=icsStampUtc(endDt);
   var now=new Date();
   var stamp=now.getUTCFullYear()+pad(now.getUTCMonth()+1)+pad(now.getUTCDate())+'T'+pad(now.getUTCHours())+pad(now.getUTCMinutes())+pad(now.getUTCSeconds())+'Z';
   var summary=icsEscape((r.client||'Ride')+(r.type?' \u2014 '+r.type:''));
@@ -6407,6 +6440,23 @@ function splitApRoundTripRide(ride){
     pickup: secondType==='AP PICK UP' ? (terminalAddr || ride.home || '') : (ride.home || ''),
     home: secondType==='AP PICK UP' ? (ride.pickup || '') : (terminalAddr || ride.home || ''),
     price: split.leg2,
+    // BUG FIX: leg2's own surcharge flags, NOT leg1's inherited via the Object.assign above.
+    // apRoundTripLegSplit() -> buildRideBreakdown() already correctly priced leg2 FROM these
+    // rt_* fields (leg2's own choices, captured separately in Quick Add's "Surcharges — Leg 2
+    // (return)" chips) - but until this fix, the actual leg2 RECORD kept leg1's plain fuel/
+    // traffic/etc values instead, because Object.assign copies everything not explicitly
+    // overridden. Harmless for premium/traffic/christmas/holiday in most cases, because the
+    // fee-breakdown display separately re-derives those fresh from leg2's own date/time
+    // (see _feeLegFlagOverride) - but fuel has no such re-derivation anywhere, so any ride
+    // where the return leg's fuel choice differed from the outbound leg's was PERMANENTLY
+    // wrong on leg2 from the moment it was created, showing as a phantom "Manual adjustment"
+    // nobody actually made, forever, with no edit or sync issue involved at all. Reported
+    // directly: two separate booking-link AP Round Trips, both wrong on leg2, neither touched
+    // after creation. Once split, leg2.type is no longer 'AP ROUND TRIP', so nothing else
+    // downstream ever looks at rt_fuel/rt_traffic again - this is the one and only place they
+    // get consumed, so they have to be baked into leg2's own flat fields right here.
+    fuel: ride.rt_fuel, traffic: ride.rt_traffic, premium: ride.rt_premium,
+    holiday: ride.rt_holiday, christmas: ride.rt_christmas,
     // Fresh, independent history - NOT the array Object.assign would otherwise carry over BY
     // REFERENCE from `ride`. Every caller of this function already logs its own touchRide(leg2,
     // 'created') right after calling it; ride.trail by then already has ITS OWN 'created' entry
@@ -6420,6 +6470,14 @@ function splitApRoundTripRide(ride){
   ride.pairId=pairId;
   ride.rtLegNumber=1;
   ride.price=split.leg1;
+  // rt_* fields were only ever a carrier for leg2's choices through to this split step - fully
+  // consumed above, now dead weight on leg1 (which never referenced them for its own pricing)
+  // and actively misleading on leg2 (which just got its OWN real fuel/traffic/etc values, not
+  // these). Deleting from both rather than leaving stale, unused data for a future reader to
+  // wonder about.
+  ['rt_premium','rt_traffic','rt_holiday','rt_christmas','rt_late','rt_fuel'].forEach(function(k){
+    delete ride[k]; delete leg2[k];
+  });
   return leg2;
 }
 
