@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191938">
+<meta name="version" content="202608191939">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -8463,7 +8463,7 @@ function renderConfirmations(){
       const imgEl=document.getElementById('dc-prev-'+r.id);
       const loaderEl=document.getElementById('dc-prev-'+r.id+'-loader');
       if(!imgEl) return;
-      warmDriverCardImage(r.driver.trim()).then(function(file){
+      warmDriverCardImage(r.driver.trim()).then(async function(file){
         if(!file){ if(loaderEl) loaderEl.textContent='No card photo'; return; }
         const ds=driverSettings[r.driver.trim()]||{};
         // Per-part toggles live on the CLIENT OWNER's settings (whose confirmation this is).
@@ -8472,17 +8472,23 @@ function renderConfirmations(){
         const _sa=(driverSettings[_own]||{}).sendParts||{};
         // Build EVERY possible file into a keyed map; the per-ride checkboxes decide inclusion at send time.
         window._confFilesMap=window._confFilesMap||{};
-        const _fm={ card:file||null, vcard:null, selfie:null };
+        const _fm={ card:file||null, vcard:null, selfie:null, combined:null };
         // The "vcard" slot is now the CLIENT's contact, bound for the driver only \u2014
         // never the driver's own card going to the client (removed; the client doesn't
         // need the driver's number, they text through the group confirmation).
         if(r.client) _fm.vcard=buildClientVCard(r);
+        var _selfieOwner=feeOwnerFor(r.createdBy)||r.driver.trim();
         try{
-          const _selfieOwner=feeOwnerFor(r.createdBy)||r.driver.trim();
           const _su=getDriverSelfie(_selfieOwner);
           const _sb=_su?dataURLtoBlob(_su):null;
           if(_sb) _fm.selfie=new File([_sb],(_selfieOwner.split(' ')[0]||'driver')+'-selfie.png',{type:_sb.type||'image/png'});
         }catch(e){ console.warn('selfie share file',e); }
+        // Pre-build the combined card+selfie image too, same reasoning as warming the card
+        // itself: this is a real canvas/image-decode operation, not instant, and "Send
+        // everything" should never be the thing waiting on it from a cold start.
+        if(_fm.selfie && (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')){
+          try{ _fm.combined = await buildCombinedCardSelfieImageFile(r.driver.trim(), _selfieOwner); }catch(e){ console.warn('combined card+selfie build failed',e); }
+        }
         window._confFilesMap[r.id]=_fm;
         // Legacy flat list (default selection) kept for any fallback path.
         const allFiles=[];
@@ -9090,7 +9096,10 @@ const _driverCardImgCache = {};
 const _confirmShareFiles = {};
 // Tracks which parts have been sent per ride — { rideId: Set of partKeys }
 const _sentParts = {};
-async function buildDriverCardImageFile(name){
+// Returns the driver-card CANVAS itself (not yet exported to a file), so the exact same
+// drawing logic can be reused both for a standalone card (buildDriverCardImageFile) and for a
+// combined card+selfie image (buildCombinedCardSelfieImageFile below) without duplicating it.
+async function _buildDriverCardCanvas(name){
   await _ensureDriverPhotoLoaded(name);
   const prof     = DRIVER_PROFILES[name]||{};
   const photoSrc = (typeof DRIVER_PHOTOS!=='undefined' && DRIVER_PHOTOS[name]) ? DRIVER_PHOTOS[name] : '';
@@ -9126,18 +9135,78 @@ async function buildDriverCardImageFile(name){
       ctx.fillText(name, W/2, imgH + nameH/2);
     }
 
-    return new Promise(res=>cv.toBlob(b=>{
-      res(b ? new File([b],(name.split(' ')[0]||'Driver')+'-card.png',{type:'image/png'}) : null);
-    },'image/png'));
+    return cv;
   };
 
   return new Promise((resolve)=>{
-    if(!photoSrc){ draw(null).then(resolve); return; }
+    if(!photoSrc){ resolve(draw(null)); return; }
     const img=new Image();
-    img.onload =()=>draw(img).then(resolve);
-    img.onerror=()=>draw(null).then(resolve);
+    img.onload =()=>resolve(draw(img));
+    img.onerror=()=>resolve(draw(null));
     img.src=photoSrc;
   });
+}
+
+async function buildDriverCardImageFile(name){
+  const cv = await _buildDriverCardCanvas(name);
+  return new Promise(res=>cv.toBlob(b=>{
+    res(b ? new File([b],(name.split(' ')[0]||'Driver')+'-card.png',{type:'image/png'}) : null);
+  },'image/png'));
+}
+
+// Loads a data-URL image (used for the day-of selfie, which is stored as a data URL, not a
+// File) as a real drawable Image, Promise-wrapped so it composes cleanly with the canvas work
+// above. Resolves null rather than rejecting on a missing/broken source, since a failed selfie
+// should fall back to the card alone, not break the whole send.
+function _loadImageFromDataUrl(dataUrl){
+  return new Promise(function(resolve){
+    if(!dataUrl){ resolve(null); return; }
+    var img=new Image();
+    img.onload=function(){ resolve(img); };
+    img.onerror=function(){ resolve(null); };
+    img.src=dataUrl;
+  });
+}
+
+// Combines the driver card and the day-of selfie into ONE stacked image instead of sending
+// them as two separate files. Built specifically so "Send everything" can stay on the single-
+// file, pre-addressed-thread path (see textClient()'s _multiFile branch, and the v879 handoff
+// entry explaining why that split exists) even on AP Pick Up rides — the one ride type where
+// two images genuinely needed to travel together, which used to force the OS share sheet and,
+// with it, a manually-picked recipient. One combined file sidesteps that entirely: it's still
+// just one file, so the same copy-to-clipboard + pre-addressed-thread flow every other ride
+// type already gets applies here too, with zero branching and zero exception for this one case.
+// Generated fresh from whatever driver/selfie apply to THIS ride, every time - never a
+// pre-made, manually uploaded image, so this works identically for all ~20 drivers with no
+// per-driver setup required.
+async function buildCombinedCardSelfieImageFile(cardDriverName, selfieOwnerName){
+  const cardCv = await _buildDriverCardCanvas(cardDriverName);
+  const selfieDataUrl = getDriverSelfie(selfieOwnerName);
+  const selfieImg = await _loadImageFromDataUrl(selfieDataUrl);
+  if(!selfieImg){
+    // No selfie actually available (owner has none set, or it failed to load) - the card alone
+    // is still a completely valid single file, so fall back to that rather than fail outright.
+    return new Promise(res=>cardCv.toBlob(b=>{
+      res(b ? new File([b],(cardDriverName.split(' ')[0]||'Driver')+'-card.png',{type:'image/png'}) : null);
+    },'image/png'));
+  }
+  const W = cardCv.width;
+  const GAP = 24; // matches the card's own S=2 internal scale, so the seam reads consistently
+  const selfieH = Math.round(selfieImg.height * (W / selfieImg.width));
+  const H = cardCv.height + GAP + selfieH;
+  const out=document.createElement('canvas'); out.width=W; out.height=H;
+  const ctx=out.getContext('2d');
+  ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,W,H);
+  ctx.drawImage(cardCv, 0, 0);
+  // A thin rule between the two - same treatment the card's own no-photo fallback already uses
+  // for its name-strip divider - so this reads as one intentional combined image, not two
+  // unrelated photos mashed together.
+  ctx.strokeStyle='#e0e0e0'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(24, cardCv.height+GAP/2); ctx.lineTo(W-24, cardCv.height+GAP/2); ctx.stroke();
+  ctx.drawImage(selfieImg, 0, cardCv.height+GAP, W, selfieH);
+  return new Promise(res=>out.toBlob(b=>{
+    res(b ? new File([b],(cardDriverName.split(' ')[0]||'Driver')+'-card-and-selfie.png',{type:'image/png'}) : null);
+  },'image/png'));
 }
 
 function warmDriverCardImage(name){
@@ -24596,8 +24665,27 @@ async function sendAllConf(id){
     }catch(e){}
   }
   const files=[];
-  if(g('card')&&fm.card) files.push(fm.card);
-  if(_selfieApplies&&g('selfie')&&fm.selfie) files.push(fm.selfie);
+  const _wantsCard = g('card') && !!fm.card;
+  const _wantsSelfie = _selfieApplies && g('selfie') && !!fm.selfie;
+  if(_wantsCard && _wantsSelfie){
+    // Combine into ONE image instead of sending two separate files - keeps this on the same
+    // pre-addressed single-file send path every other ride type already gets, instead of
+    // forcing the OS share sheet (and with it, a manually-picked recipient) purely because two
+    // images needed to travel together. See buildCombinedCardSelfieImageFile's own comment for
+    // the full reasoning. fm.combined is normally already warmed by the same background pass
+    // that builds fm.card/fm.selfie (see "Populate driver card previews") - built fresh here
+    // only as a fallback if that warm-up hasn't finished yet, same pattern as the card fix
+    // above, not a routine path.
+    var _selfieOwnerForCombine = feeOwnerFor(r.createdBy)||r.driver.trim();
+    if(!fm.combined){
+      try{ fm.combined = await buildCombinedCardSelfieImageFile(r.driver.trim(), _selfieOwnerForCombine); }catch(e){}
+    }
+    if(fm.combined) files.push(fm.combined);
+    else { files.push(fm.card); files.push(fm.selfie); } // combining genuinely failed - still send both rather than drop one
+  } else {
+    if(_wantsCard) files.push(fm.card);
+    if(_wantsSelfie) files.push(fm.selfie);
+  }
   // Same real bug as sendArrivalText() had, same fix: textClient() already correctly detects
   // and warns when there's genuinely nobody to text (client has no saved number and the
   // sender's own number is deliberately excluded from the recipient list) - but its result
