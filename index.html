@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191932">
+<meta name="version" content="202608191938">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -8145,11 +8145,17 @@ function mapsHref(addr){
     ? "https://maps.apple.com/?daddr="+q+"&dirflg=d"
     : "https://www.google.com/maps/dir/?api=1&destination="+q+"&travelmode=driving";
 }
-function mapsLink(addr, color){
+function mapsLink(addr, color, navAddr){
   const a=(addr||"").trim();
   if(!a || a==="\u2014") return escHtml(a||"\u2014");
-  const attr=escHtml(a).replace(/"/g,"&quot;");
-  return '<a href="'+mapsHref(a)+'" data-addr="'+attr+'" target="_blank" rel="noopener" '
+  // navAddr lets a caller show one thing (a human-readable address or terminal name) while
+  // actually navigating somewhere more precise - see the PICKUP/DESTINATION fix below, the
+  // first real caller of this. Falls back to the display address itself when not given, or
+  // when given but empty, so every existing caller (linkifyAddresses, and any 2-arg call)
+  // keeps working exactly as before with zero behavior change.
+  const nav=((navAddr||'').trim())||a;
+  const attr=escHtml(nav).replace(/"/g,"&quot;");
+  return '<a href="'+mapsHref(nav)+'" data-addr="'+attr+'" target="_blank" rel="noopener" '
        + 'onclick="event.stopPropagation();openNav(this.getAttribute(\'data-addr\'));return false;" '
        + 'style="color:'+(color||"inherit")+';text-decoration:underline;text-underline-offset:2px;">'
        + escHtml(a)+'</a>';
@@ -9759,9 +9765,9 @@ function renderRideView(r){
 
     ${_bothAddr && (r.pickup||r.home) ? `<div class="detail-row" style="grid-column:1/-1;">
       <div style="display:flex;flex-direction:column;gap:.4rem;">
-        ${r.pickup?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:78px;flex-shrink:0;margin-top:2px;">PICKUP</span><div style="font-size:.86rem;">${mapsLink(r.pickup,"var(--accent)")}</div></div>`:''}
+        ${r.pickup?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:78px;flex-shrink:0;margin-top:2px;">PICKUP</span><div style="font-size:.86rem;">${mapsLink(r.pickup,"var(--accent)", (r.type==='AP PICK UP'&&r.terminal)?terminalToAddress(r.terminal):null)}</div></div>`:''}
         ${extraStopsHtml}
-        ${r.home?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:78px;flex-shrink:0;margin-top:2px;">DESTINATION</span><div style="font-size:.86rem;">${mapsLink(r.home,"var(--accent)")}</div></div>`:''}
+        ${r.home?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:78px;flex-shrink:0;margin-top:2px;">DESTINATION</span><div style="font-size:.86rem;">${mapsLink(r.home,"var(--accent)", ((r.type==='AP RUN'||r.type==='AP ROUND TRIP')&&r.terminal)?terminalToAddress(r.terminal):null)}</div></div>`:''}
       </div>
     </div>` : ''}
 
@@ -17295,7 +17301,18 @@ function refreshDash(){
         if(r.status==='paid' || typeof _isRideWithinHours!=='function' || !_isRideWithinHours(r,12)) return '';
         var _btns = [];
         var _started = r.rideStartedAt && !r.rideStoppedAt;
-        if(!_started){
+        // BUG FIX (flagged in the v935 handoff entry, now fixed): a ride that's been started
+        // AND stopped used to fall right back into the "!_started" branch below, since
+        // _started specifically means "currently in progress" and is false once stopped too -
+        // showing Start Ride a second time on an already-finished ride, for every type, not
+        // just the ONE WAY case v935 fixed. Distinguished explicitly here so a genuinely
+        // finished ride skips every other branch (Pause/Resume, Track, Send Arrival Text -
+        // none of which make sense once the ride is already over) and goes straight to the
+        // one real next action left: Mark Paid.
+        var _stopped = !!(r.rideStartedAt && r.rideStoppedAt);
+        if(_stopped){
+          _btns.push('<button onclick="event.stopPropagation();toggleRidePaid('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\ud83d\udcb0 Mark Paid</button>');
+        } else if(!r.rideStartedAt){
           _btns.push('<button onclick="event.stopPropagation();openStartRide('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;">\ud83d\ude97 Start Ride</button>');
         } else if(r.type==='ROUND TRIP'){
           // Genuine round trips (not AP ROUND TRIP) get Pause/Resume instead of nothing once
@@ -17312,7 +17329,12 @@ function refreshDash(){
 
         var _isAirport = (r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP');
         var _showBillLater = false;
-        if(r.arrivalSentAt || (r.type==='AP RUN' && _started)){
+        if(_stopped){
+          // Already handled above - Mark Paid is the only button a stopped ride needs. Same
+          // "Client Invoiced" link still applies underneath it, same as every other path that
+          // pushes Mark Paid.
+          _showBillLater = !r.awaitingInvoice;
+        } else if(r.arrivalSentAt || (r.type==='AP RUN' && _started)){
           // AP RUN never has an "arrival" to send a text about at all - it's the driver taking
           // the client TO the airport, no incoming flight to track. It was previously stuck
           // behind the same arrivalSentAt gate as AP PICK UP (which genuinely does track an
@@ -17347,6 +17369,16 @@ function refreshDash(){
           if(getMyDriverName()===r.driver && typeof _isRideWithinHoursSymmetric==='function' && _isRideWithinHoursSymmetric(r,6)){
             _btns.push('<button onclick="event.stopPropagation();dashSendArrival('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#1d4ed8;color:#fff;">\ud83d\udee9\ufe0f Arrived</button>');
           }
+        } else if(_started && !_isAirport && r.type!=='ROUND TRIP'){
+          // BUG FIX (reported directly: "the mark paid button is missing on the dashboard").
+          // A started ride that's neither an airport type (needs arrivalSentAt or AP RUN) nor
+          // a genuine ROUND TRIP (has its own Pause/Resume branch above) fell through every
+          // branch here with nothing pushed to _btns at all - ONE WAY specifically, but really
+          // any plain point-to-point type. Once started, there's no flight to track and no
+          // second leg to pause/resume for a trip like this - Mark Paid IS the next real
+          // action, same reasoning the AP RUN branch above already uses once it's started.
+          _btns.push('<button onclick="event.stopPropagation();toggleRidePaid('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\ud83d\udcb0 Mark Paid</button>');
+          _showBillLater = !r.awaitingInvoice;
         }
         // A dedicated row of its own (width:100% forces this onto its own line within the
         // outer card's flex-wrap layout), buttons laid out with their own flex context so
@@ -17667,7 +17699,7 @@ function venmoPayRideBtn(ownerName, amount, payerDName, rideId){
   if(!url) return '';
   const _safePayer=payerDName?payerDName.replace(/'/g,"\\'"):'';
   const _safeOwner=ownerName.replace(/'/g,"\\'");
-  const autoMark=payerDName?'venmoAutoMarkRide(\''+_safeOwner+'\',\''+_safePayer+'\','+_feeIdArg(rideId)+');':'';
+  const autoMark=payerDName?'venmoAutoMarkRide(\''+_safeOwner+'\',\''+_safePayer+'\','+_feeIdArg(rideId)+')':'';
   // A real anchor with target="_blank" rather than window.location.href (v861). Reported: this
   // started asking "do you want to go to Venmo?" instead of just going. window.location.href
   // navigates the CURRENT context away - which in a browser tab is merely rude (the app is
@@ -17679,8 +17711,29 @@ function venmoPayRideBtn(ownerName, amount, payerDName, rideId){
   // app running untouched behind it. rel="noopener" because any window.opener handed to an
   // external site is a needless liability. Matches the pattern the flight Track link already
   // uses on the dashboard card.
-  return '<a href="'+url.replace(/"/g,'&quot;')+'" target="_blank" rel="noopener" '
-    +'onclick="event.stopPropagation();'+autoMark+'" '
+  //
+  // BUG FIX (reported directly: "I hit Venmo and paid it but it hasn't been marked as paid"):
+  // the onclick previously fired venmoAutoMarkRide() - a real async Firebase write - and let
+  // the anchor's own target="_blank" navigation proceed at the exact same moment, unawaited.
+  // On Android specifically, tapping a venmo.com link commonly hands off to the native Venmo
+  // APP via an OS-level intent - a genuine app switch, not just a background browser tab - and
+  // nothing guaranteed the in-flight write actually completed before that happened. Usually
+  // fast enough to get away with it; not always, which matches a report that isn't 100%
+  // reproducible rather than a request that flat-out never worked.
+  //
+  // Fixed by removing the race entirely rather than trying to win it: preventDefault stops the
+  // anchor's own navigation, the save is fully awaited, and ONLY once it's confirmed complete
+  // does this manually open the same URL the anchor would have. Costs a brief, real delay
+  // before Venmo opens (the time the write actually takes - typically well under a second) in
+  // exchange for guaranteeing the pending state is recorded before the app hands off, not
+  // racing it. If the save itself fails, still opens Venmo (the person likely still wants to
+  // pay), but warns rather than silently proceeding as if the tracking succeeded.
+  const _openVenmo='(function(e){e.preventDefault();e.stopPropagation();'
+    +(autoMark?('Promise.resolve('+autoMark+').catch(function(){showToast(\'\\u26a0\\ufe0f Payment tracking failed to save \\u2014 opening Venmo anyway; mark it paid manually after\',\'error\');}).then(function(){'):'(function(){')
+    +'window.open(\''+url.replace(/'/g,"\\'")+'\',\'_blank\',\'noopener\');'
+    +'})();})(event)';
+  return '<a href="'+url.replace(/"/g,'&quot;')+'" rel="noopener" '
+    +'onclick="'+_openVenmo+'" '
     +'style="flex:1;min-width:78px;padding:.42rem;background:#3d95ce;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:600;cursor:pointer;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center;box-sizing:border-box;">Venmo</a>';
 }
 
@@ -24512,6 +24565,36 @@ async function sendAllConf(id){
   if(selEl){ _setConfInstKey(id, selEl.value); }
   if(!g('text')&&!g('inst')&&!g('card')&&!(_vcardApplies&&g('vcard'))&&!(_selfieApplies&&g('selfie'))&&!(_phoneApplies&&g('phone'))){ showToast('Nothing is checked \u2014 tick at least one item to send','error'); return; }
   const fm=(window._confFilesMap||{})[id]||{};
+  // BUG FIX: reported directly — driver card silently missing from "Send everything," no
+  // error shown. Root cause: fm.card is populated by a background warm-up that starts when
+  // the confirmations list first renders (see "Populate driver card previews" a few hundred
+  // lines up) — a real network fetch of the driver's photo, an image decode, a canvas draw,
+  // and a toBlob encode, not instant. If Send was tapped before that finished (very plausible
+  // — e.g. the first confirmation touched right after opening the tab), fm.card was simply
+  // undefined and this used to just skip it, silently, with the send otherwise proceeding as
+  // if nothing were wrong. warmDriverCardImage() returns the SAME cached, already-in-flight
+  // promise if a build already started (see _driverCardImgCache) — so this waits a little
+  // longer for work already underway rather than starting a fresh multi-second build, and it
+  // runs before textClient() below, not after, so it doesn't touch the timing textClient
+  // itself depends on for its own send call.
+  if(g('card') && !fm.card && r.driver){
+    try{ fm.card = await warmDriverCardImage(r.driver.trim()); }catch(e){}
+  }
+  // SAME BUG, SAME ROOT CAUSE, one line down from here: fm.selfie was built inside that exact
+  // same background .then() callback as fm.card above (see "Populate driver card previews"),
+  // so it was gated behind the driver card's async warm-up finishing too — even though
+  // building a selfie file needs no network fetch or async work at all, just an in-memory
+  // data URL (getDriverSelfie) run through a synchronous data-URL-to-Blob conversion. It was
+  // only ever "async" by association, not by necessity, so unlike the card above, this
+  // doesn't need an await — just build it right here if it's missing.
+  if(_selfieApplies && g('selfie') && !fm.selfie && r.driver){
+    try{
+      const _selfieOwner=feeOwnerFor(r.createdBy)||r.driver.trim();
+      const _su=getDriverSelfie(_selfieOwner);
+      const _sb=_su?dataURLtoBlob(_su):null;
+      if(_sb) fm.selfie=new File([_sb],(_selfieOwner.split(' ')[0]||'driver')+'-selfie.png',{type:_sb.type||'image/png'});
+    }catch(e){}
+  }
   const files=[];
   if(g('card')&&fm.card) files.push(fm.card);
   if(_selfieApplies&&g('selfie')&&fm.selfie) files.push(fm.selfie);
