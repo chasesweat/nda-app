@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191939">
+<meta name="version" content="202608191943">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2446,14 +2446,22 @@ function setupRealtimeListeners(){
   fbRef('nda/kat/comments').on('value', snap=>{
     if(snap.exists()) comments = snap.val()||{};
   });
-  // Listen for two-admin approval requests so a second admin sees them live.
-  fbRef('nda/kat/adminActions').on('value', snap=>{
-    if(snap.exists()){
-      var _v=snap.val(); adminActions=(_v&&typeof _v==='object')?_v:{};
-      try{ refreshDash(); }catch(e){}
-      try{ updateNotifBadge(); }catch(e){}
-    }
-  });
+  // Listen for two-admin approval requests so a second admin sees them live. Admin-only data —
+  // a regular driver can never act on this, so there's no reason for their device to hold this
+  // connection open at all. Scanned for exactly this kind of always-on-regardless-of-need
+  // listener on request; found this one, adminRemovalRequests, and adminPromotionRequests
+  // (see loadAdminRemovalRequests()'s own call site) all doing the same thing. If someone is
+  // promoted to admin mid-session, this listener won't retroactively start without a reload -
+  // acceptable since a promotion already tends to prompt one anyway, but worth knowing.
+  if(isAdmin()){
+    fbRef('nda/kat/adminActions').on('value', snap=>{
+      if(snap.exists()){
+        var _v=snap.val(); adminActions=(_v&&typeof _v==='object')?_v:{};
+        try{ refreshDash(); }catch(e){}
+        try{ updateNotifBadge(); }catch(e){}
+      }
+    });
+  }
   // Listen for fee-waiver requests so the owner sees them (and drivers see the outcome) live.
   fbRef('nda/kat/feeWaiveRequests').on('value', snap=>{
     if(snap.exists()){
@@ -3358,7 +3366,7 @@ const TIP_DATA={
 
   cal:{icon:'📅',title:'Calendar',text:'Tap any ride to see its full details. Creators and admins can also edit or cancel it from there. Search by client, phone, driver, or type. '+_MTIP_HINT},
 
-  myrides:{icon:'📋',title:'My Rides & Confirmations',text:'The To Confirm tab shows tomorrow\'s rides needing a day-before text. After Arrived, Mark Paid moves it into income \u2014 or Client Invoiced if they\'re billed later instead. A round trip works differently: Pause once dropped off, Resume heading back, and the app adds both legs together. '+_MTIP_HINT},
+  myrides:{icon:'📋',title:'My Rides & Confirmations',text:'The To Confirm tab shows tomorrow\'s rides needing a day-before text. Once a ride is underway, Mark Paid moves it into income \u2014 or Client Invoiced if they\'re billed later instead. A round trip works differently: Pause once dropped off, Resume heading back, and the app adds both legs together. '+_MTIP_HINT},
   clients:{icon:'👥',title:'Client List',text:'Your client list is private \u2014 no other driver can see it, and an admin needs a second admin\u2019s approval before they can, for 24 hours. Added automatically when you book, or import a spreadsheet. Each client has an owner, which decides who earns the fee if someone else drives them. '+_MTIP_HINT},
 
   income:{icon:'💰',title:'Income & Receipts',text:'Track gross fares, expenses, and net take-home here. A ride counts as income only once it\'s marked paid, not the date it happened. Your mileage rate is yours to set, no admin needed, and can change mid-year. '+_MTIP_HINT},
@@ -11757,6 +11765,20 @@ function openStartRide(rideId){
   var r=rides.find(function(x){return x.id===rideId;});
   if(!r){ showToast('Ride not found'); return; }
 
+  // RESUME: already started. "Resume navigation" used to run this ENTIRE function again from
+  // the top - re-confirming, re-prompting for odometer, re-asking where to return to, and
+  // silently overwriting rideStartedAt with a fresh timestamp every single tap. Reported
+  // directly as serving no real function, which was accurate - none of that made sense for a
+  // ride already underway. If the return destination was already saved (see
+  // _openStartRideWithHome, which now persists it), skip straight to relaunching navigation.
+  // If it wasn't - a ride started before this existed - skip the confirm/odometer (the ride is
+  // provably already started) but do ask the destination question once, same as first-time.
+  if(r.rideStartedAt && !r.rideStoppedAt){
+    if(r.startRideReturnDest){ _resumeStartRideNavigation(rideId); }
+    else { _getGpsForNav(function(locStr){ _askReturnDest(rideId, locStr||_rtGetHome()); }); }
+    return;
+  }
+
   // A stray tap on any of the three places this button lives (dashboard card, ride modal,
   // upcoming list) used to silently mark the ride started with zero chance to catch the
   // mistake - the exact same root-cause pattern already found and fixed for Send Arrival Text
@@ -12070,7 +12092,13 @@ function _skipOdometerResume(rideId){
 // dropoff) -> back home. Mirrors _openStartRideFromCurrent below, just threading the swap flag
 // through to _openStartRideWithHome, with the end point fixed to home rather than asking -
 // Chase was explicit this ends at home, not another "where does this end" prompt.
-function _openResumeRideFromCurrent(rideId){
+// Shared by every "get my current location, then do something with it" navigation entry point
+// (round-trip resume, first-time Start Ride, the resume-navigation and change-destination
+// flows added alongside it) - same loading overlay, same GPS call, same error toast, every
+// time. Passes the location string to cb(), or null if the fix failed - each caller decides
+// what null should fall back to, since that differs (some want to skip a question entirely on
+// failure, others just want to keep asking with a slightly worse starting point).
+function _getGpsForNav(cb){
   var ov=document.createElement('div');
   ov.id='nav-modal-overlay';
   ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14000;'
@@ -12082,54 +12110,51 @@ function _openResumeRideFromCurrent(rideId){
     +'<div style="font-size:.78rem;color:#64748b;">Just takes a second</div>'
     +'</div>';
   document.body.appendChild(ov);
-
   navigator.geolocation.getCurrentPosition(
     function(pos){
-      var lat=pos.coords.latitude.toFixed(6);
-      var lng=pos.coords.longitude.toFixed(6);
-      var locStr=lat+','+lng;
       _closeNavModal();
-      _openStartRideWithHome(rideId, locStr, _rtGetHome(), true);
+      cb(pos.coords.latitude.toFixed(6)+','+pos.coords.longitude.toFixed(6));
     },
     function(err){
       _closeNavModal();
       showToast('Could not get location: '+err.message);
-      _openStartRideWithHome(rideId, _rtGetHome(), _rtGetHome(), true);
+      cb(null);
     },
     {enableHighAccuracy:true, timeout:12000, maximumAge:0}
   );
 }
 
-function _openStartRideFromCurrent(rideId){
-  // Get GPS fix then open nav chooser with lat/lng as the start point
-  var ov=document.createElement('div');
-  ov.id='nav-modal-overlay';
-  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14000;'
-    +'display:flex;align-items:center;justify-content:center;padding:1.5rem;';
-  ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:300px;width:100%;'
-    +'padding:1.25rem;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.3);">'
-    +'<div style="font-size:1.5rem;margin-bottom:.5rem;">&#128205;</div>'
-    +'<div style="font-size:.95rem;font-weight:700;color:#0f172a;margin-bottom:.35rem;">Getting your location…</div>'
-    +'<div style="font-size:.78rem;color:#64748b;">Just takes a second</div>'
-    +'</div>';
-  document.body.appendChild(ov);
+function _openResumeRideFromCurrent(rideId){
+  _getGpsForNav(function(locStr){
+    _openStartRideWithHome(rideId, locStr||_rtGetHome(), _rtGetHome(), true);
+  });
+}
 
-  navigator.geolocation.getCurrentPosition(
-    function(pos){
-      var lat=pos.coords.latitude.toFixed(6);
-      var lng=pos.coords.longitude.toFixed(6);
-      var locStr=lat+','+lng;
-      _closeNavModal();
-      _askReturnDest(rideId, locStr);
-    },
-    function(err){
-      _closeNavModal();
-      showToast('Could not get location: '+err.message);
-      // Fall back to home address
-      _openStartRideWithHome(rideId, _rtGetHome());
-    },
-    {enableHighAccuracy:true, timeout:12000, maximumAge:0}
-  );
+function _openStartRideFromCurrent(rideId){
+  _getGpsForNav(function(locStr){
+    if(locStr){ _askReturnDest(rideId, locStr); }
+    else { _openStartRideWithHome(rideId, _rtGetHome(), _rtGetHome()); }
+  });
+}
+
+// RESUME (see openStartRide()'s resume branch): the return destination was already saved from
+// the first time this ride was started, so no odometer prompt, no "where to" question - just a
+// fresh GPS fix (the driver's moved since starting) and straight back into navigation.
+function _resumeStartRideNavigation(rideId){
+  var r=rides.find(function(x){return x.id===rideId;});
+  if(!r){ showToast('Ride not found'); return; }
+  _getGpsForNav(function(locStr){
+    _openStartRideWithHome(rideId, locStr||_rtGetHome(), r.startRideReturnDest);
+  });
+}
+
+// CHANGE DESTINATION: the actual fix for "no way to go back if you picked the wrong return
+// location." Reopens just the return-destination picker - no confirm dialog, no odometer -
+// and _openStartRideWithHome() saves whatever's picked over the old value automatically.
+function _changeReturnDest(rideId){
+  _getGpsForNav(function(locStr){
+    _askReturnDest(rideId, locStr||_rtGetHome());
+  });
 }
 
 // Starting from current location: ask where the route should END —
@@ -12291,6 +12316,17 @@ function _navOptimize(){
 function _openStartRideWithHome(rideId, startAddr, endAddr, swapPickupDropoff){
   var r=rides.find(function(x){return x.id===rideId;});
   if(!r){ showToast('Ride not found'); return; }
+  // Remember the chosen return destination so "Resume navigation" can relaunch instantly next
+  // time - no odometer prompt, no "where to" question - instead of re-running the entire Start
+  // Ride flow from scratch on every tap, which is what made it feel like it served no function.
+  // Guarded against the swapPickupDropoff case on purpose: that's the unrelated genuine-
+  // ROUND-TRIP Pause/Resume flow (_openResumeRideFromCurrent), which always passes home as
+  // endAddr regardless of what a driver picked here - saving it would silently overwrite a
+  // real chosen destination with "home" the next time a round trip happens to use this ride.
+  if(!swapPickupDropoff && endAddr && r.startRideReturnDest!==endAddr){
+    r.startRideReturnDest = endAddr;
+    try{ saveRides(); }catch(e){}
+  }
   var _link=(r.linkedRide!=null)?rides.find(function(x){return x&&x.id===r.linkedRide;}):null;
   // For Resume on a paused ROUND TRIP: the client's being picked up from where they were
   // dropped off, and taken back to where they originally started - same two addresses, roles
@@ -13394,6 +13430,13 @@ function rideActionBarHtml(rid){
     try{
       _t = new Date(_startedAt).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
     }catch(_e){}
+    // UPDATE: Resume navigation used to just re-run the entire Start Ride flow (confirm dialog,
+    // odometer prompt, "where to" question, all of it) every single tap - reported directly as
+    // serving no real function, and as leaving no way to fix a wrongly-picked return
+    // destination short of that whole redo. Both fixed together: the destination now persists
+    // (see _openStartRideWithHome), so Resume is a genuine one-tap relaunch, and the small
+    // pencil button next to it opens just the destination picker on its own - no odometer, no
+    // confirm - so a wrong pick is a two-tap fix, not a full restart.
     return '<div id="mt-bar" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem;">'
       +'<div style="width:100%;display:flex;align-items:center;gap:.5rem;background:#f0fdf4;border:1.5px solid #86efac;'
       +'border-radius:8px;padding:.55rem .8rem;font-size:.78rem;font-weight:700;color:#15803d;">'
@@ -13402,6 +13445,9 @@ function rideActionBarHtml(rid){
       +'<button onclick="openStartRide('+rid+')" style="flex:1;padding:.6rem .9rem;border-radius:8px;font-family:inherit;'
       +'font-size:.78rem;font-weight:700;cursor:pointer;border:1.5px solid var(--light);background:none;color:var(--black);">'
       +'\uD83E\uDDED Resume navigation</button>'
+      +'<button onclick="_changeReturnDest('+rid+')" title="Change return destination" style="padding:.6rem .7rem;border-radius:8px;'
+      +'font-family:inherit;font-size:.85rem;cursor:pointer;border:1.5px solid var(--light);background:none;color:var(--mid);">'
+      +'\u270E</button>'
       +'</div></div>';
   }
 
@@ -17449,10 +17495,28 @@ function refreshDash(){
           _btns.push('<button onclick="event.stopPropagation();toggleRidePaid('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\ud83d\udcb0 Mark Paid</button>');
           _showBillLater = !r.awaitingInvoice;
         }
-        // A dedicated row of its own (width:100% forces this onto its own line within the
-        // outer card's flex-wrap layout), buttons laid out with their own flex context so
-        // they evenly split whatever width is available - whether that's 3 buttons or,
-        // once the arrival text is sent, 2.
+        // Resume navigation. Deliberately not conditioned on ride type or on whether Track/
+        // Arrived/Mark Paid are also showing: it solves a different problem (maps got closed,
+        // phone died) than any of those, and can be needed independently of them - explicitly
+        // including the case Chase raised directly: needing this WITHOUT needing to send the
+        // arrival text, which ruled out making the two mutually exclusive.
+        //
+        // Whether it joins row 1 or gets a row of its own depends on how many buttons are
+        // already there - checked directly against the else-if chain above, not assumed: once
+        // arrivalSentAt is actually set (the arrival text genuinely sent), that chain's FIRST
+        // branch fires and skips the Track/Arrived branch entirely, so row 1 drops straight
+        // from 2 buttons to 1 (Mark Paid alone) - real room for a second button on the same
+        // line at that point, reported directly and confirmed against the code before changing
+        // it. Only the 2-button Track+Arrived state still needs Resume Navigation pushed to
+        // its own full-width row below, to avoid a cramped 3-across row on a narrow phone.
+        var _resumeNavBtn = (_started && !_stopped)
+          ? '<button onclick="event.stopPropagation();openStartRide('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;border:1.5px solid var(--light);background:none;color:var(--black);">\ud83e\udded Resume navigation</button>'
+          : '';
+        var _resumeNavRow = '';
+        if(_resumeNavBtn){
+          if(_btns.length<=1){ _btns.push(_resumeNavBtn); }
+          else { _resumeNavRow = '<div style="display:flex;width:100%;margin-top:.4rem;">'+_resumeNavBtn+'</div>'; }
+        }
         // "Bill later instead" is deliberately NOT a fourth button in that equal-weight row -
         // it's a quiet secondary link underneath, only shown alongside Mark Paid, never
         // competing with it for space or attention. Chase's own framing for why this had to be
@@ -17460,6 +17524,7 @@ function refreshDash(){
         // late for a flight, needing an invoice just that once - the ride in front of you
         // decides this, not who the client usually is.
         return '<div style="display:flex;gap:.4rem;width:100%;">'+_btns.join('')+'</div>'
+          +_resumeNavRow
           +(_showBillLater ? '<div style="text-align:center;margin-top:.3rem;"><button onclick="event.stopPropagation();openLogMiles('+r.id+',true)" style="background:none;border:none;color:var(--mid);font-size:.68rem;font-weight:600;text-decoration:underline;cursor:pointer;padding:.2rem;">\ud83e\uddfe Client Invoiced</button></div>' : '');
       })()}
       <div class="ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}${_ridePaidTag(r)}</div>
@@ -27298,7 +27363,9 @@ function enterApp(){
   maybeShowNotifPrompt();
   if(('Notification' in window) && Notification.permission==='granted') registerFcmToken();
   renderAccountPage();
-  loadAdminRemovalRequests();
+  // Admin-only data (Access Control review) - see the adminActions gating in
+  // setupRealtimeListeners() for the full reasoning; same fix, same source.
+  if(isAdmin()) loadAdminRemovalRequests();
   initPresence(); try{ setTimeout(function(){ if(typeof maybeShowKmWalkthrough==='function') maybeShowKmWalkthrough(); }, 900); }catch(e){}
   try{ setTimeout(function(){ if(typeof maybeShowAdminPromotion==='function') maybeShowAdminPromotion(); }, 1200); }catch(e){}
 }
