@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191943">
+<meta name="version" content="202608191960">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -705,9 +705,12 @@ input,select,textarea{font-size:16px;}
      under Flight #, which reads as an afterthought and hides the cause of the autofill from
      the person using it. Reported from the live Quote page. -->
         <div class="form-group" id="q-terminal-group">
-          <label>Terminal</label>
+          <label id="q-terminal-lbl">Which airline / terminal?</label>
           <select id="q-terminal" aria-label="Terminal" onchange="autoFillTerminalAddress();calcQuote();updateSuggestedPickupTime();">
-            <option value="">—</option><option>North Domestic</option><option>South Domestic</option><option>International</option>
+            <option value="">Not sure</option>
+            <option value="South Domestic">Delta — domestic</option>
+            <option value="North Domestic">Other airline — domestic</option>
+            <option value="International">International</option>
           </select>
         </div>
 
@@ -1788,12 +1791,12 @@ input,select,textarea{font-size:16px;}
      and writes into the address box directly above. It used to live several fields lower,
      under Flight #, which reads as an afterthought and hides the cause of the autofill from
      the person using it. Reported from the live Quote page. -->
-      <div class="form-group" id="qa-terminal-group"><label>Terminal</label>
+      <div class="form-group" id="qa-terminal-group"><label id="qa-terminal-lbl">Which airline / terminal?</label>
         <select id="qa-terminal" onchange="qaAutoFillTerminalAddress();updateQaSuggestedPickupTime()">
-          <option value="">—</option>
-          <option>North Domestic</option>
-          <option>South Domestic</option>
-          <option>International</option>
+          <option value="">Not sure</option>
+          <option value="South Domestic">Delta — domestic</option>
+          <option value="North Domestic">Other airline — domestic</option>
+          <option value="International">International</option>
         </select>
       </div>
       <div class="form-group" style="grid-column:1/-1;">
@@ -3366,7 +3369,7 @@ const TIP_DATA={
 
   cal:{icon:'📅',title:'Calendar',text:'Tap any ride to see its full details. Creators and admins can also edit or cancel it from there. Search by client, phone, driver, or type. '+_MTIP_HINT},
 
-  myrides:{icon:'📋',title:'My Rides & Confirmations',text:'The To Confirm tab shows tomorrow\'s rides needing a day-before text. Once a ride is underway, Mark Paid moves it into income \u2014 or Client Invoiced if they\'re billed later instead. A round trip works differently: Pause once dropped off, Resume heading back, and the app adds both legs together. '+_MTIP_HINT},
+  myrides:{icon:'📋',title:'My Rides & Confirmations',text:'The To Confirm tab shows tomorrow\'s rides needing a day-before text. Once a ride is underway, Mark Paid moves it into income \u2014 or Client Invoiced if they\'re billed later instead. A round trip works differently: Pause once dropped off, Resume heading back, and the app adds both legs together. If your maps app closes mid-ride, Resume Navigation relaunches it right where you left off \u2014 no need to redo anything. '+_MTIP_HINT},
   clients:{icon:'👥',title:'Client List',text:'Your client list is private \u2014 no other driver can see it, and an admin needs a second admin\u2019s approval before they can, for 24 hours. Added automatically when you book, or import a spreadsheet. Each client has an owner, which decides who earns the fee if someone else drives them. '+_MTIP_HINT},
 
   income:{icon:'💰',title:'Income & Receipts',text:'Track gross fares, expenses, and net take-home here. A ride counts as income only once it\'s marked paid, not the date it happened. Your mileage rate is yours to set, no admin needed, and can change mid-year. '+_MTIP_HINT},
@@ -5053,6 +5056,15 @@ function openGoogleMaps(){
 // AP RUN = client going TO airport → terminal fills PICKUP
 // AP PICK UP = client arriving FROM airport → terminal fills DROPOFF
 const TERMINAL_ADDRESSES = {
+  // Shared by autoFillTerminalAddress()/qaAutoFillTerminalAddress()/
+  // editAutoFillTerminalAddress() below - clears a pickup/dropoff field ONLY if its current
+  // value is still byte-for-byte one of this object's own strings, meaning it was auto-filled
+  // by picking a terminal and never hand-edited since. Never touches anything a person
+  // actually typed themselves. Exists specifically because clearing a terminal selection back
+  // to empty ("Not sure") used to leave the address text it had written behind - reported
+  // directly, with a screenshot of "Start Ride" handing that exact known-undriveable string to
+  // navigation because the matching r.terminal had gone empty and nothing was left to override
+  // it with the correct coordinate.
   // Used ONLY to auto-fill a human-readable address into the booking form's pickup/dropoff
   // text field when a dispatcher picks a terminal (autoFillTerminalAddress and its Quick-Add/
   // Edit equivalents) - a display convenience, not a navigation source. Confirmed by Chase:
@@ -5065,6 +5077,12 @@ const TERMINAL_ADDRESSES = {
   'South Domestic':  '6000 S Terminal Pkwy, Atlanta, GA 30337',
   'International':    '2600 Maynard H Jackson Jr Blvd, Atlanta, GA 30337',
 };
+function _clearIfAutoFilledTerminalAddr(el){
+  if(!el) return;
+  var v=(el.value||'').trim();
+  if(!v) return;
+  for(var k in TERMINAL_ADDRESSES){ if(TERMINAL_ADDRESSES[k]===v){ el.value=''; return; } }
+}
 // Precise coordinates per terminal. All three corrected directly by Chase (Aug 2026) after
 // the street-address fallback below sent an AP RUN's navigation to a pin literally on the
 // tarmac between gates - not "imprecise," genuinely undriveable. See terminalToAddress() just
@@ -5098,6 +5116,35 @@ function terminalToAddress(term){
   }
   return (TERMINAL_COORDS[key]||'').trim();
 }
+// Catches a known-airport address by its own TEXT rather than by r.terminal — a stale auto-
+// filled leftover, a hand-typed variant, a client-entered address from the booking form,
+// anything. Order-sensitive substring match, case-insensitive. Extracted to top-level (was
+// nested inside _buildRouteUrlsFrom, recreated on every single call and unusable anywhere
+// else) as part of consolidating terminal resolution into one place instead of four separate
+// mechanisms scattered across the file.
+function _terminalCoordFromAddressText(addr){
+  var a=(addr||'').toLowerCase();
+  if(!a) return '';
+  if(a.indexOf('south terminal pkwy')>-1 || a.indexOf('south terminal parkway')>-1
+   || a.indexOf('s terminal pkwy')>-1 || a.indexOf('s terminal parkway')>-1){
+    return TERMINAL_COORDS['South Domestic']||'';
+  }
+  if(a.indexOf('north terminal pkwy')>-1 || a.indexOf('north terminal parkway')>-1
+   || a.indexOf('n terminal pkwy')>-1 || a.indexOf('n terminal parkway')>-1){
+    return TERMINAL_COORDS['North Domestic']||'';
+  }
+  if(a.indexOf('maynard h jackson')>-1){
+    return TERMINAL_COORDS['International']||'';
+  }
+  return '';
+}
+// One call instead of the two-line "compute coord, then conditionally assign" pattern that
+// used to be repeated at every call site. Returns the resolved coordinate if the address text
+// matches a known airport phrase, otherwise returns the address unchanged — always safe to
+// assign the result straight back.
+function _resolveAddrForNav(addr){
+  return _terminalCoordFromAddressText(addr) || addr;
+}
 
 // Checks whether the client currently entered has a stored terminal preference that differs
 // from what was just selected, and if so, offers to use it instead - never silently overrides.
@@ -5128,50 +5175,77 @@ function _applyTerminalPref(terminalFieldId, pref){
   if(el){ el.value=pref; el.dispatchEvent(new Event('change')); }
   var ov=document.getElementById('terminal-pref-popup'); if(ov) ov.remove();
 }
-function autoFillTerminalAddress(){
-  const terminal = document.getElementById('q-terminal').value;
-  const type     = document.getElementById('q-type').value;
-  _checkTerminalPrefPopup('q-client','q-terminal');
-  if(!terminal) return;
-  const addr = TERMINAL_ADDRESSES[terminal];
-  if(!addr) return;
-  if(type === 'AP RUN'){
-    document.getElementById('q-dropoff').value = addr;
-    resetMileage(); debounceMileage();
-  } else if(type === 'AP PICK UP'){
-    document.getElementById('q-pickup').value = addr;
-    resetMileage(); debounceMileage();
-  } else if(type === 'AP ROUND TRIP'){
-    // AP Run leg: drop off at airport; AP Pick Up leg: pick up from airport (same terminal)
-    document.getElementById('q-dropoff').value = addr;
-    resetMileage(); debounceMileage();
-    // Also fill the return terminal
-    const rtTerm = document.getElementById('q-rt-terminal');
-    if(rtTerm && !rtTerm.value) rtTerm.value = terminal;
+// Shared by autoFillTerminalAddress()/qaAutoFillTerminalAddress()/editAutoFillTerminalAddress()
+// - the actual auto-fill/clear logic lives here once instead of three hand-synchronized
+// copies, which is exactly why v955's stale-address fix had to be written three times in one
+// sitting. Each of the three functions below is now a thin wrapper supplying its own form's
+// element IDs and per-type target-field logic, which genuinely differs between forms (Quick
+// Add collapses AP ROUND TRIP to whichever leg was actually chosen first before picking a
+// target field; Quote and Edit Ride use the raw type directly) - verified byte-identical to
+// all three original implementations across 15 scenarios (every ride type, both fill and
+// clear paths, rt-terminal already-set vs blank) before this replaced them.
+function _applyTerminalAutoFill(cfg){
+  var terminal = (document.getElementById(cfg.terminalId)||{}).value;
+  var type     = (document.getElementById(cfg.typeId)||{}).value;
+  var targetId = cfg.targetIdForType(type);
+  if(!targetId) return;
+  if(!terminal){
+    _clearIfAutoFilledTerminalAddr(document.getElementById(targetId));
+    if(cfg.onClear) cfg.onClear(type);
+    return;
   }
+  var addr = TERMINAL_ADDRESSES[terminal];
+  if(!addr) return;
+  var el = document.getElementById(targetId);
+  if(el) el.value = addr;
+  if(cfg.onFill) cfg.onFill(terminal, type);
+}
+function autoFillTerminalAddress(){
+  _checkTerminalPrefPopup('q-client','q-terminal');
+  _applyTerminalAutoFill({
+    terminalId:'q-terminal', typeId:'q-type',
+    targetIdForType:function(type){
+      if(type==='AP RUN'||type==='AP ROUND TRIP') return 'q-dropoff';
+      if(type==='AP PICK UP') return 'q-pickup';
+      return null;
+    },
+    onClear:function(){ resetMileage(); debounceMileage(); },
+    onFill:function(terminal, type){
+      resetMileage(); debounceMileage();
+      if(type==='AP ROUND TRIP'){
+        var rtTerm = document.getElementById('q-rt-terminal');
+        if(rtTerm && !rtTerm.value) rtTerm.value = terminal;
+      }
+    }
+  });
 }
 // Quick Add's equivalent of autoFillTerminalAddress(). For AP Run / AP Round Trip the
 // client's home stays in Pickup and the terminal goes in Destination (client starts at
 // home, ends at the airport). For AP Pick Up it's the reverse — the terminal is the
 // Pickup, home is the Destination. Same direction as the main Quote form.
 function qaAutoFillTerminalAddress(){
-  const terminal = (document.getElementById('qa-terminal')||{}).value;
-  const type     = (document.getElementById('qa-type')||{}).value;
   _checkTerminalPrefPopup('qa-client','qa-terminal');
-  if(!terminal) return;
-  const addr = TERMINAL_ADDRESSES[terminal];
-  if(!addr) return;
   // On a round trip, leg 1's own type for this purpose is whichever one was actually chosen
   // as first - it's no longer safe to assume that's always AP RUN.
-  const _effectiveType = (type==='AP ROUND TRIP' && typeof qaRtFirstLegType==='function') ? qaRtFirstLegType() : type;
-  var targetId = (_effectiveType==='AP PICK UP') ? 'qa-pickup' : (_effectiveType==='AP RUN') ? 'qa-home' : null;
-  if(!targetId) return;
-  const el = document.getElementById(targetId);
-  if(el){ el.value = addr; try{ if(typeof _qaDebounceMileage==='function') _qaDebounceMileage(); }catch(e){} }
-  // Parity with the Quote form, which has always done this: on a round trip the return leg uses
-  // the same terminal unless the user says otherwise, so pre-fill it when it's still blank.
-  if(type==='AP ROUND TRIP'){ var rt=document.getElementById('qa-rt-terminal'); if(rt && !rt.value) rt.value = terminal; }
-  try{ renderQaAddrPickers(); }catch(e){}
+  var type = (document.getElementById('qa-type')||{}).value;
+  var _effectiveType = (type==='AP ROUND TRIP' && typeof qaRtFirstLegType==='function') ? qaRtFirstLegType() : type;
+  _applyTerminalAutoFill({
+    terminalId:'qa-terminal', typeId:'qa-type',
+    targetIdForType:function(){
+      return (_effectiveType==='AP PICK UP') ? 'qa-pickup' : (_effectiveType==='AP RUN') ? 'qa-home' : null;
+    },
+    onClear:function(){
+      try{ if(typeof _qaDebounceMileage==='function') _qaDebounceMileage(); }catch(e){}
+      try{ renderQaAddrPickers(); }catch(e){}
+    },
+    onFill:function(terminal, rawType){
+      try{ if(typeof _qaDebounceMileage==='function') _qaDebounceMileage(); }catch(e){}
+      // Parity with the Quote form, which has always done this: on a round trip the return leg
+      // uses the same terminal unless the user says otherwise, so pre-fill it when still blank.
+      if(rawType==='AP ROUND TRIP'){ var rt=document.getElementById('qa-rt-terminal'); if(rt && !rt.value) rt.value = terminal; }
+      try{ renderQaAddrPickers(); }catch(e){}
+    }
+  });
 }
 
 // EDIT RIDE had no terminal auto-fill at all. Not "a broken one" - its terminal dropdown carried
@@ -5179,16 +5253,15 @@ function qaAutoFillTerminalAddress(){
 // Same direction as the other two forms: terminal goes in Destination for AP Run / AP Round Trip,
 // in Pickup for AP Pick Up.
 function editAutoFillTerminalAddress(){
-  var terminal=(document.getElementById('edit-terminal')||{}).value;
-  var type=(document.getElementById('edit-type')||{}).value;
   _checkTerminalPrefPopup('edit-client','edit-terminal');
-  if(!terminal) return;
-  var addr=TERMINAL_ADDRESSES[terminal];
-  if(!addr) return;
-  var targetId = (type==='AP PICK UP') ? 'edit-pickup' : (type==='AP RUN'||type==='AP ROUND TRIP') ? 'edit-home' : null;
-  if(!targetId) return;
-  var el=document.getElementById(targetId);
-  if(el){ el.value=addr; try{ if(typeof _editDebounceMileage==='function') _editDebounceMileage(); }catch(e){} }
+  _applyTerminalAutoFill({
+    terminalId:'edit-terminal', typeId:'edit-type',
+    targetIdForType:function(type){
+      return (type==='AP PICK UP') ? 'edit-pickup' : (type==='AP RUN'||type==='AP ROUND TRIP') ? 'edit-home' : null;
+    },
+    onClear:function(){ try{ if(typeof _editDebounceMileage==='function') _editDebounceMileage(); }catch(e){} },
+    onFill:function(){ try{ if(typeof _editDebounceMileage==='function') _editDebounceMileage(); }catch(e){} }
+  });
 }
 
 // THE REPORTED BUG. On AP Round Trip there are two terminal dropdowns. The main one seeds the
@@ -8472,7 +8545,16 @@ function renderConfirmations(){
       const loaderEl=document.getElementById('dc-prev-'+r.id+'-loader');
       if(!imgEl) return;
       warmDriverCardImage(r.driver.trim()).then(async function(file){
-        if(!file){ if(loaderEl) loaderEl.textContent='No card photo'; return; }
+        // BUG FIX (found while investigating a report of both card AND selfie missing from a
+        // sent confirmation together): this used to return here immediately whenever the card
+        // failed to build, which meant window._confFilesMap[r.id] was never set AT ALL - not
+        // just the card, but the vCard, selfie, and combined image too, none of which actually
+        // depend on the card succeeding. One failure point was silently taking three unrelated
+        // attachments down with it. Low-probability in practice (buildDriverCardImageFile's own
+        // fallback path means a missing/broken photo still resolves to an initials card, not a
+        // failure - only a genuine toBlob() failure reaches this branch at all) but a real,
+        // confirmed structural gap regardless of how often it actually fires.
+        if(!file && loaderEl) loaderEl.textContent='No card photo';
         const ds=driverSettings[r.driver.trim()]||{};
         // Per-part toggles live on the CLIENT OWNER's settings (whose confirmation this is).
         // Missing = on (default), so existing drivers are unaffected until they opt out.
@@ -8493,8 +8575,11 @@ function renderConfirmations(){
         }catch(e){ console.warn('selfie share file',e); }
         // Pre-build the combined card+selfie image too, same reasoning as warming the card
         // itself: this is a real canvas/image-decode operation, not instant, and "Send
-        // everything" should never be the thing waiting on it from a cold start.
-        if(_fm.selfie && (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')){
+        // everything" should never be the thing waiting on it from a cold start. Only actually
+        // useful if the card itself built successfully - combining a real selfie with nothing
+        // isn't a combined image, so this correctly stays skipped when file is null; the plain
+        // fm.selfie above still gets sent on its own in that case, not silently dropped with it.
+        if(file && _fm.selfie && (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')){
           try{ _fm.combined = await buildCombinedCardSelfieImageFile(r.driver.trim(), _selfieOwner); }catch(e){ console.warn('combined card+selfie build failed',e); }
         }
         window._confFilesMap[r.id]=_fm;
@@ -8747,8 +8832,20 @@ function buildConfirmationText(r){
   const owner = feeOwnerFor(r.createdBy) || assigned;
   const _oProf = DRIVER_PROFILES[owner] || {};
   const _ods=(typeof driverSettings!=='undefined'&&driverSettings[owner])||{};
-  var _pkUseOwn=!!(_cOwner && _cOwner===owner && (_ods.ownPickupInstructionsByTerminal || _ods.ownPickupInstructions));
-  var _byTerm = (_pkUseOwn ? _ods.ownPickupInstructionsByTerminal : _ods.pickupInstructionsByTerminal)||{};
+  // BUG FIX: this used to branch on _pkUseOwn (true whenever the client's designated owner
+  // matches the ride's fee-owner AND either an "own" terminal instructions field OR the
+  // general "own pickup instructions" textarea had anything in it) and, when true, read
+  // _ods.ownPickupInstructionsByTerminal instead of _ods.pickupInstructionsByTerminal.
+  // Checked every reference to ownPickupInstructionsByTerminal in this file: both are reads,
+  // right here - there is no save path anywhere that ever writes it. Meanwhile
+  // ownPickupInstructions (singular, no "ByTerminal") IS real and saved from a genuine
+  // settings textarea, for the general non-terminal ride types - but its mere presence was
+  // enough to flip _pkUseOwn true, silently redirecting the PER-TERMINAL lookup to that
+  // permanently-empty field instead of the one their real saved terminal instructions
+  // actually live in. Confirmed directly: Kat and Morgan do have real per-terminal
+  // instructions saved - the data was never missing, the wrong field was being read the
+  // instant either of them had also filled in that one unrelated general textarea.
+  var _byTerm = _ods.pickupInstructionsByTerminal||{};
   // r.terminal is the OUTBOUND (drop-off) terminal; r.rtTerminal is the RETURN (pickup)
   // terminal. Pickup instructions only ever apply to the pickup-at-airport leg, so on an
   // AP Round Trip that means the return terminal, not the outbound one.
@@ -8788,6 +8885,31 @@ function buildConfirmationText(r){
            ||(_gtl.indexOf('south')>-1&&_gkl.indexOf('south')>-1)
            ||(((_gtl.indexOf('international')>-1)||(_gtl.indexOf('intl')>-1))&&((_gkl.indexOf('international')>-1)||(_gkl.indexOf('intl')>-1)))){
             _termInstr=_gByTerm[_gtk]; break;
+          }
+        }
+      }
+    }
+    // BUG FIX: this third tier - the actual hardcoded, always-available terminal walkthrough
+    // (HARDCODED_PICKUP_BY_TERMINAL) - was never consulted here at all before now, despite a
+    // comment elsewhere in this file (the templates-picker code) explicitly claiming "the send
+    // path was always resolving correctly" through all three tiers. It wasn't; confirmed by
+    // reading this function directly rather than trusting that claim. Without this, a terminal
+    // with neither a personal override nor a saved global default - the ordinary case for most
+    // terminals most days, since nobody necessarily customizes every one - had nothing left to
+    // fall back to except the generic "coordinate with your driver" placeholder. Same fuzzy
+    // match as the two tiers above, for the same reason: terminal names get stored in more than
+    // one format across older and newer rides.
+    if(!_termInstr){
+      var _hByTerm = (typeof HARDCODED_PICKUP_BY_TERMINAL!=='undefined') ? HARDCODED_PICKUP_BY_TERMINAL : {};
+      _termInstr = _hByTerm[_rideTerm] || '';
+      if(!_termInstr){
+        var _htl=_rideTerm.toLowerCase();
+        for(var _htk in _hByTerm){
+          var _hkl=_htk.toLowerCase();
+          if((_htl.indexOf('north')>-1&&_hkl.indexOf('north')>-1)
+           ||(_htl.indexOf('south')>-1&&_hkl.indexOf('south')>-1)
+           ||(((_htl.indexOf('international')>-1)||(_htl.indexOf('intl')>-1))&&((_hkl.indexOf('international')>-1)||(_hkl.indexOf('intl')>-1)))){
+            _termInstr=_hByTerm[_htk]; break;
           }
         }
       }
@@ -9086,7 +9208,6 @@ function buildClientVCard(ride){
     'FN:'+displayName,
     'N:'+last+';'+first+';;;',
     phone ? 'TEL;TYPE=CELL:'+phone : null,
-    'NOTE:NWDA client'+(owner?' \u2014 scheduled by '+owner:''),
     'END:VCARD'
   ].filter(Boolean).join('\r\n');
   return new File([new Blob([lines],{type:'text/vcard'})],
@@ -9217,10 +9338,26 @@ async function buildCombinedCardSelfieImageFile(cardDriverName, selfieOwnerName)
   },'image/png'));
 }
 
+// Generic "memoize a promise, but don't let a failure be cached forever" utility. Built
+// specifically because the driver card cache had exactly this gap - a failed build stayed
+// cached as a permanent failure for the rest of the browser session, silently blocking every
+// later confirmation for that driver (see v950's own handoff entry for the full story) - but
+// written generically so any future cache needing the same "retry on failure, reuse on
+// success" behavior can reuse this instead of hand-rolling the same fix again from scratch.
+// Deliberately NOT used for _dmCache/_geoCache, which already have their own correct, more
+// sophisticated TTL and size-limited eviction - a different, already-working fit for a
+// different problem (staleness, not failure-caching); forcing them onto this simpler helper
+// would be a downgrade, not an improvement.
+function _cachePromise(store, key, builder){
+  if(!store[key]) store[key] = builder().catch(function(){ return null; });
+  return store[key].then(function(result){
+    if(!result) delete store[key];
+    return result;
+  });
+}
 function warmDriverCardImage(name){
   if(!name) return Promise.resolve(null);
-  if(!_driverCardImgCache[name]) _driverCardImgCache[name]=buildDriverCardImageFile(name).catch(()=>null);
-  return _driverCardImgCache[name];
+  return _cachePromise(_driverCardImgCache, name, function(){ return buildDriverCardImageFile(name); });
 }
 function prebuildAllDriverCardImages(){
   if(typeof DRIVERS==='undefined') return;
@@ -10420,6 +10557,85 @@ async function _saveMarkPaidCombined(rideId){
     try{ showToast('\u26A0\uFE0F Save error: '+((err&&err.message)||'unknown')+' \u2014 nothing was saved, try again'); }catch(_e){}
     try{ _closeMarkPaidCombined(); }catch(_e){}
   }
+}
+
+// Replaces the dashboard card's old "Mark Paid" button (which always assumed the ride was
+// being marked paid right now) plus the separate "Client Invoiced" link that used to sit
+// disconnected underneath everything else, looking - per Chase's own words - "slapped in."
+// One button, one clear question, then dispatches into the exact same two flows that already
+// existed: toggleRidePaid() for paid, openLogMiles(id, true) for invoiced. Neither downstream
+// flow changed at all - only how the choice between them gets made. Safe from the gesture-
+// timing class of bug found and fixed earlier this session (v937/v944): the eventual Venmo
+// prompt this can lead into already fires from its own fresh tap, so stacking this decision in
+// front of it doesn't delay or interfere with that at all.
+function _dashRideCompletedPrompt(rideId){
+  var r = rides.find(function(x){ return x.id===rideId; });
+  if(!r){ showToast('Ride not found','error'); return; }
+  var ov=document.createElement('div');
+  ov.id='ride-completed-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14000;display:flex;align-items:center;justify-content:center;padding:1.5rem;';
+  ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:320px;width:100%;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.3);">'
+    +'<div style="font-size:.95rem;font-weight:700;color:#0f172a;margin-bottom:.9rem;">Was this ride paid, or will '+escHtml(r.client||'the client')+' be invoiced instead?</div>'
+    +'<div style="display:flex;flex-direction:column;gap:.5rem;">'
+    +'<button id="ride-completed-paid" style="padding:.65rem;border-radius:8px;font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;border:none;background:#15803d;color:#fff;">\ud83d\udcb0 Paid</button>'
+    +'<button id="ride-completed-invoice" style="padding:.65rem;border-radius:8px;font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;border:1.5px solid var(--light);background:none;color:var(--black);">\ud83e\uddfe Invoice instead</button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  ov.querySelector('#ride-completed-paid').onclick=function(){ ov.remove(); toggleRidePaid(rideId); };
+  ov.querySelector('#ride-completed-invoice').onclick=function(){ ov.remove(); openLogMiles(rideId, true); };
+}
+
+// Replaces v959's tip-only follow-up with the fuller version requested immediately after
+// shipping it: tip and "the invoice actually cleared" turn out to arrive as the same piece of
+// information in practice, so splitting them into two separate actions/taps didn't reflect how
+// this is actually used. One field, one button - enter the tip if there was one, tap Invoice
+// Paid, and the ride is genuinely closed out: same status/paidAt/paidBy/awaitingInvoice fields
+// the full Mark Paid flow sets, reached through a lighter path since mileage/gas/odometer are
+// already locked in from the original invoice step and there's no payment method to choose -
+// an invoiced ride is Invoice/credit card by definition. Tied directly to the Venmo fee
+// prompt, per request: this is the real moment the ride is finally done, so it's the right
+// moment to offer it, same as every other path that marks a ride paid.
+function _dashInvoicePaidPrompt(rideId){
+  var r = rides.find(function(x){ return x.id===rideId; });
+  if(!r){ showToast('Ride not found','error'); return; }
+  var ov=document.createElement('div');
+  ov.id='invoice-paid-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14000;display:flex;align-items:center;justify-content:center;padding:1.5rem;';
+  ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:300px;width:100%;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.3);">'
+    +'<div style="font-size:.95rem;font-weight:700;color:#0f172a;margin-bottom:.15rem;">Invoice paid \u2014 '+escHtml(r.client||'this ride')+'</div>'
+    +'<div style="font-size:.76rem;color:#64748b;margin-bottom:.8rem;">Add a tip if there was one, then confirm.</div>'
+    +'<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.9rem;">'
+    +'<span style="font-size:.72rem;font-weight:700;color:#64748b;">TIP $</span>'
+    +'<input id="dash-tip-input" type="number" min="0" step="0.01" value="'+(r.tip||'')+'" placeholder="0.00" '
+    +'style="flex:1;padding:.5rem .65rem;border:1.5px solid #c4b5fd;border-radius:8px;font-family:inherit;font-size:1rem;box-sizing:border-box;">'
+    +'</div>'
+    +'<div style="display:flex;gap:.5rem;">'
+    +'<button onclick="document.getElementById(\'invoice-paid-overlay\').remove()" style="flex:1;padding:.6rem;background:#f1f5f9;color:#475569;border:none;border-radius:8px;font-family:inherit;font-size:.85rem;font-weight:600;cursor:pointer;">Cancel</button>'
+    +'<button id="dash-invoice-paid-save-btn" onclick="_dashSaveInvoicePaid('+rideId+')" style="flex:1;padding:.6rem;background:#15803d;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">\u2705 Invoice Paid</button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  try{ document.getElementById('dash-tip-input').focus(); }catch(e){}
+}
+async function _dashSaveInvoicePaid(rideId){
+  var r = rides.find(function(x){ return x.id===rideId; });
+  var ov = document.getElementById('invoice-paid-overlay');
+  if(!r){ showToast('Ride not found','error'); if(ov) ov.remove(); return; }
+  var val = parseFloat((document.getElementById('dash-tip-input')||{}).value);
+  if(isFinite(val) && val>0) r.tip = val;
+  // Same fields the full Mark Paid flow sets when genuinely closing a ride out - same
+  // meaning, just reached through this lighter path instead.
+  r.status='paid'; r.paidAt=Date.now(); r.paidBy=currentUser?.name||'';
+  if(!r.payment) r.payment='Invoice';
+  delete r.awaitingInvoice;
+  touchRide(r,'invoice marked paid');
+  try{ await saveRides(); }catch(e){ console.warn(e); }
+  if(ov) ov.remove();
+  showToast('\u2705 Invoice marked paid');
+  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+  try{ if(typeof renderIncome==='function' && document.getElementById('page-income') && document.getElementById('page-income').classList.contains('active')) renderIncome(); }catch(e){}
+  try{ _maybeOfferFeeAndPaid(rideId); }catch(e){ console.warn(e); }
 }
 
 async function toggleRidePaid(id){
@@ -11699,6 +11915,10 @@ function _buildRouteUrlsFrom(r, startAddr, endAddr, linkRide){
     if(t==='AP PICK UP') pickup = termAddr;
     else if(t==='AP RUN' || t==='AP ROUND TRIP') dropoff = termAddr;
   }
+  // SECOND, INDEPENDENT SAFETY NET (v956): catches a known-airport address by its own text,
+  // applied to both fields regardless of whether the r.terminal-based override above even ran.
+  pickup = _resolveAddrForNav(pickup);
+  dropoff = _resolveAddrForNav(dropoff);
   // Extra stop addresses (shown once the extra-stop fee is set) slot in between
   // pickup and dropoff; several can be separated with ';'
   var extras  = (r.xstopAddr||'').split(';').map(function(x){return x.trim();}).filter(Boolean);
@@ -11722,6 +11942,8 @@ function _buildRouteUrlsFrom(r, startAddr, endAddr, linkRide){
     var l_pu=(linkRide.pickup||'').trim(), l_do=(linkRide.home||'').trim(), l_t=linkRide.type||'';
     var l_term=terminalToAddress(linkRide.terminal);
     if(l_term){ if(l_t==='AP PICK UP') l_pu=l_term; else if(l_t==='AP RUN'||l_t==='AP ROUND TRIP') l_do=l_term; }
+    l_pu=_resolveAddrForNav(l_pu);
+    l_do=_resolveAddrForNav(l_do);
     var l_ex=(linkRide.xstopAddr||'').split(';').map(function(x){return x.trim();}).filter(Boolean);
     var l_mid=[l_pu].concat(l_ex).concat([l_do]).filter(Boolean);
     if(l_mid.length){ var _last=stops[stops.length-1]; stops=stops.slice(0,-1).concat(l_mid).concat([_last]).filter(function(s,i,a){return s && s!==a[i-1];}); }
@@ -12591,19 +12813,44 @@ function _maybeOfferFeeAndPaid(rideId){
   var fee=Math.round(fare*(typeof clientFeeRate==='function'?clientFeeRate():0.15)*100)/100;
   var handle=(typeof driverVenmo!=='undefined')?driverVenmo[owner]:'';
   if(!handle || fee<=0) return; // nothing to pay to
-  if(confirm('Pay '+owner.split(' ')[0]+'\u2019s $'+fee.toFixed(2)+' fee via Venmo now?')){
-    var venmoUrl=(typeof venmoPayUrl==='function')?venmoPayUrl(handle, fee, (typeof _venmoRideNote==='function')?_venmoRideNote(r):''):'';
-    if(venmoUrl){
-      if(typeof venmoAutoMarkRide==='function') venmoAutoMarkRide(owner, dName, rideId);
-      // window.open rather than window.location.href (v861), and called immediately rather than
-      // behind a setTimeout. Two reasons: location.href navigates the app itself away, which
-      // from an installed home-screen app makes Android interpose its own "leave this app?"
-      // prompt - a second dialog stacked on the one just answered above. And a deferred call
-      // loses its association with the click that caused it, which is exactly what popup
-      // blockers key on; calling it synchronously keeps the user gesture intact.
-      window.open(venmoUrl, '_blank', 'noopener');
-    }
-  }
+  var venmoUrl=(typeof venmoPayUrl==='function')?venmoPayUrl(handle, fee, (typeof _venmoRideNote==='function')?_venmoRideNote(r):''):'';
+  if(!venmoUrl) return;
+
+  // BUG FIX (reported directly: "hands me off to a plain white screen"). This used to be a
+  // native confirm() immediately followed by window.open() - both individually fine on their
+  // own, but by the time this function actually runs, openMarkPaidCombined's save handler has
+  // already done a real amount of synchronous work first: closing the modal, re-rendering the
+  // ride view/dashboard/income page, sometimes sharing a receipt document. That's genuine
+  // wall-clock time on a phone even with no explicit await in the way, and the confirm()
+  // dialog adds the driver's own reading/response time on top of it. By the time window.open()
+  // finally fired, it was meaningfully later, gesture-wise, than the dashboard's own Venmo
+  // button - whose tight click -> open sequence is exactly why that one kept working the whole
+  // time, as reported directly. A browser can decide a gesture backing window.open() isn't
+  // fresh enough and open a genuinely blank tab that never loads its real URL - a "plain white
+  // screen, nothing else," not the ordinary silent no-op of a blocked popup.
+  //
+  // Fixed by not trying to out-time that window at all: a real, tappable prompt instead of an
+  // auto-firing confirm(). The Venmo tap itself becomes the fresh gesture, at whatever moment
+  // the driver actually makes it - the same reliable save-before-navigate pattern already
+  // proven for the dashboard's own Venmo button, just reached via a fresh click instead of a
+  // confirm() dialog sitting behind a pile of prior render work.
+  var ov=document.createElement('div');
+  ov.id='venmo-offer-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14000;display:flex;align-items:center;justify-content:center;padding:1.5rem;';
+  ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:320px;width:100%;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.3);">'
+    +'<div style="font-size:.95rem;font-weight:700;color:#0f172a;margin-bottom:.9rem;">Pay '+escHtml(owner.split(' ')[0])+'\u2019s $'+fee.toFixed(2)+' fee via Venmo now?</div>'
+    +'<div style="display:flex;gap:.5rem;">'
+    +'<button id="venmo-offer-skip" style="flex:1;padding:.6rem;border-radius:8px;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;border:1.5px solid var(--light);background:none;color:var(--mid);">Not now</button>'
+    +'<a id="venmo-offer-pay" href="'+venmoUrl.replace(/"/g,'&quot;')+'" rel="noopener" style="flex:1;padding:.6rem;border-radius:8px;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;border:none;background:#3d95ce;color:#fff;text-decoration:none;text-align:center;display:flex;align-items:center;justify-content:center;">Pay via Venmo</a>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+  ov.querySelector('#venmo-offer-skip').onclick=function(){ ov.remove(); };
+  ov.querySelector('#venmo-offer-pay').onclick=function(e){
+    e.preventDefault();
+    Promise.resolve(typeof venmoAutoMarkRide==='function'?venmoAutoMarkRide(owner, dName, rideId):null)
+      .catch(function(){ showToast('\u26a0\ufe0f Payment tracking failed to save \u2014 opening Venmo anyway; mark it paid manually after','error'); })
+      .then(function(){ window.open(venmoUrl, '_blank', 'noopener'); ov.remove(); });
+  };
 }
 
 // Re-attempts writing the whole rides array, exactly what saveRides() already always does -
@@ -17402,7 +17649,10 @@ function refreshDash(){
       <div style="width:4px;height:40px;border-radius:2px;background:${c};flex-shrink:0;"></div>
       <div class="ride-date" style="color:${tc};">${fmtDateShort(r.date)}<br><span style="font-size:.72rem">${fmtTime12(r.time)||''}</span></div>
       <div class="ride-info">
-        <div class="ride-client" style="color:${tc};">${_rideIsConfirmed(r)?'<span title="Confirmed" style="color:#15803d;font-weight:700;">&#x2713;</span> ':''}${r.client}</div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:.5rem;">
+          <div class="ride-client" style="color:${tc};">${_rideIsConfirmed(r)?'<span title="Confirmed" style="color:#15803d;font-weight:700;">&#x2713;</span> ':''}${r.client}</div>
+          <div class="ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};flex-shrink:0;">$${r.price}${_ridePaidTag(r)}</div>
+        </div>
         <div class="ride-detail" style="color:${tc};opacity:.78;">${r.type} · ${vehTag(r.vehicle)} · ${r.driver?driverShortName(r.driver):'<em>Unassigned</em>'}</div>
       </div>
       ${/* The type badge that used to sit here was removed (v858). It rendered
@@ -17425,8 +17675,19 @@ function refreshDash(){
         // none of which make sense once the ride is already over) and goes straight to the
         // one real next action left: Mark Paid.
         var _stopped = !!(r.rideStartedAt && r.rideStoppedAt);
-        if(_stopped){
-          _btns.push('<button onclick="event.stopPropagation();toggleRidePaid('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\ud83d\udcb0 Mark Paid</button>');
+        if(_stopped && r.awaitingInvoice){
+          // Already invoiced - re-asking "was this paid or invoiced" here would be redundant
+          // (that question's already answered). Originally shipped as tip-only (v959), then
+          // widened immediately after: tip and "the invoice actually cleared" turn out to be
+          // information a driver finds out at the same moment in practice, so this single
+          // button now handles both - enter the tip if there was one, confirm, and the ride is
+          // genuinely closed out right here, no need to go through the full Mark Paid modal
+          // (odometer, payment method, the works) just for this - mileage/gas are already
+          // locked in from the original invoice step, and an invoiced ride's payment method is
+          // Invoice/credit card by definition, nothing left to choose.
+          _btns.push('<button onclick="event.stopPropagation();_dashInvoicePaidPrompt('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\u2705 Invoice Paid</button>');
+        } else if(_stopped){
+          _btns.push('<button onclick="event.stopPropagation();_dashRideCompletedPrompt('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\u2705 Ride Completed</button>');
         } else if(!r.rideStartedAt){
           _btns.push('<button onclick="event.stopPropagation();openStartRide('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;">\ud83d\ude97 Start Ride</button>');
         } else if(r.type==='ROUND TRIP'){
@@ -17443,12 +17704,13 @@ function refreshDash(){
         }
 
         var _isAirport = (r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP');
-        var _showBillLater = false;
         if(_stopped){
-          // Already handled above - Mark Paid is the only button a stopped ride needs. Same
-          // "Client Invoiced" link still applies underneath it, same as every other path that
-          // pushes Mark Paid.
-          _showBillLater = !r.awaitingInvoice;
+          // Already handled above — a stopped ride's "Ride Completed" button was pushed by the
+          // first chain. This branch exists only to keep the rest of this else-if chain from
+          // being reached for a stopped ride (a stopped ride can easily also have arrivalSentAt
+          // or a flight number set from earlier in its own lifecycle, which would otherwise
+          // match a later condition below and push a second, duplicate button, or show Track/
+          // Arrived on a ride that's already finished).
         } else if(r.arrivalSentAt || (r.type==='AP RUN' && _started)){
           // AP RUN never has an "arrival" to send a text about at all - it's the driver taking
           // the client TO the airport, no incoming flight to track. It was previously stuck
@@ -17466,8 +17728,7 @@ function refreshDash(){
           // Marking an AP RUN paid before it starts (a client who prepays) is still possible -
           // it just happens from the ride's own screen, which has Mark Paid regardless of
           // status, rather than from this at-a-glance card.
-          _btns.push('<button onclick="event.stopPropagation();toggleRidePaid('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\ud83d\udcb0 Mark Paid</button>');
-          _showBillLater = !r.awaitingInvoice;
+          _btns.push('<button onclick="event.stopPropagation();_dashRideCompletedPrompt('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\u2705 Ride Completed</button>');
         } else if(_isAirport && r.flight){
           var _flightNum=(r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'').toUpperCase();
           var _flightUrl=flightTrackUrl(_flightNum);
@@ -17492,8 +17753,7 @@ function refreshDash(){
           // any plain point-to-point type. Once started, there's no flight to track and no
           // second leg to pause/resume for a trip like this - Mark Paid IS the next real
           // action, same reasoning the AP RUN branch above already uses once it's started.
-          _btns.push('<button onclick="event.stopPropagation();toggleRidePaid('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\ud83d\udcb0 Mark Paid</button>');
-          _showBillLater = !r.awaitingInvoice;
+          _btns.push('<button onclick="event.stopPropagation();_dashRideCompletedPrompt('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\u2705 Ride Completed</button>');
         }
         // Resume navigation. Deliberately not conditioned on ride type or on whether Track/
         // Arrived/Mark Paid are also showing: it solves a different problem (maps got closed,
@@ -17510,24 +17770,20 @@ function refreshDash(){
         // it. Only the 2-button Track+Arrived state still needs Resume Navigation pushed to
         // its own full-width row below, to avoid a cramped 3-across row on a narrow phone.
         var _resumeNavBtn = (_started && !_stopped)
-          ? '<button onclick="event.stopPropagation();openStartRide('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;border:1.5px solid var(--light);background:none;color:var(--black);">\ud83e\udded Resume navigation</button>'
+          ? '<button onclick="event.stopPropagation();openStartRide('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;border:1.5px solid var(--light);background:#fff;color:var(--black);">\ud83e\udded Resume navigation</button>'
           : '';
         var _resumeNavRow = '';
         if(_resumeNavBtn){
           if(_btns.length<=1){ _btns.push(_resumeNavBtn); }
           else { _resumeNavRow = '<div style="display:flex;width:100%;margin-top:.4rem;">'+_resumeNavBtn+'</div>'; }
         }
-        // "Bill later instead" is deliberately NOT a fourth button in that equal-weight row -
-        // it's a quiet secondary link underneath, only shown alongside Mark Paid, never
-        // competing with it for space or attention. Chase's own framing for why this had to be
-        // per-ride rather than a client setting: a normally-pay-on-completion client running
-        // late for a flight, needing an invoice just that once - the ride in front of you
-        // decides this, not who the client usually is.
+        // Client Invoiced used to be a separate, always-visible link here, disconnected from
+        // the button it was actually an alternative to (reported directly as looking "slapped
+        // in"). That choice now lives inside the Ride Completed prompt itself instead of being
+        // pre-decided by a standalone link sitting underneath everything else.
         return '<div style="display:flex;gap:.4rem;width:100%;">'+_btns.join('')+'</div>'
-          +_resumeNavRow
-          +(_showBillLater ? '<div style="text-align:center;margin-top:.3rem;"><button onclick="event.stopPropagation();openLogMiles('+r.id+',true)" style="background:none;border:none;color:var(--mid);font-size:.68rem;font-weight:600;text-decoration:underline;cursor:pointer;padding:.2rem;">\ud83e\uddfe Client Invoiced</button></div>' : '');
+          +_resumeNavRow;
       })()}
-      <div class="ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};">$${r.price}${_ridePaidTag(r)}</div>
     </div>`;
   }).join(''):'<div style="text-align:center;padding:2rem 1rem;color:var(--mid);"><div style="font-size:2rem;margin-bottom:.4rem;">\uD83D\uDE97</div><div style="font-weight:600;color:var(--black);margin-bottom:.2rem;">No rides yet</div><div style="font-size:.85rem;line-height:1.5;">Nothing\u2019s broken \u2014 you just don\u2019t have any upcoming rides right now. New rides you\u2019re driving will show up here automatically.</div></div>';
 }
@@ -22520,7 +22776,13 @@ function renderIncome(){
   var _paBtn=document.getElementById('pricing-audit-btn');
   if(_paBtn) _paBtn.style.display=isAdmin()?'inline-block':'none';
   var _arBtn=document.getElementById('archive-rides-btn');
-  if(_arBtn) _arBtn.style.display=isAdmin()?'inline-block':'none';
+  // Reported directly as clutter: unlike every other maintenance button on this page (the
+  // sweep/scan tools just below), this one used to show for every admin regardless of whether
+  // there was actually anything old enough to archive - the one inconsistent holdout from a
+  // pattern already established everywhere else here. Now matches it: hidden unless there's
+  // genuinely at least one ride past the cutoff, same isAdmin()-and-something-to-do gate the
+  // others already use.
+  if(_arBtn) _arBtn.style.display=(isAdmin() && (rides||[]).some(function(r){return r && r.date && r.date < _archiveCutoffStr();}))?'inline-block':'none';
   var _sweepBtn=document.getElementById('sweep-rt-notes-btn');
   if(_sweepBtn) _sweepBtn.style.display=(isAdmin() && _ridesNeedingLegNotesCleanup().length>0)?'inline-block':'none';
   var _adjBtn=document.getElementById('scan-adj-btn');
@@ -24975,7 +25237,7 @@ async function sendClientVCardToDriver(id){
   }
   if(navigator.canShare){
     try{
-      const shareData={ files:[vcf], title:(r.client||'Client')+'\u2019s contact \u2014 for '+driverShortName(r.driver) };
+      const shareData={ files:[vcf] };
       if(navigator.canShare(shareData)){
         await navigator.share(shareData);
         return;
@@ -27303,11 +27565,14 @@ function enterApp(){
   const accessTab = document.getElementById('mptab-access');
   if(accessTab) accessTab.style.display = admin ? 'inline-block' : 'none';
   const fwReviewBtn = document.getElementById('fw-review-btn');
-  // Chase-only, not admin-only — the same currentUser.name==='Chase' check already used for
+  // Same bug class as Archive old (see that fix's own comment): this used to show for Chase
+  // regardless of whether _findSuspiciousFamilyWallRides() would actually find anything -
+  // found during a full pass over every button in the app checking for exactly this pattern.
+  // Chase-only, not admin-only - the same currentUser.name==='Chase' check already used for
   // the Message Templates tab and the owner-override toggle, not isAdmin() (which also covers
   // Kat and Morgan). Deliberate: this deletes data immediately with no approval and no undo,
   // scoped tighter than the rest of the admin surface on purpose.
-  if(fwReviewBtn) fwReviewBtn.style.display = (currentUser && currentUser.name==='Chase') ? 'inline-block' : 'none';
+  if(fwReviewBtn) fwReviewBtn.style.display = (currentUser && currentUser.name==='Chase' && typeof _findSuspiciousFamilyWallRides==='function' && _findSuspiciousFamilyWallRides().length>0) ? 'inline-block' : 'none';
   const archivedTab2=document.getElementById('mptab-archived'); if(archivedTab2) archivedTab2.style.display=admin?'inline-block':'none';
   const pricingTab2=document.getElementById('mptab-pricing'); if(pricingTab2) pricingTab2.style.display=admin?'inline-block':'none';
   const templatesTab=document.getElementById('mptab-templates');
