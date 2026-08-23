@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191961">
+<meta name="version" content="202608191966">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2589,6 +2589,20 @@ let _archiveLoaded = false;   // whether the ride archive is currently merged in
 // Exists so a slow or failed save can show its result immediately (the local state is
 // already correct) without a stale, in-flight Firebase snapshot silently overwriting that
 // change before the save actually lands - see setupRealtimeListeners()'s own use of this set.
+//
+// STANDING REQUIREMENT, not just this comment's own history: any NEW or EXPANDED feature that
+// calls saveRides() to mutate an EXISTING ride record (not creating a brand-new one) must use
+// this set the same way _saveMarkPaidCombined() does below - add the id, set a ~90s timeout to
+// self-clear it, delete it on confirmed save. This was found missing from three separate save
+// functions built across this same session (_saveLogMiles, _dashSaveInvoicePaid,
+// _changeReturnDest, sendAllConf's confirmation-sent save) before being fixed - each one a real,
+// reported bug where a correct local change silently reverted because of exactly this gap.
+// Before shipping any new ride-mutating save, check: does this need the same protection? A
+// brand-new record being created for the first time doesn't (nothing existing to race against);
+// a mutation to a record that could plausibly be open or edited elsewhere around the same time
+// does. When in doubt, add it - the cost of an unnecessary 90-second pending flag is nothing;
+// the cost of a silently reverted payment or status change is a real, hard-to-diagnose report
+// weeks or months later that looks like nothing happened when tapped.
 window._pendingUnsavedRideIds = window._pendingUnsavedRideIds || new Set();
 let comments = {};   // { rideId: [{user, text, ts}] }
 let notifications = {}; // { driverName: [{rideId, msg, ts, read}] }
@@ -3599,6 +3613,11 @@ function _snapshotRidesBaseline(arr){
 // Falls back to the old whole-node write whenever the shape changed rather than the contents:
 // a different length (ride added, archived, swept) or no usable baseline. Those are rare,
 // deliberate operations where rewriting the node is correct and cheap by comparison.
+//
+// BEFORE ADDING A NEW CALL SITE that mutates an existing ride record: check whether it needs
+// window._pendingUnsavedRideIds protection against a stale live-listener snapshot silently
+// reverting the change. Full standing requirement and reasoning at that variable's own
+// declaration (search _pendingUnsavedRideIds) - this note is just the pointer to it.
 async function saveRides(){
   const arr = rides || [];
   // localStorage stays a full mirror — it is the offline fallback and costs nothing.
@@ -10605,11 +10624,12 @@ function _dashInvoicePaidPrompt(rideId){
   ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:300px;width:100%;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.3);">'
     +'<div style="font-size:.95rem;font-weight:700;color:#0f172a;margin-bottom:.15rem;">Invoice paid \u2014 '+escHtml(r.client||'this ride')+'</div>'
     +'<div style="font-size:.76rem;color:#64748b;margin-bottom:.8rem;">Add a tip if there was one, then confirm.</div>'
-    +'<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.9rem;">'
+    +'<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.7rem;">'
     +'<span style="font-size:.72rem;font-weight:700;color:#64748b;">TIP $</span>'
     +'<input id="dash-tip-input" type="number" min="0" step="0.01" value="'+(r.tip||'')+'" placeholder="0.00" '
     +'style="flex:1;padding:.5rem .65rem;border:1.5px solid #c4b5fd;border-radius:8px;font-family:inherit;font-size:1rem;box-sizing:border-box;">'
     +'</div>'
+    +_buildTipMethodToggleHtml('dash', r.tipPayment)
     +'<div style="display:flex;gap:.5rem;">'
     +'<button onclick="document.getElementById(\'invoice-paid-overlay\').remove()" style="flex:1;padding:.6rem;background:#f1f5f9;color:#475569;border:none;border-radius:8px;font-family:inherit;font-size:.85rem;font-weight:600;cursor:pointer;">Cancel</button>'
     +'<button id="dash-invoice-paid-save-btn" onclick="_dashSaveInvoicePaid('+rideId+')" style="flex:1;padding:.6rem;background:#15803d;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">\u2705 Invoice Paid</button>'
@@ -10624,18 +10644,96 @@ async function _dashSaveInvoicePaid(rideId){
   if(!r){ showToast('Ride not found','error'); if(ov) ov.remove(); return; }
   var val = parseFloat((document.getElementById('dash-tip-input')||{}).value);
   if(isFinite(val) && val>0) r.tip = val;
+  var dashTipMethod = _readTipMethodFromPrompt('dash');
+  if(dashTipMethod){ r.tipPayment=dashTipMethod; } else { delete r.tipPayment; }
   // Same fields the full Mark Paid flow sets when genuinely closing a ride out - same
   // meaning, just reached through this lighter path instead.
   r.status='paid'; r.paidAt=Date.now(); r.paidBy=currentUser?.name||'';
   if(!r.payment) r.payment='Invoice';
   delete r.awaitingInvoice;
   touchRide(r,'invoice marked paid');
-  try{ await saveRides(); }catch(e){ console.warn(e); }
+  // Same protection as _saveMarkPaidCombined and _saveLogMiles (just fixed there for the
+  // identical reason) - tracked as pending so a stale, in-flight Firebase snapshot can't
+  // quietly revert this specific change before it lands. This function sets even more
+  // critical state than the invoice-marking step (status='paid' itself), so leaving it
+  // unprotected would just move the same bug one step later in this exact flow.
+  window._pendingUnsavedRideIds.add(r.id);
+  setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
+  var _dipSaveDone = saveRides().then(function(ok){
+    if(ok){ window._pendingUnsavedRideIds.delete(r.id); }
+    try{ renderDashSaveFailed(); }catch(e){}
+    if(!ok){ showToast('\u26a0\ufe0f '+(r.client||'Ride')+'\u2019s payment didn\u2019t save \u2014 check your connection'); }
+  }).catch(function(){
+    try{ renderDashSaveFailed(); }catch(e){}
+    showToast('\u26a0\ufe0f '+(r.client||'Ride')+'\u2019s payment didn\u2019t save \u2014 check your connection');
+  });
   if(ov) ov.remove();
   showToast('\u2705 Invoice marked paid');
   try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
   try{ if(typeof renderIncome==='function' && document.getElementById('page-income') && document.getElementById('page-income').classList.contains('active')) renderIncome(); }catch(e){}
   try{ _maybeOfferFeeAndPaid(rideId); }catch(e){ console.warn(e); }
+}
+
+// Generic tip-payment-method toggle, built for the places that didn't have one: the original
+// invoice screen (openLogMiles) and the new Invoice Paid follow-up (_dashInvoicePaidPrompt).
+// Reported directly: "I just invoiced a customer and he tipped me in cash but there is no way
+// to denote how I was tipped." The full Mark Paid modal already has this exact idea built in
+// (see its own mp-tip-* elements and _paySelectTipMethodCombined) — deliberately NOT reused or
+// modified here, to keep zero risk to that already-working flow. This is new, independent code
+// using its own prefix-scoped element ids and its own state, storing the result in the same
+// r.tipPayment field the existing implementation already uses, so receipts and income
+// breakdowns read it identically regardless of which screen it was set from.
+window._tipMethodState = window._tipMethodState || {};
+function _buildTipMethodToggleHtml(prefix, currentTipPayment){
+  var selected = currentTipPayment && PAY_METHODS.indexOf(currentTipPayment)>=0 ? currentTipPayment : (currentTipPayment ? 'Other' : '');
+  window._tipMethodState[prefix] = selected;
+  var btns = PAY_METHODS.map(function(m){
+    var active = (m===selected);
+    return '<button type="button" onclick="_selectTipMethod(\''+prefix+'\',\''+m+'\')" '
+      +'style="flex:0 0 auto;padding:.4rem .8rem;border:1.5px solid '+(active?'var(--accent)':'var(--light)')
+      +';border-radius:20px;background:'+(active?'var(--accent)':'#fff')+';color:'+(active?'#fff':'#000')
+      +';font-family:inherit;font-size:.78rem;font-weight:600;cursor:pointer;">'+m+'</button>';
+  }).join('');
+  return '<label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.6rem;">'
+    +'<input type="checkbox" id="'+prefix+'-tip-split" '+(selected?'checked':'')+' onchange="_tipMethodSplitToggle(\''+prefix+'\')" style="width:17px;height:17px;flex-shrink:0;">'
+    +'<span style="font-size:.8rem;color:#0f172a;">Tip paid by a different method than the fare</span></label>'
+    +'<div id="'+prefix+'-tip-method-wrap" style="margin-bottom:.75rem;'+(selected?'':'display:none;')+'">'
+    +'<div id="'+prefix+'-tip-method-btns" style="display:flex;flex-wrap:wrap;gap:.45rem;">'+btns+'</div>'
+    +'<div id="'+prefix+'-tip-other-wrap" style="margin-top:.5rem;'+(selected==='Other'?'':'display:none;')+'">'
+    +'<input type="text" id="'+prefix+'-tip-other-text" value="'+(currentTipPayment && PAY_METHODS.indexOf(currentTipPayment)<0 ? escHtml(currentTipPayment) : '')+'" placeholder="e.g. Cash" '
+    +'style="width:100%;padding:.45rem .6rem;border:1.5px solid #d1d5db;border-radius:9px;font-family:inherit;font-size:.85rem;box-sizing:border-box;">'
+    +'</div></div>';
+}
+function _tipMethodSplitToggle(prefix){
+  var checked = !!document.getElementById(prefix+'-tip-split')?.checked;
+  var wrap = document.getElementById(prefix+'-tip-method-wrap');
+  if(wrap) wrap.style.display = checked ? 'block' : 'none';
+  if(!checked){ window._tipMethodState[prefix]=''; }
+}
+function _selectTipMethod(prefix, m){
+  window._tipMethodState[prefix] = m;
+  var box=document.getElementById(prefix+'-tip-method-btns');
+  if(box){
+    box.innerHTML = PAY_METHODS.map(function(x){
+      var active=(x===m);
+      return '<button type="button" onclick="_selectTipMethod(\''+prefix+'\',\''+x+'\')" '
+        +'style="flex:0 0 auto;padding:.4rem .8rem;border:1.5px solid '+(active?'var(--accent)':'var(--light)')
+        +';border-radius:20px;background:'+(active?'var(--accent)':'#fff')+';color:'+(active?'#fff':'#000')
+        +';font-family:inherit;font-size:.78rem;font-weight:600;cursor:pointer;">'+x+'</button>';
+    }).join('');
+  }
+  var otherWrap=document.getElementById(prefix+'-tip-other-wrap');
+  if(otherWrap) otherWrap.style.display = (m==='Other') ? 'block' : 'none';
+}
+// Reads back the current selection at save time. Returns '' if the toggle isn't checked or
+// nothing's selected, meaning: don't touch r.tipPayment (or clear it, per the caller's own
+// existing "same method as the fare" default).
+function _readTipMethodFromPrompt(prefix){
+  var checked = !!document.getElementById(prefix+'-tip-split')?.checked;
+  if(!checked) return '';
+  var m = window._tipMethodState[prefix] || '';
+  if(m==='Other'){ var tt=(document.getElementById(prefix+'-tip-other-text')?.value||'').trim(); m = tt||'Other'; }
+  return m;
 }
 
 async function toggleRidePaid(id){
@@ -12121,10 +12219,17 @@ function _buildOdoMilesTipGasFieldsHtml(prefix, r, milesExplanationText){
       +'style="width:100%;padding:.5rem .65rem;border:1.5px solid #fdba74;border-radius:8px;font-family:inherit;font-size:.95rem;box-sizing:border-box;">'
       +'</div>')
     : '';
+  var _milesBlurbSeen = isUiDismissed('miles-explain');
+  var milesBlurbHtml = _milesBlurbSeen ? '' :
+    ('<div id="'+prefix+'-miles-blurb" style="font-size:.72rem;color:#5b21b6;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:.55rem .7rem;margin-bottom:.6rem;line-height:1.5;">'
+    +milesExplanationText
+    +' <button onclick="setUiDismissed(\'miles-explain\');document.getElementById(\''+prefix+'-miles-blurb\').remove();" style="background:none;border:none;color:#5b21b6;font-size:.7rem;font-weight:700;text-decoration:underline;cursor:pointer;padding:0;">Got it</button>'
+    +'</div>');
   return odoPromptHtml
-    +'<div style="font-size:.66rem;color:#94a3b8;margin-bottom:.6rem;line-height:1.4;">'+milesExplanationText+' '+mtipDot(prefix+'-miles-explain','Logged a starting odometer reading? You only need the ending number here \u2014 the app works out the mileage for you.')+'</div>'
+    + milesBlurbHtml
+    +'<div style="font-size:.66rem;color:#94a3b8;margin-bottom:.6rem;line-height:1.4;">'+mtipDot(prefix+'-miles-explain-odo','Logged a starting odometer reading? You only need the ending number here \u2014 the app works out the mileage for you.')+'</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin-bottom:.75rem;align-items:end;">'
-    +'<div><label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">MILES DRIVEN</label>'
+    +'<div><label style="font-size:.72rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">MILES DRIVEN '+mtipDot(prefix+'-miles-total-explain', milesExplanationText)+'</label>'
     +'<input id="'+prefix+'-miles" type="number" min="0" step="0.1" value="'+(r.drivenMiles||r.miles||'')+'" placeholder="e.g. 41" '
     +'style="width:100%;padding:.55rem .65rem;border:1.5px solid #c4b5fd;border-radius:9px;font-family:inherit;font-size:1rem;box-sizing:border-box;">'
     +'</div>'
@@ -12547,7 +12652,14 @@ function _openStartRideWithHome(rideId, startAddr, endAddr, swapPickupDropoff){
   // real chosen destination with "home" the next time a round trip happens to use this ride.
   if(!swapPickupDropoff && endAddr && r.startRideReturnDest!==endAddr){
     r.startRideReturnDest = endAddr;
-    try{ saveRides(); }catch(e){}
+    // Same protection as the payment-related saves (_saveLogMiles, _dashSaveInvoicePaid,
+    // _saveMarkPaidCombined) - copied directly, not reinvented. Lower stakes here (a lost value
+    // just means re-picking a destination once, not a payment tracking failure) but the same
+    // exact class of gap, found by auditing every save from this session rather than assuming
+    // this one was safe because the consequence of missing it is smaller.
+    window._pendingUnsavedRideIds.add(r.id);
+    setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
+    saveRides().then(function(ok){ if(ok) window._pendingUnsavedRideIds.delete(r.id); }).catch(function(){});
   }
   var _link=(r.linkedRide!=null)?rides.find(function(x){return x&&x.id===r.linkedRide;}):null;
   // For Resume on a paused ROUND TRIP: the client's being picked up from where they were
@@ -12731,6 +12843,7 @@ function openLogMiles(rideId, billLater){
     // in-progress ride (which would make the nudge just noise) - two hours is a proxy for
     // "is this actually useful right now," not an arbitrary number.
     +_buildOdoMilesTipGasFieldsHtml('lm', r, 'Total from Waze / Apple / Google Maps \u2014 include the drive to pick them up, not just the ride itself. That\u2019s still deductible business mileage.')
+    +_buildTipMethodToggleHtml('lm', r.tipPayment)
     +'<div style="display:flex;gap:.5rem;">'
     +'<button onclick="_closeLogMiles()" style="flex:1;padding:.6rem;background:#f1f5f9;color:#475569;border:none;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:600;cursor:pointer;">Cancel</button>'
     +'<button id="lm-save-btn" onclick="if(!this.dataset.lmFired){this.dataset.lmFired=\'1\';_saveLogMiles('+rideId+','+(billLater?'true':'false')+');}" style="flex:2;padding:.6rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.9rem;font-weight:700;cursor:pointer;">'+(billLater?'&#128190; Save \u2014 Mark Invoiced':'&#128190; Save')+'</button>'
@@ -12962,11 +13075,13 @@ async function _saveLogMiles(rideId, billLater){
     }
     var tip=parseFloat(document.getElementById('lm-tip').value)||0;
     var gas=parseFloat(document.getElementById('lm-gas').value)||0;
+    var lmTipMethod=_readTipMethodFromPrompt('lm');
     // These are the miles the DRIVER actually drove (e.g. round trip), used only
     // for their gas/maintenance cost and profit. It does NOT change the client's
     // fare, which is based on the originally quoted r.miles.
     r.drivenMiles=mi;
     if(tip>0) r.tip=tip;
+    if(lmTipMethod){ r.tipPayment=lmTipMethod; } else { delete r.tipPayment; }
     if(gas>0) await _mtSaveGasPrice(gas);
     // "Bill later instead" from the ride card, not the small Log/Edit miles button elsewhere -
     // marks the ride done and awaiting an invoice, WITHOUT touching r.status/the Scheduled ->
@@ -12982,7 +13097,26 @@ async function _saveLogMiles(rideId, billLater){
       r.invoicedBy=currentUser?.name||'';
       touchRide(r,'marked awaiting invoice');
     }
-    try{await saveRides();}catch(e){console.warn(e);}
+    // BUG FIX (reported directly: a ride correctly marked awaiting invoice, saved, confirmed -
+    // then later, after the client had actually paid, showed as if it had never been invoiced
+    // at all). Copied directly from _saveMarkPaidCombined's own protection, not reinvented -
+    // the identical race was already found and fixed once for the full Mark Paid modal, it
+    // simply never got extended to this save path, which is the one actually used to mark a
+    // ride invoiced in the first place. Tracked as pending so a stale, in-flight Firebase
+    // snapshot - arriving from some other write entirely, a slow round trip, anything - can't
+    // quietly revert this specific change before it durably lands. Local state is already
+    // correct the instant this runs, so nothing downstream needs to wait on the network round
+    // trip either - same reasoning as the original.
+    window._pendingUnsavedRideIds.add(r.id);
+    setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
+    var _lmSaveDone = saveRides().then(function(ok){
+      if(ok){ window._pendingUnsavedRideIds.delete(r.id); }
+      try{ renderDashSaveFailed(); }catch(e){}
+      if(!ok){ showToast('\u26a0\ufe0f '+(r.client||'Ride')+'\u2019s mileage didn\u2019t save \u2014 check your connection'); }
+    }).catch(function(){
+      try{ renderDashSaveFailed(); }catch(e){}
+      showToast('\u26a0\ufe0f '+(r.client||'Ride')+'\u2019s mileage didn\u2019t save \u2014 check your connection');
+    });
     _closeLogMiles();
     // Refresh the mileage bar in the open ride modal
     var w=document.getElementById('mt-wrap'); if(w)w.innerHTML=rideActionBarHtml(rideId);
@@ -25037,7 +25171,12 @@ async function sendAllConf(id){
   // confirmed, regardless of which box was checked.
   if(g('text') && _texted){
     _markRideConfirmed(r);
-    await saveRides();
+    // Same protection as the payment-related saves - copied directly. Matters a bit more than
+    // it might look: this is the exact field that removes a ride from Confirmations To Send,
+    // so a stale snapshot reverting it means an already-sent confirmation looks unsent again.
+    window._pendingUnsavedRideIds.add(r.id);
+    setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
+    saveRides().then(function(ok){ if(ok) window._pendingUnsavedRideIds.delete(r.id); }).catch(function(){});
     setTimeout(function(){
       renderConfirmations();
       renderCal();
