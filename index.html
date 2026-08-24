@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191979">
+<meta name="version" content="202608191983">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -5072,7 +5072,7 @@ function openGoogleMaps(){
   const pickup  = document.getElementById('q-pickup').value.trim();
   const dropoff = document.getElementById('q-dropoff').value.trim();
   if(!pickup || !dropoff){ return; }
-  window.open(`https://www.google.com/maps/dir/${encodeURIComponent(pickup)}/${encodeURIComponent(dropoff)}/`, '_blank');
+  window.open(_gmapsDirUrl([pickup, dropoff]), '_blank');
 }
 
 // ── TERMINAL AUTO-FILL ──
@@ -5111,11 +5111,57 @@ function _clearIfAutoFilledTerminalAddr(el){
 // tarmac between gates - not "imprecise," genuinely undriveable. See terminalToAddress() just
 // below: the street-address fallback is gone entirely now, specifically because of that.
 // Format: 'lat,lng' string, or '' if not set yet.
-const TERMINAL_COORDS = {
+// Built-in STARTING points, not gospel. Reported directly with a screenshot: the North Domestic
+// coordinate routed a driver into the North Parking Deck rather than the arrivals curb - close,
+// reachable, and still wrong. Every earlier fix in this area was about making sure navigation
+// actually REACHES these values instead of a bad street address; none of them ever checked
+// whether the values themselves land on the right patch of pavement, and there was no way to
+// correct one without a code change. Now overridable from Settings, so whoever is standing at
+// the actual curb can fix it in the field and have it sync to everyone.
+const TERMINAL_COORDS_BUILTIN = {
   'North Domestic':  '33.641718,-84.448644',
   'South Domestic':  '33.638882,-84.442656',
   'International':    '33.641312,-84.419636',
 };
+// Live view: saved overrides win over the built-ins, per terminal. Anything malformed in saved
+// data is ignored rather than trusted - a bad coordinate sends a driver somewhere wrong, so the
+// built-in is the safer answer if an override doesn't parse.
+function _resolvedTerminalCoords(){
+  var out = {
+    'North Domestic':  TERMINAL_COORDS_BUILTIN['North Domestic'],
+    'South Domestic':  TERMINAL_COORDS_BUILTIN['South Domestic'],
+    'International':   TERMINAL_COORDS_BUILTIN['International'],
+  };
+  try{
+    var ov = (typeof globalSettings!=='undefined' && globalSettings && globalSettings.terminalCoordOverrides) || {};
+    Object.keys(out).forEach(function(k){
+      var v = (ov[k]||'').trim();
+      if(v && _isValidLatLng(v)) out[k] = v;
+    });
+  }catch(e){}
+  return out;
+}
+// Strict on purpose. "33.64, -84.44" with a space, a transposed pair, or a stray character all
+// resolve to somewhere real and wrong, which is worse than obviously broken.
+function _isValidLatLng(s){
+  var m = /^\s*(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/.exec(String(s||''));
+  if(!m) return false;
+  var lat = parseFloat(m[1]), lng = parseFloat(m[2]);
+  if(!isFinite(lat) || !isFinite(lng)) return false;
+  return lat>=-90 && lat<=90 && lng>=-180 && lng<=180;
+}
+// Rough great-circle miles - used only to flag an override that's implausibly far from the
+// built-in, which almost always means a typo or a transposed lat/lng rather than a real move.
+function _latLngMilesApart(a, b){
+  try{
+    var pa=String(a).split(','), pb=String(b).split(',');
+    var la1=parseFloat(pa[0])*Math.PI/180, lo1=parseFloat(pa[1])*Math.PI/180;
+    var la2=parseFloat(pb[0])*Math.PI/180, lo2=parseFloat(pb[1])*Math.PI/180;
+    var dla=la2-la1, dlo=lo2-lo1;
+    var h=Math.sin(dla/2)*Math.sin(dla/2)+Math.cos(la1)*Math.cos(la2)*Math.sin(dlo/2)*Math.sin(dlo/2);
+    return 3958.8*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));
+  }catch(e){ return 0; }
+}
 // Resolve a stored terminal value to a navigable destination. COORDINATE ONLY - no street-
 // address fallback. That fallback used to return TERMINAL_ADDRESSES[key] when no coordinate was
 // set, which sounded like a reasonable "better than nothing" - until Chase found it in practice:
@@ -5130,14 +5176,15 @@ const TERMINAL_COORDS = {
 function terminalToAddress(term){
   if(!term) return '';
   var key=String(term).trim();
-  if(!TERMINAL_COORDS[key]){
+  var _TC=_resolvedTerminalCoords();
+  if(!_TC[key]){
     var low=key.toLowerCase();
     if(low.indexOf('north')===0)      key='North Domestic';
     else if(low.indexOf('south')===0) key='South Domestic';
     else if(low.indexOf('int')===0)   key='International';
     else return '';
   }
-  return (TERMINAL_COORDS[key]||'').trim();
+  return (_TC[key]||'').trim();
 }
 // Catches a known-airport address by its own TEXT rather than by r.terminal — a stale auto-
 // filled leftover, a hand-typed variant, a client-entered address from the booking form,
@@ -5150,14 +5197,14 @@ function _terminalCoordFromAddressText(addr){
   if(!a) return '';
   if(a.indexOf('south terminal pkwy')>-1 || a.indexOf('south terminal parkway')>-1
    || a.indexOf('s terminal pkwy')>-1 || a.indexOf('s terminal parkway')>-1){
-    return TERMINAL_COORDS['South Domestic']||'';
+    return _resolvedTerminalCoords()['South Domestic']||'';
   }
   if(a.indexOf('north terminal pkwy')>-1 || a.indexOf('north terminal parkway')>-1
    || a.indexOf('n terminal pkwy')>-1 || a.indexOf('n terminal parkway')>-1){
-    return TERMINAL_COORDS['North Domestic']||'';
+    return _resolvedTerminalCoords()['North Domestic']||'';
   }
   if(a.indexOf('maynard h jackson')>-1){
-    return TERMINAL_COORDS['International']||'';
+    return _resolvedTerminalCoords()['International']||'';
   }
   return '';
 }
@@ -5661,7 +5708,7 @@ function viewRouteOnMaps(){
   const p=(document.getElementById('q-pickup')||{}).value||'';
   const d=(document.getElementById('q-dropoff')||{}).value||'';
   if(!p||!d){ showToast('Enter a pickup and drop-off first','error'); return; }
-  window.open('https://www.google.com/maps/dir/'+encodeURIComponent(p)+'/'+encodeURIComponent(d)+'/','_blank');
+  window.open(_gmapsDirUrl([p, d]),'_blank');
 }
 
 // ── SURCHARGE CHIPS ──
@@ -12137,6 +12184,37 @@ async function _mtSaveGasPrice(val){
   try{await storageSetOne('kat:driverProfiles',dn,DRIVER_PROFILES[dn],DRIVER_PROFILES);}catch(e){}
 }
 // ── RIDE NAVIGATION + MILE LOGGING ───────────────────────────────────────
+// Builds a Google Maps directions URL using the OFFICIAL Maps URLs API (?api=1&...) rather than
+// the older path form (/maps/dir/A/B/C).
+//
+// BUG FIX - this is the actual cause of the "navigation dropped me in the North Parking Deck"
+// report, after the coordinates themselves were ruled out. Chase confirmed the terminal
+// coordinates are correct and are SHARED between arrivals and departures on purpose: at ATL the
+// two curbs are physically stacked, same lat/lng, and the split into upper/lower happens right
+// at the terminal approach. So one point per terminal is right, and the pin was still landing on
+// a parking deck.
+//
+// The difference is how each URL form treats a raw "lat,lng" string. In the path form, each
+// segment is handled as a place QUERY - Google reverse-geocodes it and snaps to the nearest
+// NAMED result, and at that spot the nearest named result is the North Parking Deck. In the
+// ?api=1 form, a lat,lng destination is taken as an exact point and is not re-resolved to a
+// nearby place. Same coordinate, two different destinations, decided entirely by URL shape.
+//
+// This also explains why none of the earlier work here helped: every prior fix was about WHICH
+// coordinate got used, and the coordinate was already right by the time it was handed over.
+// (mapsHref() at the AP-pickup link already used ?api=1 - which is exactly why that path never
+// produced this complaint.)
+function _gmapsDirUrl(stops){
+  var list = (stops||[]).map(function(s){ return String(s||'').trim(); }).filter(Boolean);
+  if(!list.length) return '';
+  if(list.length===1) return 'https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(list[0])+'&travelmode=driving';
+  var origin = list[0], dest = list[list.length-1], mid = list.slice(1,-1);
+  var url = 'https://www.google.com/maps/dir/?api=1&origin='+encodeURIComponent(origin)
+          + '&destination='+encodeURIComponent(dest);
+  // Maps URLs API takes waypoints as a single pipe-separated parameter.
+  if(mid.length) url += '&waypoints='+mid.map(encodeURIComponent).join('%7C');
+  return url + '&travelmode=driving';
+}
 function _navEnc(addr){ return encodeURIComponent((addr||'').trim()); }
 
 function _buildRouteUrlsFrom(r, startAddr, endAddr, linkRide){
@@ -12206,9 +12284,9 @@ function _buildRouteUrlsFrom(r, startAddr, endAddr, linkRide){
     if(l_mid.length){ var _last=stops[stops.length-1]; stops=stops.slice(0,-1).concat(l_mid).concat([_last]).filter(function(s,i,a){return s && s!==a[i-1];}); }
   }
 
-  // Google Maps multi-stop: /dir/origin/wp1/wp2/.../destination
-  var gmStops = stops.map(_navEnc).join('/');
-  var gmUrl   = 'https://www.google.com/maps/dir/'+gmStops;
+  // Google Maps multi-stop via the official Maps URLs API - see _gmapsDirUrl for why the
+  // older /dir/A/B/C path form can't be used with coordinates.
+  var gmUrl   = _gmapsDirUrl(stops);
 
   // Apple Maps: was using the legacy ?saddr=&daddr= scheme with a daddr repeated once per
   // stop, on the assumption (per the comment this replaces) that Apple Maps only supports a
@@ -12374,7 +12452,7 @@ function _buildOdoMilesTipGasFieldsHtml(prefix, r, milesExplanationText){
     ? ('<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:9px;padding:.6rem .8rem;margin-bottom:.75rem;">'
       +'<div style="font-size:.74rem;color:#7c2d12;line-height:1.5;margin-bottom:.5rem;">You '+_refLabel+' at <strong>'+_refReading+'</strong> \u2014 enter where you ended and the miles below fill in automatically, or skip this and enter your total mileage directly.</div>'
       +'<label style="font-size:.68rem;font-weight:700;color:#7c2d12;display:block;margin-bottom:3px;">ENDING ODOMETER</label>'
-      +'<input id="'+prefix+'-odo-end" type="number" min="0" step="0.1" placeholder="e.g. 48261" oninput="_'+prefix+'PreviewOdoMiles('+r.id+')" '
+      +'<input id="'+prefix+'-odo-end" type="number" min="0" step="0.1" placeholder="e.g. 48261" oninput="_clearFieldError(\''+prefix+'-odo-end\');_'+prefix+'PreviewOdoMiles('+r.id+')" '
       +'style="width:100%;padding:.5rem .65rem;border:1.5px solid #fdba74;border-radius:8px;font-family:inherit;font-size:.95rem;box-sizing:border-box;">'
       +'</div>')
     : '';
@@ -12414,6 +12492,42 @@ function _buildOdoMilesTipGasFieldsHtml(prefix, r, milesExplanationText){
 // entirely; see the handoff notes for why). Returns the computed total, or null if the
 // reading wasn't valid to use at all. Mutates real ride data - only ever called at an actual
 // save, never while the person is still just typing.
+// Shows a validation problem INSIDE the open modal, attached to the offending field, instead of
+// relying on a toast.
+//
+// BUG FIX (reported directly): entering an ending odometer LOWER than the starting one was
+// correctly refused - _applyOdometerEnd returned null and nothing saved - and it did call
+// showToast(). But the toast renders behind the modal overlay, so from the driver's side there
+// was "no pop up, no red lettering, no nothing": the Save button simply did nothing, which is
+// indistinguishable from the app being broken. The validation was right; the feedback never
+// reached the person. This puts the reason on the field itself - red border, red message, and
+// scrolls it into view - so a mistyped reading is obvious and fixable on the spot.
+function _showFieldError(inputId, msg){
+  try{
+    var el=document.getElementById(inputId); if(!el) return;
+    el.style.borderColor='#dc2626';
+    el.style.background='#fef2f2';
+    var errId=inputId+'-err';
+    var err=document.getElementById(errId);
+    if(!err){
+      err=document.createElement('div');
+      err.id=errId;
+      err.style.cssText='color:#dc2626;font-size:.75rem;font-weight:700;line-height:1.4;margin-top:.35rem;';
+      el.parentNode.insertBefore(err, el.nextSibling);
+    }
+    err.textContent='\u26A0\uFE0F '+msg;
+    try{ el.scrollIntoView({block:'center',behavior:'smooth'}); }catch(_e){}
+    try{ el.focus(); el.select&&el.select(); }catch(_e){}
+  }catch(e){}
+}
+function _clearFieldError(inputId){
+  try{
+    var el=document.getElementById(inputId);
+    if(el){ el.style.borderColor=''; el.style.background=''; }
+    var err=document.getElementById(inputId+'-err');
+    if(err) err.remove();
+  }catch(e){}
+}
 function _applyOdometerEnd(r, endingReading){
   if(!r || r.odoStart==null || !isFinite(endingReading)) return null;
   // A paused-and-resumed round trip with BOTH segment readings actually captured gets the
@@ -12423,7 +12537,15 @@ function _applyOdometerEnd(r, endingReading){
   // single start-to-end span, since that's the best available with the data actually on hand.
   var twoSegment = r.odoPause!=null && r.odoResume!=null;
   var compareFloor = twoSegment ? r.odoResume : r.odoStart;
-  if(endingReading <= compareFloor){ showToast('Ending reading should be higher than the '+(twoSegment?'resume':'starting')+' one \u2014 not saved','error'); return null; }
+  if(endingReading <= compareFloor){
+    // Names the actual number it has to beat - "should be higher than the starting one" on
+    // its own still leaves you hunting for what that number was.
+    var _msg='Ending odometer must be higher than your '+(twoSegment?'resume':'starting')+' reading of '+compareFloor+'. Nothing was saved.';
+    showToast(_msg,'error');
+    // The toast sits behind the modal - this is the part the driver actually sees.
+    ['lm-odo-end','mp-odo-end'].forEach(function(id){ if(document.getElementById(id)) _showFieldError(id,_msg); });
+    return null;
+  }
   var total = twoSegment
     ? parseFloat(((r.odoPause - r.odoStart) + (endingReading - r.odoResume)).toFixed(2))
     : parseFloat((endingReading - r.odoStart).toFixed(2));
@@ -12742,7 +12864,7 @@ function _navStopsBoxHtml(){
   return '<div id="nav-stop-list">'+_navStopListHtml()+'</div>'
     +((window._navStops&&window._navStops.length>3)?'<button onclick="_navOptimize()" style="width:100%;margin-top:.55rem;padding:.5rem;border:1.5px solid #7c3aed;border-radius:8px;background:#f5f3ff;color:#7c3aed;font-family:inherit;font-size:.78rem;font-weight:700;cursor:pointer;">\ud83e\ude84 Optimize stop order (nearest first)</button>':'');
 }
-function _navGoogleUrl(){ return 'https://www.google.com/maps/dir/'+(window._navStops||[]).map(_navEnc).join('/'); }
+function _navGoogleUrl(){ return _gmapsDirUrl(window._navStops||[]); }
 function _navSyncGm(){ var b=document.getElementById('nav-gm-btn'); if(b) b.setAttribute('onclick', "window.open('"+_navGoogleUrl().replace(/'/g,"\\'")+"','_blank');_closeNavModal();"); }
 // Re-renders the whole stops box (list + Optimize button, which only shows past 3 stops) —
 // used by move/optimize/add-stop alike so the Optimize button correctly appears once a typed
@@ -13254,6 +13376,13 @@ async function _saveLogMiles(rideId, billLater){
       r.awaitingInvoice=true;
       r.invoicedAt=Date.now();
       r.invoicedBy=currentUser?.name||'';
+      // BUG FIX (reported with a screenshot): invoicing a ride never marked it as STOPPED, only
+      // as awaiting invoice. The ride is plainly over at this point - the ending odometer was
+      // just entered - but because rideStoppedAt stayed empty, the dashboard card still thought
+      // it was in progress: it kept offering "Resume navigation" on a finished ride, and its
+      // green button stayed on "Ride Completed" instead of advancing to "Invoice Paid" (that
+      // branch requires stopped AND awaiting-invoice). One missing field, two visible symptoms.
+      if(r.rideStartedAt && !r.rideStoppedAt) r.rideStoppedAt = Date.now();
       touchRide(r,'marked awaiting invoice');
     }
     // BUG FIX (reported directly: a ride correctly marked awaiting invoice, saved, confirmed -
@@ -13964,7 +14093,9 @@ function rideActionBarHtml(rid){
   // strand a driver who closed their maps app. What changes is that it stops CLAIMING the ride
   // has not started: it becomes a secondary "Resume navigation" next to a plain statement of when
   // the ride began.
-  var _startedAt = r.rideStartedAt && !r.rideStoppedAt ? r.rideStartedAt : 0;
+  // Excludes awaitingInvoice for the same reason as the dashboard card: an invoiced ride is
+  // finished, so offering to resume navigation to it is noise at best and confusing at worst.
+  var _startedAt = (r.rideStartedAt && !r.rideStoppedAt && !r.awaitingInvoice) ? r.rideStartedAt : 0;
   if(_startedAt){
     var _t='';
     try{
@@ -17967,7 +18098,11 @@ function refreshDash(){
         // finished ride skips every other branch (Pause/Resume, Track, Send Arrival Text -
         // none of which make sense once the ride is already over) and goes straight to the
         // one real next action left: Mark Paid.
-        var _stopped = !!(r.rideStartedAt && r.rideStoppedAt);
+        // awaitingInvoice counts as stopped on its own: a ride can only reach that state by
+        // being completed and billed. This is belt-and-braces alongside the rideStoppedAt fix
+        // at the source - rides invoiced BEFORE that fix shipped have no rideStoppedAt at all,
+        // and would otherwise keep showing Resume navigation and the wrong button forever.
+        var _stopped = !!(r.rideStartedAt && r.rideStoppedAt) || !!r.awaitingInvoice;
         if(_stopped && r.awaitingInvoice){
           // Already invoiced - re-asking "was this paid or invoiced" here would be redundant
           // (that question's already answered). Originally shipped as tip-only (v959), then
@@ -18101,16 +18236,22 @@ function renderCalFinalizeTomorrow(){
     +'<div style="font-size:.75rem;color:var(--mid);line-height:1.45;">You\u2019ve scheduled '+count+' ride'+(count===1?'':'s')+' that '+(count===1?'hasn\u2019t':'haven\u2019t')+' been announced yet \u2014 tap Notify Drivers once it\u2019s set, and whoever\u2019s currently assigned finds out.</div>'
     +'</div>';
 }
+// A ride marked awaiting-invoice is NOT an oversight - it's been deliberately closed out and
+// is sitting waiting on the client to pay the invoice. It has its own "Invoice Paid" action
+// on the dashboard card. Reported directly: these were padding the wrap-up list and, worse,
+// were being swept up by Mark-all-paid, which would silently mark an invoice paid that the
+// client hasn't actually paid yet - losing the fact that money is still owed.
+function _isAwaitingInvoice(r){ return !!(r && r.awaitingInvoice); }
 function renderDashNeedsAttention(){
   var box=document.getElementById('dash-needs-attention'); if(!box) return;
   var todayStr=toDateStr(new Date());
-  var overdue=(rides||[]).filter(function(r){ return r && isMyDrivingRide(r) && r.status!=='cancelled' && r.status!=='paid' && parseFloat(r.price||0)>0 && ((r.date && r.date<todayStr) || r.status==='completed'); })
+  var overdue=(rides||[]).filter(function(r){ return r && isMyDrivingRide(r) && r.status!=='cancelled' && r.status!=='paid' && !_isAwaitingInvoice(r) && parseFloat(r.price||0)>0 && ((r.date && r.date<todayStr) || r.status==='completed'); })
     .sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
   // Computed once, up front, rather than only inside the admin button's own markup - an admin
   // with zero unpaid rides of their own but a team that has plenty shouldn't have this whole
   // banner (and the one action that matters to them) disappear just because THEIR count is 0.
   var companyCount = isAdmin()
-    ? (rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && parseFloat(r.price||0)>0 && ((r.status==='completed')||(r.date && r.date<todayStr)); }).length
+    ? (rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && !_isAwaitingInvoice(r) && parseFloat(r.price||0)>0 && ((r.status==='completed')||(r.date && r.date<todayStr)); }).length
     : 0;
   if(!overdue.length && !companyCount){ box.innerHTML=''; return; }
   var rows=overdue.slice(0,15).map(function(r){
@@ -18599,7 +18740,7 @@ function profileUnwaive(){
 async function markAllPastRidesPaidAdmin(){
   if(!isAdmin()){ showToast('Admins only','error'); return; }
   var today=toDateStr(new Date());
-  var list=(rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && parseFloat(r.price||0)>0 && ((r.status==='completed')||(r.date && r.date<today)); });
+  var list=(rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && !_isAwaitingInvoice(r) && parseFloat(r.price||0)>0 && ((r.status==='completed')||(r.date && r.date<today)); });
   if(!list.length){ showToast('Nothing to mark'); return; }
   var byDriver={};
   list.forEach(function(r){ var d=r.driver||'Unassigned'; byDriver[d]=(byDriver[d]||0)+1; });
@@ -18621,7 +18762,7 @@ async function markAllPastRidesPaidAdmin(){
 
 async function markAllPrevPaid(){
   var dName=getMyDriverName(); var today=toDateStr(new Date());
-  var list=(rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && r.driver===dName && parseFloat(r.price||0)>0 && ((r.status==='completed')||(r.date && r.date<today)); });
+  var list=(rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && r.driver===dName && !_isAwaitingInvoice(r) && parseFloat(r.price||0)>0 && ((r.status==='completed')||(r.date && r.date<today)); });
   if(!list.length){ showToast('Nothing to mark'); return; }
   var _choice = await showConfirmModal({
     icon:'\u2713', iconColor:'#0d9488', iconBg:'#0f2e2b',
@@ -20142,6 +20283,69 @@ const HARDCODED_PICKUP_BY_TERMINAL = {
   'South Domestic': '\ud83d\udeec South Terminal (LS1)\nStep 1: Text your driver after you get your bags.\nStep 2: Go to the Lower Level (LS1) using the elevators or escalators between Doors S2 & S3.\nStep 3: Text the driver when you are heading out to the curb.\nStep 4: Wait at the curb just before the crosswalk.',
   'International': '\ud83d\udec2 International (Middle Island)\nStep 1: Text your driver once you have your bags.\nStep 2: Walk out the main doors and cross the first road to the Middle Island.\nStep 3: Walk all the way to the VERY LAST A2 sign at the far end of the island.\nStep 4: Keep your ringer on!',
 };
+// Where navigation actually sends a driver for each terminal. Lives beside the per-terminal
+// pickup instructions because it's the same kind of per-terminal setting - but this one decides
+// the physical destination, so it's deliberately more guarded: strict format validation, a
+// sanity check against the built-in, and a visible "Using built-in" vs "Custom" state so nobody
+// has to guess whether an override is live.
+function _buildTerminalCoordCardHtml(){
+  var live = _resolvedTerminalCoords();
+  var ov = (typeof globalSettings!=='undefined' && globalSettings && globalSettings.terminalCoordOverrides) || {};
+  var canEdit = (typeof isAdmin==='function') ? isAdmin() : false;
+  var rows = ['North Domestic','South Domestic','International'].map(function(k){
+    var custom = !!((ov[k]||'').trim() && _isValidLatLng((ov[k]||'').trim()));
+    var id = 'tcoord-'+k.replace(/[^A-Za-z]/g,'');
+    return '<div style="margin-bottom:.7rem;">'
+      +'<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.25rem;">'
+        +'<span style="font-size:.8rem;font-weight:700;color:var(--black);">'+escHtml(k)+'</span>'
+        +'<span style="font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:10px;'
+          +(custom?'background:#7c3aed;color:#fff;':'background:var(--light);color:var(--mid);')+'">'
+          +(custom?'Custom':'Using built-in')+'</span>'
+      +'</div>'
+      +'<div style="display:flex;gap:.35rem;align-items:center;">'
+        +'<input id="'+id+'" value="'+escHtml(live[k]||'')+'" '+(canEdit?'':'readonly ')
+          +'placeholder="33.641718,-84.448644" '
+          +'style="flex:1;min-width:0;padding:.4rem .55rem;border:1.5px solid var(--light);border-radius:8px;font-family:inherit;font-size:.8rem;box-sizing:border-box;'+(canEdit?'':'background:var(--surface);color:var(--mid);')+'">'
+        +(canEdit?'<button onclick="_saveTerminalCoord(\''+k+'\',\''+id+'\')" style="flex-shrink:0;padding:.4rem .7rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">Save</button>':'')
+        +(canEdit&&custom?'<button onclick="_resetTerminalCoord(\''+k+'\')" style="flex-shrink:0;padding:.4rem .6rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">Reset</button>':'')
+      +'</div></div>';
+  }).join('');
+  return '<div style="background:var(--surface);border-radius:12px;padding:1.1rem;border:1.5px solid var(--light);margin-bottom:1.25rem;">'
+    +'<div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.25rem;">Airport pickup points</div>'
+    +'<div style="font-size:.72rem;color:var(--mid);margin-bottom:.8rem;line-height:1.5;">Exactly where Start Ride sends a driver for each terminal. If navigation is dropping you in a parking deck or anywhere other than the right curb, stand at the correct spot, long-press it in Google Maps to copy the coordinates, and paste them here. Applies to everyone.</div>'
+    +rows
+    +(canEdit?'':'<div style="font-size:.68rem;color:var(--mid);margin-top:.2rem;">Only an admin can change these.</div>')
+    +'</div>';
+}
+async function _saveTerminalCoord(term, inputId){
+  var el = document.getElementById(inputId); if(!el) return;
+  var v = (el.value||'').trim();
+  if(!_isValidLatLng(v)){
+    showToast('That doesn\u2019t look like coordinates \u2014 expected something like 33.641718,-84.448644','error');
+    return;
+  }
+  // Catches a transposed or mistyped pair before it ever routes a driver somewhere absurd.
+  var builtin = TERMINAL_COORDS_BUILTIN[term]||'';
+  if(builtin){
+    var miles = _latLngMilesApart(v, builtin);
+    if(miles > 25 && !confirm('That point is about '+Math.round(miles)+' miles from where '+term+' normally is. That usually means a typo or a swapped lat/long. Save it anyway?')) return;
+  }
+  globalSettings = globalSettings || {};
+  globalSettings.terminalCoordOverrides = globalSettings.terminalCoordOverrides || {};
+  globalSettings.terminalCoordOverrides[term] = v;
+  try{ await storageSet('kat:globalSettings', globalSettings); }catch(e){ console.warn(e); }
+  showToast('\u2705 '+term+' pickup point updated');
+  try{ renderMessageTemplates(); }catch(e){}
+}
+async function _resetTerminalCoord(term){
+  if(!confirm('Put '+term+' back to the built-in pickup point?')) return;
+  try{
+    if(globalSettings && globalSettings.terminalCoordOverrides) delete globalSettings.terminalCoordOverrides[term];
+    await storageSet('kat:globalSettings', globalSettings);
+  }catch(e){ console.warn(e); }
+  showToast('\u21a9\ufe0f '+term+' reset to the built-in point');
+  try{ renderMessageTemplates(); }catch(e){}
+}
 function renderMessageTemplates(){
   const panel = document.getElementById('driver-panel-templates');
   if(!panel) return;
@@ -20159,6 +20363,8 @@ function renderMessageTemplates(){
   // looks once you open one, just visible from the start instead of hidden until you have
   // something to show.
   if(!myName){ panel.innerHTML='<div style="padding:1.5rem 0;color:var(--mid);font-size:.9rem;">Your login isn\u2019t linked to a driver profile yet. Ask an admin to link your account on the Team page.</div>'; return; }
+
+  const _terminalCoordCardHtml = _buildTerminalCoordCardHtml();
 
   // Each field is now a collapsible section - collapsed by default, showing the label and
   // a status pill so you can scan which messages are customized without opening every one.
@@ -20389,7 +20595,9 @@ function renderMessageTemplates(){
   // his edits alone auto-promote to become the shared default everyone else falls back to (see
   // saveTemplateField's own comment for the mechanism). One button, one place, for everyone.
 
-  panel.innerHTML = html;
+  // Airport pickup points sit above the message templates - same per-terminal family, but
+  // this one decides where a driver is physically sent, so it leads.
+  panel.innerHTML = _terminalCoordCardHtml + html;
 }
 function startFromDefault(id){
   const el = document.getElementById(id); if(!el) return;
