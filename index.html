@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191966">
+<meta name="version" content="202608191977">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2438,6 +2438,9 @@ function setupRealtimeListeners(){
         if(activeRideId!=null && document.getElementById('ride-modal')?.classList?.contains('show')){
           const _ar = rides.find(x=>x.id===activeRideId);
           if(_ar) renderInterest(_ar);
+          // The other vehicle's driver can be assigned from another device while this modal is
+          // open - refresh just that badge in place so the name is never stale on screen.
+          try{ _refreshXxlPairBadge(); }catch(e){}
         }
         if(document.getElementById('page-myrides').classList.contains('active')){ renderMyCal(); if(myTab==='confirm') renderConfirmations(); }
         if(document.getElementById('page-income').classList.contains('active')) renderIncome();
@@ -2812,6 +2815,7 @@ async function _loadAppData() {
   try{ await _migrateLegacyProfileTemplates(); }catch(e){ console.warn('legacy template migration', e); }
   try{ await _promoteChaseTemplatesToGlobalDefault(); }catch(e){ console.warn('Chase default promotion', e); }
   try{ await _clearChasePersonalDuplicates(); }catch(e){ console.warn('Chase personal duplicate cleanup', e); }
+  try{ await _healBrokenConfirmTemplate(); }catch(e){ console.warn('broken confirm template heal', e); }
   // The two pickup-instructions seed migrations that used to run here (v793-era) were removed
   // in v807 - both only ever populated globalSettings fields (defaultPickupInstructions,
   // defaultPickupInstructionsByTerminal) that nothing reads anymore now that pickup instructions
@@ -7963,7 +7967,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
               const badge=r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP'?'badge-ap':r.type==='ROUND TRIP'?'badge-rt':'badge-pt';
   const xxlBadge=(r.xxl&&r.vehicle2)?'<span style="font-size:.55rem;font-weight:700;background:#6b21a8;color:#fff;border-radius:3px;padding:1px 4px;margin-left:2px;">XXL</span>':'';
   const privateBadge=r.private?'<span style="font-size:.55rem;font-weight:700;background:#1b1330;color:#fff;border-radius:3px;padding:1px 4px;margin-left:2px;" title="Hidden from other drivers">🔒</span>':'';
-  const pairBadge='';
+  const pairBadge=_xxlPairChipHtml(r);
               return `<div class="week-ride-card" style="border-color:${c};background:${c}66;" onclick="openRideModal(${r.id})">
                 <div style="display:flex;flex-direction:column;min-width:46px;">
                   <div class="week-ride-time" style="color:${tc};">${fmtTime12(r.time)||'—'}</div>
@@ -8090,7 +8094,7 @@ function calSearch(){
         +'<div style="width:6px;align-self:stretch;min-height:34px;border-radius:3px;background:'+c+';"></div>'
         +'<div style="min-width:58px;"><strong style="font-size:.82rem;color:'+tc+';">'+fmtDateShort(r.date)+'</strong><br><span style="font-size:.72rem;color:'+tc+';opacity:.78;">'+(fmtTime12(r.time)||'')+'</span></div>'
         +'<div style="flex:1;min-width:120px;"><div style="font-weight:600;font-size:.9rem;color:'+tc+';">'+check+escHtml(r.client||'—')+'</div><div style="font-size:.74rem;color:'+tc+';opacity:.78;">'+escHtml(driverShortName(r.driver))+(r.phone&&(currentUser&&(PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name)===(r.createdBy?(PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy):null)||(getMyDriverName()&&getMyDriverName()===r.driver))?' · '+escHtml(r.phone):'')+'</div></div>'
-        +'<span class="badge '+typeCls+'">'+escHtml((r.type||'')+apVehSuffix(r))+'</span>'
+        +'<span class="badge '+typeCls+'">'+escHtml((r.type||'')+apVehSuffix(r))+'</span>'+_xxlPairChipHtml(r)
         +'<div style="font-weight:600;color:'+(tc==='#fff'?'#fff':'var(--green)')+';">$'+r.price+'</div>'
       +'</div>';
     }).join('');
@@ -8598,7 +8602,17 @@ function renderConfirmations(){
         // useful if the card itself built successfully - combining a real selfie with nothing
         // isn't a combined image, so this correctly stays skipped when file is null; the plain
         // fm.selfie above still gets sent on its own in that case, not silently dropped with it.
-        if(file && _fm.selfie && (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')){
+        // BUG FIX: this used to include AP ROUND TRIP, contradicting the documented design a
+        // few hundred lines up (see _isApPickup0's own comment): a merged AP ROUND TRIP
+        // booking's single confirmation card is always the OUTBOUND, home-pickup leg - the
+        // return/airport leg gets no separate card here - so airport-only extras like the
+        // day-of selfie genuinely don't apply to it. The selfie checkbox itself already
+        // renders only for _isTrueApPickup0 (AP PICK UP alone), and sendAllConf's own
+        // _selfieApplies is AP PICK UP alone too, so this warm-up was the lone outlier -
+        // building a combined card+selfie image for a ride type that can never send one, and
+        // (below) padding the flat file list with a second PNG that has no business being
+        // there. Aligned to the same single rule the other three places already use.
+        if(file && _fm.selfie && r.type==='AP PICK UP'){
           try{ _fm.combined = await buildCombinedCardSelfieImageFile(r.driver.trim(), _selfieOwner); }catch(e){ console.warn('combined card+selfie build failed',e); }
         }
         window._confFilesMap[r.id]=_fm;
@@ -8608,13 +8622,24 @@ function renderConfirmations(){
         // vcard is deliberately NEVER added to this legacy merged-group file list \u2014
         // it must only ever reach the driver, and this list feeds the multi-recipient
         // group text/share (client + driver + creator + Kat/Morgan together).
-        if(_sa.selfie!==false&&_fm.selfie&&(r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')) allFiles.push(_fm.selfie);
+        if(_sa.selfie!==false&&_fm.selfie&&r.type==='AP PICK UP') allFiles.push(_fm.selfie);
         _confirmShareFiles[r.id]=allFiles;
-        const url=URL.createObjectURL(file);
-        imgEl.onload=function(){ URL.revokeObjectURL(url); };
-        imgEl.src=url;
-        imgEl.style.display='block';
-        if(loaderEl) loaderEl.style.display='none';
+        // BUG FIX: this used to call URL.createObjectURL(file) unconditionally, even when file
+        // is null (the card genuinely failed to build) - createObjectURL(null) throws, and
+        // that exception was silently caught by this same .then() chain's trailing .catch(),
+        // which then overwrote the "No card photo" message set just above with an empty
+        // string. The preview thumbnail went silently blank instead of explaining why. Found
+        // during a systematic pass through the whole image pipeline, not a specific report -
+        // this only ever affected the preview thumbnail here, never the actual attachment sent
+        // by "Send everything" (that path already reads from the correctly-populated
+        // window._confFilesMap regardless of whether this preview code runs cleanly).
+        if(file){
+          const url=URL.createObjectURL(file);
+          imgEl.onload=function(){ URL.revokeObjectURL(url); };
+          imgEl.src=url;
+          imgEl.style.display='block';
+          if(loaderEl) loaderEl.style.display='none';
+        }
       }).catch(function(){ if(loaderEl) loaderEl.textContent=''; });
     });
 
@@ -8668,7 +8693,12 @@ async function toggleConfirmSent(id){
       card.style.opacity='.4';
     }
   }
-  await saveRides();
+  // Same protection as sendAllConf's automatic confirmSent marking (v965) - this is the
+  // separate, manual "Mark confirmation sent" toggle button, found during the full-pipeline
+  // audit to have the identical gap on the same critical field.
+  window._pendingUnsavedRideIds.add(r.id);
+  setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
+  saveRides().then(function(ok){ if(ok) window._pendingUnsavedRideIds.delete(r.id); }).catch(function(){});
   setTimeout(function(){
     renderConfirmations();
     renderCal();
@@ -8687,6 +8717,45 @@ function fmtTime12(t){
   return h+':'+min+' '+ap;
 }
 
+// Returns the phrase that slots into "scheduled for ___ at 7:00 AM".
+//
+// Confirmations are normally sent the day before, so "tomorrow" is both accurate and the most
+// natural thing for a client to read - it stays. But it's now always paired with the real date
+// ("tomorrow, Monday, Aug 24"), so the client has something concrete to check against rather
+// than a relative word alone, which is easy to misread if they open the text a day later.
+//
+// BUG FIX (the reason this function exists at all): every confirmation message used to hardcode
+// the literal word "tomorrow", with nothing anywhere checking that the ride actually IS
+// tomorrow. Sending a confirmation two days ahead, or the same morning as the ride, told the
+// client the wrong day with complete confidence - the exact kind of quiet, plausible-looking
+// wrongness that produces a client showing up on the wrong day and nobody able to explain why.
+// Compares calendar days at local midnight (not elapsed hours), so the answer never depends on
+// what time of day the confirmation happens to be sent. Falls back to the original bare
+// "tomorrow" wording whenever the date is missing or unparseable - a fallback that silently
+// changed long-standing behavior on bad input would be its own new problem.
+function _confWhenPhrase(dateStr){
+  try{
+    if(!dateStr) return 'tomorrow';
+    var p = String(dateStr).trim().split('-');
+    if(p.length !== 3) return 'tomorrow';
+    var y = +p[0], mo = +p[1], d = +p[2];
+    if(!isFinite(y) || !isFinite(mo) || !isFinite(d)) return 'tomorrow';
+    var rideDay = new Date(y, mo-1, d);
+    if(isNaN(rideDay.getTime())) return 'tomorrow';
+    var now = new Date();
+    var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var diffDays = Math.round((rideDay.getTime() - today.getTime()) / 86400000);
+    var dayLabel = rideDay.toLocaleDateString('en-US', { weekday:'long', month:'short', day:'numeric' });
+    // "tomorrow" stays for the normal case (confirmations go out the day before), but always
+    // paired with the real date so there's something concrete to check against.
+    if(diffDays === 1) return 'tomorrow, ' + dayLabel;
+    if(diffDays === 0) return 'today, ' + dayLabel;
+    // Everything else - further out, or already past - names the actual day on its own. Never
+    // ambiguous, and never says "tomorrow" about a day that isn't tomorrow.
+    return dayLabel;
+  }catch(e){ return 'tomorrow'; }
+}
+
 // Returns { message, instructions } — message is the confirmation text to send the
 // client; instructions is the separate terminal pickup message (AP PICK UP only).
 // The per-type default message logic, factored out of buildConfirmationText() so it can be
@@ -8697,6 +8766,9 @@ function fmtTime12(t){
 // its inputs rather than reaching into outer scope.
 function _buildRawConfirmDefaults(r, ctx){
   const { type, time, driverLine, driverLineShort, contact, sig, ownerSig, amount, terminalVal, flight, flightLink, dest, start } = ctx;
+  // Defaulted rather than required: any caller that hasn't been updated still gets the exact
+  // original wording instead of the literal string "undefined" appearing in a client's text.
+  const whenPhrase = ctx.whenPhrase || 'tomorrow';
   let message='', instructions='';
 
   if(type==='AP RUN'){
@@ -8705,7 +8777,7 @@ function _buildRawConfirmDefaults(r, ctx){
     // rather than an empty destination if no terminal was recorded on this ride.
     const destPart = terminalVal ? (terminalVal+' Terminal') : 'the Airport';
     const pickupPart = start ? (' at '+start) : '';
-    message = 'I am confirming your pickup scheduled for tomorrow at '+time+pickupPart+', going to '+destPart+'.\n\n'+
+    message = 'I am confirming your pickup scheduled for '+whenPhrase+' at '+time+pickupPart+', going to '+destPart+'.\n\n'+
               driverLine+'\n\n'+
               'The Driver: Please review the attached photo to see what your driver and their vehicle look like.\n\n'+
               'Safety: If there is a driver change, it will be communicated through this text thread only.\n\n'+
@@ -8724,7 +8796,7 @@ function _buildRawConfirmDefaults(r, ctx){
     // Pick Up leads with flight + arrival terminal, not the destination address — matches
     // Chase's exact template.
     const termPart = terminalVal ? (', the '+terminalVal+' Terminal') : '';
-    message = 'I am confirming your pickup scheduled for tomorrow at '+time+' from Flight # '+flight+termPart+'.\n\n'+
+    message = 'I am confirming your pickup scheduled for '+whenPhrase+' at '+time+' from Flight # '+flight+termPart+'.\n\n'+
               driverLineShort+'\n\n'+
               'The Driver: Please review the attached photo to see what your driver and their vehicle look like.\n\n'+
               'Safety: If there is a driver change, it will be communicated through this text thread only.\n\n'+
@@ -8740,7 +8812,7 @@ function _buildRawConfirmDefaults(r, ctx){
     // existing return-time field. Return time is omitted gracefully if not yet set.
     const going = dest || '(destination)';
     const returnPart = r.rt ? (' at '+fmtTime12(r.rt)) : '';
-    message = 'I am confirming your pickup scheduled for tomorrow at '+time+' at '+start+' going to '+going+
+    message = 'I am confirming your pickup scheduled for '+whenPhrase+' at '+time+' at '+start+' going to '+going+
               ' returning to '+start+returnPart+'.\n\n'+
               driverLineShort+'\n\n'+
               'The Driver: Please review the attached photo to see what your driver and their vehicle look like.\n\n'+
@@ -8752,7 +8824,7 @@ function _buildRawConfirmDefaults(r, ctx){
     // Same structure as AP RUN, per Chase's instruction to reuse that text for One Way —
     // ground pickup/destination in place of AP RUN's pickup/terminal.
     const going = dest || '(destination)';
-    message = 'I am confirming your pickup scheduled for tomorrow at '+time+' at '+start+', going to '+going+'.\n\n'+
+    message = 'I am confirming your pickup scheduled for '+whenPhrase+' at '+time+' at '+start+', going to '+going+'.\n\n'+
               driverLine+'\n\n'+
               'The Driver: Please review the attached photo to see what your driver and their vehicle look like.\n\n'+
               'Safety: If there is a driver change, it will be communicated through this text thread only.\n\n'+
@@ -8764,7 +8836,7 @@ function _buildRawConfirmDefaults(r, ctx){
     // original generic wording on purpose rather than guessed at.
     const going = dest || '(destination)';
     const fromPart = start ? ' from '+start : '';
-    message = 'I am confirming your pickup scheduled for tomorrow at '+time+fromPart+', going to '+going+'.\n\n'+
+    message = 'I am confirming your pickup scheduled for '+whenPhrase+' at '+time+fromPart+', going to '+going+'.\n\n'+
               driverLine+'\n\n'+contact+'\n\n'+
               flightLink+
               'Many thanks,\n\n'+sig+'\n\n'+
@@ -8826,7 +8898,7 @@ function buildConfirmationText(r){
   // Extracted so this exact logic can also be called directly for a "here's the real
   // built-in default" preview (Settings screen) without picking up whatever custom template
   // the viewing driver may have already saved — see _buildRawConfirmDefaults below.
-  const _raw = _buildRawConfirmDefaults(r, { type, time, driverLine, driverLineShort, contact, sig, ownerSig, amount, terminalVal, flight, flightLink, dest, start });
+  const _raw = _buildRawConfirmDefaults(r, { type, time, driverLine, driverLineShort, contact, sig, ownerSig, amount, terminalVal, flight, flightLink, dest, start, whenPhrase: _confWhenPhrase(r && r.date) });
   let message = _raw.message, instructions = _raw.instructions;
 
   // Per-driver custom templates override the defaults ONLY when the sender has set them.
@@ -9005,6 +9077,10 @@ function fillConfTemplate(tpl, r, sender, assigned){
     client:  r.client||'',
     date:    (typeof fmtDateShort==='function'?fmtDateShort(r.date):(r.date||'')),
     time:    fmtTime12(r.time),
+    // Date-aware "tomorrow"/"today"/real-day-name, same helper the built-in defaults use.
+    // Additive only: a saved template that doesn't use {when} is completely unaffected, since
+    // fillConfTemplate leaves any placeholder it doesn't recognize exactly as written.
+    when:    (typeof _confWhenPhrase==='function' ? _confWhenPhrase(r && r.date) : 'tomorrow'),
     pickup:  r.pickup||'',
     dropoff: r.home||'',
     driver:  driverDisplayName(assigned),
@@ -9791,14 +9867,80 @@ function _prevPaySend(withTip){
 // used by the ride detail modal's own leg badge (renderRideView) - the dashboard card's use of
 // this (_pairedLegLabel) was removed at Chase's request; the modal badge was left alone since
 // that wasn't what was reported.
-function _inferLegNumber(r, pairedRide){
-  if(r.rtLegNumber) return r.rtLegNumber;
-  if(!pairedRide) return r.rtLegNumber || 1;
-  var myKey = (r.date||'')+' '+(r.time||'');
-  var theirKey = (pairedRide.date||'')+' '+(pairedRide.time||'');
-  if(myKey && theirKey && myKey!==theirKey) return myKey < theirKey ? 1 : 2;
-  return r.id < pairedRide.id ? 1 : 2;
+// A split XXL booking is two fully independent ride records sharing a pairId, both flagged
+// xxlPair. Once split, NEITHER carries the old r.xxl/r.vehicle2 fields any more (splitXXLRide
+// explicitly clears them), so the "XXL" chip that used to mark the single combined record
+// stops rendering entirely and nothing anywhere shows the two rides belong to the same job.
+// Reported directly: drivers need to see they're one of two vehicles on the same trip, and
+// crucially WHO the other driver is - the number alone doesn't answer the actual question.
+// Ordering is by id: the original record keeps its id and the second vehicle gets nextId++,
+// so lower id is always vehicle 1, matching the order they were booked in.
+//
+// Reads the mate LIVE out of `rides` on every call rather than snapshotting anything at
+// creation time, so the other driver's name reflects the current assignment the moment any
+// view re-renders - which matters because a ride's driver genuinely changes over its life:
+// every ride is auto-assigned to the client owner when created, and only later reassigned to
+// whoever actually drives it (and reverts to the owner again on a rejection).
+//
+// That auto-assign rule creates a real intermediate state worth naming explicitly: until the
+// second vehicle has been given its OWN driver, both records still carry the same owner. Just
+// printing "with Chase" to Chase would read as either a mistake or stale data, when the honest
+// answer is that nobody's been assigned to the other vehicle yet. `otherAssigned` distinguishes
+// the two so callers can say so plainly instead of showing a confusing name.
+function _xxlPairInfo(r){
+  if(!r || !r.xxlPair || !r.pairId) return null;
+  var mate = (typeof rides!=='undefined' ? rides : []).find(function(x){
+    return x && x.id!==r.id && x.pairId===r.pairId;
+  });
+  if(!mate) return null;
+  var mineD = (r.driver||'').trim();
+  var theirD = (mate.driver||'').trim();
+  return {
+    n: (r.id < mate.id ? 1 : 2),
+    other: mate,
+    otherDriver: theirD,
+    // "Genuinely a different driver" - not blank, and not still sitting on the same owner
+    // both records were created under.
+    otherAssigned: !!theirD && theirD !== mineD
+  };
 }
+// Badge text, shared by the modal's initial render and its live in-place refresh below, so
+// the two can never drift apart.
+function _xxlPairBadgeInner(info){
+  return '\uD83D\uDE90 Two-vehicle booking \u2014 vehicle '+info.n+' of 2 \u00b7 '
+    + (info.otherAssigned
+        ? 'with '+escHtml(driverShortName(info.otherDriver))
+        : 'second driver not assigned yet');
+}
+// Refreshes just that badge, in place, without re-rendering the whole ride modal. Called from
+// the live Firebase listener: the other vehicle's driver can genuinely be assigned from another
+// device while this modal is sitting open, and a full renderRideView() there would be both
+// heavier than needed and disruptive to anything half-edited on screen.
+function _refreshXxlPairBadge(){
+  try{
+    var el = document.getElementById('rm-xxl-pair-badge');
+    if(!el) return;
+    var r = (typeof rides!=='undefined' ? rides : []).find(function(x){ return x && x.id===activeRideId; });
+    if(!r) return;
+    var info = _xxlPairInfo(r);
+    if(info) el.innerHTML = _xxlPairBadgeInner(info);
+  }catch(e){}
+}
+// Compact chip for calendar/list thumbnails where horizontal space is genuinely tight.
+function _xxlPairChipHtml(r){
+  var info = _xxlPairInfo(r);
+  if(!info) return '';
+  var tip = info.otherAssigned
+    ? ' \u2014 other vehicle: '+driverShortName(info.otherDriver)
+    : ' \u2014 second driver not assigned yet';
+  return '<span style="font-size:.55rem;font-weight:700;background:#6b21a8;color:#fff;border-radius:3px;padding:1px 4px;margin-left:2px;" title="Two-vehicle booking'
+    + escHtml(tip)
+    + '">XXL '+info.n+' of 2</span>';
+}
+// _inferLegNumber() was removed here: AP Round Trip leg numbering is no longer shown
+// anywhere (Chase's call - once booked, those legs are ordinary AP Run / AP Pick Up
+// rides), and the modal badge was its last remaining consumer. Removed outright rather
+// than left dormant, per the standing rule on superseded code.
 function renderRideView(r){
   // BUG (reported, v581): "mark unpaid the paid banner at the top doesnt reset." This function
   // was called BARE at several sites — including setRideStatus (the function responsible for
@@ -9854,18 +9996,18 @@ function renderRideView(r){
   // no separate DOM write needed (it used to live in its own #rm-share-loc-btn div,
   // far from every other action button; consolidated so it can't render twice).
   var _slLocalType=(r.type==='ONE WAY'||r.type==='ROUND TRIP');
-  const _pairedRide = (r.pairId && !r.xxlPair) ? (rides||[]).find(function(x){ return x.id!==r.id && x.pairId===r.pairId; }) : null;
-  // Which leg is actually first is now an explicit choice made at scheduling (rtLegNumber),
-  // not something inferable from type alone - a round trip can genuinely start with either
-  // an AP Run or an AP Pickup, depending on whether the client is departing or arriving first.
-  // A ride paired before rtLegNumber existed won't have it set though, and showing a raw "?"
-  // reads as a glitch rather than genuinely unknown data - _inferLegNumber below fills that
-  // gap using time ordering instead, which IS always physically true regardless of type.
-  const _legBadgeHtml = _pairedRide
-    ? '<div style="display:inline-block;background:rgba(255,255,255,.35);border-radius:6px;padding:2px 8px;font-size:.7rem;font-weight:700;color:var(--black);margin-top:.3rem;">'
-      + '\u2708\uFE0F '+escHtml(r.type||'')+' \u2014 leg '+_inferLegNumber(r,_pairedRide)+' of 2' + '</div>'
+  // AP Round Trip is purely a booking-time convenience for entering both legs at once. Once
+  // that's done the two rides are ordinary AP Run / AP Pick Up records and are treated exactly
+  // like any other ride - so no leg numbering is shown for them any more (Chase's explicit
+  // call). What DOES deserve a badge is a split XXL: two vehicles on the same job, where the
+  // driver genuinely needs to know they're one of a pair and who the other driver is.
+  const _xxlInfo = _xxlPairInfo(r);
+  const _legBadgeHtml = _xxlInfo
+    ? '<div id="rm-xxl-pair-badge" style="display:inline-block;background:rgba(255,255,255,.35);border-radius:6px;padding:2px 8px;font-size:.7rem;font-weight:700;color:var(--black);margin-top:.3rem;">'
+      + _xxlPairBadgeInner(_xxlInfo)
+      + '</div>'
     : '';
-  const _pairLabel = _pairedRide ? (_pairedRide.type==='AP PICK UP' ? '\u2708\ufe0f View return leg \u2192' : '\u2708\ufe0f View outbound leg \u2192') : null;
+
   const apType = r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP';
   const _flightNum = (r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'').toUpperCase();
   // A quick Track link sits right beside the flight number itself, reusing the exact same
@@ -9885,7 +10027,10 @@ function renderRideView(r){
     : '';
   if(!window._offeredRides) window._offeredRides=new Set();
   const _alreadyOffered=window._offeredRides.has(r.id);
-  const _pairedRideForBtn=(r.pairId&&!r.xxlPair&&rides)?rides.find(function(x){return x.id!==r.id&&x.pairId===r.pairId;}):null;
+  // Covers BOTH pair kinds now: a split XXL's other vehicle (previously excluded outright,
+  // leaving no way to reach it at all) and an AP Round Trip's other ride. Neutral wording -
+  // this is navigation between two related records, not leg labelling, which was dropped.
+  const _pairedRideForBtn=(r.pairId&&rides)?rides.find(function(x){return x.id!==r.id&&x.pairId===r.pairId;}):null;
   // Post to Offerings — creator (Kat↔Morgan treated as same), the assigned driver, or any
   // admin. This stays in the main ride card, not the Dispatch Tools panel below — it's a
   // "someone needs help" action for whoever's looking at this ride, not a reassignment
@@ -10106,7 +10251,7 @@ function renderRideView(r){
           ${canSeeContact&&hasIncomeAccess()&&_slLocalType?'<button onclick="shareLocationToClient('+r.id+')" style="padding:.45rem .75rem;background:#0f172a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;">&#128205; Share Location \u2014 let the client see you coming</button>':''}
           ${((r.type==='AP PICK UP'||r.type==='AP ROUND TRIP') && getMyDriverName()===r.driver && _isRideWithinHoursSymmetric(r,6))?`<button onclick="dashSendArrival(${r.id})" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.6rem;background:none;border:1.5px solid #7c3aed;border-radius:8px;color:#7c3aed;font-weight:700;font-size:.88rem;cursor:pointer;font-family:'DM Sans',sans-serif;">\u2708\uFE0F Send arrival text to ${escHtml((r.client||'client').split(' ')[0])}</button>`:''}
           ${(r.arrivalSentAt && getMyDriverName()===r.driver)?`<div onclick="resetArrivalSent(${r.id})" style="text-align:center;font-size:.68rem;color:var(--mid);text-decoration:underline;cursor:pointer;margin-top:-.15rem;">Arrival text sent by mistake? Reset</div>`:''}
-          ${_pairedRideForBtn?`<button onclick="openRideModal(${_pairedRideForBtn.id})" style="width:100%;padding:.6rem;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">${_pairedRideForBtn.type==='AP PICK UP'?'\u2708\ufe0f View return leg \u2192':'\u2708\ufe0f View outbound leg \u2192'}</button>`:''}
+          ${_pairedRideForBtn?`<button onclick="openRideModal(${_pairedRideForBtn.id})" style="width:100%;padding:.6rem;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">${r.xxlPair?'\uD83D\uDE90 View the other vehicle \u2192':'\u2708\ufe0f View the other ride in this booking \u2192'}</button>`:''}
           ${shareOfferingsBtn}
         </div>
       </div>`;
@@ -16495,7 +16640,7 @@ function openConfImporter(targetId){
     +'<button onclick="_runConfImport()" style="width:100%;padding:.6rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;font-weight:700;cursor:pointer;margin-bottom:.8rem;">\u2728 Insert tokens</button>'
     +'<label style="font-size:.72rem;font-weight:700;color:var(--mid);">Tokenized result <span style="font-weight:600;">(edit as needed)</span></label>'
     +'<textarea id="conf-import-out" rows="6" placeholder="Your tokenized message appears here\u2026" style="width:100%;margin:.25rem 0 .5rem;padding:.5rem .6rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;line-height:1.5;"></textarea>'
-    +'<div style="font-size:.66rem;color:var(--mid);margin-bottom:.8rem;line-height:1.4;">Available tokens: <code>{client}</code> <code>{date}</code> <code>{time}</code> <code>{pickup}</code> <code>{dropoff}</code> <code>{driver}</code> <code>{me}</code> <code>{phone}</code> <code>{amount}</code> <code>{flight}</code> <code>{terminal}</code></div>'
+    +'<div style="font-size:.66rem;color:var(--mid);margin-bottom:.8rem;line-height:1.4;">Available tokens: <code>{client}</code> <code>{date}</code> <code>{when}</code> <code>{time}</code> <code>{pickup}</code> <code>{dropoff}</code> <code>{driver}</code> <code>{me}</code> <code>{phone}</code> <code>{amount}</code> <code>{flight}</code> <code>{terminal}</code></div>'
     +'<button onclick="_useConfImport()" style="width:100%;padding:.65rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.9rem;font-weight:700;cursor:pointer;">Use this text</button>'
     +'</div>';
   document.body.appendChild(ov);
@@ -16517,7 +16662,7 @@ function _useConfImport(){
 function _onbInsertConfExample(){
   var el = document.getElementById('onb-conf');
   if(el && !el.value.trim()){
-    el.value = 'Hi {client}, this is {me} confirming your pickup on {date} at {time} from {pickup} going to {dropoff}.\n\nMy partner {driver} will be driving you and can be reached at {phone}.\n\nTrip cost: {amount}. Tips are never expected but always appreciated. Thank you!';
+    el.value = HARDCODED_MSG_DEFAULTS.confirm;
   }
 }
 function _onbPickupMode(){
@@ -19955,7 +20100,7 @@ const _TEMPLATE_FIELD_MAP = {
 // no single universal default for those two - so the AP Run/general version is shown as a
 // representative example, noted as such, rather than presenting it as the only possibility.
 const HARDCODED_MSG_DEFAULTS = {
-  confirm: '(Varies by ride type - shown here is the AP Run / Local version)\n\nI am confirming your pickup scheduled for tomorrow at {time}.\n\n[driver + contact info]\n\nMany thanks,\n\n[signature]\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)',
+  confirm: 'I am confirming your pickup scheduled for {when} at {time} at {pickup} going to {dropoff}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\n{me}\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)',
   pickup: '\ud83c\udfe0 Home/Hotel Pickup Instructions\nStep 1: Your driver will text you when they are 15 minutes away.\nStep 2: Your driver will text again once they have arrived at your door or curb.\nStep 3: Please keep your ringer on!',
   arrival: "Hi, this is {driver}, your driver. I see that you've landed\u2014welcome! I'm parked just a few minutes away.\nOnce you grab your bags and start heading toward the pickup location, please let me know and I will pull right up. (If you haven't already, sending a quick description or selfie helps me spot you faster!) See you soon.",
   driverchange: "Dear {client},\n\nPlease be advised that there has been a change regarding your scheduled pickup on {date} at {time}.\n\nYour new driver will be {driver}. We have attached a photo of your driver and the vehicle for easy identification upon arrival. If you need to reach them directly, they can be contacted at {phone}.\n\nThere are no changes to your scheduled itinerary or pickup location. If you have any questions, please reply to this message.",
@@ -20031,6 +20176,7 @@ function renderMessageTemplates(){
       +'<div id="'+bodyId+'" style="display:none;padding:.75rem .8rem;">'
       +'<div style="display:flex;align-items:center;justify-content:'+(isSet?'flex-end':'space-between')+';margin-bottom:.2rem;gap:.5rem;">'
       +(isSet?'<button onclick="clearTemplateField(\''+scope+'\',\''+key+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Clear (use default)</button>':(NO_REAL_DEFAULT_KEYS[key]?'':'<button onclick="startFromDefault(\''+id+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Start from this default</button>'))
+      +'<button onclick="openConfImporter(\''+id+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">\u2728 Import</button>'
       +'<button onclick="saveTemplateField(\''+scope+'\',\''+key+'\').then(renderMessageTemplates)" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Save</button>'
       +'</div>'
       +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">'+hint+'</div>'
@@ -20073,7 +20219,7 @@ function renderMessageTemplates(){
       const sig = (sender||'').split(' ')[0]||'Your driver';
       const ownerSig = sig; // preview always signs as the viewing driver, no owner lookup needed
       const flightLink = ''; // tracking link is a live send-time extra, not relevant to a text preview
-      return _buildRawConfirmDefaults(sampleR, { type, time, driverLine, driverLineShort, contact, sig, ownerSig, amount, terminalVal, flight, flightLink, dest, start }).message;
+      return _buildRawConfirmDefaults(sampleR, { type, time, driverLine, driverLineShort, contact, sig, ownerSig, amount, terminalVal, flight, flightLink, dest, start, whenPhrase: 'tomorrow' }).message;
     }catch(e){ console.warn('_typeDefaultPreview failed for', type, e); return ''; }
   }
 
@@ -20106,7 +20252,7 @@ function renderMessageTemplates(){
       +(isSet?'<button onclick="clearConfirmTypeField(\''+type+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Clear (use default)</button>':'<button onclick="startFromDefault(\''+id+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Start from this default</button>')
       +'<button onclick="saveConfirmTypeField(\''+type+'\').then(renderMessageTemplates)" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Save</button>'
       +'</div>'
-      +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">This is the real message '+label.replace(' confirmation text','')+' rides send today, shown exactly as it would go out (with example client/address/time filled in). Placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}</div>'
+      +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">This is the real message '+label.replace(' confirmation text','')+' rides send today, shown exactly as it would go out (with example client/address/time filled in). Placeholders: {client} {date} {when} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}</div>'
       +'<textarea id="'+id+'" rows="8" placeholder="'+placeholderText+'" data-default="'+escAttr(defaultText)+'" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(value||'')+'</textarea>'
       +'<div style="font-size:.66rem;color:var(--mid);margin-top:.35rem;line-height:1.4;">'+(isSet?'This is your current wording for this ride type, live and editable above. "Clear (use default)" empties this field and saves, switching back to the built-in text.':'Shown above (grayed out, in the box) is the actual current built-in text \u2014 leave blank to keep using it exactly as shown, or tap "Start from this default" to copy it in and edit from there.')+'</div>'
       +'</div>'
@@ -20138,7 +20284,7 @@ function renderMessageTemplates(){
       + '</div>';
     html += '<div style="font-size:.72rem;color:var(--mid);margin-bottom:1rem;line-height:1.5;background:#f3eeff;border:1px solid #d9c9f5;border-radius:8px;padding:.7rem .85rem;">'
       + 'Your own current wording, shown exactly as it\'ll be sent — fix a typo without retyping the whole thing. This always wins over the app-wide default below. Tap a message to open it.</div>'
-      + field('personal','confirm', 'My confirmation text (general fallback)', 'Only used for ride types with nothing of their own set below — Round Trip, One Way, AP Run, and AP Pick Up each have real built-in text and their own box now. Placeholders: {client} {date} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}', myCustom.confTemplate, 5)
+      + field('personal','confirm', 'My confirmation text (general fallback)', 'Only used for ride types with nothing of their own set below — Round Trip, One Way, AP Run, and AP Pick Up each have real built-in text and their own box now. Placeholders: {client} {date} {when} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}', myCustom.confTemplate, 5)
       + typeField('AP RUN',     'AP Run confirmation text')
       + typeField('AP PICK UP', 'AP Pick Up confirmation text')
       + typeField('ROUND TRIP', 'Round Trip confirmation text')
@@ -20445,6 +20591,18 @@ async function saveTemplateField(scope, key){
   const map = _TEMPLATE_FIELD_MAP[key]; if(!map) return;
   const el = document.getElementById('msgtpl-'+scope+'-'+key); if(!el) return;
   const val = el.value.trim();
+  // PROACTIVE SAFEGUARD (added after v967's root cause): this app only ever uses {curly-brace}
+  // placeholders for real substitution - checked every substitution function in this whole
+  // pipeline (fillConfTemplate, buildArrivalText, _driverChangeClientMessage, the receipt
+  // builders) and none of them recognize square brackets as anything special. A literal [...]
+  // in saved text is never legitimate content, only ever a sign of unfinished placeholder-stub
+  // text like "[driver + contact info]" being saved as-is - exactly what happened here. Doesn't
+  // block saving (someone's own judgment about their own wording still wins, same as
+  // everywhere else in this app), just makes sure they see it and mean it before it becomes a
+  // real, sendable message.
+  if(val && /\[[^\]]{2,}\]/.test(val)){
+    if(!confirm('This still contains something in square brackets, like "[driver + contact info]" - usually a sign it\u2019s unfinished placeholder text rather than your real wording. Save it exactly as written anyway?')) return;
+  }
   if(!map.personal) return; // this template has no per-driver customization
   const myName = getMyDriverName(); if(!myName) return;
   driverSettings[myName] = driverSettings[myName] || {};
@@ -24747,43 +24905,72 @@ async function _clearChasePersonalDuplicates(){
   try{ await storageSet('kat:globalSettings', globalSettings); if(changed) await saveDriverSettings('Chase Sweat'); }
   catch(e){ console.warn('Chase personal duplicate cleanup failed', e); }
 }
+// AUTO-HEAL for v967's actual root cause: HARDCODED_MSG_DEFAULTS.confirm used to hold literal,
+// unfinished placeholder text ("[driver + contact info]", "[signature]", plus an instructional
+// preamble) instead of real content. "Start from this default" copied that broken text straight
+// into whichever real, savable field it was tapped from - the shared global default, or a
+// driver's own personal template - and saving without noticing the brackets permanently baked
+// it in. Reported directly, with a client having received that literal text.
+//
+// This can't be reached or repaired from a past session directly - there is no database
+// connection into a live account's saved data from here, only into the code. So instead this
+// runs ON THE DEVICE, using the account's own normal write access, the same way every other
+// migration in this exact sequence already does - it corrects itself the first time the fixed
+// code actually loads. Matches on the EXACT broken string only, nothing looser - never touches
+// real custom wording, even if it's short, unusual, or looks incomplete for some unrelated
+// reason. Checks both the shared global default (what everyone without a personal override
+// reads, including anyone else relying on the same shared text) and every individual driver's
+// own personal and "own-client" templates, since the broken text could have been saved at
+// either level depending on which settings screen it was copied from.
+async function _healBrokenConfirmTemplate(){
+  globalSettings = globalSettings || {};
+  if(globalSettings._brokenConfirmTemplateHealed) return;
+  var BROKEN = '(Varies by ride type - shown here is the AP Run / Local version)\n\nI am confirming your pickup scheduled for tomorrow at {time}.\n\n[driver + contact info]\n\nMany thanks,\n\n[signature]\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)';
+  var globalChanged = false;
+  if(globalSettings.defaultConfirmTemplate === BROKEN){
+    delete globalSettings.defaultConfirmTemplate;
+    globalChanged = true;
+  }
+  var driverChanged = false;
+  var fixedNames = [];
+  Object.keys(driverSettings||{}).forEach(function(dn){
+    var s = driverSettings[dn];
+    if(!s) return;
+    var hitHere = false;
+    if(s.confTemplate === BROKEN){ delete s.confTemplate; hitHere = true; }
+    if(s.ownConfTemplate === BROKEN){ delete s.ownConfTemplate; hitHere = true; }
+    if(hitHere){ driverChanged = true; fixedNames.push(dn); }
+  });
+  globalSettings._brokenConfirmTemplateHealed = true;
+  try{
+    await storageSet('kat:globalSettings', globalSettings);
+    if(driverChanged) await saveDriverSettings();
+  }catch(e){ console.warn('broken confirm template heal failed', e); }
+  if(globalChanged || driverChanged){
+    var who = globalChanged ? ['the shared default'].concat(fixedNames) : fixedNames;
+    try{ showToast('\u2705 Fixed a corrupted confirmation template ('+who.join(', ')+') \u2014 the placeholder text is gone, real wording is back in effect'); }catch(e){}
+  }
+}
 // Two pickup-instructions seed migrations used to live here (v793-era) - removed in v807, since
 // the fields they populated (globalSettings.defaultPickupInstructionsByTerminal,
 // defaultPickupInstructions) are no longer read anywhere. Pickup instructions are now purely
 // hardcoded-default-plus-personal-override; see HARDCODED_MSG_DEFAULTS.pickup and
 // HARDCODED_PICKUP_BY_TERMINAL for the current baked-in wording, and _TEMPLATE_FIELD_MAP.pickup
 // (global: null) for why the personal-override comparison no longer checks a global layer.
-async function _restoreKatTemplatesV2(){
-  try{
-    var CT={'AP RUN':'I am confirming your pickup scheduled for tomorrow at {time} at {pickup} going to {terminal} Terminal.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)','AP PICK UP':'I am confirming your pickup scheduled for tomorrow at {time} from the Airport, Flight # {flight}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)\n\n\ud83d\udd34 Live Flight Status: https://www.google.com/search?q={flight}+flight+tracking','ONE WAY':'I am confirming your pickup scheduled for tomorrow at {time} at {pickup}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany Thanks\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (trip fee does not include tip for the driver. Tips are not mandatory but always greatly appreciated)','ROUND TRIP':'I am confirming your pickup scheduled for tomorrow at {time} at {pickup} going to {dropoff}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)'};
-    var PK={'North Domestic':'\ud83d\udeeb NORTH TERMINAL Pick Up Instructions\n\n1\ufe0f\u20e3 Text or call when you ARRIVE at baggage claim.\n\n2\ufe0f\u20e3 From baggage claim, take the escalator to lower level (LN1) pickup. The escalator is located just beyond baggage carousel #4, between doors N2 and N3.\n\n3\ufe0f\u20e3 The driver will meet you near the lower level elevator, which is to your right once you exit the lower level.\n\n\ud83d\udd3b\ud83d\udd3b\u2b07\ufe0f\u2b07\ufe0f\u2b07\ufe0f\u2b07\ufe0f\ud83d\udd3b\ud83d\udd3b\nDISREGARD SIGNS FOR UBER/LYFT RIDESHARE\n\ud83d\udd3a\ud83d\udd3a\u2b06\ufe0f\u2b06\ufe0f\u2b06\ufe0f\u2b06\ufe0f\ud83d\udd3a\ud83d\udd3a','South Domestic':'\ud83d\udeec SOUTH TERMINAL (Delta Domestic) Pick Up Instructions\n\n1\ufe0f\u20e3 Text your driver once you have retrieved your luggage from baggage claim.\n\n2\ufe0f\u20e3 Take the escalator or elevator located between Doors S2 and S3 down to the Lower Level Pickup Area (LS1).\n\n3\ufe0f\u20e3 Text your driver again when you are on your way to the LS1 pickup area.\n\n4\ufe0f\u20e3 Wait on the curb just before the crosswalk near the curbside baggage check-in.\n\nYour driver will pick up from there.\n\n\u2728 Important: Please make sure your phone is off Airplane Mode and your ringer is on so your driver can communicate with you.','International':'\ud83d\udeec INTERNATIONAL TERMINAL Pick Up Instructions\n\n1\ufe0f\u20e3 Text or call when you arrive at baggage claim. This helps us time our arrival appropriately.\n\n2\ufe0f\u20e3 From baggage claim, proceed to curbside pickup. Exit through door A2 to curbside pickup (A1 is usually very congested).\n\n3\ufe0f\u20e3 Follow the signs for ground transportation and passenger pick up. Doors A1 and A2 will be to the left \u2b05.\n\n4\ufe0f\u20e3 Once you exit the airport, use the walkway and proceed to the middle island for passenger pickup. IF POSSIBLE, GO TO THE LAST SIGN FOR A2\u2014just before the A3 sign.\n\n(If you do not have global entry or mobile passport control, you can visit etbykat.com/mpc for details on mobile passport control.)'};
-    var GEN='I am confirming your pickup scheduled for tomorrow at {time} at {pickup} going to {dropoff}.\n\nMy partner {driver} will be driving you on my behalf. {driver} is copied on this message.\n\nContact Information:\n\n{driver}\n{phone}\n\nMany thanks,\n\nKathleen \u201cKat\u201d\n\nTrip cost: {amount} (Trip fee does not include a tip for the driver. Tips are not mandatory but are always greatly appreciated.)'; var FB='Please coordinate with your driver upon arrival for specific pickup location details.';
-    // Kat AND Morgan (Morgan dispatches for Kat, so identical text). Nobody else is touched.
-    ['Kathleen Herringdine','Morgan Newton'].forEach(function(K){
-      var s=driverSettings[K]; if(!s) return;
-      if(s._katTemplatesV2) return;                                   // per-profile one-time guard
-      s.confTemplateByType=s.confTemplateByType||{};
-      for(var k in CT){ if(!s.confTemplateByType[k]) s.confTemplateByType[k]=CT[k]; }  // never overwrite theirs
-      if(!s.confTemplate) s.confTemplate=GEN;
-      s.pickupInstructionsByTerminal=s.pickupInstructionsByTerminal||{};
-      for(var k2 in PK){ if(!s.pickupInstructionsByTerminal[k2]) s.pickupInstructionsByTerminal[k2]=PK[k2]; }
-      if(!s.pickupInstructions) s.pickupInstructions=FB;
-      s._katTemplatesV2=true; s._katAprunRestored=true;
-    });
-    // Exactly Kat and Morgan by name, not a roster loop — two targeted writes, not a
-    // whole-collection save. (Distinct from _migrateLegacyProfileTemplates above, which
-    // genuinely does loop the full driver roster and keeps its whole-object write for that
-    // reason — a targeted write there would only ever save whichever driver iterated last.)
-    await saveDriverSettings('Kathleen Herringdine');
-    await saveDriverSettings('Morgan Newton');
-  }catch(e){}
-}
 async function loadDriverSettings(){
   try{
     const d=await storageGet('kat:driverSettings');
     if(d && typeof d==='object') driverSettings=d;
   }catch(e){ driverSettings={}; }
-  await _restoreKatTemplatesV2();
+  // _restoreKatTemplatesV2() used to run here - removed entirely, not just disabled. It
+  // maintained its own separate, hardcoded copy of confirmation/pickup default text (CT, GEN,
+  // FB, PK) that had already drifted out of sync with HARDCODED_MSG_DEFAULTS and
+  // HARDCODED_PICKUP_BY_TERMINAL - three different hardcoded versions of conceptually the same
+  // content, exactly the kind of duplication that let a stale/broken version (see v967) go
+  // unnoticed. It was also flag-guarded and had already run for Kat and Morgan, so removing it
+  // has zero effect on their existing saved data - anyone with nothing customized already
+  // correctly falls through to buildConfirmationText's own generic fallback chain, which reads
+  // HARDCODED_MSG_DEFAULTS directly and is now the one and only place this content lives.
 }
 
 // Pass the driver whose settings you changed and only their record is written (v869).
@@ -25109,6 +25296,12 @@ async function sendAllConf(id){
   // itself depends on for its own send call.
   if(g('card') && !fm.card && r.driver){
     try{ fm.card = await warmDriverCardImage(r.driver.trim()); }catch(e){}
+    // Genuinely failed even after a fresh retry - this is rare (buildDriverCardImageFile's own
+    // fallback means a missing/broken photo still resolves to an initials card; only a real
+    // toBlob() failure reaches here) but was completely silent before now. The success popup
+    // below is honest about this already (won't claim "card" was sent), but a shorter list is
+    // easy to not notice - this makes the failure impossible to miss instead of just absent.
+    if(!fm.card) showToast('\u26a0\ufe0f Driver card couldn\u2019t be attached \u2014 everything else still sent. Try again in a moment.');
   }
   // SAME BUG, SAME ROOT CAUSE, one line down from here: fm.selfie was built inside that exact
   // same background .then() callback as fm.card above (see "Populate driver card previews"),
@@ -25186,7 +25379,8 @@ async function sendAllConf(id){
   }
   // Client contact goes to the driver ONLY \u2014 fired separately, never mixed into the
   // group files above (see sendClientVCardToDriver for why that has to be a real limit).
-  if(_vcardApplies&&g('vcard')){ try{ await sendClientVCardToDriver(id); }catch(e){} }
+  var _vcardSent = false;
+  if(_vcardApplies&&g('vcard')){ try{ _vcardSent = await sendClientVCardToDriver(id); }catch(e){ _vcardSent = false; } }
   const sent=[];
   ['text','inst','card','vcard','selfie'].forEach(function(k){
     if(k==='selfie'&&!_selfieApplies) return;
@@ -25196,6 +25390,22 @@ async function sendAllConf(id){
     // didn't actually send, none of them did either. vcard is a genuinely separate function
     // call (sendClientVCardToDriver, just above) and stays independent of _texted.
     if(k!=='vcard' && !_texted) return;
+    // BUG FIX (reported directly: "Everything sent!" showed, driver card never actually
+    // arrived): this used to mark card/selfie as sent purely because the checkbox was
+    // checked and the overall text send succeeded - completely independent of whether the
+    // image itself actually built and was actually included in files[] above. A genuine
+    // build failure (a network hiccup fetching the driver's photo, a toBlob() failure,
+    // anything) meant the text/instructions still went out fine, _texted was true, and this
+    // silently claimed success for an attachment that was never there. Now checks the exact
+    // same _wantsCard/_wantsSelfie flags that decided what actually went into files[] a few
+    // lines up, so this can only ever report success for something genuinely included.
+    if(k==='card' && !_wantsCard) return;
+    if(k==='selfie' && !_wantsSelfie) return;
+    // SAME BUG, SAME FIX, found in the full pipeline audit: vcard used to be marked sent
+    // purely because sendClientVCardToDriver() didn't throw - but that function has its own
+    // real failure paths (share cancelled, download blocked) that used to return silently
+    // with no signal at all. Now checks its actual, real return value.
+    if(k==='vcard' && !_vcardSent) return;
     if(document.getElementById('cpart-'+id+'-'+k)){ markPartSent(id,k); sent.push(k); }
   });
   if(_phoneApplies&&g('phone')){ setTimeout(function(){ try{ sendClientPhone(id); markPartSent(id,'phone'); }catch(e){} }, 900); sent.push('phone'); }
@@ -25253,8 +25463,14 @@ async function copyConfPart(id, partKey){
     if(ok) showToast('\uD83D\uDCCB Selfie card copied to clipboard');
     else showToast('Image copy not supported on this browser \u2014 use Send button instead','error');
   } else if(partKey==='card'){
-    const files=_confirmShareFiles[id]||[];
-    const cardFile=files.find(function(f){ return f.type==='image/png'; })
+    // BUG FIX: this used to scan the flat file list for any image/png and call the first
+    // hit the driver card - but the day-of selfie is an image/png too. The card only
+    // happens to be first when the driver hasn't switched it off in their own send-parts
+    // settings; when they have, the selfie is the ONLY png in that list, and this would
+    // have copied the selfie and told them it was the driver card. Reads the explicitly
+    // keyed .card slot instead, which is never ambiguous, with the same fresh-build
+    // fallback as before for a cold start.
+    const cardFile=((window._confFilesMap||{})[id]||{}).card
       || await warmDriverCardImage((r.driver||'').trim());
     if(!cardFile){ showToast('Driver card not ready','error'); return; }
     if(window.ClipboardItem && navigator.clipboard && navigator.clipboard.write){
@@ -25266,7 +25482,7 @@ async function copyConfPart(id, partKey){
   } else if(partKey==='vcard'){
     // Quick single-item action mirrors the full-send path \u2014 client's contact, to
     // the driver only, never a manual driver-vcard download here anymore.
-    try{ await sendClientVCardToDriver(id); ok=true; }catch(e){ ok=false; }
+    try{ ok = await sendClientVCardToDriver(id); }catch(e){ ok=false; }
   } else if(partKey==='phone'){
     const phone=r.phone||'';
     if(!phone){ showToast('No client phone on file','error'); return; }
@@ -25365,26 +25581,32 @@ function _downloadVCardFile(vcf){
     return true;
   }catch(e){ return false; }
 }
+// BUG FIX (found in the full image/attachment pipeline audit, not from a specific report):
+// this used to have no return value at all - every exit point, including the ones that
+// explicitly show an error toast ("Could not save contact", "Could not prepare contact"), just
+// `return;`ed with undefined. Both callers treated "didn't throw" as "succeeded," the exact
+// same class of bug already fixed for the driver card itself in v968 - just missed here since
+// that investigation was specifically about the card, not the vCard. Now returns real
+// true/false at every exit, matching the pattern textClient() already correctly uses.
 async function sendClientVCardToDriver(id){
-  const r=rides.find(function(x){ return x.id===id; }); if(!r||!r.driver||!r.client) return;
+  const r=rides.find(function(x){ return x.id===id; }); if(!r||!r.driver||!r.client) return false;
   const vcf=(window._confFilesMap&&window._confFilesMap[id]&&window._confFilesMap[id].vcard) || buildClientVCard(r);
   const myDriverName=(typeof getMyDriverName==='function')?getMyDriverName():null;
   if(myDriverName && r.driver===myDriverName){
-    if(_downloadVCardFile(vcf)) showToast('\uD83D\uDCC7 '+(r.client||'Client')+'\u2019s contact saved');
-    else showToast('Could not save contact','error');
-    return;
+    if(_downloadVCardFile(vcf)){ showToast('\uD83D\uDCC7 '+(r.client||'Client')+'\u2019s contact saved'); return true; }
+    showToast('Could not save contact','error'); return false;
   }
   if(navigator.canShare){
     try{
       const shareData={ files:[vcf] };
       if(navigator.canShare(shareData)){
         await navigator.share(shareData);
-        return;
+        return true;
       }
-    }catch(e){ if(e && e.name==='AbortError') return; console.warn('client vcard share failed',e); }
+    }catch(e){ if(e && e.name==='AbortError') return false; console.warn('client vcard share failed',e); }
   }
-  if(_downloadVCardFile(vcf)) showToast('\uD83D\uDCC7 Saved \u2014 send this to '+driverShortName(r.driver)+' manually');
-  else showToast('Could not prepare contact','error');
+  if(_downloadVCardFile(vcf)){ showToast('\uD83D\uDCC7 Saved \u2014 send this to '+driverShortName(r.driver)+' manually'); return true; }
+  showToast('Could not prepare contact','error'); return false;
 }
 
 // Send client's phone number to the assigned driver(s), for a specific ride's context
@@ -25667,7 +25889,14 @@ function sendArrivalText(id){
   var _opened = openArrivalThread(id, buildArrivalText(r));
   if(!_opened) return; // openArrivalThread already showed the specific reason why
   try{ markPartSent(id,'arrival'); }catch(e){}
-  r.arrivalSentAt=Date.now(); try{ saveRides(); }catch(e){}
+  r.arrivalSentAt=Date.now();
+  // Same protection as every other status-tracking save in this pipeline - copied directly.
+  // Found during the full-pipeline audit, not the original v964/v965 sweep (this function
+  // predates this session), but the same exact gap: a stale snapshot could silently revert
+  // arrivalSentAt, making an already-sent arrival text look unsent again.
+  window._pendingUnsavedRideIds.add(r.id);
+  setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
+  saveRides().then(function(ok){ if(ok) window._pendingUnsavedRideIds.delete(r.id); }).catch(function(){});
   try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
   showToast('\u2708\uFE0F Arrival text opened \u2014 tap send in Messages');
 }
@@ -25814,8 +26043,10 @@ async function sendSelfiePic(id){
 
 async function sendDriverCard(id){
   const r=rides.find(function(x){ return x.id===id; }); if(!r || !r.driver) return;
-  const files=_confirmShareFiles[id]||[];
-  const cardFile=files.find(function(f){ return f.type==='image/png'; })
+  // Same bug, same fix as the copy-card quick action above: scanning for any image/png
+  // could return the day-of selfie instead of the driver card whenever the card itself
+  // isn't in the flat list. Uses the explicitly keyed .card slot.
+  const cardFile=((window._confFilesMap||{})[id]||{}).card
     || await warmDriverCardImage(r.driver.trim());
   if(!cardFile){ showToast('Driver card not ready \u2014 try again in a moment','error'); return; }
   let copied=false;
