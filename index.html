@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191977">
+<meta name="version" content="202608191979">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -9515,7 +9515,7 @@ async function textClient(id, opts){
     try{
       if(navigator.canShare(shareData)){
         await navigator.share(shareData);
-        if(_cardCopied) setTimeout(function(){ showToast('\uD83D\uDDBC\uFE0F Driver card also copied \u2014 long-press to paste it if it is missing'); },900);
+        if(_cardCopied) setTimeout(function(){ showToast('\uD83D\uDDBC\uFE0F '+_copiedImageLabel(cardFile)+' also copied \u2014 long-press to paste it if it is missing'); },900);
         return true;
       }
     }catch(e){
@@ -9535,7 +9535,7 @@ async function textClient(id, opts){
     try{
       if(navigator.canShare(shareData)){
         await navigator.share(shareData);
-        if(_cardCopied) setTimeout(function(){ showToast('\uD83D\uDDBC\uFE0F Driver card also copied \u2014 long-press to paste it if it is missing'); },900);
+        if(_cardCopied) setTimeout(function(){ showToast('\uD83D\uDDBC\uFE0F '+_copiedImageLabel(cardFile)+' also copied \u2014 long-press to paste it if it is missing'); },900);
         return true;
       }
     }catch(e){
@@ -9547,7 +9547,7 @@ async function textClient(id, opts){
   // ── Fallback: the card image is already on the clipboard (copied up front); just
   // open the pre-addressed SMS thread so the sender can paste it and send. ──
   const toasts=[];
-  if(_cardCopied) toasts.push('\uD83D\uDDBC\uFE0F Card copied \u2014 long-press to paste in Messages');
+  if(_cardCopied) toasts.push('\uD83D\uDDBC\uFE0F '+_copiedImageLabel(cardFile)+' copied \u2014 long-press to paste in Messages');
   window.location.href=smsURL;
   if(toasts.length) setTimeout(function(){ showToast(toasts.join(' \u00b7 ')); },800);
   return true;
@@ -9567,6 +9567,20 @@ function closeDayModal(){document.getElementById('day-modal').classList.remove('
 // that's cheap to get subtly wrong and expensive to notice — the duplication costs a few dozen
 // lines; a regression in client confirmation texts costs a lot more. Same iOS/Android/
 // clipboard-fallback shape, kept independent on purpose.
+// The clipboard paste-fallback grabs whatever image is being sent so it can be pasted if the
+// OS share sheet drops attachments. Picking the first PNG is correct for that purpose - but the
+// toast used to call it "Driver card" unconditionally, which is wrong whenever the image is
+// actually the day-of selfie (which happens whenever a driver has the card switched off in
+// their own send-parts settings, leaving the selfie as the only PNG). Names it from the file
+// itself instead - the three builders use stable, distinct suffixes: -card.png, -selfie.png,
+// and -card-and-selfie.png.
+function _copiedImageLabel(f){
+  var n = (f && f.name) || '';
+  if(/-card-and-selfie\.png$/i.test(n)) return 'Driver card + selfie';
+  if(/-selfie\.png$/i.test(n)) return 'Selfie';
+  if(/-card\.png$/i.test(n)) return 'Driver card';
+  return 'Image';
+}
 async function _sendTextWithFiles(nums, message, files){
   files = files || [];
   if(!nums || !nums.length) return false;
@@ -9585,7 +9599,7 @@ async function _sendTextWithFiles(nums, message, files){
     try{
       if(navigator.canShare(shareData)){
         await navigator.share(shareData);
-        if(_cardCopied) setTimeout(function(){ showToast('\uD83D\uDDBC\uFE0F Driver card also copied \u2014 long-press to paste it if it is missing'); },900);
+        if(_cardCopied) setTimeout(function(){ showToast('\uD83D\uDDBC\uFE0F '+_copiedImageLabel(cardFile)+' also copied \u2014 long-press to paste it if it is missing'); },900);
         return true;
       }
     }catch(e){
@@ -9595,7 +9609,7 @@ async function _sendTextWithFiles(nums, message, files){
   }
 
   const toasts=[];
-  if(_cardCopied) toasts.push('\uD83D\uDDBC\uFE0F Card copied \u2014 long-press to paste in Messages');
+  if(_cardCopied) toasts.push('\uD83D\uDDBC\uFE0F '+_copiedImageLabel(cardFile)+' copied \u2014 long-press to paste in Messages');
   window.location.href=smsURL;
   if(toasts.length) setTimeout(function(){ showToast(toasts.join(' \u00b7 ')); },800);
   return true;
@@ -25334,8 +25348,19 @@ async function sendAllConf(id){
     if(!fm.combined){
       try{ fm.combined = await buildCombinedCardSelfieImageFile(r.driver.trim(), _selfieOwnerForCombine); }catch(e){}
     }
-    if(fm.combined) files.push(fm.combined);
-    else { files.push(fm.card); files.push(fm.selfie); } // combining genuinely failed - still send both rather than drop one
+    // BUG FIX: buildCombinedCardSelfieImageFile has its own internal fallback - when the selfie
+    // exists as data but can't actually be DECODED into an image, it returns a card-ONLY file,
+    // deliberately named "-card.png" instead of "-card-and-selfie.png". That fallback is correct
+    // on its own terms, but this caller used to push whatever came back as if it were always the
+    // real combined image - silently dropping the selfie entirely, while the sent-summary below
+    // still reported it as sent (because _wantsSelfie is true whenever fm.selfie exists, which
+    // it does in exactly this case). Same "claimed sent, never actually went" class as the v968
+    // driver card bug. The two filenames are a deliberate, stable distinction from that builder,
+    // so checking it here is reliable - and if it ever isn't the combined file, we fall through
+    // to sending both real files rather than trusting a partial one.
+    var _reallyCombined = !!(fm.combined && /-card-and-selfie\.png$/i.test(fm.combined.name||''));
+    if(_reallyCombined) files.push(fm.combined);
+    else { files.push(fm.card); files.push(fm.selfie); } // combining failed or came back card-only - send both rather than drop one
   } else {
     if(_wantsCard) files.push(fm.card);
     if(_wantsSelfie) files.push(fm.selfie);
