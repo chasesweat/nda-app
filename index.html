@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191000">
+<meta name="version" content="202608191002">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -634,6 +634,7 @@ input,select,textarea{font-size:16px;}
       </div>
     </div>
     <div id="dash-finalize-tomorrow"></div>
+    <div id="dash-scheduling-text-needed"></div>
     <!-- Income/summary cards on top -->
     <div id="dash-morgan-counter" style="margin-bottom:1.5rem;"></div>
             <div id="dash-km-pay"></div>
@@ -7374,11 +7375,21 @@ async function notifyMyAssignedDrivers(){
     return r && isMyScheduledRide(r) && r.date===_tomorrowStr && r.assignNotifyPending===true && r.status!=='cancelled' && r.driver;
   });
   if(!pending.length){ showToast('Nothing to notify'); return; }
+  // PROTECTED (found missing during a session-wide audit): without this, a Firebase snapshot
+  // arriving mid-save could silently revert assignNotifyPending back to true, leaving a ride
+  // stuck showing as pending even after the driver was actually notified.
+  pending.forEach(function(r){
+    window._pendingUnsavedRideIds.add(r.id);
+    setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
+  });
   pending.forEach(function(r){
     addNotification(r.driver, r, 'assigned', null, true);
     delete r.assignNotifyPending;
   });
-  try{ await saveRides(); }catch(e){}
+  try{
+    var _ok = await saveRides();
+    if(_ok) pending.forEach(function(r){ window._pendingUnsavedRideIds.delete(r.id); });
+  }catch(e){}
   try{ await saveNotifs(); }catch(e){}
   try{ if(typeof updateNotifBadge==='function') updateNotifBadge(); }catch(e){}
   try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
@@ -12257,6 +12268,11 @@ async function cancelRide(id){
     ]
   });
   if(_choice==='keep'||_choice===null) return;
+  // PROTECTED (found missing during a session-wide audit, applied to this function since it
+  // was directly modified this session for the cancellation-fee gate): without this, a Firebase
+  // snapshot arriving mid-save could silently revert the cancellation.
+  window._pendingUnsavedRideIds.add(r.id);
+  setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
   r.status='cancelled'; touchRide(r, 'cancelled ride'); r.cancelledAt=Date.now(); r.cancelledBy=currentUser?.name||'';
   if(_choice==='fee'){
     r.feeType='cancel'; r.feeAmount=_feeAmt;
@@ -12276,7 +12292,8 @@ async function cancelRide(id){
       await saveNotifs();
     }
   }
-  await saveRides();
+  var _cancelOk = await saveRides();
+  if(_cancelOk) window._pendingUnsavedRideIds.delete(r.id);
   refreshAllRideViews(r); setCancelBtn(true);
   showToast(_choice==='fee'?'Ride cancelled \u2014 $'+_feeAmt+' fee applied':'Ride cancelled \u2014 no fee');
 }
@@ -12412,6 +12429,12 @@ function toggleEditMode(on){
 
 async function saveRideEdits(){
   const r=rides.find(x=>x.id===activeRideId); if(!r) return;
+  // PROTECTED (found completely unprotected during a session-wide audit - this is the function
+  // behind the entire Edit Ride form, and this session directly modified it for the medical-
+  // hours data-safety fix, which is exactly the kind of touch that should never ship without
+  // this). Deleted on confirmed save near the end of this function, right after saveRides().
+  window._pendingUnsavedRideIds.add(r.id);
+  setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
   // Edit permission: the client owner (Kat/Morgan proxy-aware, same rule that decides who
   // earns the fee - NOT admin status) or the assigned driver. Mirrors canSeeGateCode's
   // exact pattern for the same reasoning: the owner manages everything about their client's
@@ -12503,7 +12526,8 @@ async function saveRideEdits(){
       return;
     }
   }
-  await saveRides(); await saveNotifs();
+  var _sreOk = await saveRides(); if(_sreOk) window._pendingUnsavedRideIds.delete(r.id);
+  await saveNotifs();
   toggleEditMode(false);
   document.getElementById('rm-title').textContent=(r.private?'\uD83D\uDD12 ':'')+r.client;
   renderRideView(r);
@@ -18492,6 +18516,21 @@ function sendPolicyText(phone, firstName, rideDate, rideTime, ridePrice, ride){
   const num=String(phone||'').replace(/[^0-9+]/g,'');
   if(!num){ showToast('No phone number on file for this client','error'); return; }
   const body=policyTextMessage(firstName, rideDate, rideTime, ridePrice, ride);
+  // Tracks that the scheduling text was actually sent - previously nothing recorded this at
+  // all, which is exactly why there was no way to tell which rides still needed it after
+  // accidentally closing the window before sending. Protected against snapshot overwrite from
+  // the start, per the standing rule.
+  if(ride && ride.id!=null){
+    var _r = (rides||[]).find(function(x){ return x && x.id===ride.id; });
+    if(_r){
+      window._pendingUnsavedRideIds.add(_r.id);
+      setTimeout(function(){ window._pendingUnsavedRideIds.delete(_r.id); }, 90000);
+      _r.schedulingTextSent = true;
+      _r.schedulingTextSentAt = Date.now();
+      saveRides().then(function(ok){ if(ok) window._pendingUnsavedRideIds.delete(_r.id); }).catch(function(){});
+      try{ renderDashSchedulingTextNeeded(); }catch(e){}
+    }
+  }
   const isiOS=/iPad|iPhone|iPod/.test(navigator.userAgent||'');
   window.location.href='sms:'+num+(isiOS?'&':'?')+'body='+encodeURIComponent(body);
 }
@@ -18663,6 +18702,11 @@ function refreshDash(){
   // night before, with no automatic fallback in between - this needed to be somewhere more
   // likely to actually be seen day to day than a page someone might not open until later.
   try{ renderDashFinalizeTomorrow(); }catch(e){}
+
+  // Rides whose scheduling text was never sent - real gap found while investigating: closing
+  // the window before tapping Send left no trace at all, and no way to catch up later. Now
+  // tracked, and surfaced the same way as the Notify Drivers reminder right above it.
+  try{ renderDashSchedulingTextNeeded(); }catch(e){}
 
   // No server-side timer in this architecture - this is the closest thing to one: catches
   // up any ride whose hour has quietly elapsed since the last time anything checked.
@@ -18947,6 +18991,45 @@ function renderDashNeedsAttention(){
 
 // Tomorrow's rides you SCHEDULED that still need a confirmation text — a simple list + link to My Rides.
 
+// Rides that never got their scheduling text sent - a real gap: previously nothing tracked
+// whether it went out at all, so accidentally closing the window before tapping Send left no
+// trace and no way to catch up later. Modeled on renderDashConfirmations() (the day-before
+// reminder) but scoped differently: any upcoming active ride, not just tomorrow's, since the
+// scheduling text belongs at booking time, not the night before.
+function renderDashSchedulingTextNeeded(){
+  const box = document.getElementById('dash-scheduling-text-needed');
+  if(!box) return;
+  const todayStr = toDateStr(new Date());
+  let due = (rides||[]).filter(function(r){
+    if(!r || r.status==='cancelled' || r.status==='placeholder') return false;
+    if(!r.date || r.date<todayStr) return false;
+    if(r.schedulingTextSent) return false;
+    return isMyScheduledRide(r);
+  }).sort(function(a,b){ return (a.date||'').localeCompare(b.date||'') || (a.time||'').localeCompare(b.time||''); });
+
+  if(!due.length){ box.innerHTML=''; return; }
+
+  const rows = due.map(function(r){
+    return '<div onclick="_dashSendSchedulingText('+r.id+')" style="display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem;border-bottom:1px solid #fecaca;cursor:pointer;">'
+      +'<span style="min-width:74px;font-size:.78rem;font-weight:700;color:var(--black);">'+escHtml(fmtDateShort(r.date)||'')+'</span>'
+      +'<span style="flex:1;font-size:.85rem;color:var(--black);">'+escHtml(r.client||'\u2014')+'</span>'
+      +'<span style="font-size:.72rem;color:var(--mid);">'+escHtml(driverShortName(r.driver))+'</span>'
+      +'<span style="font-size:.8rem;font-weight:800;color:#b91c1c;white-space:nowrap;">Send \u203a</span>'
+      +'</div>';
+  }).join('');
+
+  box.innerHTML = '<div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:12px;padding:1rem;margin-bottom:.75rem;">'
+    +'<div style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#b91c1c;margin-bottom:.5rem;">\u2709\ufe0f Scheduling texts not yet sent \u00b7 '+due.length+'</div>'
+    +rows
+    +'</div>';
+}
+// Looks the ride up fresh and re-runs the same prompt the booking flow itself uses, so a ride
+// whose scheduling text was never sent (window closed too early, browser crash, anything) can
+// be caught up later with the exact same message it would have gotten at booking time.
+function _dashSendSchedulingText(id){
+  var r=(rides||[]).find(function(x){ return x && x.id===id; }); if(!r) return;
+  showPolicyTextPrompt(r.client, r.phone, r.date, r.time, r.price, r);
+}
 function renderDashConfirmations(){
   const box = document.getElementById('dash-confirmations');
   if(!box) return;
@@ -19423,8 +19506,17 @@ async function markAllPastRidesPaidAdmin(){
     buttons:[ {label:'Cancel', value:'cancel'}, {label:'Mark all '+list.length+' paid', style:'primary', value:'go'} ]
   });
   if(_choice!=='go') return;
+  // PROTECTED (found missing during a session-wide audit, applied since this function was
+  // directly modified this session for the invoice-exclusion filter).
+  list.forEach(function(r){
+    window._pendingUnsavedRideIds.add(r.id);
+    setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
+  });
   list.forEach(function(r){ r.status='paid'; });
-  try{ await saveRides(); }catch(e){}
+  try{
+    var _mapOk = await saveRides();
+    if(_mapOk) list.forEach(function(r){ window._pendingUnsavedRideIds.delete(r.id); });
+  }catch(e){}
   showToast('\u2713 Marked '+list.length+' ride'+(list.length>1?'s':'')+' paid across the team');
   try{ renderDashFees(); }catch(e){}
   try{ if(typeof renderDashIncome==='function') renderDashIncome(); }catch(e){}
@@ -19442,8 +19534,17 @@ async function markAllPrevPaid(){
     buttons:[ {label:'Cancel', value:'cancel'}, {label:'\u2713 Mark all paid', style:'primary', value:'go'} ]
   });
   if(_choice!=='go') return;
+  // PROTECTED (found missing during a session-wide audit, applied since this function was
+  // directly modified this session for the invoice-exclusion filter).
+  list.forEach(function(r){
+    window._pendingUnsavedRideIds.add(r.id);
+    setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
+  });
   list.forEach(function(r){ r.status='paid'; });
-  try{ await saveRides(); }catch(e){}
+  try{
+    var _mppOk = await saveRides();
+    if(_mppOk) list.forEach(function(r){ window._pendingUnsavedRideIds.delete(r.id); });
+  }catch(e){}
   showToast('\u2713 Marked '+list.length+' ride'+(list.length>1?'s':'')+' paid \u2014 add miles & tip anytime in Income');
   try{ renderDashFees(); }catch(e){} try{ if(typeof renderDashIncome==='function') renderDashIncome(); }catch(e){}
 }
