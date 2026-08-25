@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191983">
+<meta name="version" content="202608191000">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -633,6 +633,7 @@ input,select,textarea{font-size:16px;}
         <div class="page-sub" id="dash-date"></div>
       </div>
     </div>
+    <div id="dash-finalize-tomorrow"></div>
     <!-- Income/summary cards on top -->
     <div id="dash-morgan-counter" style="margin-bottom:1.5rem;"></div>
             <div id="dash-km-pay"></div>
@@ -689,12 +690,10 @@ input,select,textarea{font-size:16px;}
             <button class="tog" onclick="setTripType('AP PICK UP',this)">AP Pick Up</button>
             <button class="tog" onclick="setTripType('ROUND TRIP',this)">Round Trip</button>
             <button class="tog" onclick="setTripType('ONE WAY',this)">One Way</button>
-            <button class="tog" onclick="setTripType('MEDICAL',this)">Medical Transport</button>
           </div>
           <input type="hidden" id="q-type" value="AP ROUND TRIP" />
           <div id="q-pickup-note" style="display:none;margin-top:.5rem;font-size:.75rem;line-height:1.4;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;border-radius:8px;padding:.5rem .7rem;"></div>
         </div>
-        <div class="form-group" id="q-med-hours-group" style="display:none;"><label>Medical transport hours</label><input type="number" id="q-med-hours" min="0" step="0.5" placeholder="e.g. 3" inputmode="decimal" oninput="calcQuote()" /><div style="font-size:.72rem;color:var(--mid);margin-top:3px;line-height:1.4;">Billed hourly at your waiting-time rate. The assigned driver or an admin can adjust the hours during the ride. Add any surcharges below if needed.</div></div>
         <div class="form-group"><label id="q-pickup-label">Pickup</label><select id="q-pickup-mode" onchange="addrModeChanged('q','pickup')" style="display:none;width:100%;margin-bottom:.4rem;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-size:.88rem;background:var(--white);"></select><input type="text" id="q-pickup" placeholder="Start typing…" oninput="debounceMileage()" /></div>
         <div class="form-group"><label>Gate code <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(optional — only you and the assigned driver see this)</span></label><input type="text" id="q-gate-code" placeholder="e.g. #1234" /></div>
         <div class="form-group"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;"><input type="checkbox" id="q-private" style="width:auto;margin:0;" /> <span>🔒 Private ride <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(hidden from other drivers — creator, assigned driver, and admins only)</span></span></label></div>
@@ -852,6 +851,7 @@ input,select,textarea{font-size:16px;}
       </div>
     </div>
     <div id="fw-sync-status" style="font-size:.8rem;color:var(--mid);margin-bottom:.6rem;min-height:1.1rem;"></div>
+    <div id="cal-not-final-banner"></div>
     <div id="cal-finalize-tomorrow"></div>
     <div style="margin-bottom:.75rem;">
       <select id="cal-driver-select" onchange="switchCalTab(this.value)" style="width:100%;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.9rem;font-weight:600;background:#fff;"></select>
@@ -1267,9 +1267,8 @@ input,select,textarea{font-size:16px;}
           </div>
         </div>
         <div class="form-group"><label>Travel Type</label>
-          <select id="edit-type" onchange="editTypeChanged();_editAutoPrice()"><option>AP ROUND TRIP</option><option>AP RUN</option><option>AP PICK UP</option><option>ROUND TRIP</option><option>ONE WAY</option><option value="MEDICAL">Medical Transport</option></select>
+          <select id="edit-type" onchange="editTypeChanged();_editAutoPrice()"><option>AP ROUND TRIP</option><option>AP RUN</option><option>AP PICK UP</option><option>ROUND TRIP</option><option>ONE WAY</option></select>
         </div>
-        <div class="form-group" id="edit-med-hours-group" style="display:none;"><label>Medical hours</label><input type="number" id="edit-med-hours" min="0" step="0.5" oninput="_editAutoPrice()" /></div>
         <div class="form-group" style="grid-column:1/-1;"><label id="edit-pickup-label">Pickup</label><input type="text" id="edit-pickup" oninput="_editDebounceMileage()" /></div>
         <div class="form-group" style="grid-column:1/-1;"><label>Gate code <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(optional — only the client owner and assigned driver see this)</span></label><input type="text" id="edit-gate-code" placeholder="e.g. #1234" /></div>
         <div class="form-group" style="grid-column:1/-1;"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;"><input type="checkbox" id="edit-private" style="width:auto;margin:0;" /> <span>🔒 Private ride <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(hidden from other drivers — creator, assigned driver, and admins only)</span></span></label></div>
@@ -1692,7 +1691,6 @@ input,select,textarea{font-size:16px;}
           <option>AP PICK UP</option>
           <option>ROUND TRIP</option>
           <option>ONE WAY</option>
-          <option value="MEDICAL">Medical Transport</option>
         </select>
       </div>
       <!-- Reported directly: this used to live inside qa-rt-section, sandwiched between Leg 1's
@@ -1751,9 +1749,6 @@ input,select,textarea{font-size:16px;}
       <div class="form-group" style="grid-column:1/-1;"><label>Extra stops ($10 ea)</label>
         <div id="qa-stops-wrap"></div>
         <button type="button" id="qa-addstop-btn" onclick="qaAddStop()" style="background:none;border:1px dashed var(--gold);color:var(--gold);border-radius:8px;padding:.45rem .9rem;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:600;cursor:pointer;">+ Add Stop</button>
-      </div>
-      <div class="form-group" id="qa-med-hours-group" style="display:none;"><label>Medical transport hours</label>
-        <input type="number" id="qa-med-hours" min="0" step="0.5" placeholder="e.g. 3" inputmode="decimal" oninput="recalcQa()" />
       </div>
       <div class="form-group"><label>Wait time (hrs · $60/hr)</label>
         <input type="number" id="qa-wait" min="0" step="0.25" value="0" oninput="recalcQa()" />
@@ -2241,6 +2236,7 @@ const _AUDIT_LABELS = {
   'kat:documents':'documents','kat:driverPhotoOverrides':'a driver card','kat:driverProfiles':'a driver profile',
   'kat:driverSettings':'driver settings','kat:driverVenmo':'a Venmo handle','kat:globalSettings':'app settings',
   'kat:hiddenClients':'the client list','kat:importedClients':'the client list','kat:kmPay':'Kat\u2013Morgan payment settings',
+  'kat:dispatchInvoices':'a Morgan dispatch invoice',
   'kat:passwords':'a password','kat:subscriptions':'subscription access','kat:addedDrivers':'the driver roster',
   'kat:driverColors':'driver colors','kat:uiPrefs':'display preferences','kat:driverExpenses':'driver expenses'
 };
@@ -2799,6 +2795,7 @@ async function _loadAppData() {
     loadClientTerminalPrefs(),
     loadLockedMileage(),
     loadKmData(),
+    loadDispatchInvoices(),
     loadPendingAdminTutorial(),
     loadChaseAudit(),
     loadDeceasedClients(),
@@ -4148,14 +4145,13 @@ function tripMath(type, vehicle, miles, medHours){
   const rtType  = type==='ROUND TRIP';
   const owType  = type==='ONE WAY';
   const lcType  = type==='LOCAL';
-  const medType = type==='MEDICAL';
   // Sprinter Van: its own flat airport rate, $150/hr otherwise.
   const _sprintAP = BASE['Sprinter Van']||(globalSettings.baseRates&&globalSettings.baseRates['Sprinter Van'])||405;
   const _sprintHr = globalSettings.sprintHourly||150;
-  const r = { type:type, vehicle:vehicle, miles:miles, medHours:medHours,
-              apType:apType, apRt:apRt, rtType:rtType, owType:owType, lcType:lcType, medType:medType,
+  const r = { type:type, vehicle:vehicle, miles:miles,
+              apType:apType, apRt:apRt, rtType:rtType, owType:owType, lcType:lcType,
               legs: apRt?2:1, base:0, overMiles:0, overage:0,
-              mileageCharge:0, serviceFee:0, vehUp:0, medBase:0, tripTotal:0 };
+              mileageCharge:0, serviceFee:0, vehUp:0, tripTotal:0 };
   // Local/one-way/round trip: priced on mileage, not a flat base.
   if(rtType || owType || lcType){
     const mult = rtType?2:1;
@@ -4165,8 +4161,6 @@ function tripMath(type, vehicle, miles, medHours){
     r.tripTotal     = r.mileageCharge + r.serviceFee + r.vehUp;
     return r;
   }
-  // Medical transport: billed hourly at the waiting-time rate.
-  if(medType){ r.medBase = medHours*waitRate(); r.tripTotal = r.medBase; return r; }
   // Airport (and anything else): flat base + mileage overage past the included radius.
   r.base      = vehicle==='Sprinter Van' ? (apType?_sprintAP:_sprintHr) : (BASE[vehicle]||0);
   r.overMiles = apType && miles > mileageTrigger() ? miles - includedMiles() : 0;
@@ -4318,10 +4312,9 @@ function calcQuote() {
 
   const owType  = type==='ONE WAY';
   const lcType  = type==='LOCAL';
-  const medType = type==='MEDICAL';
 
   // Every number below comes from the shared pricing core so Add a Ride can't disagree.
-  const tm = tripMath(type, vehicle, miles, parseFloat(document.getElementById('q-med-hours')?.value)||0);
+  const tm = tripMath(type, vehicle, miles, 0);
   tripTotal = tm.tripTotal;
   if(rtType){
     lines.push(miles>0?{label:'Round trip mileage', val:tm.mileageCharge, note:`${miles} mi × 2 = ${miles*2} mi × $${mileageRate().toFixed(2)}/mi`}:{label:'Round trip mileage', val:0, note:'Enter miles above'});
@@ -4331,10 +4324,6 @@ function calcQuote() {
     lines.push(miles>0?{label:'Mileage', val:tm.mileageCharge, note:`${miles} mi × $${mileageRate().toFixed(2)}/mi`}:{label:'Mileage', val:0, note:'Enter miles above'});
     lines.push({label:'Pickup/Drop-off fee', val:tm.serviceFee});
     if(tm.vehUp>0) lines.push({label:`Vehicle upcharge (${vehicle})`, val:tm.vehUp});
-  } else if(medType){
-    lines.push(tm.medHours>0
-      ? {label:`Medical transport (${tm.medHours}h × $${waitRate()}/hr)`, val:tm.medBase}
-      : {label:'Medical transport', val:0, note:'Enter hours above'});
   } else {
     lines.push({label:`Base rate (${vehicle}) — includes up to ${includedMiles()} mi`, val:tm.base});
     if(apType && miles > 0 && miles <= mileageTrigger()) lines.push({label:`Mileage (${miles} mi — within free radius)`, val:0, note:'No overage — within '+mileageTrigger()+' mi grace buffer'});
@@ -4497,12 +4486,6 @@ function _editAutoPrice(){
   // Airport types keep manual entry because fuel/surcharges aren't captured on this form.
   var pe=document.getElementById('edit-price'); if(!pe) return;
   var type=(document.getElementById('edit-type')||{}).value||'';
-  if(type==='MEDICAL'){
-    // Price = hours × waiting-time rate, keeping whatever surcharges were already on the ride.
-    var _mh=parseFloat((document.getElementById('edit-med-hours')||{}).value)||0;
-    pe.value=Math.floor(_mh*waitRate()+(window._editMedExtras||0));   // fare rounds DOWN
-    return;
-  }
   var miles=parseFloat((document.getElementById('edit-miles')||{}).value)||0;
   if(miles<=0) return;
   var vehicle=(document.getElementById('edit-vehicle')||{}).value||'Sedan';
@@ -5361,7 +5344,7 @@ function rtTerminalPicked(prefix){
 //
 // Add Ride, Quote and Edit Ride each carried their own answer to this, and Add Ride's answer was
 // no answer at all: its Flight # and Terminal had no group wrappers, so qaTypeChanged() had
-// nothing to hide and both showed on One Way, Round Trip and Medical. This is the first
+// nothing to hide and both showed on One Way and Round Trip. This is the first
 // convergence step of the "Add Ride mirrors the Quote form" rebuild - the rule now lives in one
 // place and all three forms call it.
 //
@@ -5405,9 +5388,7 @@ function updateTripFields(){
   const isAPRT  = type==='AP ROUND TRIP';
   const isRT    = type==='ROUND TRIP';
   const isOneWay= type==='ONE WAY';
-  const isMed   = type==='MEDICAL';
   const show=(id,on)=>{ const el=document.getElementById(id); if(el) el.style.display = on?'block':'none'; };
-  show('q-med-hours-group', isMed);
   // Flight # + Terminal visibility - shared with Add Ride and Edit Ride.
   applyAirportFieldVisibility('q');
   // The type decides which address slot is the airport terminal, so the pickers must follow it.
@@ -5455,7 +5436,6 @@ function updateTripFields(){
     else if(type==='AP ROUND TRIP')_flow='\uD83C\uDFE0 Home \u21C4 \u2708\uFE0F Airport';
     else if(type==='ROUND TRIP')   _flow='\uD83D\uDCCD Pickup \u21C4 \uD83C\uDFAF Destination';
     else if(type==='ONE WAY')      _flow='\uD83D\uDCCD Pickup \u2192 \uD83C\uDFAF Destination';
-    else if(type==='MEDICAL')      _flow='\uD83C\uDFE0 Pickup \u2192 \uD83C\uDFE5 Destination';
     _dp.innerHTML = _flow ? ('<span style="font-weight:400;">Flow:</span> '+_flow) : '';
     _dp.style.display = _flow ? 'block' : 'none';
   }
@@ -5983,6 +5963,272 @@ function touchRide(r, action, whoOverride){
   r.trail.push({ by: who, action: action||'updated', ts: Date.now() });
   if(r.trail.length>12) r.trail = r.trail.slice(-12);
 }
+// The driver's own business name, captured during onboarding (onb-bizname) and editable on
+// their profile. Falls back through the client's owner, then the current driver, then a neutral
+// generic - deliberately NOT a hardcoded "Northwest Drivers Association", which was appearing in
+// client-facing text sent by drivers who don't work under that name at all.
+//
+// Reported directly: the business name must be the DRIVER'S, sourced from onboarding, never a
+// hardcoded association name baked into the app.
+function _bizNameFor(ownerName, driverName){
+  try{
+    var op = (typeof DRIVER_PROFILES!=='undefined' && ownerName) ? (DRIVER_PROFILES[ownerName]||{}) : {};
+    var dp = (typeof DRIVER_PROFILES!=='undefined' && driverName) ? (DRIVER_PROFILES[driverName]||{}) : {};
+    var n = (op.businessName||'').trim() || (dp.businessName||'').trim();
+    if(n) return n;
+  }catch(e){}
+  return '';
+}
+// Convenience for the current user's own outgoing messages.
+function _myBizName(){
+  try{
+    var me = (typeof getMyDriverName==='function') ? getMyDriverName() : null;
+    return _bizNameFor(me, me);
+  }catch(e){ return ''; }
+}
+// Quote-form equivalent of _schedulingToFrom() - same idea (which side gets labelled
+// Destination vs Pick-up Location, terminal wording via _terminalPhrase()), but reading LIVE
+// FORM fields instead of a saved ride record, since a quote exists before any ride does.
+function _quoteToFrom(legType, terminalVal, homeAddr){
+  var termPhrase = (terminalVal||'').trim()
+    ? 'Hartsfield-Jackson International ('+_terminalPhrase(terminalVal)+')'
+    : 'Hartsfield-Jackson International Airport';
+  var home = (homeAddr||'').trim() || 'your address';
+  if(legType==='AP PICK UP'){
+    return { destination: home, pickupLocation: termPhrase };
+  }
+  // AP RUN (and the default/fallback shape) - client picked up at home, dropped at the airport.
+  return { destination: termPhrase, pickupLocation: home };
+}
+// Reads the rendered .quote-line items for ONE leg's pricing section and formats them as
+// "• Label: $Val" bullets, matching Chase's own supplied example exactly. Fuel is special-
+// cased the same way _schedulingBreakdownText() already handles it for the scheduling
+// message - shown as a rate ("8%"), not a computed dollar figure, for the same reason: it
+// shouldn't need re-sending if the rate itself changes. `scopeEl` is the whole #quote-lines
+// container for a single-leg quote, or one leg's own slice of it for a round trip.
+// Shared per-line formatting, extracted so both the live-form DOM version below AND the
+// saved-quote object version (which has no DOM to read from at all - the form isn't even open)
+// use the exact same rules rather than two copies that could quietly drift apart. Takes a raw
+// label string and a raw numeric value; returns the finished "• Label: $Val" bullet, or the
+// special-cased fuel-rate bullet.
+function _formatQuoteBulletLine(rawLbl, rawVal){
+  var lbl = (rawLbl||'').replace(/\s*\([^)]*[\u00d7x$][^)]*\)/g,'').replace(/\s+/g,' ').trim();
+  // Three real label shapes exist across this file: "Base rate (Sedan) — incl. 20 mi" (live
+  // form), "Base rate (Sedan, incl. 20 mi)" (buildRideBreakdown's round-trip branch, comma
+  // inside the parens), and "Base rate (Sedan) — includes up to 20 mi" (buildRideBreakdown's
+  // non-round-trip branch). One regex, not two - an earlier two-regex version left stray
+  // punctuation behind ("Base Rate Sedan —:") because the looser first regex partially matched
+  // what the second was meant to fully handle, running first and leaving nothing for the
+  // second to match against. A character class for the leading separator (whitespace, comma,
+  // or em-dash, any combination) removes the whole clause - separator included - in one pass
+  // regardless of which one precedes it.
+  lbl = lbl.replace(/[\s,\u2014]*(?:incl\.?|includes up to)\s*\d+(\.\d+)?\s*mi\.?/i,'');
+  lbl = lbl.replace(/\s*\u00d7\s*\d+\s*$/,''); // a trailing "×N" legs multiplier, if present
+  lbl = lbl.trim();
+  // "Base rate (Sedan)" -> "Base Rate Sedan" - drops the parens around the vehicle name too.
+  lbl = lbl.replace(/^Base rate\s*\(([^)]+)\)/i, 'Base Rate $1').trim();
+  // Title-case the whole label generally, rather than special-casing every possible surcharge
+  // name one at a time.
+  lbl = lbl.replace(/\b\w/g, function(ch){ return ch.toUpperCase(); });
+  if(!lbl) return null;
+  if(/^Fuel surcharge/i.test(lbl)){
+    var m = /\(([\d.]+)%\)/.exec(lbl);
+    var pct = m ? m[1] : String(Math.round(fuelPct()));
+    return '\u2022 Fuel Surcharge: '+pct+'%';
+  }
+  // Whole dollars, not decimal cents - "$105" not "$105.00".
+  var num = (typeof rawVal==='number') ? rawVal : parseFloat(String(rawVal).replace(/[^0-9.\-]/g,''));
+  var val = isFinite(num) ? ('$'+Math.round(num)) : String(rawVal).trim();
+  return '\u2022 '+lbl+': '+val;
+}
+function _quoteBreakdownBullets(lineEls){
+  var out = [];
+  lineEls.forEach(function(el){
+    var lbl = ((el.children[0]&&el.children[0].childNodes[0]) ? el.children[0].childNodes[0].textContent : '') || '';
+    var rawVal = ((el.children[1]) ? el.children[1].textContent : '') || '';
+    var line = _formatQuoteBulletLine(lbl, rawVal);
+    if(line) out.push(line);
+  });
+  return out;
+}
+// Full quote details block - date, time, destination/pickup-location, pricing breakdown, and
+// (for AP Round Trip specifically) a second dated leg plus a combined Total Round Trip figure.
+// Same reasoning as _schedulingTripDetailsText(): the STRUCTURE genuinely differs for a round
+// trip, not just the values, so this returns the whole block for one {quoteDetails}
+// placeholder rather than trying to force it through several flat ones.
+//
+// Unlike a booked ride's two legs (which can genuinely have different addresses - see the
+// scheduling message's own mismatch check), a QUOTE's round trip has no separate return-leg
+// address field at all - both legs share the one home address on the form. No mismatch to
+// check here; that flexibility only exists once a ride is actually booked and split.
+function _quoteDetailsText(){
+  var type = (document.getElementById('q-type')||{}).value || '';
+  var homeAddr = (document.getElementById('q-pickup')||{}).value || '';
+  var lines = [];
+
+  if(type==='AP ROUND TRIP'){
+    var legDefs = [
+      { num:'1', legType:'AP RUN',     date:(document.getElementById('q-date')||{}).value,
+        time:(document.getElementById('q-time')||{}).value, flight:'',
+        terminal:(document.getElementById('q-terminal')||{}).value },
+      { num:'2', legType:'AP PICK UP', date:(document.getElementById('q-rt-date')||{}).value,
+        time:(document.getElementById('q-rt-time')||{}).value,
+        flight:(document.getElementById('q-rt-flight')||{}).value,
+        terminal:(document.getElementById('q-rt-terminal')||{}).value },
+    ];
+    var combinedTotal = 0;
+    legDefs.forEach(function(leg, i){
+      var tf = _quoteToFrom(leg.legType, leg.terminal, homeAddr);
+      var flightPart = leg.flight ? ' ('+leg.flight+')' : '';
+      if(i>0) lines.push('');
+      lines.push('Date: '+(leg.date?fmtDateShort(leg.date):''));
+      lines.push('Pick-up Time: '+(leg.time?fmtTime12(leg.time):'')+flightPart);
+      lines.push('Destination: '+tf.destination);
+      lines.push('Pick-up Location: '+tf.pickupLocation);
+      lines.push('Pricing Breakdown:');
+      var headerEl = document.querySelector('#quote-lines [data-leg-header="'+leg.num+'"]');
+      var subtotalEl = document.querySelector('#quote-lines [data-leg-subtotal="'+leg.num+'"]');
+      var legEls = [];
+      if(headerEl){
+        var el = headerEl.nextElementSibling;
+        while(el && !el.hasAttribute('data-leg-subtotal')){ legEls.push(el); el = el.nextElementSibling; }
+      }
+      lines = lines.concat(_quoteBreakdownBullets(legEls));
+      var legTotal = subtotalEl ? (parseFloat(subtotalEl.getAttribute('data-leg-subtotal-val'))||0) : 0;
+      lines.push('\u2022 Total: $'+legTotal.toFixed(0)+' (Gratuity not included but always appreciated)');
+      combinedTotal += legTotal;
+    });
+    lines.push('');
+    lines.push('Total Round Trip:');
+    lines.push('$'+combinedTotal.toFixed(0));
+    return lines.join('\n');
+  }
+
+  // Single leg - ONE WAY, AP RUN, AP PICK UP, ROUND TRIP (local).
+  var terminalVal = (document.getElementById('q-terminal')||{}).value || '';
+  var flight = (document.getElementById('q-flight')||{}).value || '';
+  var dropoff = (document.getElementById('q-dropoff')||{}).value || '';
+  var date = (document.getElementById('q-date')||{}).value || '';
+  var time = (document.getElementById('q-time')||{}).value || '';
+  var tf1;
+  if(type==='AP RUN'){ tf1 = _quoteToFrom('AP RUN', terminalVal, homeAddr); }
+  else if(type==='AP PICK UP'){ tf1 = _quoteToFrom('AP PICK UP', terminalVal, homeAddr); }
+  else { tf1 = { destination: dropoff || 'your destination', pickupLocation: homeAddr || 'your address' }; }
+  var flightPart1 = (type==='AP PICK UP' && flight) ? ' ('+flight+')' : '';
+  lines.push('Date: '+(date?fmtDateShort(date):''));
+  lines.push('Pick-up Time: '+(time?fmtTime12(time):'')+flightPart1);
+  lines.push('Destination: '+tf1.destination);
+  lines.push('Pick-up Location: '+tf1.pickupLocation);
+  lines.push('Pricing Breakdown:');
+  var lineEls1 = Array.prototype.slice.call(document.querySelectorAll('#quote-lines .quote-line'));
+  lines = lines.concat(_quoteBreakdownBullets(lineEls1));
+  // Whole dollars, matching the round-trip legs' own total formatting - found in testing that
+  // this read the raw DOM text directly ("$95.00") while the round-trip totals above correctly
+  // round, an inconsistency between the two shapes of the same message.
+  var totalRaw1 = (document.getElementById('quote-total')||{}).textContent || '$0.00';
+  var totalNum1 = parseFloat(totalRaw1.replace(/[^0-9.\-]/g,''));
+  var total1 = isFinite(totalNum1) ? ('$'+Math.round(totalNum1)) : totalRaw1.trim();
+  lines.push('\u2022 Total: '+total1+' (Gratuity not included but always appreciated)');
+  return lines.join('\n');
+}
+// Object-based sibling to _quoteDetailsText() above, for a SAVED quote (q). No live DOM to read
+// from at all - textSavedQuote() fires from the Saved Quotes list, a completely different
+// screen than the one that built the quote. `q`'s own fields (pickup/home/terminal/date/time/
+// flight) already match the exact shape _schedulingToFrom() expects for a real ride record, so
+// reused directly rather than building a third, parallel to/from resolver.
+function _quoteDetailsTextFromSaved(q){
+  if(!q) return '';
+  var lines = [];
+
+  if(q.type==='AP ROUND TRIP'){
+    var bd = (typeof buildRideBreakdown==='function') ? buildRideBreakdown(q) : {lines:[],total:0,leg1:0,leg2:0};
+    // buildRideBreakdown tags every line with which leg it belongs to - split back apart on
+    // that exact suffix rather than re-deriving the split a second way.
+    var leg1Lines = bd.lines.filter(function(l){ return / \u2014 Leg 1 \(outbound\)$/.test(l.label); });
+    var leg2Lines = bd.lines.filter(function(l){ return / \u2014 Leg 2 \(return\)$/.test(l.label); });
+    var stripSuffix = function(l){ return { label:l.label.replace(/ \u2014 Leg [12] \((outbound|return)\)$/,''), val:l.val }; };
+    var outLeg = { date:q.date, time:q.time, terminal:q.terminal, flight:'', legType:'AP RUN' };
+    var retLeg = { date:q.rtDateAP, time:q.rtTime, terminal:q.rtTerminal, flight:q.rtFlight, legType:'AP PICK UP' };
+    [ [outLeg, leg1Lines, bd.leg1, 'Outbound'], [retLeg, leg2Lines, bd.leg2, 'Return'] ].forEach(function(entry, i){
+      var leg = entry[0], legLines = entry[1], legTotal = entry[2], label = entry[3];
+      // _quoteToFrom, not _schedulingToFrom: a quote's round trip has only ONE shared home
+      // address (q.pickup) - no separate return-leg address field exists on the quote form at
+      // all (confirmed directly when this was first built) - _schedulingToFrom expects two
+      // genuinely distinct addresses the way a real, split ride record has.
+      var tf = _quoteToFrom(leg.legType, leg.terminal, q.pickup);
+      var flightPart = leg.flight ? ' ('+leg.flight+')' : '';
+      if(i>0) lines.push('');
+      lines.push(label+': '+(leg.date?fmtDateShort(leg.date):'')+', '+(leg.time?fmtTime12(leg.time):'')+flightPart);
+      lines.push('Destination: '+tf.destination);
+      lines.push('Pick-up Location: '+tf.pickupLocation);
+      lines.push('Pricing Breakdown:');
+      legLines.map(stripSuffix).forEach(function(l){
+        var line = _formatQuoteBulletLine(l.label, l.val);
+        if(line) lines.push(line);
+      });
+      lines.push('\u2022 Total: $'+Math.round(legTotal)+' (Gratuity not included but always appreciated)');
+    });
+    lines.push('');
+    lines.push('Total Round Trip:');
+    lines.push('$'+Math.round((bd.leg1||0)+(bd.leg2||0)));
+    return lines.join('\n');
+  }
+
+  // Single leg - same _schedulingToFrom() rule as everywhere else in this file.
+  var tf1 = _schedulingToFrom(q);
+  var flightPart1 = (q.type==='AP PICK UP' && q.flight) ? ' ('+q.flight+')' : '';
+  lines.push('Date: '+(q.date?fmtDateShort(q.date):''));
+  lines.push('Pick-up Time: '+(q.time?fmtTime12(q.time):'')+flightPart1);
+  // BUG FIX (found in testing): _schedulingToFrom() returns {to, from}, not
+  // {destination, pickupLocation} the way _quoteToFrom() does - a real property-name mismatch
+  // that silently produced "Destination: undefined" for every single-leg saved quote.
+  lines.push('Destination: '+tf1.to);
+  lines.push('Pick-up Location: '+tf1.from);
+  lines.push('Pricing Breakdown:');
+  var bd1 = (typeof buildRideBreakdown==='function') ? buildRideBreakdown(q) : {lines:[],total:parseFloat(q.price)||0};
+  bd1.lines.forEach(function(l){
+    var line = _formatQuoteBulletLine(l.label, l.val);
+    if(line) lines.push(line);
+  });
+  var total = bd1.total>0 ? bd1.total : (parseFloat(q.price)||0);
+  lines.push('\u2022 Total: $'+Math.round(total)+' (Gratuity not included but always appreciated)');
+  return lines.join('\n');
+}
+// Extended per direct instruction: keep the existing casual opening, add the Date/Pricing
+// Breakdown block via {quoteDetails} (same one-placeholder-for-the-whole-block reasoning as
+// the scheduling message), use the driver's own business name via {business} rather than a
+// hardcoded one, and drop the itemized-vs-summary question entirely since {quoteDetails}
+// already includes its own real breakdown per Chase's own supplied example.
+function _defaultQuoteTpl(){
+  return 'Hi {name}, here\u2019s your quote{business}:\n\n'
+    +'{quoteDetails}\n\n'
+    +'Please note: this is only a quote, and transportation will not be scheduled unless we are informed to proceed. To secure your ride, please contact us to confirm your booking.\n\n'
+    +'The total does not include a tip for the driver. While tipping is not required, it is always appreciated.\n\n'
+    +'We look forward to hearing from you.';
+}
+// Substitution function, same resolution order every other message type already uses:
+// personal (this driver's own customization) -> shared global default -> hardcoded fallback.
+// `savedQuote` is a new, OPTIONAL 2nd parameter - when present, this is being called for a
+// SAVED quote with no live form to read from (textSavedQuote's own case), and uses the
+// object-based details builder instead of the DOM-scraping one. Same pattern
+// policyTextMessage's own optional `ride` parameter already established.
+function quoteTextMessage(firstName, savedQuote){
+  const _tpl = ((typeof driverSettings!=='undefined'&&currentUser&&driverSettings[currentUser.name]&&driverSettings[currentUser.name].quoteTemplate) || '')
+    || (globalSettings && globalSettings.defaultQuoteTemplate) || ''
+    || HARDCODED_MSG_DEFAULTS.quote;
+  // {business} is the WHOLE " from X" phrase, not just the name - matching how the original
+  // (pre-template) quote text handled a driver with no business name set: the phrase drops out
+  // entirely ("here's your quote:") rather than leaving a dangling "from ." A flat template
+  // string can't do conditional inclusion on its own the way the old JS ternary could, so the
+  // substituted value carries the leading " from " itself, present or absent as a whole unit.
+  var _bizName = (typeof _myBizName==='function') ? _myBizName() : '';
+  var _biz = _bizName ? (' from '+_bizName) : '';
+  var _details = savedQuote ? _quoteDetailsTextFromSaved(savedQuote) : _quoteDetailsText();
+  return _tpl
+    .replace(/\{name\}/g, firstName||'')
+    .replace(/\{business\}/g, _biz)
+    .replace(/\{quoteDetails\}/g, _details);
+}
 function textQuoteToClient(){
   const client=(document.getElementById('q-client').value||'').trim();
   { const _vs=_quoteVehicleGate(); if(!_vs) return;
@@ -6000,56 +6246,15 @@ function textQuoteToClient(){
     if(!total || total==='$0.00'){ showToast('Fill in the trip details first so there’s a quote to send','error'); return; }
   }
   const date=document.getElementById('q-date').value||'';
-  const time=document.getElementById('q-time').value||'';
-  const pickup=(document.getElementById('q-pickup').value||'').trim();
-  const dropoff=(document.getElementById('q-dropoff').value||'').trim();
   const first=client?client.split(' ')[0]:'';
-  let body='Hi'+(first?' '+first:'')+', here’s your quote from Northwest Drivers:';
-  if(type) body+='\n\n'+type;
-  if(date) body+='\n'+fmtDateShort(date)+(time?' at '+((typeof fmtTime12==='function'&&fmtTime12(time))||time):'');
-  if(pickup) body+='\nFrom: '+pickup;
-  if(dropoff) body+='\nTo: '+dropoff;
-  if(isAprt){
-    // Two clearly separate leg sections, each with its own line items and its own subtotal -
-    // never combined into one "Total" line. A round trip's two legs may be driven (and paid
-    // for) by two different people, so there's no single number that means "the price" here
-    // the way there is for every other trip type.
-    ['1','2'].forEach(function(legNum){
-      var header = document.querySelector('#quote-lines [data-leg-header="'+legNum+'"]');
-      var subtotalEl = document.querySelector('#quote-lines [data-leg-subtotal="'+legNum+'"]');
-      if(!header || !subtotalEl) return;
-      body += '\n\n'+(header.textContent||'').trim()+':';
-      var el = header.nextElementSibling;
-      while(el && !el.hasAttribute('data-leg-subtotal')){
-        var lbl=((el.children[0]&&el.children[0].childNodes[0]?el.children[0].childNodes[0].textContent:'')||'').trim();
-        lbl=lbl.replace(/\s*\([^)]*[\u00d7x$][^)]*\)/g,'').replace(/\s+/g,' ').trim();
-        var val=((el.children[1]?el.children[1].textContent:'')||'').trim();
-        if(lbl) body+='\n'+lbl+': '+val;
-        el = el.nextElementSibling;
-      }
-      body += '\nLeg '+legNum+' total: $'+(subtotalEl.getAttribute('data-leg-subtotal-val')||'0.00');
-    });
-  } else {
-    const lineEls=document.querySelectorAll('#quote-lines .quote-line');
-    if(lineEls.length){
-      body+='\n';
-      lineEls.forEach(el=>{
-        let lbl=((el.children[0]&&el.children[0].childNodes[0]?el.children[0].childNodes[0].textContent:'')||'').trim();
-        lbl=lbl.replace(/\s*\([^)]*[\u00d7x$][^)]*\)/g,'').replace(/\s+/g,' ').trim();
-        const val=((el.children[1]?el.children[1].textContent:'')||'').trim();
-        if(lbl) body+='\n'+lbl+': '+val;
-      });
-    }
-  }
-  // Disclaimer + availability note + closing unified across all three quote channels (v815,
-  // completing v814): text, email, and the printable HTML quote document had all drifted to
-  // different combinations of the same three pieces - email had the clearest "not a booking
-  // yet" disclaimer, the HTML document alone had the "prices held subject to availability"
-  // caveat, and text alone had the warm "please let me know... Thank you!" closing. All three
-  // pieces now appear, in the same order, in all three channels.
-  body += isAprt
-    ? '\n\nEach leg is billed separately, and may be driven by a different member of our team.\n\nThis is a quote, not a booking \u2014 your ride isn\u2019t reserved until you confirm. Prices are held subject to availability and may change if the trip details change. If all of this is correct and acceptable, please let me know and I\u2019ll get you scheduled. Thank you!\n\nQuotes do not include tip — never required, but always greatly appreciated by your driver.'
-    : ('\n\nTotal: '+(document.getElementById('quote-total').textContent||'').trim()+'\n\nThis is a quote, not a booking \u2014 your ride isn\u2019t reserved until you confirm. Prices are held subject to availability and may change if the trip details change. If all of this is correct and acceptable, please let me know and I\u2019ll get you scheduled. Thank you!\n\nQuotes do not include tip — never required, but always greatly appreciated by your driver.');
+  // BUG: below used to build the message with hardcoded string concatenation mixed with live
+  // DOM scraping - not editable by any driver, and structurally unable to represent a combined
+  // round-trip total or the labelled Date/Destination/Pick-up Location/Pricing Breakdown format
+  // Chase's own supplied example actually wants. Rebuilt on the same editable-template system
+  // every other message type already uses (quoteTextMessage() below, {quoteDetails} filled by
+  // _quoteDetailsText()), matching the exact structure-varies-by-type reasoning
+  // _schedulingTripDetailsText() already established for the scheduling message.
+  let body = quoteTextMessage(first);
   // Auto-save this quote to Saved Quotes, marked as sent today (replaces the old "Save as quote" button).
   try{
     if(typeof _gatherQuoteRide==='function' && typeof savedQuotes!=='undefined'){
@@ -6190,7 +6395,6 @@ function _gatherQuoteRide(){
     xstop: stopRows('q').length,
     xstopAddr: getStopAddresses('q').join('; '),
     wait:parseFloat(document.getElementById('q-wait').value)||0,
-    medHours:parseFloat(document.getElementById('q-med-hours')?.value)||0,
     confirmed:false, createdBy:currentUser?.name||'',
     newClient: !!(document.getElementById('q-new-client')?.checked),
   };
@@ -6285,7 +6489,7 @@ function buildQuoteHTML(q, cmp){
   const appLogo = (document.querySelector('img[alt="NWDA Logo"]')||{}).src || '';
   const shownLogo = (_ownerProf.logo||'') || appLogo;
   const logoHtml = shownLogo ? '<img src="'+shownLogo+'" alt="logo" style="max-height:70px;max-width:180px;object-fit:contain;margin-bottom:10px;">' : '';
-  const orgName = ((_ownerProf.businessName||'').trim()) || 'Northwest Drivers Association (NWDA)';
+  const orgName = ((_ownerProf.businessName||'').trim()) || 'Your Driver';
   const ownerPhone = (_ownerProf.phone||'').trim();
   const bd = buildRideBreakdown(q);
   const amt = bd.total;
@@ -6683,14 +6887,51 @@ function _quoteVehicleGate(){
 // build the comparison themselves. Removed rather than left in place: it queried
 // #q-compare-checks and wrote to #q-compare-result, neither of which exists any more, so it
 // would have thrown the moment anything called it.
+// Vehicle-options list for the price-comparison message. Genuinely different shape from a
+// quote's {quoteDetails} (multiple vehicles for ONE trip, not one vehicle across one or two
+// legs), so this is its own block rather than forced into the quote system's shape. Whole
+// dollars, matching the same convention established throughout the quote/scheduling messages.
+function _comparisonDetailsText(c){
+  var lines = [];
+  var tripLine = 'Trip';
+  if(c.date) tripLine += ' on '+fmtDateShort(c.date);
+  if(c.time) tripLine += ' at '+fmtTime12(c.time);
+  if(c.pickup) tripLine += ' from '+c.pickup;
+  if(c.dropoff) tripLine += ' to '+c.dropoff;
+  lines.push(tripLine+':');
+  lines.push('');
+  (c.results||[]).forEach(function(r){
+    lines.push('\u2022 '+r.label+': $'+Math.round(r.total));
+  });
+  return lines.join('\n');
+}
+// Extended the same way the quote message was: {business} via _myBizName() rather than no
+// business identity at all (the original hardcoded version never mentioned it), and
+// {comparisonDetails} holding the whole variable block rather than a flat set of placeholders.
+function _defaultComparisonTpl(){
+  return 'Hi {name}, here\u2019s a price comparison{business}:\n\n'
+    +'{comparisonDetails}\n\n'
+    +'Let us know which works best for you!\n\n'
+    +'Quotes do not include tip \u2014 never required, but always greatly appreciated by your driver.';
+}
+function comparisonTextMessage(firstName, c){
+  const _tpl = ((typeof driverSettings!=='undefined'&&currentUser&&driverSettings[currentUser.name]&&driverSettings[currentUser.name].comparisonTemplate) || '')
+    || (globalSettings && globalSettings.defaultComparisonTemplate) || ''
+    || HARDCODED_MSG_DEFAULTS.comparison;
+  var _bizName = (typeof _myBizName==='function') ? _myBizName() : '';
+  var _biz = _bizName ? (' from '+_bizName) : '';
+  var _details = _comparisonDetailsText(c);
+  return _tpl
+    .replace(/\{name\}/g, firstName||'there')
+    .replace(/\{business\}/g, _biz)
+    .replace(/\{comparisonDetails\}/g, _details);
+}
 function _comparisonBodyText(c){
-  let msg = 'Hi '+ (c.client.split(' ')[0]||'there') +'! Here\'s a price comparison for your trip';
-  if(c.date) msg += ' on '+fmtDateShort(c.date);
-  if(c.time) msg += ' at '+fmtTime12(c.time);
-  msg += (c.pickup?(' from '+c.pickup):'') + (c.dropoff?(' to '+c.dropoff):'') + ':\n\n';
-  c.results.forEach(function(r){ msg += r.label+': $'+r.total.toFixed(2)+'\n'; });
-  msg += '\nLet us know which works best for you!\n\nQuotes do not include tip \u2014 never required, but always greatly appreciated by your driver.';
-  return msg;
+  // BUG: this used to be its own hardcoded implementation, not editable by any driver, and
+  // never mentioned the sender's business at all - the one message in this whole family that
+  // never got the {business} treatment the quote and scheduling messages already have.
+  // Rebuilt on the same editable-template system, via comparisonTextMessage().
+  return comparisonTextMessage((c.client||'').split(' ')[0], c);
 }
 function textComparisonToClient(){
   const c = window._lastComparison;
@@ -6775,7 +7016,6 @@ function editSavedQuote(qid){
     set('q-extra-phones', q.extraPhones||'');
     set('q-email', q.email||'');
     set('q-wait', q.wait||0);
-    set('q-med-hours', q.medHours||0);
     set('q-driver', q.driver||'');
     // Vehicle - find and click the matching toggle button so its active state stays in sync
     // A saved quote is always for one vehicle, so restoring selects exactly that one. Matching
@@ -6827,22 +7067,12 @@ async function textSavedQuote(qid){
   const q=(savedQuotes||[]).find(function(x){return x._quoteId===qid;}); if(!q) return;
   const phone=(q.phone||'').replace(/[^0-9+]/g,'');
   const first=(q.client||'').trim().split(' ')[0]||'';
-  let body='Hi'+(first?' '+first:'')+', here\u2019s your quote from Northwest Drivers:\n\n';
-  if(q.date) body+=fmtDateShort(q.date)+(q.time?' at '+fmtTime12(q.time):'')+'\n';
-  if(q.type) body+=q.type+'\n';
-  if(q.pickup) body+='From: '+q.pickup+'\n';
-  if(q.home) body+='To: '+q.home+'\n';
-  // AP ROUND TRIP: two separate, independently-charged leg totals, never combined into one
-  // figure - a round trip's two legs may be driven, and paid for, by two different people.
-  if(q.type==='AP ROUND TRIP'){
-    var bd=(typeof buildRideBreakdown==='function')?buildRideBreakdown(q):{leg1:null,leg2:null};
-    body+='\nLeg 1 (AP Run) total: $'+(bd.leg1!=null?bd.leg1:0).toFixed(2);
-    body+='\nLeg 2 (AP Pick Up) total: $'+(bd.leg2!=null?bd.leg2:0).toFixed(2);
-    body+='\n\nEach leg is billed separately, and may be driven by a different member of our team.';
-  } else {
-    body+='\nTotal: $'+(parseFloat(q.price)||0).toFixed(2);
-  }
-  body+='\n\nIf this works for you, let me know and I\u2019ll get you scheduled. Thank you!\n\nQuotes do not include tip \u2014 never required, but always greatly appreciated by your driver.';
+  // BUG: this used to be a third, separate hardcoded implementation of the same idea - could
+  // not be edited by any driver, and had already drifted from the live quote's own wording
+  // (e.g. no combined round-trip total, a different closing line). Rebuilt on the exact same
+  // editable-template system textQuoteToClient() already uses, via quoteTextMessage()'s new
+  // optional savedQuote parameter.
+  let body = quoteTextMessage(first, q);
   q.sentAt=Date.now();
   try{ await saveSavedQuotes(); }catch(e){}
   renderSavedQuotes();
@@ -7109,15 +7339,19 @@ function addNotification(driverName, ride, action, customMsg, forceNow){
 // for who EARNS the 15% finder's fee); this is about who can genuinely act on the ride.
 // Zero once there's nothing left to release, same "gone once its job is done" pattern every
 // other action-block banner already follows.
-// Was scoped to literally-tomorrow rides only; broadened to any future date so a ride assigned
-// weeks out doesn't skip the hold entirely and start its accept-window clock unattended - see
-// the comment on assignNotifyPending's origin in addNotification() for the incident that
-// prompted this.
+// Counts exactly what the button will actually release - TOMORROW's rides only. These two must
+// stay in step: a count of every pending future ride beside a button that releases only
+// tomorrow's would promise "5 rides" and then report "1 ride notified", which reads as a bug.
+//
+// Note the HOLD itself is still broad: assignments for ANY future date stay pending (see
+// assignNotifyPending in addNotification, and the incident where a ride assigned two weeks out
+// started its accept-window clock unattended). Broad hold, one-day release - they release on
+// the day before each ride, via that day's own tap.
 function myPendingNotifyCount(){
   if(!currentUser) return 0;
-  var _todayStr = _todayDateStr();
+  var _tomorrowStr = _tomorrowDateStr();
   return (rides||[]).filter(function(r){
-    return r && isMyScheduledRide(r) && r.date>_todayStr && r.assignNotifyPending===true && r.status!=='cancelled' && r.driver;
+    return r && isMyScheduledRide(r) && r.date===_tomorrowStr && r.assignNotifyPending===true && r.status!=='cancelled' && r.driver;
   }).length;
 }
 // Releases the queued assignment notification for every one of the current user's OWN
@@ -7131,8 +7365,13 @@ function myPendingNotifyCount(){
 async function notifyMyAssignedDrivers(){
   if(!currentUser){ showToast('Could not find your account','error'); return; }
   var _todayStr = _todayDateStr();
+  // Releases exactly ONE day - tomorrow. Chase's explicit call: tapping this today notifies
+  // drivers for the 25th and nobody for the 26th. Assignments further out stay pending and get
+  // released by tomorrow's tap, which also keeps the one-hour accept clock from starting days
+  // before a driver has any reason to be looking at the app.
+  var _tomorrowStr = _tomorrowDateStr();
   var pending = (rides||[]).filter(function(r){
-    return r && isMyScheduledRide(r) && r.date>_todayStr && r.assignNotifyPending===true && r.status!=='cancelled' && r.driver;
+    return r && isMyScheduledRide(r) && r.date===_tomorrowStr && r.assignNotifyPending===true && r.status!=='cancelled' && r.driver;
   });
   if(!pending.length){ showToast('Nothing to notify'); return; }
   pending.forEach(function(r){
@@ -7365,6 +7604,22 @@ function _prefillFromClientRequest(req){
     } else {
       set('pickup', req.pickup);
       var _hm = document.getElementById('qa-home'); if(_hm && req.destination) _hm.value = req.destination;
+      // BUG FIX, reported directly with a screenshot: qa-pickup/qa-home (the trip's own
+      // leg-1 addresses, used for mileage/price calculation) got set correctly above, but
+      // qa-home-address - the Personal Info section's on-file "home address" field, shown
+      // separately at the top of the form - was never touched at all. A client's booking
+      // request correctly priced the ride and left their own home address blank on the form
+      // that's supposed to save it. Reuses the exact type-aware rule
+      // qaHomeAddrCheckboxChanged() already established elsewhere in this file (home is
+      // PICKUP for AP RUN/ONE WAY/ROUND TRIP, DESTINATION for AP PICK UP
+      // specifically) rather than inventing a second copy of that logic.
+      var _homeAddrVal = (req.type==='AP PICK UP') ? req.destination : req.pickup;
+      var _haEl = set('home-address', _homeAddrVal);
+      // .value= never fires oninput - same class of gap already fixed twice above in this
+      // exact function (maybeAutofillClient, the mileage recalculation). Fired explicitly so
+      // the "Same as home address" checkbox row actually appears, matching what would happen
+      // if a person had typed this address in by hand.
+      if(_haEl && _homeAddrVal){ try{ qaHomeAddressChanged(); }catch(e){} }
     }
     // Notes: qa-notes exists; a q-notes element is referenced elsewhere in the file but isn't
     // actually in the Quote markup, so set() safely no-ops there. Rather than silently drop
@@ -7829,7 +8084,19 @@ function readableInk(hex){
 }
 
 
-// Returns the color for a ride — driver's color if assigned, otherwise creator's color
+// Tomorrow, as a date string. Notify Drivers deliberately releases ONE day at a time.
+function _tomorrowDateStr(){
+  var d=new Date(); d.setDate(d.getDate()+1); return toDateStr(d);
+}
+// Returns the color for a ride — driver's color if assigned, otherwise creator's color.
+//
+// Shows real-time for everyone, including a just-made assignment still awaiting Notify
+// Drivers - walked back per direct instruction from the earlier "draft" behavior, which hid an
+// assigned driver's color from everyone but the ride's owner until the notification was
+// released. The notification itself is still held back exactly as before (assignNotifyPending,
+// Notify Drivers releasing one day at a time) - only the color-hiding is reverted. See
+// _renderFinalizeTomorrowInto's own banner for the reminder that a color on the calendar isn't
+// the same thing as an actual notification having gone out.
 function rideColor(r){
   if(r.status==='placeholder') return '#9ca3af'; // distinct neutral gray — never a real driver's color
   if(r.driver) return driverColor(r.driver);
@@ -8085,6 +8352,7 @@ function renderMonthView(containerId, monthDate, driverFilter, jumpFn){
 function renderCal(){
   if(!document.getElementById('cal-grid')) return;
   buildCalTabs();
+  renderCalNotFinalBanner();
   renderCalFinalizeTomorrow();
   // FamilyWall sync only on the all-drivers view
   const fwBtn=document.getElementById('cal-familywall-btn');
@@ -9441,7 +9709,7 @@ function _loadImageFromDataUrl(dataUrl){
 
 // Combines the driver card and the day-of selfie into ONE stacked image instead of sending
 // them as two separate files. Built specifically so "Send everything" can stay on the single-
-// file, pre-addressed-thread path (see textClient()'s _multiFile branch, and the v879 handoff
+// file, pre-addressed-thread path (see textClient()'s share-sheet branch, and the v879 handoff
 // entry explaining why that split exists) even on AP Pick Up rides — the one ride type where
 // two images genuinely needed to travel together, which used to force the OS share sheet and,
 // with it, a manually-picked recipient. One combined file sidesteps that entirely: it's still
@@ -9546,18 +9814,50 @@ async function textClient(id, opts){
     try{ await navigator.clipboard.write([new ClipboardItem({'image/png':cardFile})]); _cardCopied=true; }catch(e){ console.warn('clipboard write failed',e); }
   }
 
-  // The share sheet is the only way to send MULTIPLE files in one action (the clipboard can
-  // only hold one image at a time), but it can't pre-address Messages — the sender has to pick
-  // the recipient themselves. That's a real cost, so it's only worth paying when there's
-  // actually more than one file to bundle (driver card + day-of selfie, on AP Pick Up / AP
-  // Round Trip rides). A single file always goes the copy+paste route below instead: pre-
-  // addressed thread, correct group text, the one image already on the clipboard to paste in.
-  // Chase's explicit call, weighing the selfie-gets-dropped tradeoff against always needing to
-  // pick the recipient by hand.
-  const _multiFile = files.length > 1;
+
+  // BUG FIX - reported repeatedly: "driver cards still aren't going out."
+  //
+  // The single-file design above is deliberate and stays: pre-addressed thread, card on the
+  // clipboard, driver long-presses to paste. But it rests ENTIRELY on the clipboard write
+  // above having succeeded, and that write is genuinely fragile - navigator.clipboard.write
+  // needs a focused document and, on several browsers, still-live user activation. By the time
+  // it runs, sendAllConf() has already awaited the card build, the selfie build, the combine,
+  // and sometimes an entire vCard share. That is the same gesture-expiry class of bug this app
+  // has already been bitten by twice in the Venmo handoffs.
+  //
+  // When that write fails it is caught and logged, _cardCopied stays false - and then the code
+  // opens an sms: URL, which CANNOT carry an attachment under any circumstance. The text goes,
+  // the card silently does not, and nothing on screen says so. v968's honesty fix does not
+  // catch this either: the card built perfectly well, _wantsCard is true, it simply never
+  // reached anyone. Note _sendTextWithFiles() below never had this problem - it shares on ANY
+  // file count; only this function gates on more-than-one.
+  //
+  // So: if there is a card to send and it is NOT on the clipboard, the paste route is a dead
+  // end. Use the share sheet, which attaches a single file perfectly well. That costs the
+  // pre-addressed recipient - the exact tradeoff weighed above - but only in the case where the
+  // alternative is the card not arriving at all.
+  // REGRESSION FIX, dated from evidence. A screenshot of a real send on Aug 15 shows the driver
+  // card and day-of selfie ARRIVING AUTOMATICALLY, attached, with no paste step. v939 (Aug 22)
+  // then combined those two images into one file. Before that change there were 2 files, so
+  // _multiFile was true and the send went through the share sheet, which genuinely attaches
+  // images. After it there was 1 file, so it fell to the copy-to-clipboard + sms: route - and
+  // sms: cannot carry an attachment at all, leaving the driver to paste it by hand, or leaving
+  // the image behind entirely whenever the clipboard write quietly failed.
+  //
+  // So the auto-attach wasn't lost to a deliberate decision - v939 was about collapsing "Send
+  // everything" to one path, and this was unintended fallout of going from two files to one.
+  // Chase confirmed directly that it used to bundle and attach automatically and that he never
+  // asked for that to change.
+  //
+  // Fix: whenever there is ANY file to send and the share sheet is available, use it. That is
+  // exactly what the pre-v939 behaviour did, and what _sendTextWithFiles() below has always
+  // done (it gates on files.length, never on more-than-one). The cost is picking the recipient
+  // in the share sheet - which is what was already happening on Aug 15, when this worked.
+  // Attachments that actually arrive beat a pre-addressed thread that silently drops them.
+  const _useShareSheet = files.length > 0;
 
   // ── iOS: single navigator.share call — image + vCard + text all land in iMessage ──
-  if(isIOS && navigator.canShare && _multiFile){
+  if(isIOS && navigator.canShare && _useShareSheet){
     const shareData={files:files, text:_fullMsg};
     try{
       if(navigator.canShare(shareData)){
@@ -9577,7 +9877,7 @@ async function textClient(id, opts){
 
   // ── Android: navigator.share handles image + vCard together via share sheet ──
   // Falls back to clipboard+SMS if share isn't available
-  if(!isIOS && navigator.canShare && _multiFile){
+  if(!isIOS && navigator.canShare && _useShareSheet){
     const shareData={files:files, text:_fullMsg};
     try{
       if(navigator.canShare(shareData)){
@@ -9595,6 +9895,10 @@ async function textClient(id, opts){
   // open the pre-addressed SMS thread so the sender can paste it and send. ──
   const toasts=[];
   if(_cardCopied) toasts.push('\uD83D\uDDBC\uFE0F '+_copiedImageLabel(cardFile)+' copied \u2014 long-press to paste in Messages');
+  // Reaching here WITH a card but WITHOUT it on the clipboard means the share sheet was
+  // unavailable too - the image genuinely cannot travel with this message. Say so, rather
+  // than opening a text-only thread and letting the summary imply the card went.
+  else if(cardFile) toasts.push('\u26a0\ufe0f Driver card couldn\u2019t be attached \u2014 send it separately from the ride');
   window.location.href=smsURL;
   if(toasts.length) setTimeout(function(){ showToast(toasts.join(' \u00b7 ')); },800);
   return true;
@@ -9865,24 +10169,6 @@ function openRideModal(id){
   if(_rmBox) _rmBox.scrollTop = 0;
 }
 
-async function updateMedHours(id){
-  var r=(rides||[]).find(function(x){ return x.id===id; }); if(!r) return;
-  var me=getMyDriverName();
-  if(!((typeof isAdmin==='function'&&isAdmin()) || (me && me===r.driver))){ showToast('Only the assigned driver or an admin can change the hours','error'); return; }
-  var el=document.getElementById('med-hours-inline-'+id); if(!el) return;
-  var nh=parseFloat(el.value);
-  if(!isFinite(nh)||nh<0){ showToast('Enter a valid number of hours','error'); return; }
-  var oh=parseFloat(r.medHours)||0;
-  var delta=(nh-oh)*waitRate();               // only the hours portion moves — surcharges stay
-  r.medHours=nh;
-  r.price=Math.round(((parseFloat(r.price)||0)+delta)*100)/100;
-  try{ touchRide(r,'edit medical hours'); }catch(e){}
-  await saveRides();
-  showToast('\u2713 Hours updated: '+nh+'h \u2014 $'+(parseFloat(r.price)||0).toFixed(2));
-  try{ renderRideView(r); }catch(e){}
-  try{ refreshDash(); }catch(e){}
-}
-
 // ── Pay the previous (unpaid) leg via Venmo: choose fare-only or fare + tip ──
 function _fmtNoteDate(ds){ try{ var p=String(ds).split('-'); if(p.length===3) return parseInt(p[1],10)+'/'+parseInt(p[2],10)+'/'+p[0]; }catch(e){} return ds||''; }
 function payPrevRideVenmo(prevRideId){
@@ -10047,7 +10333,6 @@ function renderRideView(r){
   // happened to be open when the periodic check fired - that's not something a person did.
   let _respLine = '';
 
-  const canEditMedHours = (_myDName && _myDName===r.driver) || (typeof isAdmin==='function' && isAdmin());
   const _ccRm = currentUser ? (PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name) : null;
   const _ccRc = r.createdBy ? (PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy) : null;
   const canSeeContact = (_ccRm && _ccRc && _ccRm === _ccRc)
@@ -10106,7 +10391,7 @@ function renderRideView(r){
   const shareOfferingsBtn = (r.status!=='cancelled' && canPostOfferings)
     ? '<div class="detail-row" style="grid-column:1/-1;margin-top:.25rem;">'+(_alreadyOffered?'<div style="padding:.6rem;text-align:center;font-size:.88rem;color:var(--green);font-weight:600;">\u2705 Posted to Offerings</div>':'<button onclick="shareRideToOfferings('+r.id+')" style="width:100%;padding:.6rem;background:none;border:1.5px solid #7c3aed;color:#7c3aed;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">\uD83D\uDCE4 Post to Offerings</button>')+'</div>'
     : '';
-  const _bothAddr = (r.type==='MEDICAL'||r.type==='ROUND TRIP'||r.type==='ONE WAY'||r.type==='AP PICK UP'||r.type==='AP RUN'||r.type==='AP ROUND TRIP');
+  const _bothAddr = (r.type==='ROUND TRIP'||r.type==='ONE WAY'||r.type==='AP PICK UP'||r.type==='AP RUN'||r.type==='AP ROUND TRIP');
   const address = _bothAddr ? '' : (r.pickup||r.home||'');
   // Extra-stop address(es), shared between both possible layouts below (the single-`address`
   // airport-ride layout and the pickup+destination layout) so the parsing/labeling logic lives
@@ -10207,15 +10492,6 @@ function renderRideView(r){
         ${r.pickup?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:78px;flex-shrink:0;margin-top:2px;">PICKUP</span><div style="font-size:.86rem;">${mapsLink(r.pickup,"var(--accent)", (r.type==='AP PICK UP'&&r.terminal)?terminalToAddress(r.terminal):null)}</div></div>`:''}
         ${extraStopsHtml}
         ${r.home?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:78px;flex-shrink:0;margin-top:2px;">DESTINATION</span><div style="font-size:.86rem;">${mapsLink(r.home,"var(--accent)", ((r.type==='AP RUN'||r.type==='AP ROUND TRIP')&&r.terminal)?terminalToAddress(r.terminal):null)}</div></div>`:''}
-      </div>
-    </div>` : ''}
-
-    ${r.type==='MEDICAL' ? `<div class="detail-row" style="grid-column:1/-1;">
-      <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;">
-        <span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);">HOURS</span>
-        ${canEditMedHours
-          ? `<input type="number" id="med-hours-inline-${r.id}" value="${r.medHours||0}" min="0" step="0.5" style="width:72px;padding:.3rem .45rem;border:1.5px solid var(--light);border-radius:6px;font-size:.85rem;" /><button onclick="updateMedHours(${r.id})" style="padding:.32rem .8rem;background:var(--accent);color:#fff;border:none;border-radius:7px;font-size:.78rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">Update</button><span style="font-size:.72rem;color:var(--mid);">× $${waitRate()}/hr</span>`
-          : `<span style="font-size:.9rem;font-weight:600;">${r.medHours||0} h</span>`}
       </div>
     </div>` : ''}
 
@@ -11213,7 +11489,7 @@ function buildReceiptText(r){
   const _rprof = (typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[driver]) ? DRIVER_PROFILES[driver] : {};
   const _ownerName = (typeof getClientOwner==='function') ? getClientOwner(r.client) : null;
   const _ownerProf = (_ownerName && typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[_ownerName]) ? DRIVER_PROFILES[_ownerName] : {};
-  const orgName = ((_ownerProf.businessName||'').trim()) || ((_rprof.businessName||'').trim()) || 'Northwest Drivers Association (NWDA)';
+  const orgName = ((_ownerProf.businessName||'').trim()) || ((_rprof.businessName||'').trim()) || 'Your Driver';
   const rn = _receiptNumber(r);
   const dateStr = _receiptDate(r.date);
 
@@ -11286,7 +11562,7 @@ function buildReceiptHTML(r){
   const _rtipVia = r.tipPayment||r.payment||'';
 
   // Header identity: business name if set, else NWDA; driver always shown as provider.
-  const orgName = ((_ownerProf.businessName||'').trim()) || bizName || 'Northwest Drivers Association (NWDA)';
+  const orgName = ((_ownerProf.businessName||'').trim()) || bizName || 'Your Driver';
   // Receipt logo: the driver's uploaded business logo, or the app's standard logo if they haven't set one.
   const appLogo = (document.querySelector('img[alt="NWDA Logo"]')||{}).src || '';
   const shownLogo = logo || appLogo;
@@ -11354,6 +11630,223 @@ function buildReceiptHTML(r){
 }
 
 // Download the branded receipt as an HTML document the client can open + Save as PDF.
+// Morgan's monthly invoice to Kat for scheduling/dispatch work. Built the exact same way as
+// buildReceiptHTML() - same document shell, same header band, same total-due block, same
+// "Save as PDF / Print" button - because it IS the same kind of document, just itemizing a
+// period's worth of Morgan's dispatch rides instead of one ride's fare, and billed TO Kat
+// rather than to a client. Copied and adapted rather than built fresh, per the standing
+// methodology on extending existing features.
+//
+// Deliberately independent of buildReceiptHTML() itself (no shared call), for the same reason
+// v962's tip-payment-method fix stayed independent of the working Mark Paid modal: zero risk to
+// a document real clients already receive from touching it while building this new one.
+function _dispatchInvoiceRides(start, end){
+  return (rides||[]).filter(function(r){
+    if(!r || r.createdBy!=='Morgan' || r.status==='cancelled') return false;
+    if(!_kmRideDone(r)) return false;
+    if(kmExcludedRides[r.id]) return false;
+    if(!r.date) return false;
+    if(start && end){
+      var d = new Date(r.date+'T12:00:00');
+      if(d<start||d>end) return false;
+    }
+    return true;
+  }).sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
+}
+function _dispatchInvoiceNumber(start){
+  var ym = start ? (start.getFullYear()+String(start.getMonth()+1).padStart(2,'0')) : 'NA';
+  return 'DISP-MORGAN-'+ym;
+}
+function buildDispatchInvoiceHTML(start, end){
+  const esc = (s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const rowsData = _dispatchInvoiceRides(start, end);
+  const prof = (typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES['Morgan Newton']) ? DRIVER_PROFILES['Morgan Newton'] : {};
+  const kprof = (typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES['Kathleen Herringdine']) ? DRIVER_PROFILES['Kathleen Herringdine'] : {};
+  const bizName = (prof.businessName||'').trim() || 'Morgan Newton';
+  const logo = (prof.logo||'');
+  const _docAccent = (prof.logoAccentColor||'') || '#0d9488';
+  const _docAccentText = _readableTextOn(_docAccent);
+  const invNum = _dispatchInvoiceNumber(start);
+  const periodLabel = (start && end)
+    ? (start.getFullYear()===end.getFullYear() && start.getMonth()===end.getMonth()
+        ? start.toLocaleDateString('en-US',{month:'long',year:'numeric'})
+        : start.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' \u2013 '+end.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}))
+    : 'All time';
+  const total = rowsData.reduce(function(a,r){ return a+kmRideValue(r); }, 0);
+
+  const appLogo = (document.querySelector('img[alt="NWDA Logo"]')||{}).src || '';
+  const shownLogo = logo || appLogo;
+  const logoHtml = shownLogo
+    ? '<img src="'+shownLogo+'" alt="logo" style="max-height:70px;max-width:180px;object-fit:contain;margin-bottom:10px;">'
+    : '';
+
+  const rowsHtml = rowsData.map(function(r){
+    const v = kmRideValue(r);
+    const settled = !!kmSettledRides[r.id];
+    return '<tr><td style="padding:7px 0;border-bottom:1px solid #eee;color:#333;">'+esc(fmtDateShort(r.date))+'</td>'
+      + '<td style="padding:7px 0;border-bottom:1px solid #eee;color:#333;">'+esc(r.client||'')+'</td>'
+      + '<td style="padding:7px 0;border-bottom:1px solid #eee;text-align:right;color:#333;">$'+(parseFloat(r.price)||0).toFixed(2)+'</td>'
+      + '<td style="padding:7px 0;border-bottom:1px solid #eee;text-align:right;color:#333;white-space:nowrap;">$'+v.toFixed(2)+(settled?' <span style="color:#0d9488;font-weight:700;">\u2713</span>':'')+'</td></tr>';
+  }).join('');
+
+  return '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+    + '<title>Invoice '+esc(invNum)+'</title></head>'
+    + '<body style="margin:0;background:#f4f4f6;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;color:#1a1a1a;">'
+    + '<div style="max-width:640px;margin:24px auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,.08);">'
+    + '<div style="background:'+_docAccent+';color:'+_docAccentText+';padding:26px 30px;">'
+    +   logoHtml
+    +   '<div style="font-size:22px;font-weight:800;letter-spacing:.2px;">'+esc(bizName)+'</div>'
+    +   '<div style="font-size:13px;opacity:.85;margin-top:3px;">Dispatch &amp; Scheduling Invoice</div>'
+    + '</div>'
+    + '<div style="padding:24px 30px 6px;">'
+    +   '<table style="width:100%;font-size:13.5px;border-collapse:collapse;">'
+    +     '<tr><td style="padding:3px 0;color:#888;width:130px;">Invoice #</td><td style="padding:3px 0;color:#1a1a1a;font-weight:600;">'+esc(invNum)+'</td></tr>'
+    +     '<tr><td style="padding:3px 0;color:#888;">Period</td><td style="padding:3px 0;color:#1a1a1a;">'+esc(periodLabel)+'</td></tr>'
+    +     '<tr><td style="padding:3px 0;color:#888;">Billed to</td><td style="padding:3px 0;color:#1a1a1a;">Kathleen Herringdine'+(kprof.businessName?' ('+esc(kprof.businessName)+')':'')+'</td></tr>'
+    +     '<tr><td style="padding:3px 0;color:#888;">Rate</td><td style="padding:3px 0;color:#1a1a1a;">'+esc(kmRateLabel())+'</td></tr>'
+    +   '</table>'
+    + '</div>'
+    + '<div style="padding:18px 30px 6px;">'
+    +   '<div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#999;margin-bottom:4px;">Rides scheduled this period</div>'
+    +   '<table style="width:100%;font-size:13.5px;border-collapse:collapse;">'
+    +     '<tr><td style="padding:5px 0;border-bottom:2px solid #ddd;color:#888;font-size:11px;text-transform:uppercase;">Date</td>'
+    +     '<td style="padding:5px 0;border-bottom:2px solid #ddd;color:#888;font-size:11px;text-transform:uppercase;">Client</td>'
+    +     '<td style="padding:5px 0;border-bottom:2px solid #ddd;color:#888;font-size:11px;text-transform:uppercase;text-align:right;">Fare</td>'
+    +     '<td style="padding:5px 0;border-bottom:2px solid #ddd;color:#888;font-size:11px;text-transform:uppercase;text-align:right;">Pay</td></tr>'
+    +     (rowsHtml || '<tr><td colspan="4" style="padding:14px 0;text-align:center;color:#999;">No qualifying rides this period.</td></tr>')
+    +   '</table>'
+    + '</div>'
+    + '<div style="padding:10px 30px 24px;">'
+    +   '<div style="display:flex;justify-content:space-between;align-items:center;border-top:2px solid '+_docAccent+';padding-top:12px;margin-top:6px;">'
+    +     '<div style="font-size:16px;font-weight:800;color:#1a1a1a;">TOTAL DUE</div>'
+    +     '<div style="font-size:20px;font-weight:800;color:'+_docAccent+';">$'+total.toFixed(2)+'</div></div>'
+    +   '<div style="margin-top:6px;font-size:12px;color:#999;">\u2713 marks rides already settled \u2014 shown for reference, still counted in this period\u2019s total.</div>'
+    + '</div>'
+    + '<div style="background:#f7f7f8;padding:16px 30px;border-top:1px solid #eee;font-size:12px;color:#999;text-align:center;">'
+    +   'Thank you! &middot; Keep this invoice for your records.'
+    + '</div>'
+    + '</div>'
+    + '<div style="max-width:640px;margin:0 auto 30px;text-align:center;" class="no-print">'
+    +   '<button onclick="window.print()" style="background:'+_docAccent+';color:'+_docAccentText+';border:none;border-radius:8px;padding:12px 28px;font-size:15px;font-weight:700;cursor:pointer;">\uD83D\uDCC4 Save as PDF / Print</button>'
+    +   '<div style="font-size:12px;color:#999;margin-top:8px;">Tap to save this as a PDF you can send to Kat.</div>'
+    + '</div>'
+    + '<style>@media print{.no-print{display:none!important;}body{background:#fff!important;}}</style>'
+    + '</body></html>';
+}
+// Custom date-range picker for generating an invoice - independent of whatever the income
+// page's own Weekly/Monthly/Yearly tabs happen to be set to. Chase asked directly for this:
+// the invoice's range and the income page's own filter are two different questions, and tying
+// them together would force switching income tabs just to build an invoice for an odd range.
+function openDispatchInvoiceRangePicker(){
+  if(!kmVisible() || kmIsKat()) return;
+  var today=toDateStr(new Date());
+  var monthStart=today.slice(0,7)+'-01';
+  var ov=document.createElement('div'); ov.id='dispatch-invoice-range-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:16000;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:380px;width:100%;padding:1.35rem;box-shadow:0 24px 60px rgba(0,0,0,.4);">'
+    +'<div style="font-size:1.05rem;font-weight:800;color:#0f172a;margin-bottom:.3rem;">\uD83E\uDD1D Invoice Kat</div>'
+    +'<div style="font-size:.8rem;color:#64748b;margin-bottom:.9rem;">Pick the date range this invoice should cover.</div>'
+    +'<div style="display:flex;gap:.5rem;margin-bottom:1rem;">'
+    +'<div style="flex:1;"><div style="font-size:.7rem;color:#64748b;margin-bottom:.2rem;">From</div><input id="div-from" type="date" value="'+monthStart+'" style="width:100%;padding:.5rem;border:1.5px solid #e2e8f0;border-radius:8px;font-size:.85rem;box-sizing:border-box;"></div>'
+    +'<div style="flex:1;"><div style="font-size:.7rem;color:#64748b;margin-bottom:.2rem;">To</div><input id="div-to" type="date" value="'+today+'" style="width:100%;padding:.5rem;border:1.5px solid #e2e8f0;border-radius:8px;font-size:.85rem;box-sizing:border-box;"></div>'
+    +'</div>'
+    +'<div style="display:flex;gap:.5rem;">'
+    +'<button onclick="document.getElementById(\'dispatch-invoice-range-overlay\').remove()" style="flex:1;padding:.6rem;background:#f1f5f9;color:#475569;border:none;border-radius:8px;font-family:inherit;font-size:.85rem;font-weight:600;cursor:pointer;">Cancel</button>'
+    +'<button onclick="_generateDispatchInvoice()" style="flex:1;padding:.6rem;background:#0d9488;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">Generate</button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+}
+// Generates the PERSISTENT invoice record first (a real, trackable object with its own
+// paid/received lifecycle), THEN offers the actual document to send - in that order, so the
+// record exists even if the share sheet is cancelled or unavailable.
+async function _generateDispatchInvoice(){
+  var fromEl=document.getElementById('div-from'), toEl=document.getElementById('div-to');
+  var fromStr=(fromEl&&fromEl.value)||'', toStr=(toEl&&toEl.value)||'';
+  if(!fromStr || !toStr){ showToast('Pick both dates','error'); return; }
+  if(fromStr>toStr){ showToast('The From date is after the To date','error'); return; }
+  var start=new Date(fromStr+'T00:00:00'), end=new Date(toStr+'T23:59:59');
+  var rowsData=_dispatchInvoiceRides(start,end);
+  var total=rowsData.reduce(function(a,r){ return a+kmRideValue(r); },0);
+  var id='div_'+Date.now();
+  dispatchInvoices[id]={
+    id:id, startDate:fromStr, endDate:toStr,
+    rideIds:rowsData.map(function(r){return r.id;}),
+    total:Math.round(total*100)/100,
+    rate:Object.assign({},kmPaySettings), // snapshot - a later rate change shouldn't rewrite history
+    createdAt:Date.now(), createdBy:currentUser&&currentUser.name||'Morgan',
+    status:'sent', paidAt:null, paidBy:null, paidMethod:null, receivedAt:null
+  };
+  try{ await saveDispatchInvoices(); }catch(e){ console.warn(e); }
+  var ov=document.getElementById('dispatch-invoice-range-overlay'); if(ov) ov.remove();
+  showToast('\uD83E\uDD1D Invoice created \u2014 '+rowsData.length+' ride'+(rowsData.length===1?'':'s')+', $'+total.toFixed(2));
+  try{ renderIncome(); }catch(e){}
+  try{ await shareDispatchInvoice(start,end); }catch(e){}
+}
+function _dispatchInvoiceStatusLabel(inv){
+  if(inv.status==='settled') return { text:'\u2713 Settled', color:'#0d9488' };
+  if(inv.status==='paid_pending') return { text:'\u23F3 Awaiting Morgan\u2019s confirmation', color:'#b45309' };
+  return { text:'\u23F3 Awaiting Kat\u2019s payment', color:'#b45309' };
+}
+// Kat marks an invoice paid. Mirrors markFeeRidePaid()'s own wording and behavior exactly -
+// this does NOT settle the invoice by itself, it stays 'paid_pending' until Morgan confirms.
+async function markDispatchInvoicePaid(id){
+  if(!kmVisible() || !kmIsKat()) return;
+  var inv=dispatchInvoices[id]; if(!inv || inv.status!=='sent') return;
+  inv.status='paid_pending'; inv.paidAt=Date.now(); inv.paidBy=currentUser&&currentUser.name||'Kat';
+  try{ await saveDispatchInvoices(); }catch(e){ console.warn(e); }
+  showToast('\u23F3 Marked paid \u2014 stays here until Morgan taps \u2713 Received');
+  try{ renderIncome(); }catch(e){}
+}
+// Morgan confirms she actually received it - the second half of the dual approval.
+async function markDispatchInvoiceReceived(id){
+  if(!kmVisible() || kmIsKat()) return;
+  var inv=dispatchInvoices[id]; if(!inv || inv.status!=='paid_pending') return;
+  inv.status='settled'; inv.receivedAt=Date.now();
+  try{ await saveDispatchInvoices(); }catch(e){ console.warn(e); }
+  showToast('\u2713 Invoice settled');
+  try{ renderIncome(); }catch(e){}
+}
+// Morgan's escape hatch if Kat marked it paid but the money genuinely never arrived - same
+// role as _feeUndoRide() plays for the client-owner fee.
+async function rejectDispatchInvoicePaid(id){
+  if(!kmVisible() || kmIsKat()) return;
+  var inv=dispatchInvoices[id]; if(!inv || inv.status!=='paid_pending') return;
+  inv.status='sent'; inv.paidAt=null; inv.paidBy=null; inv.paidMethod=null;
+  try{ await saveDispatchInvoices(); }catch(e){ console.warn(e); }
+  showToast('\u21a9 Marked not received \u2014 back to awaiting payment');
+  try{ renderIncome(); }catch(e){}
+}
+function downloadDispatchInvoice(start, end){
+  if(!_receiptAccessOrUpgrade()) return;
+  const html = buildDispatchInvoiceHTML(start, end);
+  const fname = _dispatchInvoiceNumber(start)+'.html';
+  try{
+    const blob = new Blob([html], {type:'text/html'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fname;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+    showToast('\uD83D\uDCC4 Invoice downloaded \u2014 open it to Save as PDF');
+  }catch(e){ console.error(e); showToast('Download failed','error'); }
+}
+// Same share-with-download-fallback pattern as shareReceiptDocument().
+async function shareDispatchInvoice(start, end){
+  if(!_receiptAccessOrUpgrade()) return;
+  const html = buildDispatchInvoiceHTML(start, end);
+  const fname = _dispatchInvoiceNumber(start)+'.html';
+  try{
+    const file = new File([html], fname, {type:'text/html'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      const periodLabel = start ? start.toLocaleDateString('en-US',{month:'long',year:'numeric'}) : 'this period';
+      await navigator.share({ files:[file], title:'Dispatch Invoice', text:'Here\u2019s my scheduling invoice for '+periodLabel+'.' });
+      return;
+    }
+  }catch(e){ if(e && e.name==='AbortError') return; }
+  downloadDispatchInvoice(start, end);
+}
 function downloadReceiptDocument(id){
   // Receipts are part of the paid Income/tips bundle.
   if(!_receiptAccessOrUpgrade()) return;
@@ -11740,14 +12233,27 @@ async function cancelRide(id){
     showToast('Only the client\u2019s owner can cancel this ride','error'); return;
   }
   const _feeAmt=Math.round((r.price||0)*cancelFeePct()/100);
+  // Only offer a fee if the confirmation text has actually gone out - the policy itself says
+  // "canceling AFTER the confirmation text" results in a fee, so offering it before that point
+  // contradicts what the client was actually told. r.confirmSentAt is the real, currently-
+  // maintained field for this - deliberately not _rideIsConfirmed() (the Confirmed status pill),
+  // which is a different concept and could be true without the text ever having been sent.
+  // r.confirmed is a dead legacy boolean nothing else reads (see that function's own note).
+  const _wasConfirmed = !!r.confirmSentAt;
   const _choice=await showConfirmModal({
     icon:'\uD83D\uDEAB', iconColor:'#f0997b', iconBg:'#3a1a1a',
     title:'Cancel this ride?',
-    message:(r.client||'This client')+(r.date?' \u2014 '+fmtDateShort(r.date):'')+(r.time?' at '+fmtTime12(r.time):'')+'. Choose whether to charge a cancellation fee.',
-    buttons:[
+    message:(r.client||'This client')+(r.date?' \u2014 '+fmtDateShort(r.date):'')+(r.time?' at '+fmtTime12(r.time):'')
+      +(_wasConfirmed
+        ? '. Choose whether to charge a cancellation fee.'
+        : '. No confirmation text has been sent yet, so no cancellation fee applies.'),
+    buttons: _wasConfirmed ? [
       {label:'Keep ride', style:'neutral', value:'keep'},
       {label:'Cancel \u2014 no fee', style:'warn', value:'nofee'},
       {label:'Cancel + 50% fee ($'+_feeAmt+')', style:'danger', value:'fee'}
+    ] : [
+      {label:'Keep ride', style:'neutral', value:'keep'},
+      {label:'Cancel ride', style:'warn', value:'nofee'}
     ]
   });
   if(_choice==='keep'||_choice===null) return;
@@ -11792,7 +12298,6 @@ function editTypeChanged(){
   var _ehl=document.getElementById('edit-home-label'); if(_ehl) _ehl.textContent='Destination';
   var _isAP=(t==='AP RUN'||t==='AP PICK UP'||t==='AP ROUND TRIP');
   applyAirportFieldVisibility('edit');
-  var _emhg=document.getElementById('edit-med-hours-group'); if(_emhg) _emhg.style.display=(t==='MEDICAL')?'block':'none';
 }
 
 function toggleEditMode(on){
@@ -11897,8 +12402,6 @@ function toggleEditMode(on){
   }
   document.getElementById('edit-type').value     = r.type||'AP RUN';
   editTypeChanged(); // refresh address labels + return-trip section now that type is set
-  window._editMedExtras = Math.max(0,(r.price||0) - (r.medHours||0)*waitRate());
-  var _emh0=document.getElementById('edit-med-hours'); if(_emh0) _emh0.value = r.medHours||'';
   document.getElementById('edit-pickup').value   = r.pickup||'';
   var _egc=document.getElementById('edit-gate-code'); if(_egc) _egc.value = r.gateCode||'';
   var _epv=document.getElementById('edit-private'); if(_epv) _epv.checked = !!r.private;
@@ -11955,7 +12458,6 @@ async function saveRideEdits(){
     price2:   parseFloat(document.getElementById('edit-price2')?.value)||0,
   } : null;
   r.type      = document.getElementById('edit-type').value;
-  r.medHours  = parseFloat((document.getElementById('edit-med-hours')||{}).value)||0;
   r.pickup    = document.getElementById('edit-pickup').value.trim();
   r.gateCode  = document.getElementById('edit-gate-code')?.value.trim()||'';
   r.private   = !!document.getElementById('edit-private')?.checked;
@@ -14248,14 +14750,14 @@ function _computeFeeRebuild(r){
   const on   = v => v==='Y' || v===true;
   const miles = parseFloat(r.miles)||0;
   // Was: always the AP-style "flat base rate (incl. X mi)" formula, applied to every ride
-  // type — including ONE WAY, LOCAL, ROUND TRIP, and MEDICAL, none of which actually price
+  // type — including ONE WAY, LOCAL, and ROUND TRIP, none of which actually price
   // that way. calcQuote() already gets these right via tripMath(), the shared pricing core
   // ("so Add a Ride can't disagree") — this just wasn't using it, so any ride NOT priced with
   // a flat base rate showed a real, correct price with no matching formula to explain it, and
   // the whole difference surfaced as a phantom "Manual adjustment" nobody actually made.
   // Reusing tripMath() here means this can never drift from the original quote formula again,
   // for any type, the same guarantee calcQuote() already had.
-  const tm = tripMath(r.type, veh, miles, parseFloat(r.medHours)||0);
+  const tm = tripMath(r.type, veh, miles, 0);
   const rows = [];
   let sub;
   if(tm.rtType || tm.owType || tm.lcType){
@@ -14266,12 +14768,6 @@ function _computeFeeRebuild(r){
     });
     rows.push({label:'Pickup/Drop-off fee', val: tm.serviceFee, add:false});
     if(tm.vehUp>0) rows.push({label:`Vehicle upcharge (${veh})`, val: tm.vehUp, add:true});
-    sub = tm.tripTotal;
-  } else if(tm.medType){
-    rows.push({
-      label: tm.medHours>0 ? `Medical transport (${tm.medHours}h \u00d7 $${waitRate()}/hr)` : 'Medical transport',
-      val: tm.medBase, add:false
-    });
     sub = tm.tripTotal;
   } else {
     // AP types (and anything else) - flat base rate + mileage overage past the included
@@ -16215,7 +16711,7 @@ function openQuickAddModal(){
   // could carry over onto an unrelated new one, including keeping the round-trip-only sections
   // (qa-rt-section, qa-rt-first-section) visible for a ride that isn't a round trip at all.
   // Reset to the default (AP Run) and re-run qaTypeChanged() so everything depending on type -
-  // section visibility, labels, medical-hours field - re-applies correctly for a fresh ride.
+  // section visibility, labels - re-applies correctly for a fresh ride.
   const qtEl=document.getElementById('qa-type'); if(qtEl) qtEl.value='AP RUN';
   try{ qaTypeChanged(); }catch(e){}
   renderQaAddons(); recalcQa();
@@ -16278,7 +16774,7 @@ function checkQaClientOwnership(){
       +'<button onclick="requestClientFromWarning(\''+escHtml(cName)+'\')" style="margin-left:.35rem;padding:2px 10px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer;">\uD83D\uDD17 Request this client \u2192</button>';
   } else { wEl.style.display='none'; }
 }
-function offerSaveDefaultAddress(clientName,newAddr){
+function offerSaveDefaultAddress(clientName,newAddr,ride){
   var ov=document.createElement("div");
   ov.style.cssText="position:fixed;inset:0;background:rgba(20,8,40,.8);z-index:14000;display:flex;align-items:center;justify-content:center;padding:1rem;";
   var first=(clientName.trim().split(" ")[0])||clientName;
@@ -16326,7 +16822,10 @@ function offerSaveDefaultAddress(clientName,newAddr){
       }
     }
     document.body.removeChild(ov);
-    showPolicyTextPrompt(clientName,"");
+    // BUG FIX, found while threading the ride object through for the new trip-detail
+    // content: this call never passed date/time/price at all, even before today - a
+    // pre-existing gap in this specific branch only, now fixed alongside adding ride.
+    showPolicyTextPrompt(clientName, "", ride&&ride.date, ride&&ride.time, ride&&ride.price, ride);
   };
   document.getElementById("_addr-yes").onclick=function(){_close(true);};
   document.getElementById("_addr-no").onclick=function(){_close(false);};
@@ -16359,7 +16858,7 @@ function closeQuickAddModal(){
 // before it calls closeQuickAddModal, so wiping the form here is safe on the save path too.
 function resetQuickAddForm(){
   ['qa-client','qa-phone','qa-email','qa-pickup','qa-home','qa-flight','qa-notes',
-   'qa-date','qa-time','qa-rt-flight','qa-med-hours'].forEach(function(id){
+   'qa-date','qa-time','qa-rt-flight'].forEach(function(id){
     var el=document.getElementById(id); if(el) el.value='';
   });
   // Stop rows don't clear themselves the way a plain input does - a leftover row from the ride
@@ -16496,12 +16995,10 @@ function recalcQa(){
   }
   const qaType =document.getElementById('qa-type')?document.getElementById('qa-type').value:'';
   const qaMiles=parseFloat((document.getElementById('qa-miles-hidden')||{}).value)||0;
-  const medHrs =parseFloat(document.getElementById('qa-med-hours')?.value)||0;
   // Identical pricing core to the Quote calculator — see tripMath(). This handles the
-  // mileage-priced types (ONE WAY / ROUND TRIP / LOCAL), hourly medical transport, the
-  // Sprinter's airport-vs-hourly split, and the AP-round-trip leg multiplier, none of
-  // which this form used to account for.
-  const tm=tripMath(qaType, veh, qaMiles, medHrs);
+  // mileage-priced types (ONE WAY / ROUND TRIP / LOCAL), the Sprinter's airport-vs-hourly
+  // split, and the AP-round-trip leg multiplier, none of which this form used to account for.
+  const tm=tripMath(qaType, veh, qaMiles, 0);
   const base=tm.base;
   if(veh==='Sprinter Van' && !base && tm.apType){
     const pNote2=document.getElementById('qa-price-note');
@@ -17319,8 +17816,7 @@ function _addrListFor(prefix){ return _clientAddrListByKey(_addrClientKey(prefix
 // Destination IS the venue for those types, and mileage bills as the distance between the two, so
 // an accidental match means the trip is charged for zero miles. AP types are exempt (home vs.
 // airport are never expected to coincide, so equal addresses there would already be a different,
-// more obvious problem) and so is MEDICAL (a same-address round trip - wait at the same facility -
-// is a plausible real booking). A warning, not a hard block: the rare deliberate case (a driver
+// more obvious problem). A warning, not a hard block: the rare deliberate case (a driver
 // literally waiting at one spot) still needs a way through.
 async function _confirmIfSameAddress(prefix){
   var type=(document.getElementById(prefix+'-type')||{}).value||'';
@@ -17357,7 +17853,7 @@ function qaHomeAddressChanged(){
   // Keep the filled field in sync if they keep typing after already checking the box.
   if((document.getElementById('qa-home-addr-cb')||{}).checked){ qaHomeAddrCheckboxChanged(); }
 }
-// Type-aware: home applies to PICKUP for AP RUN/ONE WAY/ROUND TRIP/MEDICAL (client starts from
+// Type-aware: home applies to PICKUP for AP RUN/ONE WAY/ROUND TRIP (client starts from
 // home), but to DESTINATION for AP PICK UP specifically (client is dropped off at home after
 // landing). Re-run on every type change so the label/target stay correct if the driver picks a
 // type after already entering a home address, not just the first time.
@@ -17478,7 +17974,7 @@ function _gatherQaRide(client, qaType){
     terminal:document.getElementById('qa-terminal').value,
     notes:   document.getElementById('qa-notes').value.trim(),
     miles:parseFloat((document.getElementById('qa-miles-hidden')||{}).value)||0,pax:parseInt(document.getElementById('qa-pax')?.value)||1,checkedBags:parseInt(document.getElementById('qa-checked-bags')?.value)||0,carryOnBags:parseInt(document.getElementById('qa-carryon-bags')?.value)||0,rt:'',email:document.getElementById('qa-email')?document.getElementById('qa-email').value.trim():'',
-    holiday:qaAddonState.holiday?'Y':'N',christmas:qaAddonState.christmas?'Y':'N',late:qaAddonState.late?'Y':'N',premium:qaAddonState.premium?'Y':'N',fuel:qaAddonState.fuel?'Y':'N',xstop:stopRows('qa').length,xstopAddr:getStopAddresses('qa').join('; '),traffic:qaAddonState.traffic?'Y':'N',...Object.fromEntries(customSurchargeList().map(function(c){return [c.key, qaAddonState[c.key]?'Y':'N'];})),rtDateAP:document.getElementById('qa-rt-date')?.value||'',rtTime:document.getElementById('qa-rt-time')?.value||'',...Object.fromEntries(Object.keys(qaAddonStateLeg2).map(function(k){return ['rt_'+k, qaAddonStateLeg2[k]?'Y':'N'];})),wait:parseFloat(document.getElementById('qa-wait')?.value)||0,medHours:parseFloat(document.getElementById('qa-med-hours')?.value)||0,
+    holiday:qaAddonState.holiday?'Y':'N',christmas:qaAddonState.christmas?'Y':'N',late:qaAddonState.late?'Y':'N',premium:qaAddonState.premium?'Y':'N',fuel:qaAddonState.fuel?'Y':'N',xstop:stopRows('qa').length,xstopAddr:getStopAddresses('qa').join('; '),traffic:qaAddonState.traffic?'Y':'N',...Object.fromEntries(customSurchargeList().map(function(c){return [c.key, qaAddonState[c.key]?'Y':'N'];})),rtDateAP:document.getElementById('qa-rt-date')?.value||'',rtTime:document.getElementById('qa-rt-time')?.value||'',...Object.fromEntries(Object.keys(qaAddonStateLeg2).map(function(k){return ['rt_'+k, qaAddonStateLeg2[k]?'Y':'N'];})),wait:parseFloat(document.getElementById('qa-wait')?.value)||0,
     confirmed:false, createdBy:currentUser?.name||'',
     newClient: !!(document.getElementById('qa-new-client')?.checked),
   };
@@ -17645,8 +18141,8 @@ async function saveQuickAddRide(){
   if(_driverNeedsOverride) await sendAvailOverrideRequest(ride, currentUser?.name||'');
   const _usedAddr = ride.type==='AP PICK UP' ? (ride.home||'') : (ride.pickup||'');
   if(_usedAddr && typeof _qaAutofilledData!=='undefined' && _qaAutofilledData.client && _qaAutofilledData.client.toLowerCase()===client.toLowerCase() && _usedAddr!==_qaAutofilledData.addr){
-    offerSaveDefaultAddress(client, _usedAddr);
-  } else { showPolicyTextPrompt(client, ride.phone, ride.date, ride.time, ride.price); }
+    offerSaveDefaultAddress(client, _usedAddr, ride);
+  } else { showPolicyTextPrompt(client, ride.phone, ride.date, ride.time, ride.price, ride); }
   if(typeof _qaAutofilledData!=='undefined') _qaAutofilledData={addr:'',phone:'',client:'',prefix:''};
 }
 
@@ -17681,9 +18177,141 @@ async function _saveOwnMsgEditor(){
   var b=document.getElementById('own-msg-back'); if(b) b.remove();
   showToast('\u2713 Saved your own-client message set');
 }
+// Resolves To:/From: for the scheduling message's trip-details block, per ride type. r.pickup
+// and r.home already hold the client's true pickup/dropoff regardless of type (same
+// established fact buildConfirmationText's own start/dest already rely on) - this just decides
+// which one is labelled To vs From, and swaps in the terminal on whichever side is the airport.
+//
+// BUG FIX: this originally built the terminal phrase from the raw r.terminal field value
+// directly ("South Domestic" + " Terminal" = "South Domestic Terminal"), which does not match
+// what was actually shown in the mockup and approved ("Hartsfield-Jackson International (South
+// Terminal)"). Uses _terminalPhrase() instead - the same already-proven North/South/
+// International mapping used elsewhere in this file - rather than the raw stored value.
+function _schedulingToFrom(r){
+  var terminalVal = (r.terminal||'').trim();
+  var termPhrase = terminalVal
+    ? 'Hartsfield-Jackson International ('+_terminalPhrase(terminalVal)+')'
+    : 'Hartsfield-Jackson International Airport';
+  var start = (r.pickup||'').trim();
+  var dest = (r.home||'').trim();
+  if(r.type==='AP RUN' || r.type==='AP ROUND TRIP'){
+    // AP ROUND TRIP is purely a booking convenience (this session's own standing note) - a
+    // still-combined record defaults to its outbound (AP Run) shape.
+    return { to: termPhrase, from: start || 'your address' };
+  }
+  if(r.type==='AP PICK UP'){
+    return { to: dest || 'your address', from: termPhrase };
+  }
+  // ONE WAY / ROUND TRIP - no airport involved, straightforward pickup -> dropoff.
+  return { to: dest || 'your address', from: start || 'your address' };
+}
+// Which side of a leg is the client's real (non-airport) address - type-agnostic on purpose.
+// An AP Round Trip's first leg can genuinely be either AP RUN or AP PICK UP depending on how
+// it was booked (ride.rtFirstLeg) - there's no fixed "outbound is always AP Run" assumption
+// anywhere else in this app, so this can't make one either.
+function _schedulingHomeSideAddr(legRide){
+  var tf = _schedulingToFrom(legRide);
+  return legRide.type==='AP PICK UP' ? tf.to : tf.from;
+}
+// Finds the OTHER leg of a genuine AP Round Trip pair. Deliberately excludes xxlPair records -
+// a pairId can mean either kind of pair in this app, and this function only ever wants the
+// round-trip kind. Same lookup shape as _xxlPairInfo() (proven earlier this session), adapted
+// for the other pair type it was always meant to eventually cover.
+function _schedulingRoundTripMate(r){
+  if(!r || !r.pairId || r.xxlPair) return null;
+  return (typeof rides!=='undefined' ? rides : []).find(function(x){
+    return x && x.id!==r.id && x.pairId===r.pairId && !x.xxlPair;
+  }) || null;
+}
+// The full Trip Details block - date(s), time(s), transportation line(s), and the total. Single
+// function rather than several small placeholders because the STRUCTURE genuinely differs by
+// ride type, not just the values: a split AP Round Trip needs two dated sub-blocks and an
+// address-mismatch check across them; a plain (non-AP) Round Trip needs one date with a
+// pickup AND a return time; everything else needs one date, one time. Trying to force all
+// three shapes through the same flat set of placeholders was the wrong instinct - this returns
+// the whole block instead, and the template holds exactly one {tripDetails} placeholder for it.
+//
+// Cost breakdown itself was simplified to a bare total, per direct instruction - the itemized
+// version (base rate, fuel, surcharges) that used to live here is gone; buildRideBreakdown() is
+// still used for the TOTAL specifically, so it can never disagree with what's actually charged,
+// it just isn't broken out line by line here any more.
+function _schedulingTripDetailsText(r){
+  if(!r) return '';
+  var mate = _schedulingRoundTripMate(r);
+
+  if(mate){
+    // Genuine, still-distinguishable AP Round Trip pair. Ordered by id, matching the same
+    // "lower id came first" convention _xxlPairInfo() already established for pairs generally.
+    var outbound = r.id < mate.id ? r : mate;
+    var ret = r.id < mate.id ? mate : r;
+    var outTF = _schedulingToFrom(outbound), retTF = _schedulingToFrom(ret);
+    var outFlight = (outbound.type==='AP PICK UP' && outbound.flight) ? ' ('+outbound.flight+')' : '';
+    var retFlight = (ret.type==='AP PICK UP' && ret.flight) ? ' ('+ret.flight+')' : '';
+    var addrDiffers = _schedulingHomeSideAddr(outbound).trim().toLowerCase() !== _schedulingHomeSideAddr(ret).trim().toLowerCase();
+    var total = (parseFloat(outbound.price)||0) + (parseFloat(ret.price)||0);
+    var lines = [];
+    lines.push('Outbound: '+fmtDateShort(outbound.date)+', '+fmtTime12(outbound.time)+outFlight);
+    lines.push('\uD83D\uDE97 Transportation between '+outTF.from+' and '+outTF.to);
+    lines.push('');
+    lines.push('Return: '+fmtDateShort(ret.date)+', '+fmtTime12(ret.time)+retFlight);
+    lines.push('\uD83D\uDE97 Transportation between '+retTF.from+' and '+retTF.to);
+    if(addrDiffers){
+      lines.push('\u26A0\uFE0F Note: your return address is different from your outbound address \u2014 please confirm this is correct.');
+    }
+    lines.push('');
+    lines.push('\uD83D\uDCB0 Total: $'+total.toFixed(0)+' (Gratuity not included but always appreciated)');
+    return lines.join('\n');
+  }
+
+  if(r.type==='ROUND TRIP' && r.rt){
+    // Plain (non-AP) round trip - one date, pickup time AND return time, same day.
+    var tf1 = _schedulingToFrom(r);
+    var lines1 = [];
+    lines1.push('\uD83D\uDCC5 Pickup Date: '+fmtDateShort(r.date));
+    lines1.push('\u23F0 Pickup Time: '+fmtTime12(r.time)+' \u2014 Return Time: '+fmtTime12(r.rt));
+    lines1.push('');
+    lines1.push('\uD83D\uDE97 Transportation between '+tf1.from+' and '+tf1.to);
+    lines1.push('');
+    lines1.push('\uD83D\uDCB0 Total: $'+(parseFloat(r.price)||0).toFixed(0)+' (Gratuity not included but always appreciated)');
+    return lines1.join('\n');
+  }
+
+  // Single-leg: ONE WAY, AP RUN, AP PICK UP, or an AP ROUND TRIP whose mate wasn't
+  // found (shouldn't normally happen post-split, but degrades to this rather than crashing).
+  var tf2 = _schedulingToFrom(r);
+  var flight2 = (r.type==='AP PICK UP' && r.flight) ? ' ('+r.flight+')' : '';
+  var lines2 = [];
+  lines2.push('\uD83D\uDCC5 Pickup Date: '+fmtDateShort(r.date));
+  lines2.push('\u23F0 Pickup Time: '+fmtTime12(r.time)+flight2);
+  lines2.push('');
+  lines2.push('\uD83D\uDE97 Transportation between '+tf2.from+' and '+tf2.to);
+  lines2.push('');
+  lines2.push('\uD83D\uDCB0 Total: $'+(parseFloat(r.price)||0).toFixed(0)+' (Gratuity not included but always appreciated)');
+  return lines2.join('\n');
+}
+// Extended directly per Chase's own supplied wording - the existing policy bullets (which
+// this scheduling message has always led with) are KEPT AS-IS, not replaced. A real trip-detail
+// block is added ahead of them via the single {tripDetails} placeholder (see
+// _schedulingTripDetailsText) - its exact shape now varies by ride type (a split AP Round Trip
+// gets two dated sub-blocks with an address-mismatch check; a plain Round Trip gets a pickup
+// AND return time; everything else gets one date/time), which a flat set of placeholders
+// couldn't represent. Per direct instruction, the itemized cost breakdown was replaced with
+// just the total, and the message trimmed: "final" no longer said twice (only in the opening
+// line now, not the 7:30 PM reminder too), and the two closing sentences that said almost the
+// same thing in different voices were merged into one.
+//
+// The standalone "Confirmation" bullet below was removed on a direct follow-up (Option B of
+// two offered): the opening line already states the day-before-confirmation fact, so the
+// bullet was saying the identical thing a second time in a different voice, four lines later.
+// Changes/Cancellations/Card Payments stay exactly as they were - only the one redundant bullet
+// is gone.
 function _defaultPolicyTpl(){
-  return 'Hi {name},\n\nI have your ride scheduled for {date} at {time}.\n\n'
-    +'\u2022 Confirmation: We\u2019ll text you a confirmation the day before your trip.\n'
+  return 'Your Ride is Scheduled\n\n'
+    +'I have you scheduled for your upcoming trip. You will receive a final confirmation the day before your scheduled ride.\n\n'
+    +'Trip Details:\n\n'
+    +'{tripDetails}\n\n'
+    +'If you have not received your confirmation by 7:30 PM the evening before your trip, please contact {driver} at {phone}.\n\n'
+    +'Please read through the details above and reply confirming everything\u2019s accurate \u2014 a \uD83D\uDC4D works fine.\n\n'
     +'\u2022 Changes: Any changes to travel date or time after the confirmation text will incur a {changeFee} fee (except for emergencies/acts of God).\n'
     +'\u2022 Cancellations: Canceling after the confirmation text will result in a fee of {cancelFee}.\n'
     +'\u2022 Card Payments: A processing fee will be applied to any credit or debit card payments \u2014 cash and other methods have no added fee.\n\n'
@@ -17758,7 +18386,13 @@ async function _clearSchedulingField(){
   await _saveSchedulingField();
   renderMessageTemplates();
 }
-function policyTextMessage(firstName, rideDate, rideTime, ridePrice){
+// `ride` is a new, OPTIONAL 5th parameter - deliberately added at the end rather than
+// reordering the existing four, so every call site that hasn't been updated yet still works
+// exactly as before (just without the new {to}/{from}/{breakdown}/{flight} placeholders filled
+// in). Threaded through from every real call site below where a ride object is actually
+// available - only offerSaveDefaultAddress's own internal call didn't have one in scope before
+// this, and now does.
+function policyTextMessage(firstName, rideDate, rideTime, ridePrice, ride){
   const cancelFee = ridePrice ? cancelFeePct()+'% of the $'+ridePrice+' fare' : cancelFeePct()+'% of the fare';
   // Personal (currentUser - whoever's actively booking right now, not a resolved ride owner,
   // since a scheduling message is sent live by whoever's creating this specific booking) ->
@@ -17775,11 +18409,17 @@ function policyTextMessage(firstName, rideDate, rideTime, ridePrice){
     || HARDCODED_MSG_DEFAULTS.scheduling;
   var _dt2=(rideDate&&typeof fmtDateShort==='function')?fmtDateShort(rideDate):(rideDate||'');
   var _tm2=(rideTime&&typeof fmtTime12==='function')?fmtTime12(rideTime):(rideTime||'');
+  // Single new placeholder, replacing the earlier {to}/{from}/{breakdown}/{flight} set from
+  // moments ago in this same session - those assumed one fixed shape, which stopped being true
+  // the moment AP Round Trip and plain Round Trip needed genuinely different structures, not
+  // just different values in the same slots. Still only meaningful when a real ride was passed.
+  var _tripDetails = ride ? _schedulingTripDetailsText(ride) : '';
   return _tpl
     .replace(/\{name\}/g,firstName||'').replace(/\{date\}/g,_dt2).replace(/\{time\}/g,_tm2)
     .replace(/\{amount\}/g,ridePrice?'$'+ridePrice:'').replace(/\{cancelFee\}/g,cancelFee)
     .replace(/\{changeFee\}/g,'$'+changeFeeAmt())
-    .replace(/\{driver\}/g,getMyDriverName()||'').replace(/\{phone\}/g,(DRIVER_PROFILES[getMyDriverName()||'']||{}).phone||'');
+    .replace(/\{driver\}/g,getMyDriverName()||'').replace(/\{phone\}/g,(DRIVER_PROFILES[getMyDriverName()||'']||{}).phone||'')
+    .replace(/\{tripDetails\}/g,_tripDetails);
 }
 function clearQuoteForm(){
   _fuelUserTouched = false; // fresh quote — let fuel default on again (until the driver chooses otherwise)
@@ -17806,7 +18446,10 @@ function showQuoteBookingFlow(ride){
   back.setAttribute('data-qbf','1');
   back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.7);z-index:13000;display:flex;align-items:center;justify-content:center;padding:1rem;';
   function step1(){
-    const policyMsg=policyTextMessage(first);
+    // BUG FIX (found while threading ride through for the new trip-detail content): this
+    // never passed date/time/price/ride at all - a third pre-existing gap in this same
+    // family, alongside the two already fixed above.
+    const policyMsg=policyTextMessage(first, ride.date, ride.time, ride.price, ride);
     const hasPh=!!String(ride.phone||'').replace(/[^0-9+]/g,'');
     back.innerHTML='<div style="background:var(--white);border-radius:16px;max-width:400px;width:100%;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
       +'<div style="font-size:1.05rem;font-weight:700;color:var(--black);margin-bottom:.3rem;">\u2705 Ride Saved \u2014 '+escHtml(client)+'</div>'
@@ -17818,7 +18461,7 @@ function showQuoteBookingFlow(ride){
       +'</div></div>';
     document.body.appendChild(back);
     const pSend=document.getElementById('qbf-pol-send');
-    if(pSend) pSend.addEventListener('click',function(){ sendPolicyText(ride.phone, first); step2(); });
+    if(pSend) pSend.addEventListener('click',function(){ sendPolicyText(ride.phone, first, ride.date, ride.time, ride.price, ride); step2(); });
     document.getElementById('qbf-pol-skip').addEventListener('click', step2);
   }
   function step2(){
@@ -17845,18 +18488,18 @@ function showQuoteBookingFlow(ride){
   }
   step1();
 }
-function sendPolicyText(phone, firstName, rideDate, rideTime, ridePrice){
+function sendPolicyText(phone, firstName, rideDate, rideTime, ridePrice, ride){
   const num=String(phone||'').replace(/[^0-9+]/g,'');
   if(!num){ showToast('No phone number on file for this client','error'); return; }
-  const body=policyTextMessage(firstName, rideDate, rideTime, ridePrice);
+  const body=policyTextMessage(firstName, rideDate, rideTime, ridePrice, ride);
   const isiOS=/iPad|iPhone|iPod/.test(navigator.userAgent||'');
   window.location.href='sms:'+num+(isiOS?'&':'?')+'body='+encodeURIComponent(body);
 }
-function showPolicyTextPrompt(clientName, phone, rideDate, rideTime, ridePrice){
+function showPolicyTextPrompt(clientName, phone, rideDate, rideTime, ridePrice, ride){
   if(!confirmTextGate()) return;
   const first=(String(clientName||'').trim().split(' ')[0])||'';
   const hasPhone=!!String(phone||'').replace(/[^0-9+]/g,'');
-  const preview=policyTextMessage(first, rideDate, rideTime, ridePrice);
+  const preview=policyTextMessage(first, rideDate, rideTime, ridePrice, ride);
   const back=document.createElement('div');
   back.setAttribute('data-policy-modal','1');
   back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13000;display:flex;align-items:center;justify-content:center;padding:1rem;';
@@ -17876,7 +18519,7 @@ function showPolicyTextPrompt(clientName, phone, rideDate, rideTime, ridePrice){
     +'</div>';
   document.body.appendChild(back);
   const b=document.getElementById('policy-send-btn');
-  if(b) b.addEventListener('click',function(){ sendPolicyText(phone, first, rideDate, rideTime, ridePrice); back.remove(); });
+  if(b) b.addEventListener('click',function(){ sendPolicyText(phone, first, rideDate, rideTime, ridePrice, ride); back.remove(); });
 }
 
 async function assignDriver(){
@@ -18014,6 +18657,12 @@ function refreshDash(){
 
   // Anything that didn't actually save yet - the single most urgent thing to surface
   try{ renderDashSaveFailed(); }catch(e){}
+
+  // Rides scheduled but not yet announced to their driver - previously Calendar-only, added
+  // here directly on request. A driver otherwise finds out only via the confirmation text the
+  // night before, with no automatic fallback in between - this needed to be somewhere more
+  // likely to actually be seen day to day than a page someone might not open until later.
+  try{ renderDashFinalizeTomorrow(); }catch(e){}
 
   // No server-side timer in this architecture - this is the closest thing to one: catches
   // up any ride whose hour has quietly elapsed since the last time anything checked.
@@ -18220,12 +18869,18 @@ function refreshDash(){
 // Free for everyone: marking a ride paid / recording how the client paid is a core action.
 // Only shows for whoever actually has something pending to release - disappears the moment
 // they've done it, same "gone once its job is done" pattern the dashboard's own action-block
-// banners already follow. Lives on the Calendar page - the client owner is naturally looking
-// right here when reviewing and settling the schedule anyway. This is the OWNER's button
-// (whoever scheduled the ride), not the driver's - see myPendingNotifyCount/
-// notifyMyAssignedDrivers above for why.
-function renderCalFinalizeTomorrow(){
-  var box=document.getElementById('cal-finalize-tomorrow'); if(!box) return;
+// banners already follow. This is the OWNER's button (whoever scheduled the ride, generically -
+// Chase gets this for HIS OWN scheduled rides exactly the same way Kat/Morgan do, since
+// myPendingNotifyCount()/notifyMyAssignedDrivers() key off isMyScheduledRide(), never a
+// hardcoded name), not the driver's - see those two functions above for why.
+//
+// Shared render, two homes: Calendar (the original) and Dashboard (added directly on request -
+// someone busy enough to forget this is more likely checking their dashboard day to day than
+// actively reviewing the calendar, so the same reminder needed to be somewhere more likely to
+// actually be seen). Same _renderKmInto(boxId) pattern already used for the Kat-Morgan card,
+// which has the identical two-pages-one-render shape - not a second copy of the banner HTML.
+function _renderFinalizeTomorrowInto(boxId){
+  var box=document.getElementById(boxId); if(!box) return;
   var count = myPendingNotifyCount();
   if(!count){ box.innerHTML=''; return; }
   box.innerHTML='<div style="background:#eef2ff;border:1.5px solid #c7d2fe;border-radius:12px;padding:1rem;margin-bottom:.75rem;">'
@@ -18236,6 +18891,22 @@ function renderCalFinalizeTomorrow(){
     +'<div style="font-size:.75rem;color:var(--mid);line-height:1.45;">You\u2019ve scheduled '+count+' ride'+(count===1?'':'s')+' that '+(count===1?'hasn\u2019t':'haven\u2019t')+' been announced yet \u2014 tap Notify Drivers once it\u2019s set, and whoever\u2019s currently assigned finds out.</div>'
     +'</div>';
 }
+// Shown every time the Calendar page opens, until dismissed for good. Direct follow-up to
+// walking back the color-hiding behavior (see rideColor()'s own note): since colors now show
+// real-time for everyone, including a just-made assignment still awaiting Notify Drivers, this
+// is the explicit warning that replaces that hiding - a color on the calendar isn't the same
+// thing as an actual notification having gone out. Uses the exact same isUiDismissed/
+// setUiDismissed mechanism already established for the miles-explain banner, not a new one.
+function renderCalNotFinalBanner(){
+  var box=document.getElementById('cal-not-final-banner'); if(!box) return;
+  if(isUiDismissed('cal-not-final')){ box.innerHTML=''; return; }
+  box.innerHTML='<div id="cal-not-final-inner" style="background:#fff7ed;border:1.5px solid #fdba74;border-radius:12px;padding:.85rem 1rem;margin-bottom:.75rem;display:flex;align-items:flex-start;gap:.6rem;justify-content:space-between;">'
+    +'<div style="font-size:.8rem;color:#9a3412;line-height:1.5;">\u26a0\ufe0f Calendar is not final until you are notified that a ride has been assigned to you.</div>'
+    +'<button onclick="setUiDismissed(\'cal-not-final\');document.getElementById(\'cal-not-final-banner\').innerHTML=\'\';" style="flex-shrink:0;background:none;border:1.5px solid #fdba74;color:#9a3412;border-radius:7px;padding:.3rem .65rem;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;">Dismiss</button>'
+    +'</div>';
+}
+function renderCalFinalizeTomorrow(){ _renderFinalizeTomorrowInto('cal-finalize-tomorrow'); }
+function renderDashFinalizeTomorrow(){ _renderFinalizeTomorrowInto('dash-finalize-tomorrow'); }
 // A ride marked awaiting-invoice is NOT an oversight - it's been deliberately closed out and
 // is sitting waiting on the client to pay the invoice. It has its own "Invoice Paid" action
 // on the dashboard card. Reported directly: these were padding the wrap-up list and, worse,
@@ -18515,7 +19186,7 @@ async function venmoAutoMarkRide(owner, payer, rideId){
 function _feeIdArg(id){
   return (typeof id==='number'&&isFinite(id)) ? String(id) : "'"+String(id).replace(/\\/g,'\\\\').replace(/'/g,"\\'")+"'";
 }
-function _tripTypeLabel(t){ var m={'AP ROUND TRIP':'AP Round Trip','AP RUN':'AP Run','AP PICK UP':'AP Pick Up','ROUND TRIP':'Round Trip','ONE WAY':'One Way','MEDICAL':'Medical Transport'}; return m[t]||t||''; }
+function _tripTypeLabel(t){ var m={'AP ROUND TRIP':'AP Round Trip','AP RUN':'AP Run','AP PICK UP':'AP Pick Up','ROUND TRIP':'Round Trip','ONE WAY':'One Way'}; return m[t]||t||''; }
 function _venmoRideNote(r){ if(!r) return ''; var d=''; if(r.date){ var p=String(r.date).split('-'); if(p.length===3) d=parseInt(p[1],10)+'/'+parseInt(p[2],10)+'/'+p[0]; } return [_tripTypeLabel(r.type), (r.client||''), d].filter(Boolean).join(' ').trim(); }
 function venmoPayRideBtn(ownerName, amount, payerDName, rideId){
   var _vr=(typeof rides!=='undefined')?rides.find(function(x){return String(x.id)===String(rideId);}):null;
@@ -20246,6 +20917,8 @@ const _TEMPLATE_FIELD_MAP = {
   driverchange: { global: 'defaultDriverChangeTemplate',  personal: 'driverChangeTemplate' },
   receiptshare: { global: 'defaultReceiptShareTemplate',  personal: 'receiptShareTemplate' },
   receiptclosing:{ global: 'defaultReceiptClosingLine',   personal: 'receiptClosingLine' },
+  quote:        { global: 'defaultQuoteTemplate',         personal: 'quoteTemplate' },
+  comparison:   { global: 'defaultComparisonTemplate',     personal: 'comparisonTemplate' },
 };
 // The actual hardcoded text each message falls back to when neither a driver's own
 // customization nor an admin default is set - pulled directly from the functions that
@@ -20266,6 +20939,8 @@ const HARDCODED_MSG_DEFAULTS = {
   // regardless of literal file order, so the function is already callable here. One source of
   // truth instead of two copies that could quietly drift apart.
   scheduling: _defaultPolicyTpl(),
+  quote: _defaultQuoteTpl(),
+  comparison: _defaultComparisonTpl(),
 };
 // Keys with NO genuine hardcoded default to copy from - the placeholder text for these is
 // purely an explanatory note (e.g. "no built-in default exists"), not real usable content,
@@ -20546,6 +21221,8 @@ function renderMessageTemplates(){
       + field('personal','driverchange', 'My driver-change notice', 'Sent to the client if you hand off one of your rides to another driver. Placeholders: {client} {date} {time} {driver} {phone}', myCustom.driverChangeTemplate, 5)
       + field('personal','receiptshare', 'My receipt share text', 'The message sent alongside a shared PDF receipt. Placeholders: {date}', myCustom.receiptShareTemplate, 3)
       + field('personal','receiptclosing', 'My receipt closing line', 'Just the closing line of the receipt itself \u2014 the rest (charges, totals, receipt number) is always computed and can\'t be edited here, for accuracy. Placeholders: {org}', myCustom.receiptClosingLine, 2)
+      + field('personal','quote', 'My quote message', 'Sent when you text a quote to a client from the Quote page. {quoteDetails} fills in the date, time, destination, pick-up location and pricing for you, and its shape adjusts automatically for round trips (two dated legs plus a combined total). Placeholders: {name} {business} {quoteDetails}', myCustom.quoteTemplate, 4)
+      + field('personal','comparison', 'My price comparison message', 'Sent when you text or email a multi-vehicle price comparison to a client from the Quote page. {comparisonDetails} lists the trip and every vehicle option with its price. Placeholders: {name} {business} {comparisonDetails}', myCustom.comparisonTemplate, 3)
       + (function(){
           // openPolicyEditor()/_savePolicyEditor() (still used by onboarding, unchanged) read and
           // write driverSettings[currentUser.name] (login name) - NOT myCustom above, which is
@@ -20579,7 +21256,7 @@ function renderMessageTemplates(){
           +(_polSet?'<button onclick="_clearSchedulingField()" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Clear (use default)</button>':'<button onclick="startFromDefault(\''+_polId+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Start from this default</button>')
           +'<button onclick="_saveSchedulingField().then(renderMessageTemplates)" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Save</button>'
           +'</div>'
-          +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">Sent the moment a ride is booked \u2014 includes your change &amp; cancellation policy. Placeholders: {name} {date} {time} {amount} {changeFee} {cancelFee} {driver} {phone}</div>'
+          +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">Sent the moment a ride is booked \u2014 includes trip details and your change &amp; cancellation policy. {tripDetails} fills in the date, time, addresses and total, and its shape adjusts automatically for round trips. Placeholders: {name} {date} {time} {amount} {changeFee} {cancelFee} {driver} {phone} {tripDetails}</div>'
           +'<textarea id="'+_polId+'" rows="6" placeholder="'+_polPlaceholder+'" data-default="'+escAttr(HARDCODED_MSG_DEFAULTS.scheduling)+'" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(_polCurrent||'')+'</textarea>'
           +'<div style="font-size:.66rem;color:var(--mid);margin-top:.35rem;line-height:1.4;">'+(_polSet?'This is your current wording, live and editable above. "Clear (use default)" empties this field and saves, switching back to whatever the app-wide default or built-in message provides.':'Shown above (grayed out, in the box) is the app\'s current built-in default \u2014 leave blank to keep using it, or tap "Start from this default" to copy it in and edit from there.')+'</div>'
           +'</div>'
@@ -23247,9 +23924,16 @@ function _incTypeFilterBarHTML(){
       +'background:'+(on?'#7c3aed':'none')+';color:'+(on?'#fff':'var(--mid)')+';'
       +'font-family:inherit;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;">'+escHtml(label)+'</button>';
   };
+  // "Dispatch" is Morgan-only - this is money SHE receives for scheduling, so the chip has no
+  // meaning on Kat's own income page (Kat's version of this money is an expense, already
+  // subtracted from her own net, not a category of income to filter TO). Chase asked directly
+  // for a dedicated, filterable dispatch view using the SAME week/month/year mechanism every
+  // other category on this page already has - not a second, separate picker.
+  var showDispatchChip = (typeof kmVisible==='function' && kmVisible() && typeof kmIsKat==='function' && !kmIsKat());
   return '<div style="display:flex;gap:.35rem;flex-wrap:wrap;align-items:center;margin-bottom:.6rem;">'
     +'<span style="font-size:.68rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-right:.15rem;">Show</span>'
     +chip('All Income','all')+chip('Rides Driven','rides')+chip('Fees','fees')
+    +(showDispatchChip?chip('Dispatch','dispatch'):'')
     +'</div>';
 }
 function _payFilterBarHTML(){
@@ -23480,7 +24164,14 @@ function renderIncome(){
     });
   }
   const netAfterVehicle  = totalEarnings - totalVehicleCost;
-  const netTakeHome    = totalEarnings + totalTips + totalFeesReceived - totalVehicleCost - totalFinderFees - proratedExp;
+  // Morgan's scheduling/dispatch pay from Kat, period-scoped to whatever range this page is
+  // currently showing (see kmScheduledPayForRange). Reported directly: this card already
+  // rendered on the income page, but its dollar amount was never actually counted toward
+  // Morgan's real income totals - she could see the number, it just didn't add up anywhere.
+  // Kat-only excluded on purpose: this is money Morgan RECEIVES, not an expense of Kat's to
+  // subtract from her own take-home.
+  const totalDispatchPay = (personalView && dName && kmVisible() && !kmIsKat()) ? kmScheduledPayForRange(start, end) : 0;
+  const netTakeHome    = totalEarnings + totalTips + totalFeesReceived + totalDispatchPay - totalVehicleCost - totalFinderFees - proratedExp;
 
   // Summary cards — show gas & maintenance prominently so they're never hidden below the fold
   // Consistent green for money made; costs shown as positive RED and labeled "… Cost".
@@ -23488,13 +24179,17 @@ function renderIncome(){
   // "All / Rides driven / Fees" filter — Chase asked to be able to see either income source
   // on its own, not just combined. showRides/showFees gate every card and breakdown row below;
   // when incTypeFilter is 'all' both are true and nothing changes from before this feature.
-  const showRides = incTypeFilter!=='fees';
-  const showFees  = incTypeFilter!=='rides';
+  const showRides = incTypeFilter!=='fees' && incTypeFilter!=='dispatch';
+  const showFees  = incTypeFilter!=='rides' && incTypeFilter!=='dispatch';
+  // Selecting 'dispatch' shows ONLY dispatch pay, same as 'rides'/'fees' each show only their
+  // own category - not a toggle layered on top of the others.
+  const showDispatch = incTypeFilter==='all' || incTypeFilter==='dispatch';
 
   const cards = [
     ...(showRides?[{label:'Gross Fares',  val:`$${totalEarnings.toFixed(2)}`, color:GREEN}]:[]),
     ...(showRides&&totalTips>0?[{label:'Tips',val:`$${totalTips.toFixed(2)}`,color:GREEN}]:[]),
     ...(showFees&&personalView&&totalFeesReceived>0?[{label:'Fees Received (15%)',val:`$${totalFeesReceived.toFixed(2)}`,color:GREEN}]:[]),
+    ...(showDispatch&&personalView&&totalDispatchPay>0?[{label:'Dispatch Pay (scheduling)',val:`$${totalDispatchPay.toFixed(2)}`,color:GREEN}]:[]),
     ...(showRides&&personalView&&totalGasCost>0?[{label:`Gas Cost (${gasCpm.toFixed(3)}/mi)`,val:`$${totalGasCost.toFixed(2)}`,color:REDCOST}]:[]),
     ...(showRides&&personalView&&totalMaintCost>0?[{label:`Maintenance Cost ($${maintCpm.toFixed(2)}/mi)`,val:`$${totalMaintCost.toFixed(2)}`,color:REDCOST}]:[]),
     ...(showFees&&personalView&&totalFinderFees>0?[{label:'Client Fees (15%)',val:`$${totalFinderFees.toFixed(2)}`,color:REDCOST}]:[]),
@@ -23515,16 +24210,28 @@ function renderIncome(){
   } else if(incTypeFilter==='fees'){
     displayedNet = totalFeesReceived - totalFinderFees;
     netLabel = 'Net Fees';
+  } else if(incTypeFilter==='dispatch'){
+    displayedNet = totalDispatchPay;
+    netLabel = 'Net Dispatch Pay';
   } else {
     displayedNet = netTakeHome;
     netLabel = 'Net Take-Home';
   }
   if(personalView && (
     (showRides && (totalVehicleCost > 0 || monthlyExp > 0)) ||
-    (showFees && (totalFeesReceived > 0 || totalFinderFees > 0))
+    (showFees && (totalFeesReceived > 0 || totalFinderFees > 0)) ||
+    (showDispatch && totalDispatchPay > 0)
   )){
     cards.push({label:netLabel, val: displayedNet>=0?`$${displayedNet.toFixed(2)}`:`−$${Math.abs(displayedNet).toFixed(2)}`, color: displayedNet>=0?GREEN:REDCOST, highlight:true});
   }
+
+  // v989's own "Invoice Kat for this period" button lived here, tied to whatever the income
+  // page's own Weekly/Monthly/Yearly tabs happened to show, and shared a document with no
+  // persistent record behind it. Removed outright per v990: Chase asked for a real, custom
+  // date range plus a trackable paid/received record - the Generate button now lives on the
+  // shared Kat-Morgan card itself (openDispatchInvoiceRangePicker), which creates a real
+  // dispatchInvoices record before ever sharing the document, so there's exactly one way to
+  // start an invoice rather than two that behave differently.
 
   // Per-ride breakdown table
   document.getElementById('income-summary-cards').innerHTML = cards.map(c=>`
@@ -24825,6 +25532,20 @@ let kmPaySettings = { mode:'flat', flat:5, pct:10 };
 let kmSettledRides = {};   // { rideId: true } — rides already paid for
 let kmExcludedRides = {};  // { rideId: true } — rides Morgan/Kat left OUT of the tally
 let kmPaymentLog = [];     // [{ at, amount, count }]
+// Persistent, per-invoice DUAL-APPROVAL records for Morgan's dispatch invoices to Kat.
+// Deliberately a separate structure from kmSettledRides/kmExcludedRides (which track
+// individual RIDES) - an invoice covers a whole custom date range as one document, and needs
+// its own lifecycle: generated -> Kat marks paid -> Morgan confirms received -> settled. Same
+// two-step confirmation feePayments already uses for the client-owner fee (see
+// venmoAutoMarkRide/markFeeRidePaid/_feeUndoRide) - copied directly, not reinvented, per
+// Chase's own explicit ask for "dual approval just like the client owner fee."
+//
+// status: 'sent' (generated, nothing paid yet) -> 'paid_pending' (Kat says she paid) ->
+// 'settled' (Morgan confirms received) - or 'paid_pending' can revert back to 'sent' if Morgan
+// taps "Not received", same escape hatch _feeUndoRide already gives the fee system.
+let dispatchInvoices = {}; // { invoiceId: {...} }
+async function saveDispatchInvoices(){ try{ await storageSet('kat:dispatchInvoices', dispatchInvoices); }catch(e){} }
+async function loadDispatchInvoices(){ try{ const d=await storageGet('kat:dispatchInvoices'); if(d && typeof d==='object') dispatchInvoices=d; }catch(e){} }
 async function saveKmData(){ try{ await storageSet('kat:kmPay', { settings:kmPaySettings, settled:kmSettledRides, excluded:kmExcludedRides, log:kmPaymentLog }); }catch(e){} }
 async function loadKmData(){ try{ const d=await storageGet('kat:kmPay'); if(d){ if(d.settings) kmPaySettings=Object.assign({mode:'flat',flat:5,pct:10}, d.settings); if(d.settled) kmSettledRides=d.settled||{}; if(d.excluded) kmExcludedRides=d.excluded||{}; if(d.log) kmPaymentLog=d.log||[]; } }catch(e){} }
 
@@ -24834,6 +25555,29 @@ function _kmRideDone(r){ return !!(r && r.status==='paid'); }   // "completed" =
 function kmOwedRides(){ return (rides||[]).filter(function(r){ return r && r.createdBy==='Morgan' && r.status!=='cancelled' && _kmRideDone(r) && !kmSettledRides[r.id] && !kmExcludedRides[r.id]; }); }
 function kmRideValue(r){ if(kmPaySettings.mode==='pct') return (parseFloat(r.price)||0) * ((parseFloat(kmPaySettings.pct)||0)/100); return (parseFloat(kmPaySettings.flat)||0); }
 function kmOwedAmount(){ return Math.round(kmOwedRides().reduce(function(a,r){ return a+kmRideValue(r); },0)*100)/100; }
+// PERIOD-SCOPED dispatch pay EARNED (not the running unpaid balance kmOwedAmount() tracks - a
+// genuinely different number). Includes rides already settled AND rides still owed, same
+// accrual convention totalFeesReceived already uses elsewhere on this page ("earned this
+// period" regardless of whether it's actually been paid yet) - deliberately NOT the same as
+// "currently outstanding," which is what the teal card and kmOwedAmount() are for. Excludes
+// rides Morgan has deliberately left out via kmExcludedRides, same as every other view of this
+// data. Chase asked directly for Morgan to be able to filter this by week/month/year the same
+// way every other income category on this page already works - this is what makes that
+// possible, reusing the SAME date range every other total on the page uses rather than a
+// second, separate picker.
+function kmScheduledPayForRange(start, end){
+  return (rides||[]).filter(function(r){
+    if(!r || r.createdBy!=='Morgan' || r.status==='cancelled') return false;
+    if(!_kmRideDone(r)) return false;
+    if(kmExcludedRides[r.id]) return false;
+    if(!r.date) return false;
+    if(start && end){
+      var d = new Date(r.date+'T12:00:00');
+      if(d<start||d>end) return false;
+    }
+    return true;
+  }).reduce(function(a,r){ return a+kmRideValue(r); }, 0);
+}
 function kmRateLabel(){ return kmPaySettings.mode==='pct' ? ((parseFloat(kmPaySettings.pct)||0)+'% of fare') : ('$'+(parseFloat(kmPaySettings.flat)||0)+'/ride'); }
 
 function kmPayVenmo(){
@@ -24896,8 +25640,13 @@ function _renderKmInto(boxId, compact){
     h+='<button onclick="kmMarkPaid()" style="flex:1;min-width:120px;padding:.6rem;background:rgba(255,255,255,.18);color:#fff;border:1.5px solid rgba(255,255,255,.5);border-radius:9px;font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">\u2713 Mark paid</button>';
   }
   h+='<button onclick="kmViewDetails()" style="flex:1;min-width:120px;padding:.6rem;background:rgba(255,255,255,.18);color:#fff;border:1.5px solid rgba(255,255,255,.5);border-radius:9px;font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">View details \u2192</button>';
+  if(!isKat && !compact) h+='<button onclick="openDispatchInvoiceRangePicker()" style="flex:1;min-width:120px;padding:.6rem;background:rgba(255,255,255,.18);color:#fff;border:1.5px solid rgba(255,255,255,.5);border-radius:9px;font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">\uD83E\uDDFE Invoice Kat</button>';
   if(isKat && !compact) h+='<button onclick="kmToggleSettings()" title="Rate settings" style="padding:.6rem .7rem;background:rgba(255,255,255,.18);color:#fff;border:1.5px solid rgba(255,255,255,.5);border-radius:9px;font-size:.85rem;cursor:pointer;">\u2699</button>';
   h+='</div>';
+  // Invoice history - shared by both, action buttons scoped to whichever half of the dual
+  // approval belongs to the person actually looking at it. Skipped on the compact dashboard
+  // card, same reasoning as the settings panel above - this is Income-page-only detail.
+  if(!compact) h += _dispatchInvoiceListHtml(isKat);
   if(isKat && !compact){
     h+='<div id="km-settings-panel" style="display:none;margin-top:.8rem;background:rgba(255,255,255,.12);border-radius:10px;padding:.8rem;">';
     h+='<div style="font-size:.72rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;opacity:.85;margin-bottom:.5rem;">How Kat pays Morgan</div>';
@@ -24911,6 +25660,33 @@ function _renderKmInto(boxId, compact){
   }
   h+='</div>';
   box.innerHTML=h;
+}
+// Invoice history, newest first. Same list for both Kat and Morgan (matching the fee system's
+// shared visibility) - only the ACTION buttons differ, based on which half of the dual
+// approval belongs to whoever is looking: Kat can mark 'sent' invoices paid; Morgan can confirm
+// or reject a 'paid_pending' one. Neither can act on the other's half.
+function _dispatchInvoiceListHtml(isKat){
+  var list = Object.values(dispatchInvoices||{}).sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); });
+  if(!list.length) return '';
+  var rows = list.slice(0,12).map(function(inv){
+    var st = _dispatchInvoiceStatusLabel(inv);
+    var periodLbl = fmtDateShort(inv.startDate)+' \u2013 '+fmtDateShort(inv.endDate);
+    var actionBtn = '';
+    if(isKat && inv.status==='sent'){
+      actionBtn = '<button onclick="markDispatchInvoicePaid(\''+inv.id+'\')" style="padding:.35rem .7rem;background:#fff;color:#0f766e;border:none;border-radius:7px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">\u2713 Mark paid</button>';
+    } else if(!isKat && inv.status==='paid_pending'){
+      actionBtn = '<button onclick="markDispatchInvoiceReceived(\''+inv.id+'\')" style="padding:.35rem .7rem;background:#fff;color:#0f766e;border:none;border-radius:7px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;margin-right:.35rem;">\u2713 Received</button>'
+        + '<button onclick="rejectDispatchInvoicePaid(\''+inv.id+'\')" style="padding:.35rem .6rem;background:none;color:#fff;border:1.5px solid rgba(255,255,255,.5);border-radius:7px;font-family:inherit;font-size:.72rem;font-weight:600;cursor:pointer;">\u2717 Not received</button>';
+    }
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.5rem 0;border-bottom:1px solid rgba(255,255,255,.15);flex-wrap:wrap;">'
+      + '<div style="min-width:0;"><div style="font-size:.78rem;font-weight:700;">'+periodLbl+'</div>'
+      + '<div style="font-size:.72rem;opacity:.85;">$'+inv.total.toFixed(2)+' \u00b7 <span style="color:'+st.color+';">'+st.text+'</span></div></div>'
+      + (actionBtn?'<div style="flex-shrink:0;">'+actionBtn+'</div>':'')
+      + '</div>';
+  }).join('');
+  return '<div style="margin-top:1rem;padding-top:.8rem;border-top:1px solid rgba(255,255,255,.2);">'
+    + '<div style="font-size:.7rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;opacity:.85;margin-bottom:.4rem;">Invoice history</div>'
+    + rows + '</div>';
 }
 function kmModeChanged(){ const m=(document.getElementById('km-mode')||{}).value; const fw=document.getElementById('km-flat-wrap'); const pw=document.getElementById('km-pct-wrap'); if(fw) fw.style.display=(m==='flat')?'flex':'none'; if(pw) pw.style.display=(m==='pct')?'flex':'none'; }
 
@@ -30854,9 +31630,6 @@ function qaTypeChanged(){
   if(secFirst) secFirst.style.display=(t==='AP ROUND TRIP')?'block':'none';
   try{ qaUpdateHomeAddrCbLabel(); }catch(e){}
   try{ qaUpdateDateTimeLabels(); }catch(e){}
-  // Medical transport is billed hourly, so it needs its own hours field (same as the Quote form).
-  const mhg=document.getElementById('qa-med-hours-group');
-  if(mhg) mhg.style.display=(t==='MEDICAL')?'block':'none';
   if(t!=='AP ROUND TRIP'){
     ['qa-leg-run','qa-leg-pickup'].forEach(id=>{ const el=document.getElementById(id); if(el) el.checked=false; });
   }
