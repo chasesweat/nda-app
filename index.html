@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191004">
+<meta name="version" content="202608191006">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2604,6 +2604,13 @@ let _archiveLoaded = false;   // whether the ride archive is currently merged in
 // the cost of a silently reverted payment or status change is a real, hard-to-diagnose report
 // weeks or months later that looks like nothing happened when tapped.
 window._pendingUnsavedRideIds = window._pendingUnsavedRideIds || new Set();
+// Deliberately SEPARATE from _pendingUnsavedRideIds above - that set exists to protect against
+// snapshot overwrite and clears itself after 90 seconds NO MATTER WHAT (success, failure, or
+// simply never checked again), so it was never a reliable signal for "did this actually fail."
+// This one only reflects the true/false result of the most recent saveRides() call, set at the
+// bottom of that function itself, and only clears when a save genuinely succeeds - never on a
+// timer. See saveRides()'s own comment for the bug this was built to fix.
+window._rideSaveHasFailed = window._rideSaveHasFailed || false;
 let comments = {};   // { rideId: [{user, text, ts}] }
 let notifications = {}; // { driverName: [{rideId, msg, ts, read}] }
 let nextId = 100;
@@ -2814,6 +2821,7 @@ async function _loadAppData() {
   try{ await _promoteChaseTemplatesToGlobalDefault(); }catch(e){ console.warn('Chase default promotion', e); }
   try{ await _clearChasePersonalDuplicates(); }catch(e){ console.warn('Chase personal duplicate cleanup', e); }
   try{ await _healBrokenConfirmTemplate(); }catch(e){ console.warn('broken confirm template heal', e); }
+  try{ await _backfillSchedulingTextSentForExistingRides(); }catch(e){ console.warn('scheduling-text backfill', e); }
   // The two pickup-instructions seed migrations that used to run here (v793-era) were removed
   // in v807 - both only ever populated globalSettings fields (defaultPickupInstructions,
   // defaultPickupInstructionsByTerminal) that nothing reads anymore now that pickup instructions
@@ -3620,7 +3628,15 @@ function _snapshotRidesBaseline(arr){
 // window._pendingUnsavedRideIds protection against a stale live-listener snapshot silently
 // reverting the change. Full standing requirement and reasoning at that variable's own
 // declaration (search _pendingUnsavedRideIds) - this note is just the pointer to it.
+// Thin wrapper - sets the genuine failure flag based on the real outcome, then returns it
+// unchanged. Wrapping rather than editing _saveRidesInner()'s own multiple early-return points
+// directly, so its carefully-tuned merge logic (see its own comments) is completely untouched.
 async function saveRides(){
+  const _ok = await _saveRidesInner();
+  window._rideSaveHasFailed = !_ok;
+  return _ok;
+}
+async function _saveRidesInner(){
   const arr = rides || [];
   // localStorage stays a full mirror — it is the offline fallback and costs nothing.
   try{ localStorage.setItem('kat:rides', JSON.stringify(arr)); }catch(_e){}
@@ -13774,17 +13790,20 @@ function _maybeOfferFeeAndPaid(rideId){
 }
 
 // Re-attempts writing the whole rides array, exactly what saveRides() already always does -
-// one successful write resolves EVERY currently-pending ride at once, not just the one that
-// prompted the retry, since they're all sitting correctly in the same in-memory array already.
-// Nothing to re-enter, nothing to redo - the data was already right, it just hadn't reached
-// Firebase yet.
+// one successful write resolves everything currently unsaved at once. Nothing to re-enter,
+// nothing to redo - the data was already right, it just hadn't reached Firebase yet.
+//
+// BUG FIX, reported directly: this used to refuse to even try if _pendingUnsavedRideIds
+// happened to be empty at that moment, producing "Nothing waiting to save" - even while the
+// save-failed banner (which triggers this) was correctly showing a genuine failure moments
+// earlier. Both were checking the same set for two different questions it was never built to
+// answer reliably. Now attempts the save unconditionally - this only ever gets called from a
+// banner that's already confirmed there's a real failure to retry.
 async function _retryPendingSaves(){
-  if(!window._pendingUnsavedRideIds || !window._pendingUnsavedRideIds.size){ showToast('Nothing waiting to save'); return; }
-  var _count = window._pendingUnsavedRideIds.size;
   var ok = await saveRides();
   if(ok){
-    window._pendingUnsavedRideIds.clear();
-    showToast('\u2705 Saved'+(_count>1?' ('+_count+' rides)':''));
+    if(window._pendingUnsavedRideIds) window._pendingUnsavedRideIds.clear();
+    showToast('\u2705 Saved');
   } else {
     showToast('\u26a0\ufe0f Still couldn\u2019t save \u2014 check your connection and try again');
   }
@@ -13797,11 +13816,18 @@ async function _retryPendingSaves(){
 // pattern all of them already follow.
 function renderDashSaveFailed(){
   var box=document.getElementById('dash-save-failed'); if(!box) return;
-  var count = (window._pendingUnsavedRideIds && window._pendingUnsavedRideIds.size) || 0;
-  if(!count){ box.innerHTML=''; return; }
+  // BUG FIX, reported directly with a screenshot: this used to check
+  // window._pendingUnsavedRideIds.size - a count of what's PROTECTED against snapshot overwrite,
+  // not a record of what actually failed. That set clears itself the instant any save succeeds,
+  // or after 90 seconds no matter what happened - so by the time someone actually saw this
+  // banner and tapped Retry, the underlying saves had usually already gone through (or the
+  // timeout had already fired), and Retry - checking that exact same set - correctly found
+  // nothing left, while the stale banner kept showing. Now checks _rideSaveHasFailed, which only
+  // reflects the true outcome of the most recent saveRides() call and never clears on a timer.
+  if(!window._rideSaveHasFailed){ box.innerHTML=''; return; }
   box.innerHTML='<div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:12px;padding:1rem;margin-bottom:.75rem;">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.4rem;">'
-    +'<span style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#b91c1c;">\u26a0\ufe0f '+count+' ride'+(count===1?'':'s')+' didn\u2019t save</span>'
+    +'<span style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#b91c1c;">\u26a0\ufe0f Your changes didn\u2019t save</span>'
     +'<button onclick="_retryPendingSaves()" style="background:#b91c1c;color:#fff;border:none;border-radius:8px;padding:.4rem .8rem;font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;">Retry</button>'
     +'</div>'
     +'<div style="font-size:.75rem;color:var(--mid);line-height:1.45;">Your change is safe on this device, but hasn\u2019t reached the server yet \u2014 likely a connection issue. Tap Retry once you\u2019re back online.</div>'
@@ -19001,6 +19027,9 @@ function renderDashNeedsAttention(){
 // ones - a "your ride is scheduled" text makes no sense to send after the ride already
 // happened, so these shouldn't keep reappearing here going forward either.
 function _schedulingTextNeededRides(){
+  // Per-driver off switch (direct instruction) - checked once here so the render and the bulk
+  // action below can't disagree about whether this reminder is even active for this person.
+  if(!schedTextReminderEnabled(getMyDriverName())) return [];
   const todayStr = toDateStr(new Date());
   return (rides||[]).filter(function(r){
     if(!r || r.status==='cancelled' || r.status==='placeholder' || r.status==='completed' || r.status==='paid') return false;
@@ -22717,7 +22746,7 @@ function buildMemberCard(d, opts){
             +'<span>&#x1F933; Day-of-travel selfie &mdash; <span style="font-weight:600;color:var(--mid);font-size:.72rem;">'+((driverSettings[d]||{}).selfie?'your photo':'using default')+' &middot; tap to change</span></span>'
           +'</button>'):'')
           +'<div style="margin-bottom:.5rem;">'+'<div style="font-size:.68rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Payment methods accepted</div>'+(function(){  const accepted=(driverSettings[d]&&driverSettings[d].paymentMethods)||[];  return ['Credit Card','Cash','Check','Venmo','Zelle','CashApp','Apple Pay'].map(function(m){    const on=accepted.includes(m);    const mid=d.replace(/ /g,'_')+'-'+m.replace(/ /g,'_');    return '<button id="pay-'+mid+'" onclick="togglePaymentMethod(\''+d+'\',\''+m+'\')" '      +'style="margin:2px;padding:.25rem .55rem;font-size:.72rem;font-weight:600;border-radius:20px;border:1.5px solid '+(on?'#7c3aed':'var(--light)')+';'      +'background:'+(on?'#7c3aed':'var(--white)')+';color:'+(on?'#fff':'var(--black)')+';cursor:pointer;font-family:\'DM Sans\',sans-serif;">'+m+'</button>';  }).join('');}())+'</div>'
-          +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;margin-bottom:.45rem;"><span style="font-size:.82rem;font-weight:600;color:var(--black);">\uD83D\uDCC5 Schedule Confirmation</span><button type="button" onclick="toggleConfText(\''+d+'\')" style="padding:.25rem .75rem;border-radius:20px;border:none;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;'+((driverSettings[d]&&driverSettings[d].confEnabled===false)?'background:var(--light);color:var(--mid);':'background:#15803d;color:#fff;')+'">'+((driverSettings[d]&&driverSettings[d].confEnabled===false)?'OFF':'ON')+'</button></div>'+'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;margin-bottom:.45rem;"><span style="font-size:.82rem;font-weight:600;color:var(--black);">\u2708\uFE0F Flight Tracking Link</span><button type="button" onclick="toggleTrackingLink(\''+d+'\')" style="padding:.25rem .75rem;border-radius:20px;border:none;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;'+((driverSettings[d]&&driverSettings[d].trackingLink===false)?'background:var(--light);color:var(--mid);':'background:#15803d;color:#fff;')+'">'+((driverSettings[d]&&driverSettings[d].trackingLink===false)?'OFF':'ON')+'</button></div>'+_autoSurchargeTogglesHTML(d)
+          +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;margin-bottom:.45rem;"><span style="font-size:.82rem;font-weight:600;color:var(--black);">\uD83D\uDCC5 Schedule Confirmation</span><button type="button" onclick="toggleConfText(\''+d+'\')" style="padding:.25rem .75rem;border-radius:20px;border:none;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;'+((driverSettings[d]&&driverSettings[d].confEnabled===false)?'background:var(--light);color:var(--mid);':'background:#15803d;color:#fff;')+'">'+((driverSettings[d]&&driverSettings[d].confEnabled===false)?'OFF':'ON')+'</button></div>'+'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;margin-bottom:.45rem;"><span style="font-size:.82rem;font-weight:600;color:var(--black);">\u2709\uFE0F Scheduling Text Reminder</span><button type="button" onclick="toggleSchedTextReminder(\''+d+'\')" style="padding:.25rem .75rem;border-radius:20px;border:none;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;'+((driverSettings[d]&&driverSettings[d].schedTextReminderEnabled===false)?'background:var(--light);color:var(--mid);':'background:#15803d;color:#fff;')+'">'+((driverSettings[d]&&driverSettings[d].schedTextReminderEnabled===false)?'OFF':'ON')+'</button></div>'+'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.5rem .7rem;margin-bottom:.45rem;"><span style="font-size:.82rem;font-weight:600;color:var(--black);">\u2708\uFE0F Flight Tracking Link</span><button type="button" onclick="toggleTrackingLink(\''+d+'\')" style="padding:.25rem .75rem;border-radius:20px;border:none;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;'+((driverSettings[d]&&driverSettings[d].trackingLink===false)?'background:var(--light);color:var(--mid);':'background:#15803d;color:#fff;')+'">'+((driverSettings[d]&&driverSettings[d].trackingLink===false)?'OFF':'ON')+'</button></div>'+_autoSurchargeTogglesHTML(d)
           +'</div>')
           :''}
         ${canEdit?((function(){var _sp=(driverSettings[d]||{}).sendParts||{};var chk=function(part){return (_sp[part]!==false)?' checked':'';};
@@ -26058,6 +26087,31 @@ async function _clearChasePersonalDuplicates(){
 // reads, including anyone else relying on the same shared text) and every individual driver's
 // own personal and "own-client" templates, since the broken text could have been saved at
 // either level depending on which settings screen it was copied from.
+// One-time backfill: any ride already on the schedule at the moment this runs is assumed to
+// have had its scheduling text sent already - the tracking field itself (v1002) is brand new,
+// and the old process always sent this manually at booking time, so "already on the calendar"
+// is the reasonable assumption for everything that predates the tracking. Direct instruction,
+// rather than requiring everyone to individually tap "Mark all sent" (v1004) for their own
+// backlog. Gated exactly like _healBrokenConfirmTemplate() so this can never re-run and can
+// never touch a ride created after this point - a genuinely new, never-sent ride should still
+// correctly show up on the reminder going forward.
+async function _backfillSchedulingTextSentForExistingRides(){
+  globalSettings = globalSettings || {};
+  if(globalSettings._schedulingTextBackfilled) return;
+  var touched = 0;
+  (rides||[]).forEach(function(r){
+    if(!r || r.schedulingTextSent) return;
+    r.schedulingTextSent = true;
+    r.schedulingTextSentAt = Date.now();
+    r.schedulingTextAssumed = true; // distinguishes an assumed backfill from a real, confirmed send
+    touched++;
+  });
+  globalSettings._schedulingTextBackfilled = true;
+  try{
+    await storageSet('kat:globalSettings', globalSettings);
+    if(touched) await saveRides();
+  }catch(e){ console.warn('scheduling-text backfill failed', e); }
+}
 async function _healBrokenConfirmTemplate(){
   globalSettings = globalSettings || {};
   if(globalSettings._brokenConfirmTemplateHealed) return;
@@ -26810,6 +26864,24 @@ async function toggleConfText(driverName){
   if(typeof renderDashConfirmations==='function') renderDashConfirmations();
   if(typeof renderConfirmations==='function' && document.getElementById('my-confirm-panel')){ try{ renderConfirmations(); }catch(e){} }
   showToast('Schedule Confirmation '+(driverSettings[driverName].confEnabled?'turned on':'turned off'));
+}
+// Per-driver on/off for the scheduling-text-not-yet-sent Dashboard reminder (v1002/v1004) -
+// direct instruction to give drivers a way to turn it off. Mirrors confTextEnabled/
+// toggleConfText exactly (same default-ON shape, same driverSettings storage), with its own key
+// so it can't collide with the existing day-before confirmation toggle above - the two are
+// genuinely different reminders and a driver may want either independently of the other.
+function schedTextReminderEnabled(driverName){
+  const s = driverSettings[driverName];
+  return !s || s.schedTextReminderEnabled !== false;   // default ON
+}
+async function toggleSchedTextReminder(driverName){
+  if(!driverSettings[driverName]) driverSettings[driverName]={};
+  const cur = driverSettings[driverName].schedTextReminderEnabled !== false;
+  driverSettings[driverName].schedTextReminderEnabled = !cur;
+  await saveDriverSettings(driverName);
+  renderDriverMembers();
+  if(typeof renderDashSchedulingTextNeeded==='function') renderDashSchedulingTextNeeded();
+  showToast('Scheduling text reminder '+(driverSettings[driverName].schedTextReminderEnabled?'turned on':'turned off'));
 }
 
 // Flight tracking link. A Google search, deliberately.
