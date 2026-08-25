@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191003">
+<meta name="version" content="202608191004">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -18996,16 +18996,23 @@ function renderDashNeedsAttention(){
 // trace and no way to catch up later. Modeled on renderDashConfirmations() (the day-before
 // reminder) but scoped differently: any upcoming active ride, not just tomorrow's, since the
 // scheduling text belongs at booking time, not the night before.
-function renderDashSchedulingTextNeeded(){
-  const box = document.getElementById('dash-scheduling-text-needed');
-  if(!box) return;
+// Shared by the render and the bulk-clear below, so they can't drift into disagreeing about
+// which rides qualify. Excludes already-completed/paid rides on purpose, not just past-dated
+// ones - a "your ride is scheduled" text makes no sense to send after the ride already
+// happened, so these shouldn't keep reappearing here going forward either.
+function _schedulingTextNeededRides(){
   const todayStr = toDateStr(new Date());
-  let due = (rides||[]).filter(function(r){
-    if(!r || r.status==='cancelled' || r.status==='placeholder') return false;
+  return (rides||[]).filter(function(r){
+    if(!r || r.status==='cancelled' || r.status==='placeholder' || r.status==='completed' || r.status==='paid') return false;
     if(!r.date || r.date<todayStr) return false;
     if(r.schedulingTextSent) return false;
     return isMyScheduledRide(r);
   }).sort(function(a,b){ return (a.date||'').localeCompare(b.date||'') || (a.time||'').localeCompare(b.time||''); });
+}
+function renderDashSchedulingTextNeeded(){
+  const box = document.getElementById('dash-scheduling-text-needed');
+  if(!box) return;
+  let due = _schedulingTextNeededRides();
 
   if(!due.length){ box.innerHTML=''; return; }
 
@@ -19019,9 +19026,39 @@ function renderDashSchedulingTextNeeded(){
   }).join('');
 
   box.innerHTML = '<div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:12px;padding:1rem;margin-bottom:.75rem;">'
-    +'<div style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#b91c1c;margin-bottom:.5rem;">\u2709\ufe0f Scheduling texts not yet sent \u00b7 '+due.length+'</div>'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.5rem;">'
+    +'<div style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#b91c1c;">\u2709\ufe0f Scheduling texts not yet sent \u00b7 '+due.length+'</div>'
+    +'<button onclick="event.stopPropagation();_dashMarkAllSchedulingTextSent()" style="flex-shrink:0;background:none;border:1.5px solid #fca5a5;color:#b91c1c;border-radius:7px;padding:.3rem .6rem;font-family:inherit;font-size:.68rem;font-weight:700;cursor:pointer;white-space:nowrap;">Mark all sent</button>'
+    +'</div>'
     +rows
     +'</div>';
+}
+// Bulk-clears the whole current list without sending anything - this tracking is brand new
+// (v1002), so every ride confirmed or completed before it existed shows up here as a false
+// positive with no way to individually distinguish "genuinely missed" from "already handled
+// before this feature existed." Same confirm-before-bulk-action pattern already established for
+// markAllPastRidesPaidAdmin/markAllPrevPaid, and the same protection those were fixed to use.
+async function _dashMarkAllSchedulingTextSent(){
+  const due = _schedulingTextNeededRides();
+  if(!due.length){ showToast('Nothing to mark'); return; }
+  const _choice = await showConfirmModal({
+    icon:'\u2709\ufe0f', iconColor:'#b91c1c', iconBg:'#450a0a',
+    title:'Mark all '+due.length+' as sent?',
+    message:'This clears the whole list without actually sending anything - for rides you already confirmed or completed before this reminder existed. If any of these genuinely still need the text, use Send on that one instead.',
+    buttons:[ {label:'Cancel', value:'cancel'}, {label:'Mark all '+due.length+' sent', style:'primary', value:'go'} ]
+  });
+  if(_choice!=='go') return;
+  due.forEach(function(r){
+    window._pendingUnsavedRideIds.add(r.id);
+    setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
+  });
+  due.forEach(function(r){ r.schedulingTextSent=true; r.schedulingTextSentAt=Date.now(); });
+  try{
+    var _ok = await saveRides();
+    if(_ok) due.forEach(function(r){ window._pendingUnsavedRideIds.delete(r.id); });
+  }catch(e){}
+  showToast('\u2713 Marked '+due.length+' as sent');
+  try{ renderDashSchedulingTextNeeded(); }catch(e){}
 }
 // Looks the ride up fresh and re-runs the same prompt the booking flow itself uses, so a ride
 // whose scheduling text was never sent (window closed too early, browser crash, anything) can
