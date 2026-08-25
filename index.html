@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191007">
+<meta name="version" content="202608191009">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -7652,9 +7652,18 @@ function _prefillFromClientRequest(req){
     // actually in the Quote markup, so set() safely no-ops there. Rather than silently drop
     // what the client wrote, surface it in the toast below when there's nowhere to put it.
     var _notesLanded = false;
-    if(req.notes){
+    // Car seats: no dedicated field exists on the Quote/Quick Add forms yet, so this rides
+    // along in Notes - prepended, so it's the first thing a driver sees rather than buried
+    // after whatever else the client wrote. Only added when actually needed; the common "No"
+    // answer stays silent rather than cluttering every prefilled ride with a non-answer.
+    var _combinedNotes = req.notes || '';
+    if(req.carSeatsNeeded){
+      var _csLine = '\uD83D\uDC76 Car seat(s) needed \u2014 client will provide and install';
+      _combinedNotes = _combinedNotes ? (_csLine+' \u00b7 '+_combinedNotes) : _csLine;
+    }
+    if(_combinedNotes){
       var _nEl = document.getElementById(P+'-notes');
-      if(_nEl){ _nEl.value = req.notes; _notesLanded = true; }
+      if(_nEl){ _nEl.value = _combinedNotes; _notesLanded = true; }
     }
     // Now trigger the real recalculation chain, exactly as if a person had typed these.
     if(isQuote){
@@ -7687,7 +7696,7 @@ function _prefillFromClientRequest(req){
       try{ onQaDateTimeChange(); }catch(e){}
     }
     var _msg = '\u2713 Filled in from '+(req.clientName||'the client')+'\u2019s request \u2014 check it over before saving';
-    if(req.notes && !_notesLanded) _msg += ' \u00b7 Their note: \u201c'+req.notes+'\u201d';
+    if(_combinedNotes && !_notesLanded) _msg += ' \u00b7 '+_combinedNotes;
     showToast(_msg);
   }catch(e){ console.warn('prefill from client request failed', e); }
 }
@@ -10637,7 +10646,15 @@ function renderRideView(r){
     _qfWrap.innerHTML = '<div style="font-size:.7rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Quick fees</div>'
       +(_feeApplied
         ?('<div style="background:'+(r.feeType==='cancel'?'#fff5f5':'#fff8e1')+';border:1.5px solid '+(r.feeType==='cancel'?'#fca5a5':'#fcd34d')+';border-radius:9px;padding:.6rem .85rem;display:flex;align-items:center;justify-content:space-between;"><span style="font-size:.9rem;font-weight:700;color:'+(r.feeType==='cancel'?'#dc2626':'#92400e')+';">'+(r.feeType==='cancel'?' Cancellation fee':'\u26a1 Change fee')+': $'+r.feeAmount+'</span><button onclick="clearRideFee('+r.id+')" style="background:none;border:none;color:#aaa;cursor:pointer;font-size:.85rem;">Remove</button></div>')
-        : ('<button onclick="applyRideFee('+r.id+',\'change\')" style="width:100%;padding:.6rem .75rem;background:#fef3c7;border:1.5px solid #fcd34d;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;font-weight:700;color:#92400e;cursor:pointer;">\u26a1 Change fee +$'+changeFeeAmt()+'</button>'));
+        // PROTECTED-POLICY FIX, mirroring cancelRide()'s own v999 fix exactly: the scheduling
+        // message's own Changes bullet says the fee applies "after the confirmation text," so
+        // offering it before that point contradicts what the client was actually told. No
+        // fallback button to show in its place (unlike Cancel, there's no fee-free version of
+        // this specific action) - a short note explains why instead of the button silently
+        // vanishing with no explanation.
+        : (r.confirmSentAt
+            ? ('<button onclick="applyRideFee('+r.id+',\'change\')" style="width:100%;padding:.6rem .75rem;background:#fef3c7;border:1.5px solid #fcd34d;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;font-weight:700;color:#92400e;cursor:pointer;">\u26a1 Change fee +$'+changeFeeAmt()+'</button>')
+            : ('<div style="font-size:.72rem;color:var(--mid);line-height:1.4;">No confirmation text has been sent yet, so no change fee applies.</div>')));
   })();
   }catch(err){
     // Whatever this says next is the real bug — no more guessing which field is bad.
@@ -12578,12 +12595,14 @@ async function applyRideFee(rideId, feeType){
   // Add fee note
   const feeNote = label+' fee: $'+feeAmount;
   ride.notes = ride.notes ? ride.notes+'\n'+feeNote : feeNote;
-  saveRides();
+  window._pendingUnsavedRideIds.add(ride.id);
+  setTimeout(function(){ window._pendingUnsavedRideIds.delete(ride.id); }, 90000);
+  var _arfOk = await saveRides(); if(_arfOk) window._pendingUnsavedRideIds.delete(ride.id);
   showToast('\u2713 '+label+' fee $'+feeAmount+' applied');
   renderCal();
   openRideModal(rideId);
 }
-function clearRideFee(rideId){
+async function clearRideFee(rideId){
   const ride=_rideById(rideId);
   if(!ride||!confirm('Remove this fee from the ride?')) return;
   // The (Cancellation|Last-minute change) pattern stays broad on purpose - a ride with a
@@ -12591,7 +12610,9 @@ function clearRideFee(rideId){
   // button to clean up correctly, not just newly-applied change fees.
   if(ride.notes) ride.notes=ride.notes.replace(/\n?(Cancellation|Last-minute change) fee: \$\d+/g,'').trim();
   delete ride.feeType; delete ride.feeAmount; delete ride.cancelled;
-  saveRides();
+  window._pendingUnsavedRideIds.add(ride.id);
+  setTimeout(function(){ window._pendingUnsavedRideIds.delete(ride.id); }, 90000);
+  var _crfOk = await saveRides(); if(_crfOk) window._pendingUnsavedRideIds.delete(ride.id);
   showToast('Fee removed');
   renderCal();
   openRideModal(rideId);
@@ -16454,6 +16475,7 @@ function renderAccountPage(){
   if(statusEl){
     if(admin){
       // Admins get a special card showing full access
+      statusEl.style.display = '';
       const driverName = getMyDriverName() || currentUser.name;
       const initials = driverName.split(' ').map(function(n){return n[0];}).join('').slice(0,2).toUpperCase();
       const color = getMyDriverName() ? driverColor(driverName) : '#7c3aed';
@@ -16462,8 +16484,12 @@ function renderAccountPage(){
         +'<div><div style="font-size:1rem;font-weight:600;color:var(--black);">'+driverName+'</div>'
         +'<div style="font-size:.82rem;color:var(--mid);margin-top:.25rem;">Admin · full access to all features</div></div></div>'
         +'<span style="background:#f3eeff;color:#6d28d9;font-size:.78rem;padding:4px 12px;border-radius:12px;font-weight:600;">Admin — Free</span>';
-    } else {
+    } else if(!BETA_HIDE_BILLING_STATUS_UI){
+      statusEl.style.display = '';
       statusEl.innerHTML = buildAccountStatusCard(sub, hasInc, expDate, daysLeft, trialDaysLeft);
+    } else {
+      statusEl.style.display = 'none'; // see BETA_HIDE_BILLING_STATUS_UI's own comment
+      statusEl.innerHTML = '';
     }
   }
 
@@ -23883,6 +23909,15 @@ async function saveMyExpenses(){
 // anything. (FREE_ACCESS_USERS / adminIncomeEnabled / upgraded / incomeTrial below are
 // legacy billing-status fields, still read by the account/billing display cards, but they
 // no longer control feature access.)
+//
+// BETA MODE — flip this back to false once beta testing is over to bring everything below
+// back exactly as it was. While true, drivers see NONE of the trial countdown toast, the
+// Free-plan/Trial/Active status badge on their own Account page, or any "days left" display -
+// direct instruction, since none of that is meaningful yet during beta. Deliberately does NOT
+// touch Chase's own admin subscription-management view (still fully visible and functional -
+// he still needs to grant/track access), or the manual-deactivation lockout screen (still
+// works exactly as before - that's a deliberate admin action, not an automatic countdown).
+const BETA_HIDE_BILLING_STATUS_UI = true;
 const FREE_ACCESS_USERS = ['Kat','Chase','Morgan'];
 
 // Only Chase may grant or revoke complimentary billing status (display only — see above).
@@ -23961,6 +23996,7 @@ function _ensureTrialStarted(name){
   if(!sub.trialStart){ sub.trialStart = new Date().toISOString(); try{ saveSubscriptions(); }catch(e){} }
 }
 function _showTrialBanner(daysLeft){
+  if(BETA_HIDE_BILLING_STATUS_UI) return; // see the flag's own comment - trivially reversible later
   try{
     if(typeof showToast !== 'function') return;
     var msg = daysLeft <= 1 ? 'Last day of your free trial \u2014 subscribe to keep your tools'
