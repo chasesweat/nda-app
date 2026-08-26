@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191009">
+<meta name="version" content="202608191011">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -647,6 +647,7 @@ input,select,textarea{font-size:16px;}
     <div id="dash-gate-codes" style="margin-bottom:1.5rem;"></div>
         <div id="dash-confirmations" style="margin-bottom:1.5rem;"></div>
     <div id="dash-needs-attention" style="margin-bottom:1.5rem;"></div>
+    <div id="dash-awaiting-invoice-past" style="margin-bottom:1.5rem;"></div>
     <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.75rem;" id="dash-upcoming-label">Your upcoming rides</div>
     <div id="upcoming-list"></div>
   </div>
@@ -18781,6 +18782,10 @@ function refreshDash(){
   // Past rides not yet marked paid — a gentle "wrap these up" reminder
   renderDashNeedsAttention();
 
+  // Invoiced rides whose date has passed, still awaiting payment - reported directly with a
+  // screenshot: these had nowhere to show up once the date passed.
+  renderDashAwaitingInvoicePast();
+
   // "Your upcoming rides" — ONLY rides this user is DRIVING (rides they scheduled for others live in Confirmations)
   const dName=getMyDriverName();
   const lbl=document.getElementById('dash-upcoming-label');
@@ -19009,6 +19014,35 @@ function renderDashFinalizeTomorrow(){ _renderFinalizeTomorrowInto('dash-finaliz
 // were being swept up by Mark-all-paid, which would silently mark an invoice paid that the
 // client hasn't actually paid yet - losing the fact that money is still owed.
 function _isAwaitingInvoice(r){ return !!(r && r.awaitingInvoice); }
+// Invoiced rides whose date has already passed, still awaiting payment - real gap reported
+// directly with a screenshot: _isAwaitingInvoice(r) correctly excludes these from
+// renderDashNeedsAttention() above (so "Mark all paid" can never falsely mark an unpaid invoice
+// as paid), but the only place the dedicated, safe Invoice Paid action was reachable from was
+// the upcoming-rides widget, which only ever shows today-or-future dates. The moment an
+// invoiced ride's date passed, it fell out of both surfaces at once with nowhere left to go.
+// Scoped to strictly past dates - today/future invoiced rides already have their own Invoice
+// Paid button in the upcoming widget, so this doesn't duplicate them.
+function renderDashAwaitingInvoicePast(){
+  var box=document.getElementById('dash-awaiting-invoice-past'); if(!box) return;
+  var todayStr=toDateStr(new Date());
+  var pastInvoiced=(rides||[]).filter(function(r){
+    return r && isMyDrivingRide(r) && r.status!=='cancelled' && _isAwaitingInvoice(r) && r.date && r.date<todayStr;
+  }).sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
+  if(!pastInvoiced.length){ box.innerHTML=''; return; }
+  var rows=pastInvoiced.slice(0,15).map(function(r){
+    return '<div onclick="openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem;border-bottom:1px solid #ddd6fe;cursor:pointer;">'
+      +'<span style="min-width:52px;font-size:.76rem;font-weight:700;color:var(--black);">'+fmtDateShort(r.date)+'</span>'
+      +'<span style="flex:1;min-width:0;font-size:.85rem;color:var(--black);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+escHtml(r.client||'\u2014')+' <span style="color:var(--mid);font-size:.72rem;">'+escHtml(r.type||'')+'</span></span>'
+      +'<span style="font-size:.82rem;font-weight:700;color:var(--green);">$'+(r.price||0)+'</span>'
+      +'<button onclick="event.stopPropagation();_dashInvoicePaidPrompt('+r.id+')" style="padding:.3rem .55rem;background:#15803d;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;">\u2705 Invoice Paid</button>'
+      +'</div>';
+  }).join('');
+  box.innerHTML='<div style="background:#f5f3ff;border:1.5px solid #ddd6fe;border-radius:12px;padding:1rem;margin-bottom:.75rem;">'
+    +'<div style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#6d28d9;margin-bottom:.4rem;">\uD83D\uDCC4 Invoiced \u00b7 still awaiting payment \u00b7 '+pastInvoiced.length+'</div>'
+    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">These were invoiced but the date has passed and payment hasn\u2019t been recorded yet. Tap Invoice Paid once the client actually pays.</div>'
+    +rows
+    +'</div>';
+}
 function renderDashNeedsAttention(){
   var box=document.getElementById('dash-needs-attention'); if(!box) return;
   var todayStr=toDateStr(new Date());
@@ -19018,7 +19052,7 @@ function renderDashNeedsAttention(){
   // with zero unpaid rides of their own but a team that has plenty shouldn't have this whole
   // banner (and the one action that matters to them) disappear just because THEIR count is 0.
   var companyCount = isAdmin()
-    ? (rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && !_isAwaitingInvoice(r) && parseFloat(r.price||0)>0 && ((r.status==='completed')||(r.date && r.date<todayStr)); }).length
+    ? (rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && !_isAwaitingInvoice(r) && r.driver!=='Kathleen Herringdine' && parseFloat(r.price||0)>0 && ((r.status==='completed')||(r.date && r.date<todayStr)); }).length
     : 0;
   if(!overdue.length && !companyCount){ box.innerHTML=''; return; }
   var rows=overdue.slice(0,15).map(function(r){
@@ -19586,7 +19620,9 @@ function profileUnwaive(){
 async function markAllPastRidesPaidAdmin(){
   if(!isAdmin()){ showToast('Admins only','error'); return; }
   var today=toDateStr(new Date());
-  var list=(rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && !_isAwaitingInvoice(r) && parseFloat(r.price||0)>0 && ((r.status==='completed')||(r.date && r.date<today)); });
+  // Excludes rides driven by Kat, per direct instruction - checks r.driver (who actually
+  // drove it), not r.createdBy or client ownership, matching "rides driven by Kat" exactly.
+  var list=(rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && !_isAwaitingInvoice(r) && r.driver!=='Kathleen Herringdine' && parseFloat(r.price||0)>0 && ((r.status==='completed')||(r.date && r.date<today)); });
   if(!list.length){ showToast('Nothing to mark'); return; }
   var byDriver={};
   list.forEach(function(r){ var d=r.driver||'Unassigned'; byDriver[d]=(byDriver[d]||0)+1; });
@@ -19613,6 +19649,7 @@ async function markAllPastRidesPaidAdmin(){
   try{ renderDashFees(); }catch(e){}
   try{ if(typeof renderDashIncome==='function') renderDashIncome(); }catch(e){}
   try{ if(typeof renderDashNeedsAttention==='function') renderDashNeedsAttention(); }catch(e){}
+  try{ if(typeof renderDashAwaitingInvoicePast==='function') renderDashAwaitingInvoicePast(); }catch(e){}
 }
 
 async function markAllPrevPaid(){
