@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191012">
+<meta name="version" content="202608191014">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -15050,8 +15050,21 @@ async function saveFeeEdit(id){
   if(note) r.feeNote = note; else delete r.feeNote;
   touchRide(r, 'edited fee');
   await saveRides();
-  renderRideView(r);
-  
+  // BUG FIX, reported directly: the fee saved correctly but the editor stayed open. Closing
+  // it used to depend entirely on the full renderRideView(r) rebuild below succeeding -
+  // that's a 250+ line function with its own documented history (v581) of throwing partway
+  // through for a real ride's specific field combination and leaving whatever was already
+  // painted frozen on screen. That would explain this exactly: the save happens first and
+  // always completes, but if the render that's supposed to replace the stale editor never
+  // finishes, the editor just... stays. Closes the editor directly now, independent of
+  // whether the full rebuild below succeeds.
+  _feeEdit = null;
+  try{
+    var _sec = document.getElementById('rm-fee-section');
+    if(_sec) _sec.outerHTML = buildFeeMathHTML(r);
+  }catch(e){ console.error('[saveFeeEdit] direct fee-section reset failed', e); }
+  try{ renderRideView(r); }catch(e){ console.error('[saveFeeEdit] renderRideView threw', e); }
+
   if(typeof refreshDash==='function') refreshDash();
   if(typeof renderCal==='function') renderCal();
   showToast('Fee updated \u2713');
@@ -24411,10 +24424,15 @@ function renderIncome(){
   // currently showing (see kmScheduledPayForRange). Reported directly: this card already
   // rendered on the income page, but its dollar amount was never actually counted toward
   // Morgan's real income totals - she could see the number, it just didn't add up anywhere.
-  // Kat-only excluded on purpose: this is money Morgan RECEIVES, not an expense of Kat's to
-  // subtract from her own take-home.
   const totalDispatchPay = (personalView && dName && kmVisible() && !kmIsKat()) ? kmScheduledPayForRange(start, end) : 0;
-  const netTakeHome    = totalEarnings + totalTips + totalFeesReceived + totalDispatchPay - totalVehicleCost - totalFinderFees - proratedExp;
+  // The mirror of the line above, on Kat's side. Direct instruction: Morgan's dispatch pay
+  // should be pulled from Kat's income too - it's money Kat is actually paying out for
+  // scheduling work, not revenue that's free and clear just because it shows up as a ride
+  // Kat's own client relationship generated. Reuses the exact same underlying number
+  // (kmScheduledPayForRange already filters on Morgan specifically, regardless of who's
+  // viewing), applied with the opposite sign.
+  const totalDispatchPayOwed = (personalView && dName && kmVisible() && kmIsKat()) ? kmScheduledPayForRange(start, end) : 0;
+  const netTakeHome    = totalEarnings + totalTips + totalFeesReceived + totalDispatchPay - totalDispatchPayOwed - totalVehicleCost - totalFinderFees - proratedExp;
 
   // Summary cards — show gas & maintenance prominently so they're never hidden below the fold
   // Consistent green for money made; costs shown as positive RED and labeled "… Cost".
@@ -24433,6 +24451,7 @@ function renderIncome(){
     ...(showRides&&totalTips>0?[{label:'Tips',val:`$${totalTips.toFixed(2)}`,color:GREEN}]:[]),
     ...(showFees&&personalView&&totalFeesReceived>0?[{label:'Fees Received (15%)',val:`$${totalFeesReceived.toFixed(2)}`,color:GREEN}]:[]),
     ...(showDispatch&&personalView&&totalDispatchPay>0?[{label:'Dispatch Pay (scheduling)',val:`$${totalDispatchPay.toFixed(2)}`,color:GREEN}]:[]),
+    ...(showDispatch&&personalView&&totalDispatchPayOwed>0?[{label:'Dispatch Pay Owed (to Morgan)',val:`$${totalDispatchPayOwed.toFixed(2)}`,color:REDCOST}]:[]),
     ...(showRides&&personalView&&totalGasCost>0?[{label:`Gas Cost (${gasCpm.toFixed(3)}/mi)`,val:`$${totalGasCost.toFixed(2)}`,color:REDCOST}]:[]),
     ...(showRides&&personalView&&totalMaintCost>0?[{label:`Maintenance Cost ($${maintCpm.toFixed(2)}/mi)`,val:`$${totalMaintCost.toFixed(2)}`,color:REDCOST}]:[]),
     ...(showFees&&personalView&&totalFinderFees>0?[{label:'Client Fees (15%)',val:`$${totalFinderFees.toFixed(2)}`,color:REDCOST}]:[]),
@@ -24463,7 +24482,7 @@ function renderIncome(){
   if(personalView && (
     (showRides && (totalVehicleCost > 0 || monthlyExp > 0)) ||
     (showFees && (totalFeesReceived > 0 || totalFinderFees > 0)) ||
-    (showDispatch && totalDispatchPay > 0)
+    (showDispatch && (totalDispatchPay > 0 || totalDispatchPayOwed > 0))
   )){
     cards.push({label:netLabel, val: displayedNet>=0?`$${displayedNet.toFixed(2)}`:`−$${Math.abs(displayedNet).toFixed(2)}`, color: displayedNet>=0?GREEN:REDCOST, highlight:true});
   }
