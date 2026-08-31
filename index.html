@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191030">
+<meta name="version" content="202608191032">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -643,6 +643,7 @@ input,select,textarea{font-size:16px;}
     <div id="dash-fees" style="margin-bottom:1.5rem;"></div>
     <!-- Action blocks: confirmations to send, then rides to wrap up, then upcoming -->
     <div id="dash-save-failed" style="margin-bottom:1.5rem;"></div>
+    <div id="dash-fees-awaiting-your-approval" style="margin-bottom:1.5rem;"></div>
     <div id="dash-pending-accept" style="margin-bottom:1.5rem;"></div>
     <div id="dash-gate-codes" style="margin-bottom:1.5rem;"></div>
         <div id="dash-confirmations" style="margin-bottom:1.5rem;"></div>
@@ -650,6 +651,7 @@ input,select,textarea{font-size:16px;}
     <div id="dash-awaiting-invoice-past" style="margin-bottom:1.5rem;"></div>
     <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.75rem;" id="dash-upcoming-label">Your upcoming rides</div>
     <div id="upcoming-list"></div>
+    <div id="dash-fees-awaiting-approval" style="margin-bottom:1.5rem;"></div>
   </div>
 
   <!-- QUOTE -->
@@ -8546,12 +8548,35 @@ function isMyDrivingRide(r){
 function isMyScheduledRide(r){
   const dName=getMyDriverName();
   const login=currentUser&&currentUser.name;
-  if(!!login && r.createdBy===login) return true;
-  if(!!dName && r.createdBy && USER_DRIVER_MAP[r.createdBy]===dName) return true;
+  // Effective creator for ownership purposes: r.createdBy as-is, UNLESS it isn't a real,
+  // recognized person at all (e.g. 'FamilyWall' from an auto-import) - in that case, fall back
+  // to whoever most recently made a real edit to this ride, since that's who's actually
+  // managing it now, not whatever automated source first created the row. Reported directly
+  // with a screenshot: a ride still attributed to FamilyWall after Morgan had edited it three
+  // times, with confirmation-sending ownership never following the actual work.
+  var _createdBy = r.createdBy;
+  if(_createdBy && !USER_DRIVER_MAP[_createdBy] && Array.isArray(r.trail) && r.trail.length){
+    var _realDriverNames = Object.keys(USER_DRIVER_MAP).map(function(k){ return USER_DRIVER_MAP[k]; });
+    for(var i=r.trail.length-1; i>=0; i--){
+      var _by = r.trail[i] && r.trail[i].by;
+      // _by is stored as a full driver name (touchRide calls getMyDriverName() first, which
+      // succeeds for any real logged-in driver) - check it against USER_DRIVER_MAP's VALUES,
+      // not its keys, which is what a login-name lookup would incorrectly assume.
+      if(_by && _realDriverNames.indexOf(_by)>-1){
+        // Reverse-resolve back to the login name, since every downstream check in this
+        // function compares against login-shaped values (r.createdBy is normally a login).
+        var _loginForBy = Object.keys(USER_DRIVER_MAP).find(function(k){ return USER_DRIVER_MAP[k]===_by; });
+        _createdBy = _loginForBy || _by;
+        break;
+      }
+    }
+  }
+  if(!!login && _createdBy===login) return true;
+  if(!!dName && _createdBy && USER_DRIVER_MAP[_createdBy]===dName) return true;
   // Kat & Morgan share dispatch: a ride scheduled by either shows for both, no
   // matter who created it. Resolve both identities to their owner and compare.
   const _pm = login ? (PROXY_MAP[login]||USER_DRIVER_MAP[login]||login) : null;
-  const _pc = r.createdBy ? (PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy) : null;
+  const _pc = _createdBy ? (PROXY_MAP[_createdBy]||USER_DRIVER_MAP[_createdBy]||_createdBy) : null;
   if(_pm && _pc && _pm===_pc) return true;
   return false;
 }
@@ -18829,6 +18854,11 @@ function refreshDash(){
   // Anything that didn't actually save yet - the single most urgent thing to surface
   try{ renderDashSaveFailed(); }catch(e){}
 
+  // Fee payments this user needs to confirm receipt of - needs action, so this sits near the
+  // very top, ahead of everything else. Split out of the main Client Fees card per direct
+  // request.
+  try{ renderDashFeesAwaitingYourApproval(); }catch(e){}
+
   // Rides scheduled but not yet announced to their driver - previously Calendar-only, added
   // here directly on request. A driver otherwise finds out only via the confirmation text the
   // night before, with no automatic fallback in between - this needed to be somewhere more
@@ -19043,6 +19073,11 @@ function refreshDash(){
       })()}
     </div>`;
   }).join(''):'<div style="text-align:center;padding:2rem 1rem;color:var(--mid);"><div style="font-size:2rem;margin-bottom:.4rem;">\uD83D\uDE97</div><div style="font-weight:600;color:var(--black);margin-bottom:.2rem;">No rides yet</div><div style="font-size:.85rem;line-height:1.5;">Nothing\u2019s broken \u2014 you just don\u2019t have any upcoming rides right now. New rides you\u2019re driving will show up here automatically.</div></div>';
+
+  // Fee payments this user already made and is simply waiting on - nothing left to act on, so
+  // this sits at the very bottom, below everything else on the dashboard. Split out of the
+  // main Client Fees card per direct request.
+  try{ renderDashFeesAwaitingApproval(); }catch(e){}
 }
 
 // Past rides the driver hasn't marked paid yet — a "wrap these up" nudge on the dashboard.
@@ -19814,58 +19849,62 @@ function renderDashFees(){
     +'<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:12px;overflow:hidden;">';
 
   if(hasOwed){
+    var _owedEntries = Object.entries(owedToMe).map(function(entry){
+      var name=entry[0], v=entry[1];
+      var _fpr=feePayments[dName+':recv:'+name]||{};
+      var _remaining=(v.rides||[]).filter(function(ri){ return !_feeRidePending(_fpr, ri.id); });
+      return {name:name, v:v, remaining:_remaining};
+    }).filter(function(e){ return e.remaining.length; });
+    if(_owedEntries.length){
     html+='<div style="font-size:.72rem;font-weight:600;color:var(--green);padding:.45rem .85rem;border-bottom:1px solid var(--light);background:#f0fdf4;">Owed to you</div>';
-    Object.entries(owedToMe).forEach(([name,v])=>{
+    _owedEntries.forEach(function(entry){
+      var name=entry.name, v=entry.v;
+      var _owedTotal=entry.remaining.reduce(function(a,ri){ return a+ri.fee; },0);
       // Counterparty header: name, total, standing Waive
       html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.55rem .85rem .3rem;gap:.6rem;">'
-        +'<div style="font-size:.86rem;font-weight:700;">'+escHtml(name.split(' ')[0])+' <span style="font-weight:600;color:var(--green);">$'+v.fee.toFixed(2)+'</span></div>'
+        +'<div style="font-size:.86rem;font-weight:700;">'+escHtml(name.split(' ')[0])+' <span style="font-weight:600;color:var(--green);">$'+_owedTotal.toFixed(2)+'</span></div>'
         +'<button onclick="waiveDashFee(\''+escAttr(dName)+'\',\''+escAttr(name)+'\')" '
         +'style="padding:.24rem .6rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.7rem;font-weight:600;cursor:pointer;">Waive '+escHtml(name.split(' ')[0])+'\u2019s</button>'
         +'</div>';
       // One row per ride — each is marked paid individually
-      (v.rides||[]).forEach(function(ri){
-        var _fpr=feePayments[dName+':recv:'+name]||{};
-        var _pendRcv=_feeRidePending(_fpr, ri.id);
-        var _sentBadge=_pendRcv?'<span style="font-size:.68rem;color:#b45309;font-weight:700;align-self:center;margin-right:.15rem;">\u23F3 sent</span>':'';
-        // Reject only makes sense once the driver has actually claimed to have sent it \u2014
-        // tapping it puts the fee straight back to owed-and-not-sent on both dashboards,
-        // the same underlying action as the driver's own pending-undo.
-        var _rejectBtn=_pendRcv?('<button onclick="_feeUndoRide(\''+escAttr(dName)+'\',\''+escAttr(name)+'\','+_feeIdArg(ri.id)+')" '
-          +'style="flex-shrink:0;padding:.26rem .6rem;background:none;border:1.5px solid #dc2626;color:#dc2626;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;">\u2717 Not received</button>'):'';
+      entry.remaining.forEach(function(ri){
         html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.35rem .85rem .35rem 1.4rem;border-bottom:1px solid var(--light);gap:.6rem;flex-wrap:wrap;">'
           +'<div style="font-size:.74rem;color:var(--mid);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_rideLabel(ri)+'</div>'
-          +'<div style="display:flex;gap:.3rem;align-items:center;flex-shrink:0;">'+_sentBadge+_rejectBtn
+          +'<div style="display:flex;gap:.3rem;align-items:center;flex-shrink:0;">'
           // Waive THIS ride only (v854) - sits beside Received because they're the two ways a
           // single fee gets settled: they paid it, or you forgave it. The counterparty's
           // "Waive all" button above still handles the standing, time-based arrangement.
           +'<button onclick="waiveOneRideFee(\''+escAttr(dName)+'\',\''+escAttr(name)+'\','+_feeIdArg(ri.id)+',\''+escAttr(ri.client||'')+'\')" '
           +'style="flex-shrink:0;padding:.26rem .6rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;">Waive</button>'
-          +'<button onclick="'+(_pendRcv?('markFeeRidePaid(\''+escAttr(dName)+'\',\''+escAttr(name)+'\','+_feeIdArg(ri.id)+',\'Venmo\')'):('promptFeePaymentMethod(\''+escAttr(dName)+'\',\''+escAttr(name)+'\','+_feeIdArg(ri.id)+')'))+'" '
+          +'<button onclick="promptFeePaymentMethod(\''+escAttr(dName)+'\',\''+escAttr(name)+'\','+_feeIdArg(ri.id)+')" '
           +'style="flex-shrink:0;padding:.26rem .6rem;background:#15803d;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;">\u2713 Received</button></div>'
           +'</div>';
       });
     });
+    }
   }
   if(hasOwe){
+    var _oweEntries = Object.entries(iOwe).map(function(entry){
+      var name=entry[0], v=entry[1];
+      // Pending-confirmation rides move to the dedicated "Fees awaiting approval" section
+      // below - a fee the payer already marked paid and is only waiting on confirmation for
+      // shouldn't still read as "you owe" here, per direct request.
+      var _fpo=feePayments[name+':recv:'+dName]||{};
+      var _remaining=(v.rides||[]).filter(function(ri){ return !_feeRidePending(_fpo, ri.id); });
+      return {name:name, v:v, remaining:_remaining};
+    }).filter(function(e){ return e.remaining.length; });
+    if(_oweEntries.length){
     html+='<div style="font-size:.72rem;font-weight:600;color:#dc2626;padding:.45rem .85rem;border-bottom:1px solid var(--light);background:#fff5f5;">You owe</div>';
-    Object.entries(iOwe).forEach(([name,v])=>{
+    _oweEntries.forEach(function(entry){
+      var name=entry.name, v=entry.v;
+      var _oweTotal=entry.remaining.reduce(function(a,ri){ return a+ri.fee; },0);
       html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.55rem .85rem .3rem;gap:.6rem;">'
-        +'<div style="font-size:.86rem;font-weight:700;">'+escHtml(name.split(' ')[0])+' <span style="font-weight:600;color:#dc2626;">$'+v.fee.toFixed(2)+'</span></div>'
+        +'<div style="font-size:.86rem;font-weight:700;">'+escHtml(name.split(' ')[0])+' <span style="font-weight:600;color:#dc2626;">$'+_oweTotal.toFixed(2)+'</span></div>'
         +'</div>';
       // One row per ride — pay and mark each ride on its own
-      (v.rides||[]).forEach(function(ri){
+      entry.remaining.forEach(function(ri){
         var _fpo=feePayments[name+':recv:'+dName]||{};
-        var _pend=_feeRidePending(_fpo, ri.id);
-        // Reported directly: a driver requesting a waiver on a fee they OWE isn't right —
-        // that decision belongs solely to the client owner, made on their own initiative, not
-        // prompted by a request from the person who'd benefit from it. Removed entirely, not
-        // just relabeled — requestFeeWaive() no longer has any call site. The owner already
-        // has a direct, unprompted way to waive what's owed to them (the Waive / Waive
-        // [name]'s buttons in the "Owed to you" section above), which is the only path now.
-        var _actions = _pend
-          ? '<span style="flex:1;min-width:78px;font-size:.7rem;color:#b45309;font-weight:700;align-self:center;">\u23F3 Awaiting confirmation</span>'
-            +'<button onclick="_feeUndoRide(\''+escAttr(name)+'\',\''+escAttr(dName)+'\','+_feeIdArg(ri.id)+')" style="flex:1;min-width:78px;padding:.42rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:600;cursor:pointer;">\u21a9 Undo</button>'
-          : venmoPayRideBtn(name, ri.fee, dName, ri.id)
+        var _actions = venmoPayRideBtn(name, ri.fee, dName, ri.id)
             +'<button onclick="promptFeePaymentMethod(\''+escAttr(name)+'\',\''+escAttr(dName)+'\','+_feeIdArg(ri.id)+')" style="flex:1;min-width:78px;padding:.42rem;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;">\u2713 Paid</button>';
         html+='<div style="padding:.4rem .85rem .55rem 1.4rem;border-bottom:1px solid var(--light);">'
           +'<div style="font-size:.74rem;color:var(--mid);margin-bottom:.42rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_rideLabel(ri)+'</div>'
@@ -19873,6 +19912,7 @@ function renderDashFees(){
           +'</div>';
       });
     });
+    }
   }
 
   // Waived-by-me section
@@ -19900,6 +19940,83 @@ function renderDashFees(){
   }
   html+='<div style="padding:.5rem .85rem;font-size:.72rem;color:var(--mid);">View full breakdown in <span onclick="nav(\'income\')" style="color:var(--accent);cursor:pointer;text-decoration:underline;">Income</span></div>'
     +'</div>';
+  box.innerHTML=html;
+}
+
+// Fees genuinely pending confirmation - split out of the main Client Fees card above, per
+// direct request: a fee the payer already marked paid and is only waiting on the other
+// person's confirmation for shouldn't still read as "you owe" (or sit buried inside "owed to
+// you" either). Two sides of the same handful of rides, shown in two different places because
+// they need two different things from two different people - the approver still has an action
+// to take, the payer is just waiting.
+
+// APPROVER'S side: rides where money was sent TO this user and is awaiting their own
+// confirmation. Needs action, so this belongs near the top of the dashboard, not buried below
+// everything else.
+function renderDashFeesAwaitingYourApproval(){
+  const box=document.getElementById('dash-fees-awaiting-your-approval'); if(!box) return;
+  const dName=getMyDriverName(); if(!dName){ box.innerHTML=''; return; }
+  const today=toDateStr(new Date());
+  const rows=[];
+  rides.forEach(function(r){
+    if(!r.date||r.date>today||r.status!=='paid'||parseFloat(r.price||0)<=0) return;
+    if(clientIsDriver(r.client)) return;
+    const owner=feeOwnerFor(r.createdBy), driver=r.driver||null;
+    if(!owner||!driver||owner===driver||owner!==dName) return;
+    const _fpr=feePayments[dName+':recv:'+driver]||{};
+    if(feeSettledForRide(_fpr, r)) return;
+    if(!_feeRidePending(_fpr, r.id)) return;
+    rows.push({driver:driver, client:r.client, date:r.date, fee:parseFloat(r.price)*clientFeeRate(), id:r.id});
+  });
+  if(!rows.length){ box.innerHTML=''; return; }
+  rows.sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
+  var html='<div style="background:#fff8e1;border:1.5px solid #fcd34d;border-radius:12px;padding:1rem;margin-bottom:.75rem;">'
+    +'<div style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#92400e;margin-bottom:.5rem;">\u23f3 Fees awaiting your approval \u00b7 '+rows.length+'</div>'
+    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.6rem;line-height:1.4;">These drivers say they\u2019ve sent your fee \u2014 confirm you actually received it.</div>';
+  rows.forEach(function(ri){
+    html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.4rem 0;border-top:1px solid #fde9b8;gap:.5rem;flex-wrap:wrap;">'
+      +'<div style="font-size:.78rem;min-width:0;"><b>'+escHtml(ri.driver.split(' ')[0])+'</b> <span style="color:var(--mid);">'+escHtml(ri.client||'')+' \u00b7 '+fmtDateShort(ri.date)+' \u00b7 $'+ri.fee.toFixed(2)+'</span></div>'
+      +'<div style="display:flex;gap:.3rem;flex-shrink:0;">'
+      +'<button onclick="_feeUndoRide(\''+escAttr(dName)+'\',\''+escAttr(ri.driver)+'\','+_feeIdArg(ri.id)+')" style="padding:.26rem .6rem;background:none;border:1.5px solid #dc2626;color:#dc2626;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;">\u2717 Not received</button>'
+      +'<button onclick="markFeeRidePaid(\''+escAttr(dName)+'\',\''+escAttr(ri.driver)+'\','+_feeIdArg(ri.id)+',\'Venmo\')" style="padding:.26rem .6rem;background:#15803d;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;">\u2713 Received</button>'
+      +'</div></div>';
+  });
+  html+='</div>';
+  box.innerHTML=html;
+}
+
+// PAYER'S own side: rides this user already marked paid and is simply waiting on. Nothing left
+// to do here but wait (or undo), so this belongs at the bottom of the dashboard, well below
+// anything actually needing action today.
+function renderDashFeesAwaitingApproval(){
+  const box=document.getElementById('dash-fees-awaiting-approval'); if(!box) return;
+  const dName=getMyDriverName(); if(!dName){ box.innerHTML=''; return; }
+  const today=toDateStr(new Date());
+  const rows=[];
+  rides.forEach(function(r){
+    if(!r.date||r.date>today||r.status!=='paid'||parseFloat(r.price||0)<=0) return;
+    if(clientIsDriver(r.client)) return;
+    const owner=feeOwnerFor(r.createdBy), driver=r.driver||null;
+    if(!owner||!driver||owner===driver||driver!==dName) return;
+    const _fpo=feePayments[owner+':recv:'+dName]||{};
+    if(feeSettledForRide(_fpo, r)) return;
+    if(!_feeRidePending(_fpo, r.id)) return;
+    rows.push({owner:owner, client:r.client, date:r.date, fee:parseFloat(r.price)*clientFeeRate(), id:r.id});
+  });
+  if(!rows.length){ box.innerHTML=''; return; }
+  rows.sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
+  var html='<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:12px;padding:1rem;margin-bottom:.75rem;">'
+    +'<div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Fees awaiting approval \u00b7 '+rows.length+'</div>'
+    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.6rem;line-height:1.4;">Already paid \u2014 just waiting on confirmation.</div>';
+  rows.forEach(function(ri){
+    html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.4rem 0;border-top:1px solid var(--light);gap:.5rem;flex-wrap:wrap;">'
+      +'<div style="font-size:.78rem;min-width:0;"><b>'+escHtml(ri.owner.split(' ')[0])+'</b> <span style="color:var(--mid);">'+escHtml(ri.client||'')+' \u00b7 '+fmtDateShort(ri.date)+' \u00b7 $'+ri.fee.toFixed(2)+'</span></div>'
+      +'<div style="display:flex;gap:.3rem;flex-shrink:0;align-items:center;">'
+      +'<span style="font-size:.7rem;color:#b45309;font-weight:700;">\u23F3 Awaiting confirmation</span>'
+      +'<button onclick="_feeUndoRide(\''+escAttr(ri.owner)+'\',\''+escAttr(dName)+'\','+_feeIdArg(ri.id)+')" style="padding:.26rem .6rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;">\u21a9 Undo</button>'
+      +'</div></div>';
+  });
+  html+='</div>';
   box.innerHTML=html;
 }
 
