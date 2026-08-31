@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191029">
+<meta name="version" content="202608191030">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -25468,6 +25468,16 @@ function _renderDecisionHistoryHTML(){
     if(!_isAdminLogin(me)) return '';
     var done=Object.keys(adminActions||{}).map(function(k){return adminActions[k];})
       .filter(function(r){ return r && r.status && r.status!=='pending'; });
+    if(!done.length) return '';
+    // Only the past week - reported directly, a decision from two weeks ago showing in what's
+    // meant to be a recent-activity glance was no longer actually "recent." Same timestamp
+    // fallback chain the sort below already uses, so filtering and sorting never disagree
+    // about which date a given entry actually has.
+    var _weekAgo = Date.now() - 7*24*60*60*1000;
+    done = done.filter(function(r){
+      var ts = new Date(r.deniedAt||r.approvedAt||r.decidedAt||r.resolvedAt||0).getTime()||0;
+      return ts>=_weekAgo;
+    });
     if(!done.length) return '';
     done.sort(function(a,b){
       var av=new Date(a.deniedAt||a.approvedAt||a.decidedAt||a.resolvedAt||0).getTime()||0;
