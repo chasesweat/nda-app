@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191015">
+<meta name="version" content="202608191019">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -860,9 +860,11 @@ input,select,textarea{font-size:16px;}
     </div>
     <input type="text" id="cal-search" name="cal-search-nofill" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="🔍 Search all rides — client, phone, driver, type…" oninput="calSearch()" style="width:100%;padding:.55rem .85rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;margin-bottom:.75rem;box-sizing:border-box;" />
     <div id="cal-controls" style="display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem;flex-wrap:wrap;">
-      <button onclick="calPrev()" class="btn-secondary" style="padding:.35rem .75rem;">←</button>
-      <span id="cal-range-label" style="font-size:.95rem;font-weight:600;"></span>
-      <button onclick="calNext()" class="btn-secondary" style="padding:.35rem .75rem;">→</button>
+      <div style="display:flex;align-items:center;gap:.5rem;flex-shrink:0;">
+        <button onclick="calPrev()" class="btn-secondary" style="padding:.35rem .75rem;">←</button>
+        <span id="cal-range-label" style="font-size:.95rem;font-weight:600;white-space:nowrap;"></span>
+        <button onclick="calNext()" class="btn-secondary" style="padding:.35rem .75rem;">→</button>
+      </div>
       <button onclick="calToday()" class="btn-secondary" style="padding:.35rem .75rem;font-size:.8rem;">Today</button>
       <div class="view-toggle" style="margin-left:auto;">
         <button id="cal-view-week" class="view-btn active" onclick="setCalView('week')">Week</button>
@@ -1073,9 +1075,11 @@ input,select,textarea{font-size:16px;}
     </div>
     <div id="my-cal-panel">
       <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem;flex-wrap:wrap;">
-        <button onclick="myCalPrev()" class="btn-secondary" style="padding:.35rem .75rem;">←</button>
-        <span id="mycal-range-label" style="font-size:.95rem;font-weight:600;"></span>
-        <button onclick="myCalNext()" class="btn-secondary" style="padding:.35rem .75rem;">→</button>
+        <div style="display:flex;align-items:center;gap:.5rem;flex-shrink:0;">
+          <button onclick="myCalPrev()" class="btn-secondary" style="padding:.35rem .75rem;">←</button>
+          <span id="mycal-range-label" style="font-size:.95rem;font-weight:600;white-space:nowrap;"></span>
+          <button onclick="myCalNext()" class="btn-secondary" style="padding:.35rem .75rem;">→</button>
+        </div>
         <button onclick="myCalToday()" class="btn-secondary" style="padding:.35rem .75rem;font-size:.8rem;">Today</button>
         <div class="view-toggle" style="margin-left:auto;">
           <button id="mycal-view-week" class="view-btn active" onclick="setMyCalView('week')">Week</button>
@@ -1164,6 +1168,7 @@ input,select,textarea{font-size:16px;}
     <div id="income-km-pay"></div>
         <div id="income-summary-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,200px));gap:.75rem;margin-bottom:1.25rem;width:100%;justify-content:center;"></div>
     <div id="income-my-fares"></div>
+    <div id="income-my-scheduled-paid"></div>
     <div id="income-tripprofit"></div>
     <div id="income-finderfees"></div>
     <div id="income-ride-list"></div>
@@ -6483,7 +6488,7 @@ function _notifyOwnerOfForeignSchedule(ride){
 // ── QUOTE DOCUMENT (branded, Save-as-PDF) ───────────────────────────────────
 // Mirrors the receipt generator's structure so a quote looks like it came from
 // the same business. Works for a saved quote or any ride-shaped object.
-function buildQuoteHTML(q, cmp){
+function buildQuoteHTML(q, cmp, logoOverride){
   if(!q) return '';
   var isCmp = !!(cmp && cmp.length>1);
   const esc = (s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -6502,12 +6507,15 @@ function buildQuoteHTML(q, cmp){
   // not NWDA's specific purple, since that's itself a brand choice that could clash with
   // whatever a given driver's actual logo colors are. Per Chase's own reasoning: a driver's
   // quote should never visually fight their own branding.
-  const _docAccent = _ownerProf.logoAccentColor || '#2d2d2d';
+  // logoOverride: set when the sender was explicitly asked which logo to use and chose their
+  // own (see _maybeAskWhichLogo) - bypasses the owner-priority resolution entirely rather than
+  // just being layered on top of it, so the accent color matches whichever logo actually shows.
+  const _docAccent = logoOverride ? (logoOverride.accentColor||'#2d2d2d') : (_ownerProf.logoAccentColor || '#2d2d2d');
   const _docAccentText = _readableTextOn(_docAccent);
   const appLogo = (document.querySelector('img[alt="NWDA Logo"]')||{}).src || '';
-  const shownLogo = (_ownerProf.logo||'') || appLogo;
+  const shownLogo = logoOverride ? (logoOverride.logo||'') : ((_ownerProf.logo||'') || appLogo);
   const logoHtml = shownLogo ? '<img src="'+shownLogo+'" alt="logo" style="max-height:70px;max-width:180px;object-fit:contain;margin-bottom:10px;">' : '';
-  const orgName = ((_ownerProf.businessName||'').trim()) || 'Your Driver';
+  const orgName = logoOverride ? (logoOverride.businessName||'Your Driver') : (((_ownerProf.businessName||'').trim()) || 'Your Driver');
   const ownerPhone = (_ownerProf.phone||'').trim();
   const bd = buildRideBreakdown(q);
   const amt = bd.total;
@@ -6609,11 +6617,53 @@ function _quoteDocSource(qid){
   return null;
 }
 // Open the branded quote in a new tab so the driver can Save-as-PDF / share it.
+// Asks whoever is about to send a quote/receipt which logo to use, when there's a genuine
+// choice to make - the sender has their own logo AND isn't the client-relationship owner (so
+// the default would otherwise silently show someone else's branding). Direct instruction: when
+// Morgan sends an invoice or quote, ask her whether to use her logo or Kat's. Scoped to the
+// actual condition that creates the choice, not hardcoded to Morgan specifically, so it holds
+// up correctly for anyone in the same position later.
+function _maybeAskWhichLogo(clientName, onChoice){
+  try{
+    var myName = (typeof getMyDriverName==='function') ? getMyDriverName() : null;
+    var myProf = (myName && typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[myName]) ? DRIVER_PROFILES[myName] : {};
+    if(!myProf.logo){ onChoice(null); return; } // nothing of mine to offer as an alternative
+    var ownerName = (typeof getClientOwner==='function') ? getClientOwner(clientName) : null;
+    if(!ownerName || ownerName===myName){ onChoice(null); return; } // I'm the owner - no real choice here
+    var ownerProf = (typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[ownerName]) ? DRIVER_PROFILES[ownerName] : {};
+    if(!ownerProf.logo){ onChoice(null); return; } // owner has nothing to choose between either
+    var ov=document.createElement('div'); ov.id='which-logo-overlay';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:16700;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+    var myLogoImg = '<img src="'+myProf.logo+'" style="max-height:52px;max-width:120px;object-fit:contain;">';
+    var ownerLogoImg = '<img src="'+ownerProf.logo+'" style="max-height:52px;max-width:120px;object-fit:contain;">';
+    ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:380px;width:100%;padding:1.3rem;box-shadow:0 20px 50px rgba(0,0,0,.4);text-align:center;">'
+      +'<div style="font-size:.95rem;font-weight:800;color:#0f172a;margin-bottom:1rem;">Which logo should this show?</div>'
+      +'<button onclick="_whichLogoChosen(true)" style="width:100%;display:flex;align-items:center;gap:.7rem;padding:.7rem;background:var(--surface);border:2px solid var(--accent);border-radius:10px;cursor:pointer;margin-bottom:.6rem;">'+myLogoImg+'<span style="font-weight:700;font-size:.88rem;">My logo</span></button>'
+      +'<button onclick="_whichLogoChosen(false)" style="width:100%;display:flex;align-items:center;gap:.7rem;padding:.7rem;background:var(--surface);border:2px solid var(--light);border-radius:10px;cursor:pointer;">'+ownerLogoImg+'<span style="font-weight:700;font-size:.88rem;">'+escHtml(ownerName)+'\u2019s logo</span></button>'
+      +'</div>';
+    document.body.appendChild(ov);
+    window._whichLogoPending = { myProf: myProf, ownerProf: ownerProf, callback: onChoice };
+  }catch(e){ onChoice(null); }
+}
+function _whichLogoChosen(useMine){
+  var pending = window._whichLogoPending;
+  var ov=document.getElementById('which-logo-overlay'); if(ov) ov.remove();
+  if(!pending) return;
+  var p = useMine ? pending.myProf : pending.ownerProf;
+  window._whichLogoPending = null;
+  pending.callback({ logo:p.logo||'', businessName:p.businessName||'', accentColor:p.logoAccentColor||'' });
+}
+
 function openQuoteDocument(qid, cmp){
   var q=_quoteDocSource(qid);
   if(!q || !(q.client||'').trim()){ showToast('Enter a client name first','error'); return; }
   if(!(parseFloat(q.price)>0)){ showToast('Fill in the trip details so there\u2019s a price to quote','error'); return; }
-  var html=buildQuoteHTML(q, cmp);
+  _maybeAskWhichLogo(q.client, function(logoOverride){
+    _openQuoteDocumentWithLogo(q, cmp, logoOverride);
+  });
+}
+function _openQuoteDocumentWithLogo(q, cmp, logoOverride){
+  var html=buildQuoteHTML(q, cmp, logoOverride);
   try{
     var w=window.open('','_blank');
     if(w && w.document){ w.document.open(); w.document.write(html); w.document.close(); return; }
@@ -10613,7 +10663,7 @@ function renderRideView(r){
     <!-- ═══ ACTIONS ═══ -->
     ${(()=>{
       const _hasActions = !!((getMyDriverName()===r.driver) || (canSeeContact&&hasIncomeAccess()&&_slLocalType)
-        || (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP') || _pairedRideForBtn || shareOfferingsBtn
+        || (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP') || (_pairedRideForBtn && r.xxlPair) || shareOfferingsBtn
         || canExportToFamilyWall()); // FAMILYWALL EXPORT BUTTON — remove this clause when the block goes
       if(!_hasActions) return '';
       return `<div class="detail-row" style="grid-column:1/-1;">
@@ -10625,7 +10675,7 @@ function renderRideView(r){
           ${canSeeContact&&hasIncomeAccess()&&_slLocalType?'<button onclick="shareLocationToClient('+r.id+')" style="padding:.45rem .75rem;background:#0f172a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;">&#128205; Share Location \u2014 let the client see you coming</button>':''}
           ${((r.type==='AP PICK UP'||r.type==='AP ROUND TRIP') && getMyDriverName()===r.driver && _isRideWithinHoursSymmetric(r,6))?`<button onclick="dashSendArrival(${r.id})" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.6rem;background:none;border:1.5px solid #7c3aed;border-radius:8px;color:#7c3aed;font-weight:700;font-size:.88rem;cursor:pointer;font-family:'DM Sans',sans-serif;">\u2708\uFE0F Send arrival text to ${escHtml((r.client||'client').split(' ')[0])}</button>`:''}
           ${(r.arrivalSentAt && getMyDriverName()===r.driver)?`<div onclick="resetArrivalSent(${r.id})" style="text-align:center;font-size:.68rem;color:var(--mid);text-decoration:underline;cursor:pointer;margin-top:-.15rem;">Arrival text sent by mistake? Reset</div>`:''}
-          ${_pairedRideForBtn?`<button onclick="openRideModal(${_pairedRideForBtn.id})" style="width:100%;padding:.6rem;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">${r.xxlPair?'\uD83D\uDE90 View the other vehicle \u2192':'\u2708\ufe0f View the other ride in this booking \u2192'}</button>`:''}
+          ${(_pairedRideForBtn && r.xxlPair)?`<button onclick="openRideModal(${_pairedRideForBtn.id})" style="width:100%;padding:.6rem;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">\uD83D\uDE90 View the other vehicle \u2192</button>`:''}
           ${shareOfferingsBtn}
         </div>
       </div>`;
@@ -11581,7 +11631,7 @@ function buildReceiptText(r){
 // Build a branded, printable HTML receipt document. Uses the driver's business
 // name + logo if set (falls back to NWDA + driver name). The client opens it and
 // can "Save as PDF" / print from any device — reimbursement-ready.
-function buildReceiptHTML(r){
+function buildReceiptHTML(r, logoOverride){
   if(!r) return '';
   const esc = (s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const addr = (r.home||r.pickup||'your address').trim();
@@ -11589,14 +11639,15 @@ function buildReceiptHTML(r){
   const who  = (r.client||'').trim();
   const driver = (r.driver||'').trim();
   const prof = (typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[driver]) ? DRIVER_PROFILES[driver] : {};
-  const bizName = (prof.businessName||'').trim();
+  const bizName = logoOverride ? (logoOverride.businessName||'') : (prof.businessName||'').trim();
   // Logo priority: the client's OWNER's business logo, then the driving driver's, then (below) the app default.
+  // logoOverride bypasses this entirely when set - see buildQuoteHTML's identical comment for why.
   var _ownerName = (typeof getClientOwner==='function') ? getClientOwner(r.client) : null;
   var _ownerProf = (_ownerName && typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[_ownerName]) ? DRIVER_PROFILES[_ownerName] : {};
-  const logo = (_ownerProf.logo||'') || (prof.logo||'');
+  const logo = logoOverride ? (logoOverride.logo||'') : ((_ownerProf.logo||'') || (prof.logo||''));
   // Same reasoning and same owner-then-driver priority as the logo itself right above -
   // themed around whichever logo actually got shown, not NWDA's own purple by default.
-  const _docAccent = (_ownerProf.logoAccentColor||'') || (prof.logoAccentColor||'') || '#2d2d2d';
+  const _docAccent = logoOverride ? (logoOverride.accentColor||'#2d2d2d') : ((_ownerProf.logoAccentColor||'') || (prof.logoAccentColor||'') || '#2d2d2d');
   const _docAccentText = _readableTextOn(_docAccent);
   const driverPhone = prof.phone||'';
   const rn = _receiptNumber(r);
@@ -11897,7 +11948,12 @@ function downloadReceiptDocument(id){
   if(!_receiptAccessOrUpgrade()) return;
   const r = rides.find(x=>x&&(x.id===id||String(x.id)===String(id)));
   if(!r){ return; }
-  const html = buildReceiptHTML(r);
+  _maybeAskWhichLogo(r.client, function(logoOverride){
+    _downloadReceiptDocumentWithLogo(r, logoOverride);
+  });
+}
+function _downloadReceiptDocumentWithLogo(r, logoOverride){
+  const html = buildReceiptHTML(r, logoOverride);
   const safe = (r.client||'client').replace(/[^a-z0-9]+/gi,'_').replace(/^_+|_+$/g,'');
   const fname = 'NWDA_Receipt_'+safe+'_'+(r.date||'').replace(/-/g,'')+'.html';
   try{
@@ -11917,7 +11973,12 @@ async function shareReceiptDocument(id){
   if(!_receiptAccessOrUpgrade()) return;
   const r = rides.find(x=>x&&(x.id===id||String(x.id)===String(id)));
   if(!r){ return; }
-  const html = buildReceiptHTML(r);
+  _maybeAskWhichLogo(r.client, function(logoOverride){
+    _shareReceiptDocumentWithLogo(r, logoOverride);
+  });
+}
+async function _shareReceiptDocumentWithLogo(r, logoOverride){
+  const html = buildReceiptHTML(r, logoOverride);
   const safe = (r.client||'client').replace(/[^a-z0-9]+/gi,'_').replace(/^_+|_+$/g,'');
   const fname = 'Receipt_'+safe+'_'+(r.date||'').replace(/-/g,'')+'.html';
   try{
@@ -11936,7 +11997,7 @@ async function shareReceiptDocument(id){
     }
   }catch(e){ if(e && e.name==='AbortError') return; }
   // Fallback: download the document instead
-  downloadReceiptDocument(id);
+  _downloadReceiptDocumentWithLogo(r, logoOverride);
 }
 
 // Opens the existing Flag Cautious modal from inside the payment flow — the moment a
@@ -22641,8 +22702,9 @@ async function renderMyProfileCard(){
   const me=profileDriver();
   if(!me){ box.innerHTML='<div style="color:var(--mid);font-size:.9rem;padding:1rem;">Your login isn\u2019t linked to a driver profile yet. Ask an admin to link your account on the Team page.</div>'; return; }
   await _ensureDriverPhotoLoaded(me);
-  try{ var _pp=DRIVER_PROFILES[me]; if(_pp){ var _ch=migrateWeeklyOff(_pp); if(pruneExpiredDaysOff(_pp)) _ch=true; if(_ch) persistDriverProfiles(me); } }catch(e){}
+  try{ var _pp=DRIVER_PROFILES[me]; if(_pp){ var _ch=migrateAvailToUnified(_pp); if(pruneExpiredAvailRules(_pp)) _ch=true; if(_ch) persistDriverProfiles(me); } }catch(e){}
   box.innerHTML=buildMemberCard(me,{forceEdit:true});
+  try{ renderAvailCalendar(me); }catch(e){}
   // Move the settings block (receipt branding, payments, toggles, confirmation text) into the
   // Account Settings tab so My Info stays short. Fields keep their IDs, so Save still works.
   try{
@@ -22713,20 +22775,26 @@ function renderTeamAvailability(){
   const _me=getMyDriverName();
   const rows=DRIVERS.slice().sort(function(a,b){ if(a===_me) return -1; if(b===_me) return 1; return String(a||'').localeCompare(String(b||'')); }).map(function(d){
     const prof=DRIVER_PROFILES[d]||{};
+    migrateAvailToUnified(prof);
     const color=driverColor(d);
-    const weekly=weeklyOffDays(prof);
-    const upcoming=(prof.unavailableDates||[]).filter(function(dt){ return dt>=today; }).sort();
-    const hrs=(prof.unavailHours||[]);
-    const hasAny=weekly.length||upcoming.length||hrs.length;
+    const rules=prof.availRules||[];
+    const weekly=(rules.find(function(x){return x.kind==='off'&&x.repeat==='weekly';})||{days:[]}).days.map(function(w){return WEEKDAY_ABBR[w];});
+    const recur=rules.filter(function(x){ return x.kind==='off' && (x.repeat==='monthly'||x.repeat==='yearly'); });
+    const upcoming=rules.filter(function(x){ return x.kind==='off' && x.repeat==='none' && x.date>=today; }).map(function(x){return x.date;}).sort();
+    const hrs=rules.filter(function(x){ return x.kind==='hours' && (x.repeat!=='none' || x.date>=today); });
+    const avExc=(prof.availExceptions||[]).filter(function(dt){ return dt>=today; }).sort();
+    const hasAny=weekly.length||recur.length||upcoming.length||hrs.length||avExc.length;
     return '<div style="border:1.5px solid var(--light);border-radius:12px;padding:.8rem .9rem;margin-bottom:.7rem;background:var(--white);">'
       +'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem;">'
       +'<span style="width:12px;height:12px;border-radius:50%;background:'+color+';flex-shrink:0;"></span>'
       +'<span style="font-weight:700;font-size:.9rem;">'+escHtml(d)+(getMyDriverName()===d?' <span style="font-size:.65rem;color:var(--mid);">(you)</span>':'')+'</span>'
       +'</div>'
       +(weekly.length?'<div style="font-size:.78rem;margin-bottom:.3rem;"><span style="color:var(--mid);">Standing days off:</span> <strong>'+weekly.join(', ')+'</strong></div>':'')
+      +(recur.length?'<div style="font-size:.78rem;margin-bottom:.3rem;"><span style="color:var(--mid);">Recurring:</span> '+recur.map(function(x){return x.repeat+' from '+fmtDateShort(x.date);}).join(', ')+'</div>':'')
       +(upcoming.length?'<div style="font-size:.78rem;margin-bottom:.3rem;"><span style="color:var(--mid);">Unavailable dates:</span><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:3px;">'
           +upcoming.map(function(dt){ return '<span style="font-size:.72rem;background:#fdecea;color:#b03a2e;border:1px solid #f3c4bd;border-radius:12px;padding:2px 8px;">'+fmtDateShort(dt)+'</span>'; }).join('')+'</div></div>':'')
-      +(hrs.length?'<div style="font-size:.78rem;margin-bottom:.2rem;"><span style="color:var(--mid);">Blocked hours:</span> '+hrs.map(function(h){ var _w=h.date?fmtDateShort(h.date):((h.days||[]).map(function(x){return WEEKDAY_ABBR[x];}).join('/')); return escHtml(_w+' '+fmtTime12(h.from||'')+'\u2013'+fmtTime12(h.to||'')); }).join(' \u00b7 ')+'</div>':'')
+      +(hrs.length?'<div style="font-size:.78rem;margin-bottom:.2rem;"><span style="color:var(--mid);">Blocked hours:</span> '+hrs.map(function(h){ var _w=h.repeat==='none'?fmtDateShort(h.date):(h.days||[]).map(function(x){return WEEKDAY_ABBR[x];}).join('/'); return escHtml(_w+' '+fmtTime12(h.from||'')+'\u2013'+fmtTime12(h.to||'')); }).join(' \u00b7 ')+'</div>':'')
+      +(avExc.length?'<div style="font-size:.78rem;margin-bottom:.2rem;"><span style="color:#15803d;">Available anyway:</span> '+avExc.map(function(dt){return fmtDateShort(dt);}).join(', ')+'</div>':'')
       +(hasAny?'':'<div style="font-size:.78rem;color:var(--mid);">No blocked days \u2014 available anytime.</div>')
       +'</div>';
   }).join('');
@@ -22845,99 +22913,15 @@ function buildMemberCard(d, opts){
           +'<span id="avail-chev-'+dk+'" style="display:inline-block;transition:transform .15s;transform:'+(_sectionCollapsed('availCollapsed_'+dk,false)?'rotate(-90deg)':'rotate(0deg)')+';color:var(--mid);font-size:.75rem;">\u25be</span>'
           +'</div>'
           +((function(){
-             var weekly=weeklyOffDays(prof);
-             var _today=toDateStr(new Date());
-             var upcoming=(prof.unavailableDates||[]).filter(function(dt){return dt>=_today;}).sort();
-             var avExc=(prof.availableDates||[]).filter(function(dt){return dt>=_today;}).sort();
-             // Recurring (day-of-week) blocks never expire and are always kept. A specific-date
-             // block (like "Jul 26 5:30 PM–8:00 PM") is only relevant through the day it's
-             // actually for - once that date has passed, it's just clutter, same reasoning
-             // already applied to unavailableDates/availableDates just above.
-             var hrs=(prof.unavailHours||[]).filter(function(h){ return !h.date || h.date>=_today; });
-             var any=weekly.length||upcoming.length||hrs.length||avExc.length;
-             return '<div style="background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.55rem .7rem;margin-bottom:.6rem;">'
-               +'<div style="font-size:.6rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Currently set</div>'
-               +(weekly.length?'<div style="font-size:.76rem;margin-bottom:.25rem;"><span style="color:var(--mid);">Days off:</span> <strong>'+weekly.join(', ')+'</strong></div>':'')
-               +(upcoming.length?'<div style="font-size:.76rem;margin-bottom:.25rem;"><span style="color:var(--mid);">Off dates:</span> '+upcoming.map(function(dt){return fmtDateShort(dt);}).join(', ')+'</div>':'')
-               +(hrs.length?'<div style="font-size:.76rem;margin-bottom:.25rem;"><span style="color:var(--mid);">Blocked hours:</span> '+hrs.map(function(h){var _w=h.date?fmtDateShort(h.date):((h.days||[]).map(function(x){return WEEKDAY_ABBR[x];}).join('/'));return escHtml(_w+' '+fmtTime12(h.from||'')+"\u2013"+fmtTime12(h.to||''));}).join(" \u00b7 ")+'</div>':'')
-               +(avExc.length?'<div style="font-size:.76rem;margin-bottom:.25rem;"><span style="color:#15803d;">Available anyway:</span> '+avExc.map(function(dt){return fmtDateShort(dt);}).join(', ')+'</div>':'')
-               +(any?'':'<div style="font-size:.76rem;color:var(--mid);">Nothing blocked \u2014 available anytime.</div>')
-               +'</div>';
+             var st = driverAvailabilityStatus(d, toDateStr(new Date()), null);
+             return '<div style="background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.55rem .7rem;margin-bottom:.6rem;font-size:.76rem;">'
+               + (st.available
+                   ? '<span style="color:#15803d;font-weight:700;">\u2713 Available today</span>'
+                   : '<span style="color:#b03a2e;font-weight:700;">\u2717 Not available today</span> \u2014 '+escHtml(st.reason||''))
+               + '</div>';
            })())
           +'<div id="avail-body-'+dk+'" style="display:'+(_sectionCollapsed('availCollapsed_'+dk,false)?'none':'')+';">'
-          +'<div style="display:flex;align-items:center;gap:4px;margin-bottom:1px;"><span style="font-size:.68rem;color:var(--mid);font-weight:600;">Specific days off</span>'
-          +'<span onclick="toggleInfoBubble(\'avail-info-days-'+dk+'\')" style="cursor:pointer;width:13px;height:13px;border-radius:50%;background:var(--light);color:var(--mid);font-size:.58rem;display:inline-flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0;">i</span></div>'
-          +'<div id="avail-info-days-'+dk+'" style="display:none;font-size:.63rem;color:var(--mid);margin-bottom:4px;line-height:1.4;background:var(--surface);border-radius:6px;padding:.4rem .5rem;">Pick a single date you can\u2019t drive (like a vacation day). Each date you add is kept \u2014 adding a new one won\u2019t erase the others.</div>'
-          +'<div style="display:flex;gap:.4rem;margin-bottom:.4rem;flex-wrap:wrap;">'
-          +'<input type="date" id="avail-date-'+dk+'" style="flex:1;min-width:132px;padding:.35rem .5rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
-          +'<select id="avail-repeat-'+dk+'" style="padding:.35rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;"><option value="none">One-time</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select>'
-          +'<button onclick="addUnavailDate(\''+d+'\')" style="padding:.35rem .8rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Add</button>'
-          +'</div>'
-          +'<div style="display:flex;flex-wrap:wrap;gap:4px;">'
-          + (prof.unavailableDates||[]).filter(function(dt){ return dt>=toDateStr(new Date()); }).map(function(dt){ return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:.72rem;background:#fdecea;color:#b03a2e;border:1px solid #f3c4bd;border-radius:12px;padding:2px 8px;">'+fmtDateShort(dt)+' <span onclick="removeUnavailDate(\''+d+'\',\''+dt+'\')" style="cursor:pointer;font-weight:700;">×</span></span>'; }).join('')
-          +'</div>'
-          +'<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">'
-          + (prof.recurringOff||[]).map(function(x){ return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:.72rem;background:#efe7fb;color:#6d28d9;border:1px solid #d8c9f5;border-radius:12px;padding:2px 8px;">'+fmtDateShort(x.date)+' ('+x.repeat+') <span onclick="removeRecurringOff(\''+d+'\',\''+x.date+'\',\''+x.repeat+'\')" style="cursor:pointer;font-weight:700;">×</span></span>'; }).join('')
-          +'</div>'
-          +'<div style="display:flex;align-items:center;gap:4px;margin-top:.7rem;margin-bottom:3px;"><span style="font-size:.68rem;color:var(--mid);">Available anyway (override a day off)</span>'
-          +'<span onclick="toggleInfoBubble(\'avail-info-anyway-'+dk+'\')" style="cursor:pointer;width:13px;height:13px;border-radius:50%;background:var(--light);color:var(--mid);font-size:.58rem;display:inline-flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0;">i</span></div>'
-          +'<div id="avail-info-anyway-'+dk+'" style="display:none;font-size:.64rem;color:var(--mid);margin-bottom:4px;line-height:1.4;background:var(--surface);border-radius:6px;padding:.4rem .5rem;">Mark a single date you <em>can</em> drive even though it&rsquo;s a standing day off &mdash; e.g. a weekday your day job is closed. Doesn&rsquo;t change your regular schedule.</div>'
-          +'<div style="display:flex;gap:.4rem;margin-bottom:.4rem;flex-wrap:wrap;">'
-          +'<input type="date" id="avail-exc-date-'+dk+'" style="flex:1;min-width:132px;padding:.35rem .5rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
-          +'<button onclick="addAvailableDate(\''+d+'\')" style="padding:.35rem .8rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Add</button>'
-          +'</div>'
-          +'<div style="display:flex;flex-wrap:wrap;gap:4px;">'
-          + (prof.availableDates||[]).filter(function(dt){ return dt>=toDateStr(new Date()); }).map(function(dt){ return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:.72rem;background:#e7f7ec;color:#15803d;border:1px solid #bbe8c9;border-radius:12px;padding:2px 8px;">'+fmtDateShort(dt)+' <span onclick="removeAvailableDate(\''+d+'\',\''+dt+'\')" style="cursor:pointer;font-weight:700;">&times;</span></span>'; }).join('')
-          +'</div>'
-          +'<div style="margin-top:.6rem;">'
-          +'<div style="display:flex;align-items:center;gap:4px;margin-bottom:1px;"><span style="font-size:.68rem;color:var(--mid);font-weight:600;">Hours I can\u2019t drive</span>'
-          +'<span onclick="toggleInfoBubble(\'avail-info-hours-'+dk+'\')" style="cursor:pointer;width:13px;height:13px;border-radius:50%;background:var(--light);color:var(--mid);font-size:.58rem;display:inline-flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0;">i</span></div>'
-          +'<div id="avail-info-hours-'+dk+'" style="display:none;font-size:.63rem;color:var(--mid);margin-bottom:4px;line-height:1.4;background:var(--surface);border-radius:6px;padding:.4rem .5rem;">For a <strong>part</strong> of a day only \u2014 e.g. can\u2019t drive Tuesdays 9am\u20132pm. Taking a <strong>whole day off?</strong> Use <strong>Specific days off</strong> at the top instead \u2014 no times needed there. Set hours here for every week on certain days, <strong>or</strong> on one specific date. To <strong>change</strong> a block, use the \u270f\uFE0F or \u00d7 next to it \u2014 don\u2019t add a new one.</div>'
-          +'<div style="font-size:.62rem;color:var(--mid);font-weight:700;margin-bottom:2px;">EVERY WEEK ON</div>'
-          +'<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:.45rem;">'
-          + ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((w,wi)=>
-            '<label style="display:flex;align-items:center;gap:2px;font-size:.65rem;cursor:pointer;">'
-            +'<input type="checkbox" class="avail-hday-'+dk+'" value="'+wi+'" style="accent-color:var(--accent);"/>'+w+'</label>'
-          ).join('')
-          +'</div>'
-          +'<div style="display:flex;align-items:center;gap:.5rem;margin:.1rem 0 .45rem;"><div style="flex:1;height:1px;background:var(--light);"></div><span style="font-size:.6rem;font-weight:700;color:var(--mid);">OR</span><div style="flex:1;height:1px;background:var(--light);"></div></div>'
-          +'<div style="font-size:.62rem;color:var(--mid);font-weight:700;margin-bottom:2px;">JUST ONE DATE</div>'
-          +'<input type="date" id="avail-hdate-'+dk+'" title="Block these hours on a single date only" style="width:100%;padding:.45rem;border:1px solid var(--light);border-radius:6px;font-size:.85rem;box-sizing:border-box;margin-bottom:.55rem;"/>'
-          +'<div style="font-size:.62rem;color:var(--mid);font-weight:700;margin-bottom:2px;">FROM (start)</div>'
-          +'<input type="time" id="avail-hfrom-'+dk+'" aria-label="Start time" title="Start time (from)" style="padding:.45rem;border:1px solid var(--light);border-radius:6px;font-size:.9rem;box-sizing:border-box;width:100%;margin-bottom:.5rem;"/>'
-          +'<div style="font-size:.62rem;color:var(--mid);font-weight:700;margin-bottom:2px;">TO (end)</div>'
-          +'<input type="time" id="avail-hto-'+dk+'" aria-label="End time" title="End time (to)" style="padding:.45rem;border:1px solid var(--light);border-radius:6px;font-size:.9rem;box-sizing:border-box;width:100%;margin-bottom:.55rem;"/>'
-          +'<button onclick="addUnavailHour(\''+d+'\')" style="width:100%;padding:.5rem .8rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;">Add</button>'
-          +((function(){
-            // Recurring blocks never expire. A specific-date block that's already passed can
-            // never affect any future ride (isDriverAvailable only matches on exact date
-            // equality) - same reasoning as filtering it from the Currently Set summary above,
-            // applied here too so it actually disappears everywhere, not just the summary.
-            var _todayEdit = toDateStr(new Date());
-            return (prof.unavailHours||[]).filter(function(h){ return !h.date || h.date>=_todayEdit; });
-          })().length?
-            '<div style="font-size:.65rem;color:var(--mid);margin-bottom:3px;font-weight:600;">Hours you\u2019ve set (\u270f\uFE0F to change, \u00d7 to remove):</div>'
-            +(function(){
-              var _todayEdit = toDateStr(new Date());
-              return (prof.unavailHours||[]).filter(function(h){ return !h.date || h.date>=_todayEdit; });
-            })().map(blk=>{
-              const dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-              const label=blk.date?fmtDateShort(blk.date):(blk.days||[]).map(d2=>dayNames[d2]).join('/');
-              return '<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.3rem;">'
-                +'<span style="flex:1;min-width:0;font-size:.72rem;color:var(--black);">'+label+' '+fmtTime12(blk.from)+'\u2013'+fmtTime12(blk.to)+'</span>'
-                +'<span style="flex-shrink:0;display:flex;gap:.5rem;">'
-                // These were padding:1px 4px at .65rem - about 16x14 CSS px, well under the ~44px
-                // a fingertip actually needs, and sitting side by side so a near miss hit the
-                // WRONG one (remove instead of edit). Now a 36px square each with a real gap
-                // between them. Kept as compact squares rather than full buttons so the row still
-                // reads as one line per time block.
-                +'<button onclick="openEditHourModal(\''+d+'\',\''+blk.id+'\')" aria-label="Change these hours" title="Change these hours" style="display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;padding:0;background:#7c3aed;color:#fff;border:none;border-radius:9px;font-size:.95rem;line-height:1;cursor:pointer;">\u270f\ufe0f</button>'
-                +'<button onclick="removeUnavailHour(\''+d+'\',\''+blk.id+'\')" aria-label="Remove these hours" title="Remove these hours" style="display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;padding:0;background:#dc2626;color:#fff;border:none;border-radius:9px;font-size:1.15rem;line-height:1;cursor:pointer;">\u00d7</button>'
-                +'</span>'
-              +'</div>';
-            }).join('')
-          :'')
-          +'</div>'
+          +'<div id="avail-cal-'+dk+'"></div>'
           +'</div>'
           +'</div>')
           :''}
@@ -23158,36 +23142,347 @@ async function saveDriverProfile(driverName){
   renderDriverMembers();
 }
 
-// ── DRIVER AVAILABILITY ──
 const WEEKDAY_ABBR = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-// A driver is unavailable on a date if it's in their unavailableDates OR the weekday is a standing day off.
-function isDriverAvailable(driverName, dateStr, timeStr){
-  if(!dateStr) return true;
+// ── UNIFIED AVAILABILITY MODEL ──
+// Replaces five separate, overlapping fields (weeklyOff, recurringOff, unavailableDates,
+// availableDates, unavailHours) with two: availRules (every kind of block, one-time or
+// recurring, full-day or partial-hours, as a single list) and availExceptions (a flat
+// "available anyway" override list, same semantics the old availableDates already had).
+// Migrates lazily per-driver, same established pattern as migrateWeeklyOff() right above -
+// converts and keeps the old fields as read-only history rather than deleting them, so nothing
+// is lost if anything ever needs cross-checking against what used to be there.
+function migrateAvailToUnified(prof){
+  if(!prof) return false;
+  if(prof.availRules || prof.availMigrated) return false; // already migrated, or nothing to do
+  var rules = [];
+  var weeklyDays = (prof.weeklyOff||[]).slice();
+  (prof.recurringOff||[]).forEach(function(x){
+    if(!x || !x.date) return;
+    if(x.repeat==='weekly'){
+      var wd = new Date(x.date+'T12:00:00').getDay();
+      if(weeklyDays.indexOf(wd)<0) weeklyDays.push(wd);
+    } else if(x.repeat==='monthly' || x.repeat==='yearly'){
+      rules.push({id:'ar_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), kind:'off', repeat:x.repeat, date:x.date});
+    }
+  });
+  if(weeklyDays.length) rules.push({id:'ar_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), kind:'off', repeat:'weekly', days:weeklyDays});
+  (prof.unavailableDates||[]).forEach(function(dt){
+    rules.push({id:'ar_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), kind:'off', repeat:'none', date:dt});
+  });
+  (prof.unavailHours||[]).forEach(function(h){
+    if(!h) return;
+    if(h.date){
+      rules.push({id:'ar_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), kind:'hours', repeat:'none', date:h.date, from:h.from, to:h.to});
+    } else if(h.days && h.days.length){
+      rules.push({id:'ar_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), kind:'hours', repeat:'weekly', days:h.days.slice(), from:h.from, to:h.to});
+    }
+  });
+  prof.availRules = rules;
+  prof.availExceptions = (prof.availableDates||[]).slice();
+  prof.availMigrated = true;
+  return true;
+}
+// Drop expired one-time rules and exceptions - recurring rules never expire. Replaces
+// pruneExpiredDaysOff(), which pruned the old fields directly; those are no longer written to
+// once a profile is migrated, so pruning needs to happen against availRules/availExceptions now.
+function pruneExpiredAvailRules(prof){
+  if(!prof) return false;
+  const today = toDateStr(new Date());
+  let changed = false;
+  if(Array.isArray(prof.availRules)){
+    const before = prof.availRules.length;
+    prof.availRules = prof.availRules.filter(function(x){ return x.repeat!=='none' || (x.date && x.date>=today); });
+    if(prof.availRules.length!==before) changed = true;
+  }
+  if(Array.isArray(prof.availExceptions)){
+    const before = prof.availExceptions.length;
+    prof.availExceptions = prof.availExceptions.filter(function(dt){ return dt>=today; });
+    if(prof.availExceptions.length!==before) changed = true;
+  }
+  return changed;
+}
+// Does a recurring rule's pattern (weekly/monthly/yearly) match this specific date? Weekly
+// rules carry their own `days` array directly (multiple weekdays in one rule, same shape
+// unavailHours already used) rather than being anchored to a single arbitrary date the way the
+// old recurringOff was - more direct, and avoids deriving a weekday from a date that was only
+// ever a stand-in for it.
+function _availRuleMatchesDate(rule, dateStr){
+  if(!rule || !dateStr) return false;
+  if(rule.repeat==='weekly'){
+    var wd = new Date(dateStr+'T12:00:00').getDay();
+    return !!(rule.days && rule.days.indexOf(wd)>-1);
+  }
+  if(!rule.date) return false;
+  if(rule.repeat==='monthly') return rule.date.slice(8)===dateStr.slice(8);
+  if(rule.repeat==='yearly')  return rule.date.slice(5)===dateStr.slice(5);
+  return false;
+}
+// The real logic - returns both whether the driver is available AND, when they're not, a
+// short human reason ("let the driver see why", direct instruction) covering every possible
+// cause including a real ride conflict, which used to be checked but never explained. Priority
+// order preserved exactly from the original function: a one-time off-date always wins, even
+// over an available-anyway exception (matching unavailableDates' old behavior); a real ride
+// conflict always wins next; an available-anyway exception then beats any recurring rule.
+function driverAvailabilityStatus(driverName, dateStr, timeStr){
+  if(!dateStr) return {available:true, reason:null};
   const prof = DRIVER_PROFILES[driverName]||{};
-  // A specific "available" exception overrides standing unavailability (weekly days off
-  // and standing blocked hours) for that one date — e.g. a normally-blocked weekday when
-  // the driver's day job is closed. An explicit unavailableDates entry still wins over it.
-  if((prof.unavailableDates||[]).includes(dateStr)) return false;
-  // A private ride already on this date blocks it too — checked dynamically, never written
-  // to the driver's public profile (see hasPrivateRideConflict).
-  if(hasPrivateRideConflict(driverName, dateStr)) return false;
-  const isException = (prof.availableDates||[]).includes(dateStr);
-  if(!isException && driverRecurringOff(prof, dateStr)) return false; // recurring monthly/yearly day off
-  const wd = new Date(dateStr+'T12:00:00').getDay();
-  if(!isException && (prof.weeklyOff||[]).includes(wd)) return false;
-  if(!isException && timeStr && (prof.unavailHours||[]).length){
-    const parts=(timeStr||'00:00').split(':').map(Number);
-    const tMins=(parts[0]||0)*60+(parts[1]||0);
-    for(const blk of prof.unavailHours){
-      const fp=(blk.from||'00:00').split(':').map(Number);
-      const tp=(blk.to||'00:00').split(':').map(Number);
-      const fMins=(fp[0]||0)*60+(fp[1]||0);
-      const tMins2=(tp[0]||0)*60+(tp[1]||0);
-      if(blk.date&&blk.date===dateStr&&tMins>=fMins&&tMins<tMins2) return false;
-      if(blk.days&&blk.days.includes(wd)&&tMins>=fMins&&tMins<tMins2) return false;
+  migrateAvailToUnified(prof);
+  const rules = prof.availRules||[];
+  const oneTimeOff = rules.find(function(x){ return x.kind==='off' && x.repeat==='none' && x.date===dateStr; });
+  if(oneTimeOff) return {available:false, reason:'Marked off on '+fmtDateShort(dateStr)};
+  if(hasPrivateRideConflict(driverName, dateStr)){
+    return {available:false, reason:'Already booked on a private ride that day'};
+  }
+  const isException = (prof.availExceptions||[]).includes(dateStr);
+  if(!isException){
+    const recurOff = rules.find(function(x){ return x.kind==='off' && x.repeat!=='none' && _availRuleMatchesDate(x, dateStr); });
+    if(recurOff){
+      const _label = recurOff.repeat==='weekly'
+        ? 'Standing day off ('+(recurOff.days||[]).map(function(w){return WEEKDAY_ABBR[w];}).join('/')+')'
+        : 'Recurring day off ('+recurOff.repeat+', from '+fmtDateShort(recurOff.date)+')';
+      return {available:false, reason:_label};
+    }
+    if(timeStr){
+      const parts=(timeStr||'00:00').split(':').map(Number);
+      const tMins=(parts[0]||0)*60+(parts[1]||0);
+      for(const blk of rules){
+        if(blk.kind!=='hours') continue;
+        const matches = blk.repeat==='none' ? blk.date===dateStr : _availRuleMatchesDate(blk, dateStr);
+        if(!matches) continue;
+        const fp=(blk.from||'00:00').split(':').map(Number);
+        const tp=(blk.to||'00:00').split(':').map(Number);
+        const fMins=(fp[0]||0)*60+(fp[1]||0);
+        const tMins2=(tp[0]||0)*60+(tp[1]||0);
+        if(tMins>=fMins && tMins<tMins2){
+          return {available:false, reason:'Blocked '+fmtTime12(blk.from)+'\u2013'+fmtTime12(blk.to)+' that day'};
+        }
+      }
     }
   }
+  return {available:true, reason:null};
+}
+function isDriverAvailable(driverName, dateStr, timeStr){
+  return driverAvailabilityStatus(driverName, dateStr, timeStr).available;
+}
+
+// ── AVAILABILITY CALENDAR MUTATIONS ──
+function _availCanEdit(driverName){
+  const myDriverName=getMyDriverName();
+  if(!(isAdmin()||myDriverName===driverName)){ showToast('You can only edit your own availability','error'); return false; }
   return true;
+}
+async function availAddOffRule(driverName, dateStr, repeat){
+  if(!_availCanEdit(driverName)) return;
+  const prof=DRIVER_PROFILES[driverName]; migrateAvailToUnified(prof);
+  prof.availRules = prof.availRules||[];
+  const id='ar_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+  if(repeat==='weekly'){
+    const wd = new Date(dateStr+'T12:00:00').getDay();
+    let rule = prof.availRules.find(function(x){ return x.kind==='off' && x.repeat==='weekly'; });
+    if(rule){ if(rule.days.indexOf(wd)<0) rule.days.push(wd); }
+    else { prof.availRules.push({id:id, kind:'off', repeat:'weekly', days:[wd]}); }
+  } else {
+    prof.availRules.push({id:id, kind:'off', repeat:repeat, date:dateStr});
+  }
+  // Adding a new block should win, even if this exact date was previously marked "available
+  // anyway" - otherwise the new block would be silently overridden by a leftover exception.
+  prof.availExceptions = (prof.availExceptions||[]).filter(function(x){ return x!==dateStr; });
+  await persistDriverProfiles(driverName);
+  renderAvailCalendar(driverName);
+  closeAvailDayModal();
+  showToast('\u2713 Marked off');
+}
+async function availRemoveRule(driverName, ruleId, dateStr){
+  if(!_availCanEdit(driverName)) return;
+  const prof=DRIVER_PROFILES[driverName]; if(!prof) return;
+  prof.availRules = (prof.availRules||[]).filter(function(x){ return x.id!==ruleId; });
+  await persistDriverProfiles(driverName);
+  renderAvailCalendar(driverName);
+  if(dateStr) openAvailDayModal(driverName, dateStr); else closeAvailDayModal();
+  showToast('\u2713 Removed');
+}
+// Removes just one weekday from a weekly rule, rather than the whole rule - used when a
+// weekly rule covers multiple days and only one of them should stop being blocked entirely
+// (different from an exception, which keeps the rule but skips one specific date).
+async function availRemoveWeeklyDay(driverName, ruleId, weekday, dateStr){
+  if(!_availCanEdit(driverName)) return;
+  const prof=DRIVER_PROFILES[driverName]; if(!prof) return;
+  const rule = (prof.availRules||[]).find(function(x){ return x.id===ruleId; });
+  if(rule && rule.days){
+    rule.days = rule.days.filter(function(d){ return d!==weekday; });
+    if(!rule.days.length) prof.availRules = prof.availRules.filter(function(x){ return x.id!==ruleId; });
+  }
+  await persistDriverProfiles(driverName);
+  renderAvailCalendar(driverName);
+  openAvailDayModal(driverName, dateStr);
+  showToast('\u2713 Removed');
+}
+// The exact behavior asked for: delete availability for one specific day without touching the
+// recurring pattern it belongs to. Adds to the flat "available anyway" list rather than
+// mutating the rule itself, so the rule keeps applying to every OTHER date it always did.
+async function availAddException(driverName, dateStr){
+  if(!_availCanEdit(driverName)) return;
+  const prof=DRIVER_PROFILES[driverName]; migrateAvailToUnified(prof);
+  prof.availExceptions = prof.availExceptions||[];
+  if(prof.availExceptions.indexOf(dateStr)<0) prof.availExceptions.push(dateStr);
+  await persistDriverProfiles(driverName);
+  renderAvailCalendar(driverName);
+  openAvailDayModal(driverName, dateStr);
+  showToast('\u2713 Available this day only');
+}
+async function availRemoveException(driverName, dateStr){
+  if(!_availCanEdit(driverName)) return;
+  const prof=DRIVER_PROFILES[driverName]; if(!prof) return;
+  prof.availExceptions = (prof.availExceptions||[]).filter(function(x){ return x!==dateStr; });
+  await persistDriverProfiles(driverName);
+  renderAvailCalendar(driverName);
+  openAvailDayModal(driverName, dateStr);
+  showToast('\u2713 Exception removed');
+}
+async function availAddHoursRule(driverName, dateStr, from, to, repeatWeekly){
+  if(!_availCanEdit(driverName)) return;
+  if(!from || !to || from>=to){ showToast('Enter a valid time range','error'); return; }
+  const prof=DRIVER_PROFILES[driverName]; migrateAvailToUnified(prof);
+  prof.availRules = prof.availRules||[];
+  const id='ar_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+  if(repeatWeekly){
+    const wd = new Date(dateStr+'T12:00:00').getDay();
+    prof.availRules.push({id:id, kind:'hours', repeat:'weekly', days:[wd], from:from, to:to});
+  } else {
+    prof.availRules.push({id:id, kind:'hours', repeat:'none', date:dateStr, from:from, to:to});
+  }
+  await persistDriverProfiles(driverName);
+  renderAvailCalendar(driverName);
+  openAvailDayModal(driverName, dateStr);
+  showToast('\u2713 Hours blocked');
+}
+
+// ── DAY-TAP MODAL ── Shows exactly what driverAvailabilityStatus() would say and why, then
+// offers the one or two actions that actually make sense for that specific state - never every
+// possible action at once. "Let the driver see why", direct instruction, extended to the block
+// reason for a private ride conflict too, previously invisible everywhere in the app.
+function openAvailDayModal(driverName, dateStr){
+  if(!_availCanEdit(driverName)) return;
+  const prof=DRIVER_PROFILES[driverName]||{}; migrateAvailToUnified(prof);
+  const st = driverAvailabilityStatus(driverName, dateStr, null);
+  const oneTimeOff = (prof.availRules||[]).find(function(x){ return x.kind==='off'&&x.repeat==='none'&&x.date===dateStr; });
+  const wd = new Date(dateStr+'T12:00:00').getDay();
+  const recurOff = (prof.availRules||[]).find(function(x){ return x.kind==='off'&&x.repeat!=='none'&&_availRuleMatchesDate(x,dateStr); });
+  const isPrivateConflict = st.reason && st.reason.indexOf('private ride')>-1;
+  const isException = (prof.availExceptions||[]).includes(dateStr);
+
+  var body = '<div style="font-size:.75rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.3rem;">'+fmtDateShort(dateStr)+'</div>';
+  if(st.available){
+    body += '<div style="font-size:.85rem;color:#15803d;font-weight:700;margin-bottom:.8rem;">\u2713 Available'+(isException?' (override active)':'')+'</div>';
+    if(isException){
+      body += '<button onclick="availRemoveException(\''+driverName+'\',\''+dateStr+'\')" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;margin-bottom:.5rem;">Undo \u2014 restore normal schedule</button>';
+    }
+    body += '<div style="font-size:.7rem;color:var(--mid);font-weight:700;margin-bottom:.3rem;">MARK THIS DAY OFF</div>'
+      + '<select id="avail-modal-repeat" style="width:100%;padding:.5rem;border:1.5px solid var(--light);border-radius:8px;font-size:.85rem;margin-bottom:.5rem;">'
+      + '<option value="none">Just this one day</option><option value="weekly">Every week on this day</option><option value="monthly">Every month on this date</option><option value="yearly">Every year on this date</option>'
+      + '</select>'
+      + '<button onclick="availAddOffRule(\''+driverName+'\',\''+dateStr+'\',document.getElementById(\'avail-modal-repeat\').value)" style="width:100%;padding:.6rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.85rem;font-weight:700;cursor:pointer;margin-bottom:.5rem;">Mark off</button>'
+      + '<div style="font-size:.7rem;color:var(--mid);font-weight:700;margin:.6rem 0 .3rem;">OR BLOCK JUST SOME HOURS</div>'
+      + '<div style="display:flex;gap:.4rem;margin-bottom:.4rem;">'
+      + '<input type="time" id="avail-modal-from" style="flex:1;padding:.45rem;border:1.5px solid var(--light);border-radius:8px;font-size:.82rem;" />'
+      + '<input type="time" id="avail-modal-to" style="flex:1;padding:.45rem;border:1.5px solid var(--light);border-radius:8px;font-size:.82rem;" />'
+      + '</div>'
+      + '<label style="display:flex;align-items:center;gap:.4rem;font-size:.78rem;margin-bottom:.5rem;cursor:pointer;"><input type="checkbox" id="avail-modal-hrepeat" style="width:15px;height:15px;" />Repeat every week on this day</label>'
+      + '<button onclick="availAddHoursRule(\''+driverName+'\',\''+dateStr+'\',document.getElementById(\'avail-modal-from\').value,document.getElementById(\'avail-modal-to\').value,document.getElementById(\'avail-modal-hrepeat\').checked)" style="width:100%;padding:.6rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;font-size:.85rem;font-weight:700;cursor:pointer;">Block these hours</button>';
+  } else {
+    body += '<div style="font-size:.85rem;color:#b03a2e;font-weight:700;margin-bottom:.3rem;">\u2717 Not available</div>'
+      + '<div style="font-size:.78rem;color:var(--mid);margin-bottom:.8rem;">'+escHtml(st.reason||'')+'</div>';
+    if(isPrivateConflict){
+      body += '<div style="font-size:.75rem;color:var(--mid);line-height:1.4;">This is a real ride already on the books \u2014 it can\u2019t be changed from here.</div>';
+    } else if(oneTimeOff){
+      body += '<button onclick="availRemoveRule(\''+driverName+'\',\''+oneTimeOff.id+'\',\''+dateStr+'\')" style="width:100%;padding:.6rem;background:#15803d;color:#fff;border:none;border-radius:8px;font-size:.85rem;font-weight:700;cursor:pointer;">\u2713 Make available again</button>';
+    } else if(recurOff){
+      body += '<button onclick="availAddException(\''+driverName+'\',\''+dateStr+'\')" style="width:100%;padding:.6rem;background:#15803d;color:#fff;border:none;border-radius:8px;font-size:.85rem;font-weight:700;cursor:pointer;margin-bottom:.5rem;">Available just this day \u2014 keep the pattern</button>';
+      if(recurOff.repeat==='weekly'){
+        body += '<button onclick="availRemoveWeeklyDay(\''+driverName+'\',\''+recurOff.id+'\','+wd+',\''+dateStr+'\')" style="width:100%;padding:.6rem;background:none;border:1.5px solid #b03a2e;color:#b03a2e;border-radius:8px;font-size:.85rem;font-weight:700;cursor:pointer;">Remove '+WEEKDAY_ABBR[wd]+' from the weekly pattern entirely</button>';
+      } else {
+        body += '<button onclick="availRemoveRule(\''+driverName+'\',\''+recurOff.id+'\',\''+dateStr+'\')" style="width:100%;padding:.6rem;background:none;border:1.5px solid #b03a2e;color:#b03a2e;border-radius:8px;font-size:.85rem;font-weight:700;cursor:pointer;">Remove the whole '+recurOff.repeat+' pattern</button>';
+      }
+    } else {
+      // Blocked by a hours rule specifically (driverAvailabilityStatus only returns this
+      // reason when no full-day rule matched) - offer to remove that specific hours block.
+      const hrsRule = (prof.availRules||[]).find(function(x){ return x.kind==='hours' && (x.repeat==='none' ? x.date===dateStr : _availRuleMatchesDate(x,dateStr)); });
+      if(hrsRule){
+        body += '<button onclick="availRemoveRule(\''+driverName+'\',\''+hrsRule.id+'\',\''+dateStr+'\')" style="width:100%;padding:.6rem;background:#15803d;color:#fff;border:none;border-radius:8px;font-size:.85rem;font-weight:700;cursor:pointer;">Remove this hours block</button>';
+      }
+    }
+  }
+  body += '<button onclick="closeAvailDayModal()" style="width:100%;padding:.55rem;background:none;border:none;color:var(--mid);font-size:.8rem;cursor:pointer;margin-top:.6rem;">Close</button>';
+
+  var back = document.getElementById('avail-day-modal-back');
+  if(!back){
+    back = document.createElement('div');
+    back.id = 'avail-day-modal-back';
+    back.style.cssText = 'position:fixed;inset:0;background:rgba(20,8,40,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1rem;';
+    back.onclick = function(e){ if(e.target===back) closeAvailDayModal(); };
+    document.body.appendChild(back);
+  }
+  back.innerHTML = '<div style="background:var(--white);border-radius:14px;max-width:360px;width:100%;max-height:90vh;overflow-y:auto;padding:1.1rem;">'+body+'</div>';
+}
+function closeAvailDayModal(){
+  var back = document.getElementById('avail-day-modal-back');
+  if(back) back.remove();
+}
+
+// ── AVAILABILITY CALENDAR (replaces the old Specific-days-off / Available-anyway / Hours
+// sections) — a real month grid, per direct instruction. Tap a day to see its status and act
+// on it. Purpose-built rather than reusing the ride calendar's month view - that one is deeply
+// tied to rendering ride cards; this only ever needs a status per day.
+var _availCalMonth = {}; // keyed by driver name, so each driver's own card remembers its own month
+function _availCalMonthFor(driverName){
+  if(!_availCalMonth[driverName]) _availCalMonth[driverName] = new Date();
+  return _availCalMonth[driverName];
+}
+function availCalNav(driverName, delta){
+  var m = _availCalMonthFor(driverName);
+  _availCalMonth[driverName] = new Date(m.getFullYear(), m.getMonth()+delta, 1);
+  renderAvailCalendar(driverName);
+}
+function availCalToday(driverName){
+  _availCalMonth[driverName] = new Date();
+  renderAvailCalendar(driverName);
+}
+function renderAvailCalendar(driverName){
+  var dk = driverName.replace(/ /g,'_');
+  var box = document.getElementById('avail-cal-'+dk); if(!box) return;
+  var prof = DRIVER_PROFILES[driverName]||{};
+  migrateAvailToUnified(prof);
+  var m = _availCalMonthFor(driverName);
+  var year = m.getFullYear(), month = m.getMonth();
+  var first = new Date(year, month, 1);
+  var startDow = first.getDay();
+  var daysInMonth = new Date(year, month+1, 0).getDate();
+  var todayStr = toDateStr(new Date());
+
+  var cells = '';
+  for(var i=0;i<startDow;i++) cells += '<div></div>';
+  for(var day=1; day<=daysInMonth; day++){
+    var dateStr = year+'-'+String(month+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+    var st = driverAvailabilityStatus(driverName, dateStr, null);
+    var isToday = dateStr===todayStr;
+    var bg = st.available ? 'var(--white)' : '#fdecea';
+    var border = isToday ? '1.5px solid var(--accent)' : (st.available ? '1px solid var(--light)' : '1px solid #f3c4bd');
+    var color = st.available ? 'var(--black)' : '#b03a2e';
+    cells += '<div onclick="openAvailDayModal(\''+driverName+'\',\''+dateStr+'\')" style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:8px;background:'+bg+';border:'+border+';color:'+color+';font-size:.78rem;font-weight:'+(isToday?'800':'600')+';cursor:pointer;position:relative;">'
+      + day
+      + (st.available ? '' : '<span style="position:absolute;bottom:2px;width:4px;height:4px;border-radius:50%;background:#b03a2e;"></span>')
+      + '</div>';
+  }
+  var dowHeader = ['S','M','T','W','T','F','S'].map(function(d){ return '<div style="font-size:.62rem;font-weight:700;color:var(--mid);text-align:center;padding-bottom:2px;">'+d+'</div>'; }).join('');
+
+  box.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;">'
+    + '<button onclick="availCalNav(\''+driverName+'\',-1)" class="btn-secondary" style="padding:.3rem .6rem;font-size:.8rem;">\u2190</button>'
+    + '<span style="font-size:.85rem;font-weight:700;">'+monthLabel(m)+'</span>'
+    + '<button onclick="availCalNav(\''+driverName+'\',1)" class="btn-secondary" style="padding:.3rem .6rem;font-size:.8rem;">\u2192</button>'
+    + '</div>'
+    + '<div style="text-align:center;margin-bottom:.5rem;"><button onclick="availCalToday(\''+driverName+'\')" class="btn-secondary" style="padding:.25rem .6rem;font-size:.72rem;">Today</button></div>'
+    + '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;">' + dowHeader + cells + '</div>'
+    + '<div style="display:flex;align-items:center;gap:.4rem;margin-top:.5rem;font-size:.68rem;color:var(--mid);"><span style="width:8px;height:8px;border-radius:50%;background:#fdecea;border:1px solid #f3c4bd;display:inline-block;"></span>Blocked \u2014 tap any day for details</div>';
 }
 // Build assign-dropdown options, greying out drivers who are unavailable on the given date.
 // Login name for a driver's full name (reverse of USER_DRIVER_MAP).
@@ -23261,173 +23556,6 @@ function driverOptionsHTML(selected, dateStr){
 async function persistDriverProfiles(dName){
   if(dName!=null) return await storageSetOne('kat:driverProfiles', dName, DRIVER_PROFILES[dName], DRIVER_PROFILES);
   return await storageSet('kat:driverProfiles', DRIVER_PROFILES);
-}
-function addUnavailHour(driverName){
-  const myDriverName=getMyDriverName();
-  if(!(isAdmin()||myDriverName===driverName)){showToast('You can only edit your own availability','error');return;}
-  const dk=driverName.replace(/ /g,'_');
-  const fromEl=document.getElementById('avail-hfrom-'+dk);
-  const toEl=document.getElementById('avail-hto-'+dk);
-  const dayEls=[...document.querySelectorAll('.avail-hday-'+dk+':checked')];
-  const dateEl=document.getElementById('avail-hdate-'+dk);
-  const from=fromEl?.value; const to=toEl?.value;
-  // A whole-day block belongs in "Specific days off" (no times); this section is partial-day
-  // only, so an empty time range here points people there rather than just rejecting them.
-  if(!from||!to){showToast('This is for part of a day — set a from and to time. For a whole day off, use "Specific days off" at the top.','error');return;}
-  if(from>=to){showToast('End time must be after start','error');return;}
-  const prof=DRIVER_PROFILES[driverName]=DRIVER_PROFILES[driverName]||{};
-  if(!prof.unavailHours) prof.unavailHours=[];
-  const blk={id:'uh_'+Date.now(),from,to};
-  if(dateEl?.value) blk.date=dateEl.value;
-  else if(dayEls.length) blk.days=dayEls.map(e=>parseInt(e.value));
-  else{showToast('Select at least one day or a specific date','error');return;}
-  prof.unavailHours.push(blk);
-  // Clear the inputs so a leftover date doesn't silently override the next block you add.
-  if(fromEl) fromEl.value=''; if(toEl) toEl.value=''; if(dateEl) dateEl.value='';
-  dayEls.forEach(function(e){ e.checked=false; });
-  persistDriverProfiles(driverName); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
-  showToast(blk.date?('Blocked '+fmtDateShort(blk.date)+' \u2713'):'Time block added \u2713');
-}
-function removeUnavailHour(driverName,id){
-  const prof=DRIVER_PROFILES[driverName]||{};
-  prof.unavailHours=(prof.unavailHours||[]).filter(b=>b.id!==id);
-  persistDriverProfiles(driverName); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
-}
-
-// Weekday abbreviations a driver is off every week — unions legacy weeklyOff with
-// the new weekly recurring entries so both migrated and un-migrated profiles display right.
-function weeklyOffDays(prof){
-  var out=[];
-  (prof&&prof.weeklyOff||[]).forEach(function(wi){ var a=WEEKDAY_ABBR[wi]; if(a&&out.indexOf(a)<0) out.push(a); });
-  (prof&&prof.recurringOff||[]).forEach(function(x){ if(x&&x.repeat==='weekly'){ var a=WEEKDAY_ABBR[new Date(x.date+'T12:00:00').getDay()]; if(a&&out.indexOf(a)<0) out.push(a); } });
-  return out;
-}
-// One-time migration: fold legacy "Days I never work" (weeklyOff) into weekly recurring days off.
-function migrateWeeklyOff(prof){
-  if(!prof || !Array.isArray(prof.weeklyOff) || !prof.weeklyOff.length) return false;
-  prof.recurringOff = prof.recurringOff||[];
-  var base=new Date(); base.setHours(12,0,0,0);
-  prof.weeklyOff.forEach(function(wi){
-    var exists=prof.recurringOff.some(function(x){ return x && x.repeat==='weekly' && new Date(x.date+'T12:00:00').getDay()===wi; });
-    if(!exists){ var dd=new Date(base); dd.setDate(dd.getDate() + ((wi - dd.getDay() + 7) % 7)); prof.recurringOff.push({date:toDateStr(dd), repeat:'weekly'}); }
-  });
-  prof.weeklyOff=[];
-  return true;
-}
-// Recurring day off match: monthly = same day-of-month, yearly = same month+day.
-function driverRecurringOff(prof, dateStr){
-  const list = prof && prof.recurringOff;
-  if(!Array.isArray(list) || !list.length || !dateStr) return false;
-  const md = dateStr.slice(5), dom = dateStr.slice(8);
-  return list.some(function(x){
-    if(!x || !x.date) return false;
-    if(x.repeat==='yearly')  return x.date.slice(5)===md;
-    if(x.repeat==='monthly') return x.date.slice(8)===dom;
-    if(x.repeat==='weekly')  return new Date(x.date+'T12:00:00').getDay()===new Date(dateStr+'T12:00:00').getDay();
-    return false;
-  });
-}
-// Drop one-time days-off (and available-anyway dates) that are now in the past. Recurring stay.
-function pruneExpiredDaysOff(prof){
-  if(!prof) return false;
-  const today = toDateStr(new Date());
-  let changed=false;
-  if(Array.isArray(prof.unavailableDates)){ const b=prof.unavailableDates.length; prof.unavailableDates=prof.unavailableDates.filter(function(d){return d>=today;}); if(prof.unavailableDates.length!==b) changed=true; }
-  if(Array.isArray(prof.availableDates)){ const b=prof.availableDates.length; prof.availableDates=prof.availableDates.filter(function(d){return d>=today;}); if(prof.availableDates.length!==b) changed=true; }
-  return changed;
-}
-function removeRecurringOff(driverName, date, repeat){
-  const myDriverName = getMyDriverName();
-  if(!(isAdmin() || myDriverName===driverName)){ showToast('You can only edit your own availability','error'); return; }
-  const prof = DRIVER_PROFILES[driverName]; if(!prof || !Array.isArray(prof.recurringOff)) return;
-  prof.recurringOff = prof.recurringOff.filter(function(x){ return !(x && x.date===date && x.repeat===repeat); });
-  persistDriverProfiles(driverName); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
-}
-// Removes a driver's own hearted-ride status from any ride whose time actually falls inside a
-// newly-saved, specific-date time block - the time-range counterpart to addUnavailDate()'s
-// whole-day version below. Same minutes-based overlap check isDriverAvailable() already uses,
-// so "is this ride actually inside the blocked window" means the same thing in both places.
-async function _autoUnheartForTimeBlock(driverName, dateStr, fromTime, toTime){
-  const loginKey = (typeof _loginForDriver==='function') ? _loginForDriver(driverName) : null;
-  if(!loginKey || !dateStr || !fromTime || !toTime) return;
-  const toMins = t => { const p=(t||'00:00').split(':').map(Number); return (p[0]||0)*60+(p[1]||0); };
-  const fMins = toMins(fromTime), tMins2 = toMins(toTime);
-  const affected = (rides||[]).filter(function(r){
-    if(!r || r.date!==dateStr || !r.interest || r.interest[loginKey]==null) return false;
-    const rMins = toMins(r.time);
-    return rMins>=fMins && rMins<tMins2;
-  });
-  if(!affected.length) return;
-  affected.forEach(function(r){ delete r.interest[loginKey]; if(Object.keys(r.interest).length===0) delete r.interest; });
-  await saveRides();
-  try{ renderCal(); refreshDash(); }catch(e){}
-  showToast('Also removed your interest from '+affected.length+' ride'+(affected.length>1?'s':'')+' on '+fmtDateShort(dateStr)+' between '+(fmtTime12(fromTime)||fromTime)+' and '+(fmtTime12(toTime)||toTime)+' since you\u2019re now unavailable then');
-}
-
-async function addUnavailDate(driverName){
-  const myDriverName = getMyDriverName();
-  if(!(isAdmin() || myDriverName===driverName)){ showToast('You can only edit your own availability','error'); return; }
-  const dk = driverName.replace(/ /g,'_');
-  const val = document.getElementById('avail-date-'+dk)?.value;
-  if(!val) return;
-  const rep = (document.getElementById('avail-repeat-'+dk)||{}).value || 'none';
-  const prof = DRIVER_PROFILES[driverName] = DRIVER_PROFILES[driverName]||{};
-  if(rep==='weekly' || rep==='monthly' || rep==='yearly'){
-    prof.recurringOff = prof.recurringOff||[];
-    if(!prof.recurringOff.some(function(x){ return x.date===val && x.repeat===rep; })) prof.recurringOff.push({date:val, repeat:rep});
-  } else {
-    const set = new Set(prof.unavailableDates||[]); set.add(val);
-    prof.unavailableDates = [...set].sort();
-  }
-  pruneExpiredDaysOff(prof);
-  persistDriverProfiles(driverName); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
-
-  // Being marked unavailable on a date makes any hearted (interested-in) ride on that SAME
-  // date stale - the driver said they wanted to cover it, but they've just said they can't.
-  // Left alone, that stale heart could read as "still interested" to whoever's looking at the
-  // offering. Only the specific-date case for now (not recurring weekly/monthly/yearly
-  // patterns), which would need matching against every future ride's day-of-week - a real,
-  // separate piece of work, not bundled in here.
-  try{
-    const loginKey = (typeof _loginForDriver==='function') ? _loginForDriver(driverName) : null;
-    if(loginKey && rep==='none'){
-      const affected = (rides||[]).filter(function(r){
-        return r && r.date===val && r.interest && r.interest[loginKey]!=null;
-      });
-      if(affected.length){
-        affected.forEach(function(r){ delete r.interest[loginKey]; if(Object.keys(r.interest).length===0) delete r.interest; });
-        await saveRides();
-        try{ renderCal(); refreshDash(); }catch(e){}
-        showToast('Also removed your interest from '+affected.length+' ride'+(affected.length>1?'s':'')+' on '+fmtDateShort(val)+' since you\u2019re now unavailable');
-      }
-    }
-  }catch(e){ console.warn('auto-unheart on unavailable date failed', e); }
-}
-function removeUnavailDate(driverName, date){
-  const prof = DRIVER_PROFILES[driverName]||{};
-  prof.unavailableDates = (prof.unavailableDates||[]).filter(x=>x!==date);
-  persistDriverProfiles(driverName); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
-}
-// "Available anyway" exceptions — a specific date the driver CAN drive despite a
-// standing day off. Overrides weekly-off / blocked-hours for that one date only.
-function addAvailableDate(driverName){
-  const myDriverName = getMyDriverName();
-  if(!(isAdmin() || myDriverName===driverName)){ showToast('You can only edit your own availability','error'); return; }
-  const dk = driverName.replace(/ /g,'_');
-  const val = document.getElementById('avail-exc-date-'+dk)?.value;
-  if(!val) return;
-  const prof = DRIVER_PROFILES[driverName] = DRIVER_PROFILES[driverName]||{};
-  // If the date was in the hard "unavailable" list, clear it there (they're now saying available).
-  prof.unavailableDates = (prof.unavailableDates||[]).filter(x=>x!==val);
-  const set = new Set(prof.availableDates||[]); set.add(val);
-  prof.availableDates = [...set].sort();
-  persistDriverProfiles(driverName); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
-  showToast('\u2713 Marked available on '+fmtDateShort(val));
-}
-function removeAvailableDate(driverName, date){
-  const prof = DRIVER_PROFILES[driverName]||{};
-  prof.availableDates = (prof.availableDates||[]).filter(x=>x!==date);
-  persistDriverProfiles(driverName); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
 }
 
 // ── PER-DRIVER VEHICLES (each with its own costs + card photo) ──
@@ -24506,6 +24634,8 @@ function renderIncome(){
   const tpBox = document.getElementById('income-tripprofit');
   const mfBox = document.getElementById('income-my-fares');
   if(mfBox){ mfBox.innerHTML=''; if(personalView && dName) renderMyFares(dName, filtered, totalGasCost, totalMaintCost, gasCpm, maintCpm, totalMiles); }
+  const mspBox = document.getElementById('income-my-scheduled-paid');
+  if(mspBox){ mspBox.innerHTML=''; if(personalView && dName && kmVisible() && !kmIsKat()) renderMyScheduledPaidRides(start, end); }
   if(tpBox){ tpBox.innerHTML=''; if(personalView && dName) renderIncomeTripProfit(dName, start, end, proratedExp); }
   const ffBox = document.getElementById('income-finderfees');
   if(ffBox){ ffBox.innerHTML=''; if(personalView && dName) renderFinderFees(dName, start, end); }
@@ -24641,6 +24771,37 @@ async function renderIncomeTripProfit(dName, start, end, proratedExp){
 // ── FINDER'S FEES between drivers (on the Income page) ──
 // When you OWN a client but assign the ride to another driver, that driver owes you 15% of the fare.
 // ─── MY FARES — rides the driver personally drove, with per-ride tip entry ───
+// Morgan's own "paid rides" list, parallel to renderMyFares() but for rides she SCHEDULED and
+// has been PAID dispatch fee for (kmSettledRides), not rides she drove. Direct request: her
+// income page previously showed nothing but "no rides in this period" for herself, even though
+// she has real, individually-paid scheduling work - the existing rides list only ever filtered
+// on r.driver===dName, and Morgan never drives.
+function renderMyScheduledPaidRides(start, end){
+  const box=document.getElementById('income-my-scheduled-paid'); if(!box) return;
+  const paid=(rides||[]).filter(function(r){
+    if(!r || r.createdBy!=='Morgan' || r.status==='cancelled') return false;
+    if(!kmSettledRides[r.id]) return false;
+    if(!r.date) return false;
+    if(start && end){ const d=new Date(r.date+'T12:00:00'); if(d<start||d>end) return false; }
+    return true;
+  }).sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
+  if(!paid.length){ box.innerHTML=''; return; }
+  const rate = kmRateLabel();
+  const total = paid.reduce(function(a,r){ return a+kmRideValue(r); },0);
+  const rows = paid.map(function(r){
+    const v=kmRideValue(r);
+    return '<div style="display:flex;align-items:center;gap:.6rem;padding:.55rem .2rem;border-bottom:1px solid var(--light);">'
+      +'<div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:.88rem;color:var(--black);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escHtml(r.client||'')+'</div>'
+      +'<div style="font-size:.72rem;color:var(--mid);">'+fmtDateShort(r.date)+'</div></div>'
+      +'<span style="font-weight:700;font-size:.95rem;color:var(--green);">$'+v.toFixed(2)+'</span>'
+      +'</div>';
+  }).join('');
+  box.innerHTML = '<div style="background:var(--white);border:1.5px solid var(--light);border-radius:12px;padding:1rem;margin-top:.75rem;">'
+    +'<div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.5rem;">Scheduling \u2014 paid ('+rate+')</div>'
+    +rows
+    +'<div style="display:flex;justify-content:space-between;margin-top:.6rem;padding-top:.5rem;border-top:1.5px solid var(--light);font-weight:700;"><span>'+paid.length+' ride'+(paid.length===1?'':'s')+'</span><span style="color:var(--green);">$'+total.toFixed(2)+'</span></div>'
+    +'</div>';
+}
 function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm, maintCpm, totalMiles){
   const box=document.getElementById('income-my-fares'); if(!box) return;
   // Include the driver's outside rides in this one list (shown with no color dot to mark them).
@@ -25882,6 +26043,20 @@ async function kmToggleExclude(rideId){
   try{ await saveKmData(); }catch(e){}
   kmRenderReport(); renderKmPayCard();
 }
+// Marks ONE ride as already paid, independent of the bulk Venmo/Mark-paid flow (which settles
+// every currently-owed ride at once). Real gap, reported directly: Kat may have already paid
+// Morgan for some rides outside this system entirely - cash, a direct Venmo never logged here -
+// and there was previously no way to reflect that for just one ride without settling everything.
+async function kmMarkRidePaid(rideId){
+  if(!kmVisible()) return;
+  var _k=rideId; var r=(rides||[]).find(function(x){return x&&(x.id===rideId||String(x.id)===String(rideId));}); if(r) _k=r.id;
+  if(kmSettledRides[_k]) return;
+  if(kmExcludedRides[_k]) delete kmExcludedRides[_k]; // being marked paid implies it should count
+  kmSettledRides[_k]=true;
+  try{ await saveKmData(); }catch(e){}
+  kmRenderReport(); renderKmPayCard();
+  showToast('\u2713 Marked paid');
+}
 
 function renderKmPayCard(){ _renderKmInto('dash-km-pay', false); _renderKmInto('income-km-pay', true); }
 function _renderKmInto(boxId, compact){
@@ -25988,7 +26163,8 @@ function kmRenderReport(){
     const dim = excluded ? 'opacity:.4;text-decoration:line-through;' : '';
     const ctrl = settled
       ? '<span title="Already paid" style="color:#0f766e;font-weight:700;font-size:.78rem;">\u2713 paid</span>'
-      : '<input type="checkbox" '+(excluded?'':'checked')+' onchange="kmToggleExclude(\''+r.id+'\')" title="Uncheck to leave this ride out of what Kat owes" style="width:17px;height:17px;cursor:pointer;accent-color:#0d9488;">';
+      : '<input type="checkbox" '+(excluded?'':'checked')+' onchange="kmToggleExclude(\''+r.id+'\')" title="Uncheck to leave this ride out of what Kat owes" style="width:17px;height:17px;cursor:pointer;accent-color:#0d9488;">'
+        +'<div><span onclick="kmMarkRidePaid(\''+r.id+'\')" style="cursor:pointer;color:#0d9488;font-weight:700;font-size:.68rem;text-decoration:underline;white-space:nowrap;">Mark paid</span></div>';
     h+='<tr style="border-bottom:1px solid #eef2f7;'+(i%2?'background:#f8fafc;':'')+'"><td style="padding:.4rem .5rem;'+dim+'">'+fmtDateShort(r.date)+'</td><td style="padding:.4rem .5rem;'+dim+'">'+escHtml(r.client||'')+'</td><td style="padding:.4rem .5rem;text-align:right;color:#64748b;'+dim+'">$'+(parseFloat(r.price)||0).toFixed(2)+'</td><td style="padding:.4rem .5rem;text-align:right;font-weight:600;'+dim+'">$'+v.toFixed(2)+'</td><td style="padding:.4rem .5rem;text-align:center;">'+ctrl+'</td></tr>';
   });
   if(!rows.length) h+='<tr><td colspan="5" style="padding:1rem;text-align:center;color:#94a3b8;">No completed rides in this range.</td></tr>';
@@ -25996,6 +26172,43 @@ function kmRenderReport(){
   h+='<div style="font-size:.72rem;color:#64748b;margin-top:.6rem;line-height:1.45;">Uncheck any ride to leave it out of what Kat owes \u2014 the total updates right away. Rides Kat has already paid for are locked.</div>';
   h+='<div style="display:flex;justify-content:space-between;margin-top:.8rem;padding-top:.6rem;border-top:2px solid #0d9488;font-weight:700;color:#0f172a;"><span>'+rows.length+' rides \u00b7 '+paidCount+' paid</span><span>Total $'+total.toFixed(2)+' \u00b7 Unpaid $'+unpaidTotal.toFixed(2)+'</span></div>';
   body.innerHTML=h;
+}
+
+// One-time, Morgan-only prompt to upload her own business logo, per direct instruction
+// including the exact wording requested. Same dismissible-forever pattern already established
+// by maybeShowKmWalkthrough/_dismissKmWalk right below - a localStorage flag, checked once on
+// login. Gated specifically to Morgan's login (not "whoever has no logo"), and to her not
+// already having one set, so it naturally stops appearing the moment she actually uploads one.
+function maybeShowMorganLogoPrompt(){
+  try{
+    if(!currentUser || currentUser.name!=='Morgan') return;
+    if(localStorage.getItem('nwda_morganlogo_prompted')==='1') return;
+    var dName = (typeof getMyDriverName==='function') ? getMyDriverName() : 'Morgan Newton';
+    var prof = (typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[dName]) ? DRIVER_PROFILES[dName] : {};
+    if(prof.logo){ localStorage.setItem('nwda_morganlogo_prompted','1'); return; } // already has one - nothing to prompt
+    var ov=document.createElement('div'); ov.id='morgan-logo-prompt-overlay';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.75);z-index:16600;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+    ov.innerHTML='<div style="background:#fff;border-radius:18px;max-width:420px;width:100%;padding:1.6rem;box-shadow:0 24px 60px rgba(0,0,0,.45);text-align:center;">'
+      +'<div style="display:flex;align-items:center;justify-content:center;gap:.5rem;margin-bottom:.5rem;">'
+      +'<span style="font-size:2.4rem;line-height:1;">\u2b07\ufe0f</span>'
+      +'<span style="font-size:2.2rem;">\uD83C\uDFE2</span>'
+      +'<span style="font-size:2.4rem;line-height:1;">\u2b07\ufe0f</span>'
+      +'</div>'
+      +'<div style="font-size:1.35rem;font-weight:900;color:#0f172a;line-height:1.25;margin-bottom:.9rem;">MORGAN<br>UPLOAD YOUR LOGO HERE</div>'
+      +'<div style="font-size:.88rem;color:#475569;line-height:1.55;margin-bottom:1.3rem;">Your own business logo can show up on quotes and receipts you send \u2014 you\u2019ll get to choose yours or Kat\u2019s each time.</div>'
+      +'<button onclick="_morganLogoPromptUpload(\''+dName+'\')" style="width:100%;padding:.8rem;background:var(--accent);color:#fff;border:none;border-radius:10px;font-family:inherit;font-size:1rem;font-weight:700;cursor:pointer;margin-bottom:.6rem;">Upload my logo now</button>'
+      +'<button onclick="_dismissMorganLogoPrompt()" style="width:100%;padding:.6rem;background:none;border:none;color:var(--mid);font-size:.82rem;cursor:pointer;">Maybe later</button>'
+      +'</div>';
+    document.body.appendChild(ov);
+  }catch(e){}
+}
+function _dismissMorganLogoPrompt(){
+  try{ localStorage.setItem('nwda_morganlogo_prompted','1'); }catch(e){}
+  var ov=document.getElementById('morgan-logo-prompt-overlay'); if(ov) ov.remove();
+}
+function _morganLogoPromptUpload(driverName){
+  _dismissMorganLogoPrompt();
+  try{ if(typeof openBusinessLogoUpload==='function') openBusinessLogoUpload(driverName); }catch(e){}
 }
 
 function maybeShowKmWalkthrough(){
@@ -29317,6 +29530,7 @@ function enterApp(){
   if(isAdmin()) loadAdminRemovalRequests();
   initPresence(); try{ setTimeout(function(){ if(typeof maybeShowKmWalkthrough==='function') maybeShowKmWalkthrough(); }, 900); }catch(e){}
   try{ setTimeout(function(){ if(typeof maybeShowAdminPromotion==='function') maybeShowAdminPromotion(); }, 1200); }catch(e){}
+  try{ setTimeout(function(){ if(typeof maybeShowMorganLogoPrompt==='function') maybeShowMorganLogoPrompt(); }, 1500); }catch(e){}
 }
 
 // ═══════════════════════════════════════════
@@ -32122,56 +32336,6 @@ function qaRequestOverride(){
       if(warnEl) warnEl.innerHTML='\u23f3 Override request sent to '+escHtml(d.split(' ')[0])+'. Assigner can proceed; driver will confirm.';
     });
   });
-}
-
-function openEditHourModal(driverName, id){
-  const prof=DRIVER_PROFILES[driverName]||{};
-  const blk=(prof.unavailHours||[]).find(b=>b.id===id);
-  if(!blk){showToast('Block not found','error');return;}
-  const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const dayChecks=DAYS.map((w,wi)=>{
-    const chk=blk.days&&blk.days.includes(wi)?'checked':'';
-    return '<label style="display:inline-flex;align-items:center;gap:3px;font-size:.78rem;cursor:pointer;"><input type="checkbox" class="edit-hday" value="'+wi+'" '+chk+' style="accent-color:#7c3aed;"/> '+w+'</label>';
-  }).join(' ');
-  const back=document.createElement('div');
-  back.id='edit-hour-backdrop';
-  back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.55);z-index:11000;display:flex;align-items:center;justify-content:center;padding:1rem;';
-  back.addEventListener('click',e=>{if(e.target===back)back.remove();});
-  const safeName=driverName.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-  back.innerHTML=
-    '<div style="background:#fff;border-radius:16px;padding:1.25rem;width:100%;max-width:360px;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
-    +'<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#7c3aed;margin-bottom:.75rem;">Edit Time Block</div>'
-    +'<div style="margin-bottom:.6rem;display:flex;flex-wrap:wrap;gap:6px;">'+dayChecks+'</div>'
-    +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.3rem;">Or specific date:</div>'
-    +'<input type="date" id="edit-hdate" value="'+(blk.date||'')+'" style="width:100%;padding:.35rem;border:1px solid #ddd;border-radius:6px;font-size:.82rem;box-sizing:border-box;margin-bottom:.6rem;"/>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.75rem;">'
-    +'<div style="min-width:0;"><label style="font-size:.7rem;color:var(--mid);display:block;margin-bottom:2px;">From</label><input type="time" id="edit-hfrom" value="'+(blk.from||'')+'" style="width:100%;padding:.35rem;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;"/></div>'
-    +'<div style="min-width:0;"><label style="font-size:.7rem;color:var(--mid);display:block;margin-bottom:2px;">To</label><input type="time" id="edit-hto" value="'+(blk.to||'')+'" style="width:100%;padding:.35rem;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;"/></div>'
-    +'</div>'
-    +'<div style="display:flex;gap:.5rem;">'
-    +'<button onclick="saveEditHour(\''+safeName+'\',\''+id+'\',this)" style="flex:1;padding:.6rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:600;cursor:pointer;">Save</button>'
-    +'<button onclick="document.getElementById(\'edit-hour-backdrop\')?.remove()" style="flex:1;padding:.6rem;background:none;border:1.5px solid #ddd;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:600;color:#666;cursor:pointer;">Cancel</button>'
-    +'</div></div>';
-  document.body.appendChild(back);
-}
-function saveEditHour(driverName, id){
-  const prof=DRIVER_PROFILES[driverName]=DRIVER_PROFILES[driverName]||{};
-  const idx=(prof.unavailHours||[]).findIndex(b=>b.id===id);
-  if(idx<0){showToast('Block not found','error');return;}
-  const from=document.getElementById('edit-hfrom')?.value;
-  const to=document.getElementById('edit-hto')?.value;
-  if(!from||!to){showToast('Set a from and to time','error');return;}
-  if(from>=to){showToast('End time must be after start','error');return;}
-  const dateVal=document.getElementById('edit-hdate')?.value;
-  const dayEls=[...document.querySelectorAll('.edit-hday:checked')];
-  const blk={id,from,to};
-  if(dateVal) blk.date=dateVal;
-  else if(dayEls.length) blk.days=dayEls.map(e=>parseInt(e.value));
-  else{showToast('Select days or a date','error');return;}
-  prof.unavailHours[idx]=blk;
-  document.getElementById('edit-hour-backdrop')?.remove();
-  persistDriverProfiles(driverName); renderDriverMembers(); if(typeof renderMyProfileCard==='function') renderMyProfileCard();
-  showToast('Time block updated \u2713');
 }
 
 initApp();
