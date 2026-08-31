@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191022">
+<meta name="version" content="202608191025">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -23359,40 +23359,87 @@ async function availAddHoursRule(driverName, dateStr, from, to, repeatWeekly){
 // Same rule shape as availAddHoursRule's weekly case (one rule, a days array) - just built
 // from several selected weekdays at once instead of one date's derived weekday. Direct
 // request: setting the same standing hours across a work week one day at a time was tedious.
-async function availAddHoursRuleMultiDay(driverName, weekdays, from, to){
+// editRuleId: when set, REPLACES that existing rule's days/from/to in place rather than
+// pushing a new one - the actual fix for a real bug reported directly with a screenshot
+// (editing standing hours added a second, duplicate rule instead of replacing the first,
+// since the old version always pushed regardless of whether a rule already existed).
+async function availAddHoursRuleMultiDay(driverName, weekdays, from, to, editRuleId){
   if(!_availCanEdit(driverName)) return;
   if(!from || !to || from>=to){ showToast('Enter a valid time range','error'); return; }
   if(!weekdays || !weekdays.length){ showToast('Pick at least one day','error'); return; }
   const prof=DRIVER_PROFILES[driverName]; migrateAvailToUnified(prof);
   prof.availRules = prof.availRules||[];
-  const id='ar_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
-  prof.availRules.push({id:id, kind:'hours', repeat:'weekly', days:weekdays.slice(), from:from, to:to});
+  if(editRuleId){
+    const existing = prof.availRules.find(function(x){ return x.id===editRuleId; });
+    if(existing){ existing.days=weekdays.slice(); existing.from=from; existing.to=to; }
+    else { prof.availRules.push({id:editRuleId, kind:'hours', repeat:'weekly', days:weekdays.slice(), from:from, to:to}); }
+  } else {
+    const id='ar_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+    prof.availRules.push({id:id, kind:'hours', repeat:'weekly', days:weekdays.slice(), from:from, to:to});
+  }
   await persistDriverProfiles(driverName);
   renderAvailCalendar(driverName);
-  closeAvailStandingHoursModal();
-  showToast('\u2713 Standing hours set');
+  openAvailStandingHoursModal(driverName);
+  showToast(editRuleId ? '\u2713 Standing hours updated' : '\u2713 Standing unavailable hours set');
 }
-function openAvailStandingHoursModal(driverName){
+async function availDeleteStandingRule(driverName, ruleId){
   if(!_availCanEdit(driverName)) return;
+  const prof=DRIVER_PROFILES[driverName]; if(!prof) return;
+  prof.availRules = (prof.availRules||[]).filter(function(x){ return x.id!==ruleId; });
+  await persistDriverProfiles(driverName);
+  renderAvailCalendar(driverName);
+  openAvailStandingHoursModal(driverName);
+  showToast('\u2713 Removed');
+}
+function openAvailStandingHoursModal(driverName, editRuleId){
+  if(!_availCanEdit(driverName)) return;
+  var oldOv=document.getElementById('avail-standing-hours-back'); if(oldOv) oldOv.remove();
+  const prof=DRIVER_PROFILES[driverName]||{}; migrateAvailToUnified(prof);
+  const standingRules = (prof.availRules||[]).filter(function(x){ return x.kind==='hours' && x.repeat==='weekly'; });
+  const editingRule = editRuleId ? standingRules.find(function(x){ return x.id===editRuleId; }) : null;
+
   var ov=document.createElement('div'); ov.id='avail-standing-hours-back';
   ov.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:1rem;';
   ov.onclick=function(e){ if(e.target===ov) closeAvailStandingHoursModal(); };
+
+  var existingListHTML = '';
+  if(standingRules.length && !editingRule){
+    existingListHTML = '<div style="background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.55rem .7rem;margin-bottom:.8rem;">'
+      + '<div style="font-size:.65rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Currently set</div>'
+      + standingRules.map(function(r){
+          var _days = (r.days||[]).slice().sort().map(function(w){ return WEEKDAY_ABBR[w]; }).join('/');
+          return '<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.3rem 0;font-size:.8rem;">'
+            + '<span>'+_days+' '+fmtTime12(r.from)+'\u2013'+fmtTime12(r.to)+'</span>'
+            + '<span style="display:flex;gap:.5rem;flex-shrink:0;">'
+            + '<span onclick="openAvailStandingHoursModal(\''+driverName+'\',\''+r.id+'\')" style="cursor:pointer;color:var(--accent);font-weight:700;font-size:.74rem;">Edit</span>'
+            + '<span onclick="availDeleteStandingRule(\''+driverName+'\',\''+r.id+'\')" style="cursor:pointer;color:#b03a2e;font-weight:700;font-size:.74rem;">Delete</span>'
+            + '</span></div>';
+        }).join('')
+      + '</div>';
+  }
+
   var dayChecks = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(function(w,wi){
-    var _checked = (wi>=1 && wi<=5) ? 'checked' : ''; // Mon-Fri pre-checked, the common case
+    var _checked;
+    if(editingRule){ _checked = (editingRule.days||[]).indexOf(wi)>-1 ? 'checked' : ''; }
+    else { _checked = (wi>=1 && wi<=5) ? 'checked' : ''; } // Mon-Fri pre-checked, the common case, only for a fresh add
     return '<label style="display:flex;flex-direction:column;align-items:center;gap:.2rem;font-size:.7rem;cursor:pointer;">'
       + '<input type="checkbox" class="avail-standing-day" value="'+wi+'" '+_checked+' style="width:18px;height:18px;" />'+w
       + '</label>';
   }).join('');
-  ov.innerHTML='<div style="background:var(--white);border-radius:14px;max-width:380px;width:100%;padding:1.1rem;">'
-    + '<div style="font-size:.95rem;font-weight:800;color:var(--black);margin-bottom:.2rem;">Set standing work hours</div>'
-    + '<div style="font-size:.78rem;color:var(--mid);margin-bottom:.8rem;line-height:1.4;">e.g. 8am\u20135pm, Monday through Friday \u2014 set it once instead of one day at a time.</div>'
+
+  ov.innerHTML='<div style="background:var(--white);border-radius:14px;max-width:380px;width:100%;padding:1.1rem;max-height:90vh;overflow-y:auto;">'
+    + '<div style="font-size:.95rem;font-weight:800;color:var(--black);margin-bottom:.2rem;">'+(editingRule?'Edit standing unavailable hours':'Set standing unavailable hours')+'</div>'
+    + '<div style="font-size:.78rem;color:var(--mid);margin-bottom:.8rem;line-height:1.4;">e.g. 8am\u20135pm, Monday through Friday \u2014 marks these hours as unavailable to drive, every week, set once instead of one day at a time.</div>'
+    + existingListHTML
+    + (editingRule?'':'<div style="font-size:.68rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">'+(standingRules.length?'Add another':'')+'</div>')
     + '<div style="display:flex;justify-content:space-between;margin-bottom:.7rem;">'+dayChecks+'</div>'
     + '<div style="font-size:.68rem;color:var(--mid);font-weight:700;margin-bottom:.2rem;">FROM (start)</div>'
-    + '<input type="time" id="avail-standing-from" style="width:100%;padding:.5rem;border:1.5px solid var(--light);border-radius:8px;font-size:.85rem;box-sizing:border-box;margin-bottom:.5rem;" />'
+    + '<input type="time" id="avail-standing-from" value="'+(editingRule?editingRule.from:'')+'" style="width:100%;padding:.5rem;border:1.5px solid var(--light);border-radius:8px;font-size:.85rem;box-sizing:border-box;margin-bottom:.5rem;" />'
     + '<div style="font-size:.68rem;color:var(--mid);font-weight:700;margin-bottom:.2rem;">TO (end)</div>'
-    + '<input type="time" id="avail-standing-to" style="width:100%;padding:.5rem;border:1.5px solid var(--light);border-radius:8px;font-size:.85rem;box-sizing:border-box;margin-bottom:.8rem;" />'
-    + '<button onclick="availAddHoursRuleMultiDay(\''+driverName+'\',Array.from(document.querySelectorAll(\'.avail-standing-day:checked\')).map(function(el){return parseInt(el.value);}),document.getElementById(\'avail-standing-from\').value,document.getElementById(\'avail-standing-to\').value)" style="width:100%;padding:.65rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.88rem;font-weight:700;cursor:pointer;margin-bottom:.5rem;">Set hours</button>'
-    + '<button onclick="closeAvailStandingHoursModal()" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;color:var(--mid);font-size:.85rem;font-weight:600;cursor:pointer;">Cancel</button>'
+    + '<input type="time" id="avail-standing-to" value="'+(editingRule?editingRule.to:'')+'" style="width:100%;padding:.5rem;border:1.5px solid var(--light);border-radius:8px;font-size:.85rem;box-sizing:border-box;margin-bottom:.8rem;" />'
+    + '<button onclick="availAddHoursRuleMultiDay(\''+driverName+'\',Array.from(document.querySelectorAll(\'.avail-standing-day:checked\')).map(function(el){return parseInt(el.value);}),document.getElementById(\'avail-standing-from\').value,document.getElementById(\'avail-standing-to\').value'+(editingRule?',\''+editingRule.id+'\'':'')+')" style="width:100%;padding:.65rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.88rem;font-weight:700;cursor:pointer;margin-bottom:.5rem;">'+(editingRule?'Save changes':'Set hours')+'</button>'
+    + (editingRule?'<button onclick="openAvailStandingHoursModal(\''+driverName+'\')" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;color:var(--mid);font-size:.85rem;font-weight:600;cursor:pointer;margin-bottom:.5rem;">Cancel edit</button>':'')
+    + '<button onclick="closeAvailStandingHoursModal()" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;color:var(--mid);font-size:.85rem;font-weight:600;cursor:pointer;">Close</button>'
     + '</div>';
   document.body.appendChild(ov);
 }
@@ -23418,7 +23465,10 @@ function openAvailDayModal(driverName, dateStr){
   // still work most of the day), so nothing ever showed the block existed. Collected
   // separately from the single-rule lookups above so it always shows, regardless of whether
   // this day is otherwise available or blocked for some other reason entirely.
-  const hoursRulesForDay = (prof.availRules||[]).filter(function(x){
+  // Gated on !isException - confirmed the exact same check driverAvailabilityStatus itself
+  // uses to skip the hours check entirely, so an excepted date's blocks are never shown as
+  // still active here even though the underlying data (the rule itself) is untouched.
+  const hoursRulesForDay = isException ? [] : (prof.availRules||[]).filter(function(x){
     return x.kind==='hours' && (x.repeat==='none' ? x.date===dateStr : _availRuleMatchesDate(x,dateStr));
   });
 
@@ -23435,7 +23485,7 @@ function openAvailDayModal(driverName, dateStr){
         + hoursRulesForDay.map(function(h){
             var _label = h.repeat==='weekly' ? 'Every '+WEEKDAY_ABBR[wd] : 'This day only';
             var _removeLinks = h.repeat==='weekly'
-              ? '<span onclick="availAddException(\''+driverName+'\',\''+dateStr+'\')" style="cursor:pointer;color:#b03a2e;font-weight:700;font-size:.75rem;">Just this day</span>'
+              ? '<span onclick="availAddException(\''+driverName+'\',\''+dateStr+'\')" style="cursor:pointer;color:#b03a2e;font-weight:700;font-size:.75rem;">Make me available this day</span>'
                 + '<span style="color:var(--light);">|</span>'
                 + '<span onclick="availRemoveRule(\''+driverName+'\',\''+h.id+'\',\''+dateStr+'\')" style="cursor:pointer;color:#b03a2e;font-weight:700;font-size:.75rem;">Always</span>'
               : '<span onclick="availRemoveRule(\''+driverName+'\',\''+h.id+'\',\''+dateStr+'\')" style="cursor:pointer;color:#b03a2e;font-weight:700;font-size:.75rem;">Remove</span>';
@@ -23516,6 +23566,7 @@ function availCalToday(driverName){
 }
 function _hasHoursBlockOnDate(driverName, dateStr){
   var prof = DRIVER_PROFILES[driverName]||{};
+  if((prof.availExceptions||[]).includes(dateStr)) return false;
   var wd = new Date(dateStr+'T12:00:00').getDay();
   return (prof.availRules||[]).some(function(x){
     return x.kind==='hours' && (x.repeat==='none' ? x.date===dateStr : _availRuleMatchesDate(x,dateStr));
@@ -23563,7 +23614,7 @@ function renderAvailCalendar(driverName){
     + '<div style="display:flex;align-items:center;gap:.4rem;"><span style="width:8px;height:8px;border-radius:50%;background:#fef6e0;border:1px solid #f0dca0;display:inline-block;"></span>Blocked part of the day</div>'
     + '<div>Tap any day for details</div>'
     + '</div>'
-    + '<button onclick="openAvailStandingHoursModal(\''+driverName+'\')" style="width:100%;margin-top:.7rem;padding:.55rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer;">\u23f0 Set standing work hours (e.g. 8\u20135, Mon\u2013Fri)</button>';
+    + '<button onclick="openAvailStandingHoursModal(\''+driverName+'\')" style="width:100%;margin-top:.7rem;padding:.55rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer;">\u23f0 Set standing unavailable hours (e.g. 8\u20135, Mon\u2013Fri)</button>';
 }
 // Build assign-dropdown options, greying out drivers who are unavailable on the given date.
 // Login name for a driver's full name (reverse of USER_DRIVER_MAP).
