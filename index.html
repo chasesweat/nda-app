@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191028">
+<meta name="version" content="202608191029">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -18761,7 +18761,12 @@ async function deleteRide(id){
   if(!canDeleteRide(r)){ showToast('You can only delete rides you created.','error'); return; }
   // Your OWN ride: delete it right away. Using the admin override to delete someone
   // ELSE'S ride needs a second admin (cancelling stays instant for live dispatch).
-  const _mine = r && r.createdBy === (currentUser&&currentUser.name);
+  // "Mine" means either I created it directly, OR I own the CLIENT this ride is for
+  // (getClientOwner - the same Kat/Morgan-aware resolution used everywhere else in the app
+  // for this exact relationship) - a ride Morgan scheduled for one of Kat's own clients is
+  // still Kat's own ride to delete, even though she didn't personally create the row.
+  const _myDriverName = (typeof getMyDriverName==='function') ? getMyDriverName() : null;
+  const _mine = !!(r && ((r.createdBy === (currentUser&&currentUser.name)) || (_myDriverName && getClientOwner(r.client)===_myDriverName)));
   if(!_mine){
     if(!confirm('Delete '+((r&&r.client)||'this ride')+'?'+(_twoAdminRequired()?'\n\nThis is someone else\u2019s ride \u2014 a second admin must approve before it\u2019s deleted.':'\n\nThis is someone else\u2019s ride.')+'\n\n(To stop a ride right now, cancel it instead \u2014 that takes effect immediately.)')) return;
     await queueAdminAction('ride_delete', {id:r.id}, 'Delete '+((r&&r.client)||'a ride')+((r&&r.date)?(' on '+fmtDateShort(r.date)):'')+' (created by '+((r&&r.createdBy)||'someone else')+')');
