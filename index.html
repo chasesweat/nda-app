@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191019">
+<meta name="version" content="202608191020">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -23370,8 +23370,28 @@ function openAvailDayModal(driverName, dateStr){
   const recurOff = (prof.availRules||[]).find(function(x){ return x.kind==='off'&&x.repeat!=='none'&&_availRuleMatchesDate(x,dateStr); });
   const isPrivateConflict = st.reason && st.reason.indexOf('private ride')>-1;
   const isException = (prof.availExceptions||[]).includes(dateStr);
+  // Real bug, reported directly: a partial-hours block genuinely saves correctly, but a day
+  // with ONLY an hours block still reads as "Available" overall (correctly - the driver can
+  // still work most of the day), so nothing ever showed the block existed. Collected
+  // separately from the single-rule lookups above so it always shows, regardless of whether
+  // this day is otherwise available or blocked for some other reason entirely.
+  const hoursRulesForDay = (prof.availRules||[]).filter(function(x){
+    return x.kind==='hours' && (x.repeat==='none' ? x.date===dateStr : _availRuleMatchesDate(x,dateStr));
+  });
 
   var body = '<div style="font-size:.75rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.3rem;">'+fmtDateShort(dateStr)+'</div>';
+  if(hoursRulesForDay.length){
+    body += '<div style="background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.55rem .7rem;margin-bottom:.7rem;">'
+      + '<div style="font-size:.65rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Hours blocked this day</div>'
+      + hoursRulesForDay.map(function(h){
+          var _label = h.repeat==='weekly' ? 'Every '+WEEKDAY_ABBR[wd] : 'This day only';
+          return '<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.3rem 0;font-size:.8rem;">'
+            + '<span>'+fmtTime12(h.from)+'\u2013'+fmtTime12(h.to)+' <span style="color:var(--mid);font-size:.72rem;">('+_label+')</span></span>'
+            + '<span onclick="availRemoveRule(\''+driverName+'\',\''+h.id+'\',\''+dateStr+'\')" style="cursor:pointer;color:#b03a2e;font-weight:700;font-size:.75rem;">Remove</span>'
+            + '</div>';
+        }).join('')
+      + '</div>';
+  }
   if(st.available){
     body += '<div style="font-size:.85rem;color:#15803d;font-weight:700;margin-bottom:.8rem;">\u2713 Available'+(isException?' (override active)':'')+'</div>';
     if(isException){
@@ -23388,7 +23408,7 @@ function openAvailDayModal(driverName, dateStr){
       + '<input type="time" id="avail-modal-to" style="flex:1;padding:.45rem;border:1.5px solid var(--light);border-radius:8px;font-size:.82rem;" />'
       + '</div>'
       + '<label style="display:flex;align-items:center;gap:.4rem;font-size:.78rem;margin-bottom:.5rem;cursor:pointer;"><input type="checkbox" id="avail-modal-hrepeat" style="width:15px;height:15px;" />Repeat every week on this day</label>'
-      + '<button onclick="availAddHoursRule(\''+driverName+'\',\''+dateStr+'\',document.getElementById(\'avail-modal-from\').value,document.getElementById(\'avail-modal-to\').value,document.getElementById(\'avail-modal-hrepeat\').checked)" style="width:100%;padding:.6rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;font-size:.85rem;font-weight:700;cursor:pointer;">Block these hours</button>';
+      + '<button onclick="availAddHoursRule(\''+driverName+'\',\''+dateStr+'\',document.getElementById(\'avail-modal-from\').value,document.getElementById(\'avail-modal-to\').value,document.getElementById(\'avail-modal-hrepeat\').checked)" style="width:100%;padding:.6rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.85rem;font-weight:700;cursor:pointer;">Block these hours</button>';
   } else {
     body += '<div style="font-size:.85rem;color:#b03a2e;font-weight:700;margin-bottom:.3rem;">\u2717 Not available</div>'
       + '<div style="font-size:.78rem;color:var(--mid);margin-bottom:.8rem;">'+escHtml(st.reason||'')+'</div>';
@@ -23404,15 +23424,10 @@ function openAvailDayModal(driverName, dateStr){
         body += '<button onclick="availRemoveRule(\''+driverName+'\',\''+recurOff.id+'\',\''+dateStr+'\')" style="width:100%;padding:.6rem;background:none;border:1.5px solid #b03a2e;color:#b03a2e;border-radius:8px;font-size:.85rem;font-weight:700;cursor:pointer;">Remove the whole '+recurOff.repeat+' pattern</button>';
       }
     } else {
-      // Blocked by a hours rule specifically (driverAvailabilityStatus only returns this
-      // reason when no full-day rule matched) - offer to remove that specific hours block.
-      const hrsRule = (prof.availRules||[]).find(function(x){ return x.kind==='hours' && (x.repeat==='none' ? x.date===dateStr : _availRuleMatchesDate(x,dateStr)); });
-      if(hrsRule){
-        body += '<button onclick="availRemoveRule(\''+driverName+'\',\''+hrsRule.id+'\',\''+dateStr+'\')" style="width:100%;padding:.6rem;background:#15803d;color:#fff;border:none;border-radius:8px;font-size:.85rem;font-weight:700;cursor:pointer;">Remove this hours block</button>';
-      }
+      body += '<div style="font-size:.75rem;color:var(--mid);line-height:1.4;">Tap Close and try again \u2014 this day\u2019s status couldn\u2019t be matched to a specific rule.</div>';
     }
   }
-  body += '<button onclick="closeAvailDayModal()" style="width:100%;padding:.55rem;background:none;border:none;color:var(--mid);font-size:.8rem;cursor:pointer;margin-top:.6rem;">Close</button>';
+  body += '<button onclick="closeAvailDayModal()" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;color:var(--mid);font-size:.85rem;font-weight:600;cursor:pointer;margin-top:.6rem;">Close</button>';
 
   var back = document.getElementById('avail-day-modal-back');
   if(!back){
