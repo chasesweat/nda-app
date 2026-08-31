@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191020">
+<meta name="version" content="202608191022">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -23356,6 +23356,49 @@ async function availAddHoursRule(driverName, dateStr, from, to, repeatWeekly){
   openAvailDayModal(driverName, dateStr);
   showToast('\u2713 Hours blocked');
 }
+// Same rule shape as availAddHoursRule's weekly case (one rule, a days array) - just built
+// from several selected weekdays at once instead of one date's derived weekday. Direct
+// request: setting the same standing hours across a work week one day at a time was tedious.
+async function availAddHoursRuleMultiDay(driverName, weekdays, from, to){
+  if(!_availCanEdit(driverName)) return;
+  if(!from || !to || from>=to){ showToast('Enter a valid time range','error'); return; }
+  if(!weekdays || !weekdays.length){ showToast('Pick at least one day','error'); return; }
+  const prof=DRIVER_PROFILES[driverName]; migrateAvailToUnified(prof);
+  prof.availRules = prof.availRules||[];
+  const id='ar_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+  prof.availRules.push({id:id, kind:'hours', repeat:'weekly', days:weekdays.slice(), from:from, to:to});
+  await persistDriverProfiles(driverName);
+  renderAvailCalendar(driverName);
+  closeAvailStandingHoursModal();
+  showToast('\u2713 Standing hours set');
+}
+function openAvailStandingHoursModal(driverName){
+  if(!_availCanEdit(driverName)) return;
+  var ov=document.createElement('div'); ov.id='avail-standing-hours-back';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  ov.onclick=function(e){ if(e.target===ov) closeAvailStandingHoursModal(); };
+  var dayChecks = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(function(w,wi){
+    var _checked = (wi>=1 && wi<=5) ? 'checked' : ''; // Mon-Fri pre-checked, the common case
+    return '<label style="display:flex;flex-direction:column;align-items:center;gap:.2rem;font-size:.7rem;cursor:pointer;">'
+      + '<input type="checkbox" class="avail-standing-day" value="'+wi+'" '+_checked+' style="width:18px;height:18px;" />'+w
+      + '</label>';
+  }).join('');
+  ov.innerHTML='<div style="background:var(--white);border-radius:14px;max-width:380px;width:100%;padding:1.1rem;">'
+    + '<div style="font-size:.95rem;font-weight:800;color:var(--black);margin-bottom:.2rem;">Set standing work hours</div>'
+    + '<div style="font-size:.78rem;color:var(--mid);margin-bottom:.8rem;line-height:1.4;">e.g. 8am\u20135pm, Monday through Friday \u2014 set it once instead of one day at a time.</div>'
+    + '<div style="display:flex;justify-content:space-between;margin-bottom:.7rem;">'+dayChecks+'</div>'
+    + '<div style="font-size:.68rem;color:var(--mid);font-weight:700;margin-bottom:.2rem;">FROM (start)</div>'
+    + '<input type="time" id="avail-standing-from" style="width:100%;padding:.5rem;border:1.5px solid var(--light);border-radius:8px;font-size:.85rem;box-sizing:border-box;margin-bottom:.5rem;" />'
+    + '<div style="font-size:.68rem;color:var(--mid);font-weight:700;margin-bottom:.2rem;">TO (end)</div>'
+    + '<input type="time" id="avail-standing-to" style="width:100%;padding:.5rem;border:1.5px solid var(--light);border-radius:8px;font-size:.85rem;box-sizing:border-box;margin-bottom:.8rem;" />'
+    + '<button onclick="availAddHoursRuleMultiDay(\''+driverName+'\',Array.from(document.querySelectorAll(\'.avail-standing-day:checked\')).map(function(el){return parseInt(el.value);}),document.getElementById(\'avail-standing-from\').value,document.getElementById(\'avail-standing-to\').value)" style="width:100%;padding:.65rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.88rem;font-weight:700;cursor:pointer;margin-bottom:.5rem;">Set hours</button>'
+    + '<button onclick="closeAvailStandingHoursModal()" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;color:var(--mid);font-size:.85rem;font-weight:600;cursor:pointer;">Cancel</button>'
+    + '</div>';
+  document.body.appendChild(ov);
+}
+function closeAvailStandingHoursModal(){
+  var ov=document.getElementById('avail-standing-hours-back'); if(ov) ov.remove();
+}
 
 // ── DAY-TAP MODAL ── Shows exactly what driverAvailabilityStatus() would say and why, then
 // offers the one or two actions that actually make sense for that specific state - never every
@@ -23380,20 +23423,29 @@ function openAvailDayModal(driverName, dateStr){
   });
 
   var body = '<div style="font-size:.75rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.3rem;">'+fmtDateShort(dateStr)+'</div>';
-  if(hoursRulesForDay.length){
-    body += '<div style="background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.55rem .7rem;margin-bottom:.7rem;">'
-      + '<div style="font-size:.65rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Hours blocked this day</div>'
-      + hoursRulesForDay.map(function(h){
-          var _label = h.repeat==='weekly' ? 'Every '+WEEKDAY_ABBR[wd] : 'This day only';
-          return '<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.3rem 0;font-size:.8rem;">'
-            + '<span>'+fmtTime12(h.from)+'\u2013'+fmtTime12(h.to)+' <span style="color:var(--mid);font-size:.72rem;">('+_label+')</span></span>'
-            + '<span onclick="availRemoveRule(\''+driverName+'\',\''+h.id+'\',\''+dateStr+'\')" style="cursor:pointer;color:#b03a2e;font-weight:700;font-size:.75rem;">Remove</span>'
-            + '</div>';
-        }).join('')
-      + '</div>';
-  }
   if(st.available){
-    body += '<div style="font-size:.85rem;color:#15803d;font-weight:700;margin-bottom:.8rem;">\u2713 Available'+(isException?' (override active)':'')+'</div>';
+    // Reported directly with a screenshot: showing the hours-blocked detail ABOVE a plain
+    // "Available" read as contradictory, even though it's correct (available outside those
+    // hours). Status leads now, and the wording explicitly acknowledges the block rather than
+    // looking like it's ignoring what was just shown right below it.
+    body += '<div style="font-size:.85rem;color:#15803d;font-weight:700;margin-bottom:.8rem;">\u2713 Available'+(hoursRulesForDay.length?' (outside blocked hours below)':'')+(isException?' (override active)':'')+'</div>';
+    if(hoursRulesForDay.length){
+      body += '<div style="background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.55rem .7rem;margin-bottom:.7rem;">'
+        + '<div style="font-size:.65rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Hours blocked this day</div>'
+        + hoursRulesForDay.map(function(h){
+            var _label = h.repeat==='weekly' ? 'Every '+WEEKDAY_ABBR[wd] : 'This day only';
+            var _removeLinks = h.repeat==='weekly'
+              ? '<span onclick="availAddException(\''+driverName+'\',\''+dateStr+'\')" style="cursor:pointer;color:#b03a2e;font-weight:700;font-size:.75rem;">Just this day</span>'
+                + '<span style="color:var(--light);">|</span>'
+                + '<span onclick="availRemoveRule(\''+driverName+'\',\''+h.id+'\',\''+dateStr+'\')" style="cursor:pointer;color:#b03a2e;font-weight:700;font-size:.75rem;">Always</span>'
+              : '<span onclick="availRemoveRule(\''+driverName+'\',\''+h.id+'\',\''+dateStr+'\')" style="cursor:pointer;color:#b03a2e;font-weight:700;font-size:.75rem;">Remove</span>';
+            return '<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.3rem 0;font-size:.8rem;">'
+              + '<span>'+fmtTime12(h.from)+'\u2013'+fmtTime12(h.to)+' <span style="color:var(--mid);font-size:.72rem;">('+_label+')</span></span>'
+              + '<span style="display:flex;align-items:center;gap:.4rem;">'+_removeLinks+'</span>'
+              + '</div>';
+          }).join('')
+        + '</div>';
+    }
     if(isException){
       body += '<button onclick="availRemoveException(\''+driverName+'\',\''+dateStr+'\')" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;margin-bottom:.5rem;">Undo \u2014 restore normal schedule</button>';
     }
@@ -23462,6 +23514,13 @@ function availCalToday(driverName){
   _availCalMonth[driverName] = new Date();
   renderAvailCalendar(driverName);
 }
+function _hasHoursBlockOnDate(driverName, dateStr){
+  var prof = DRIVER_PROFILES[driverName]||{};
+  var wd = new Date(dateStr+'T12:00:00').getDay();
+  return (prof.availRules||[]).some(function(x){
+    return x.kind==='hours' && (x.repeat==='none' ? x.date===dateStr : _availRuleMatchesDate(x,dateStr));
+  });
+}
 function renderAvailCalendar(driverName){
   var dk = driverName.replace(/ /g,'_');
   var box = document.getElementById('avail-cal-'+dk); if(!box) return;
@@ -23480,12 +23539,14 @@ function renderAvailCalendar(driverName){
     var dateStr = year+'-'+String(month+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');
     var st = driverAvailabilityStatus(driverName, dateStr, null);
     var isToday = dateStr===todayStr;
-    var bg = st.available ? 'var(--white)' : '#fdecea';
-    var border = isToday ? '1.5px solid var(--accent)' : (st.available ? '1px solid var(--light)' : '1px solid #f3c4bd');
-    var color = st.available ? 'var(--black)' : '#b03a2e';
+    var partialBlock = st.available && _hasHoursBlockOnDate(driverName, dateStr);
+    var bg = !st.available ? '#fdecea' : (partialBlock ? '#fef6e0' : 'var(--white)');
+    var border = isToday ? '1.5px solid var(--accent)' : (!st.available ? '1px solid #f3c4bd' : (partialBlock ? '1px solid #f0dca0' : '1px solid var(--light)'));
+    var color = !st.available ? '#b03a2e' : (partialBlock ? '#8a6d1f' : 'var(--black)');
+    var dotColor = !st.available ? '#b03a2e' : '#c9971f';
     cells += '<div onclick="openAvailDayModal(\''+driverName+'\',\''+dateStr+'\')" style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:8px;background:'+bg+';border:'+border+';color:'+color+';font-size:.78rem;font-weight:'+(isToday?'800':'600')+';cursor:pointer;position:relative;">'
       + day
-      + (st.available ? '' : '<span style="position:absolute;bottom:2px;width:4px;height:4px;border-radius:50%;background:#b03a2e;"></span>')
+      + ((!st.available || partialBlock) ? '<span style="position:absolute;bottom:2px;width:4px;height:4px;border-radius:50%;background:'+dotColor+';"></span>' : '')
       + '</div>';
   }
   var dowHeader = ['S','M','T','W','T','F','S'].map(function(d){ return '<div style="font-size:.62rem;font-weight:700;color:var(--mid);text-align:center;padding-bottom:2px;">'+d+'</div>'; }).join('');
@@ -23497,7 +23558,12 @@ function renderAvailCalendar(driverName){
     + '</div>'
     + '<div style="text-align:center;margin-bottom:.5rem;"><button onclick="availCalToday(\''+driverName+'\')" class="btn-secondary" style="padding:.25rem .6rem;font-size:.72rem;">Today</button></div>'
     + '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;">' + dowHeader + cells + '</div>'
-    + '<div style="display:flex;align-items:center;gap:.4rem;margin-top:.5rem;font-size:.68rem;color:var(--mid);"><span style="width:8px;height:8px;border-radius:50%;background:#fdecea;border:1px solid #f3c4bd;display:inline-block;"></span>Blocked \u2014 tap any day for details</div>';
+    + '<div style="display:flex;flex-direction:column;gap:.3rem;margin-top:.5rem;font-size:.68rem;color:var(--mid);">'
+    + '<div style="display:flex;align-items:center;gap:.4rem;"><span style="width:8px;height:8px;border-radius:50%;background:#fdecea;border:1px solid #f3c4bd;display:inline-block;"></span>Blocked all day</div>'
+    + '<div style="display:flex;align-items:center;gap:.4rem;"><span style="width:8px;height:8px;border-radius:50%;background:#fef6e0;border:1px solid #f0dca0;display:inline-block;"></span>Blocked part of the day</div>'
+    + '<div>Tap any day for details</div>'
+    + '</div>'
+    + '<button onclick="openAvailStandingHoursModal(\''+driverName+'\')" style="width:100%;margin-top:.7rem;padding:.55rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer;">\u23f0 Set standing work hours (e.g. 8\u20135, Mon\u2013Fri)</button>';
 }
 // Build assign-dropdown options, greying out drivers who are unavailable on the given date.
 // Login name for a driver's full name (reverse of USER_DRIVER_MAP).
