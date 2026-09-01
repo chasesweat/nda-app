@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191032">
+<meta name="version" content="202608191033">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -24498,23 +24498,30 @@ function getIncomeDateRange(){
     start.setHours(0,0,0,0);
     const end = new Date(start);
     end.setDate(start.getDate()+6);
+    end.setHours(23,59,59,999);
     return {start,end,label:`Week of ${start.toLocaleDateString('en-US',{month:'short',day:'numeric'})}`};
   }
   if(incomeTab==='monthly'){
     const start = new Date(now.getFullYear(),now.getMonth(),1);
-    const end   = new Date(now.getFullYear(),now.getMonth()+1,0);
+    const end   = new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59,999);
     return {start,end,label:now.toLocaleDateString('en-US',{month:'long',year:'numeric'})};
   }
   if(incomeTab==='yearly'){
     const start = new Date(now.getFullYear(),0,1);
-    const end   = new Date(now.getFullYear(),11,31);
+    const end   = new Date(now.getFullYear(),11,31,23,59,59,999);
     return {start,end,label:String(now.getFullYear())};
   }
   // custom
   const fromEl=document.getElementById('income-from');
   const toEl=document.getElementById('income-to');
   if(!fromEl?.value||!toEl?.value) return {start:null,end:null,label:'Custom range'};
-  return {start:new Date(fromEl.value),end:new Date(toEl.value),label:`${fromEl.value} to ${toEl.value}`};
+  // A bare date-only string (e.g. "2026-08-31") parses as UTC midnight, which in a
+  // negative-UTC-offset timezone (this app's actual one, America/New_York) lands on the
+  // PREVIOUS local day entirely - confirmed directly with a timezone-forced test before fixing.
+  // Appending an explicit local-time suffix sidesteps that UTC-parsing behavior altogether,
+  // since only bare date strings get it - the same reason every ride-date comparison
+  // elsewhere in this file already appends 'T12:00:00' rather than parsing the bare string.
+  return {start:new Date(fromEl.value+'T00:00:00'),end:new Date(toEl.value+'T23:59:59'),label:`${fromEl.value} to ${toEl.value}`};
 }
 
 // ── Payment-type filter (Income tab) ────────────────────────────────────────
