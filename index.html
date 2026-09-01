@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191033">
+<meta name="version" content="202608191034">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1923,6 +1923,21 @@ input,select,textarea{font-size:16px;}
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script>
+// ── EASTERN TIME, ALWAYS ── Direct instruction: this is a Georgia-based business, so "now" and
+// "today" should mean Eastern wall-clock time, regardless of a device's own timezone or where
+// it physically is (a driver traveling, or a phone with its clock set wrong, shouldn't shift
+// which day a ride counts toward). toLocaleString formats the real current instant AS IF it
+// were being read in America/New_York, then re-parsing that string builds a Date object whose
+// own LOCAL getters (getFullYear/getMonth/getDate/getHours/etc.) reflect those Eastern values -
+// verified directly, including from a simulated Pacific-timezone device, that this genuinely
+// overrides the device's own timezone rather than just reading it. Every bare `new Date()` in
+// this file (always, unambiguously, "the current moment" - never used to parse some other
+// date) was changed to nowET() so this applies everywhere at once, not just to whichever call
+// sites happened to get individually reviewed.
+function nowET(){
+  return new Date(new Date().toLocaleString('en-US', {timeZone: 'America/New_York'}));
+}
+
 // Reported: closing a modal (e.g. Add Ride via Cancel) and reopening it later showed it
 // scrolled to wherever it was left, instead of starting at the top. Root cause: .modal has
 // overflow-y:auto and its scrollTop simply persists across hide/show — nothing ever reset it.
@@ -2541,7 +2556,7 @@ function setupRealtimeListeners(){
         const sub = snap.val();
         subscriptions[currentUser.name] = sub;
         // If income just got unlocked, update the UI immediately
-        if(sub.upgraded && new Date(sub.upgradeExpiresAt) > new Date()){
+        if(sub.upgraded && new Date(sub.upgradeExpiresAt) > nowET()){
           updateNotifBadge();
           renderAccountPage();
           // If currently on account page, show toast
@@ -2660,7 +2675,7 @@ function _cacheSnapshotWrite(){
     };
     var slim = _cacheStripImages(data);
     if(!slim) return;
-    var json = JSON.stringify({ v:_appBuildTag(), savedAt:new Date().toISOString(), data:slim });
+    var json = JSON.stringify({ v:_appBuildTag(), savedAt:nowET().toISOString(), data:slim });
     if(json.length > 4600000) return;     // still too big after stripping images: skip this cycle
     localStorage.setItem(_NDA_CACHE_KEY, json);
   }catch(e){ /* quota / serialization: never crash boot over the cache */ }
@@ -3040,7 +3055,7 @@ function _sosPickType(type){
 async function confirmSOS(message){
   const myDriver=getMyDriverName()||currentUser?.name||'Unknown';
   const sosId='sos_'+Date.now();
-  activeSOS={id:sosId, sender:currentUser?.name||myDriver, senderDriver:myDriver, message:message||'', time:new Date().toISOString(), active:true, seenBy:[], respondedBy:[]};
+  activeSOS={id:sosId, sender:currentUser?.name||myDriver, senderDriver:myDriver, message:message||'', time:nowET().toISOString(), active:true, seenBy:[], respondedBy:[]};
   await saveSOS();
   // Notify ALL drivers in the group
   const allRecips=[...new Set([...DRIVERS,...Object.keys(USER_DRIVER_MAP).map(k=>USER_DRIVER_MAP[k])])].filter(Boolean);
@@ -3320,7 +3335,7 @@ async function approveMerge(reqId){
     showToast('Approved '+_adminApps.length+'/2 — one more admin needed');
     return;
   }
-  req.status='approved'; req.approvedBy=req.approvals.join(', '); req.approvedAt=new Date().toISOString();
+  req.status='approved'; req.approvedBy=req.approvals.join(', '); req.approvedAt=nowET().toISOString();
   // Set linkedWith on both drivers
   if(!driverSettings[req.fromDriver]) driverSettings[req.fromDriver]={};
   if(!driverSettings[req.toDriver]) driverSettings[req.toDriver]={};
@@ -3742,7 +3757,7 @@ const ARCHIVE_MONTHS = 13;
 
 // The cutoff date (YYYY-MM-DD). Rides on/after this stay live; older ones archive.
 function _archiveCutoffStr(){
-  const d = new Date();
+  const d = nowET();
   d.setMonth(d.getMonth() - ARCHIVE_MONTHS);
   d.setDate(1);
   return toDateStr(d);
@@ -5771,7 +5786,7 @@ function exportClientsToCSV(){
 
 async function exportCalendar(target){
   // Build an .ics of upcoming rides; Apple/Google/Outlook all import .ics.
-  const now=new Date(); const todayStr=toDateStr(now);
+  const now=nowET(); const todayStr=toDateStr(now);
   const dName=getMyDriverName();
   if(!dName){ showToast('Could not determine driver','error'); return; }
   // A personal calendar reflects what's actually on someone's OWN schedule to drive —
@@ -5873,7 +5888,7 @@ function addRideToCalendar(rideId){
   var endDt=new Date(startDt.getTime()+60*60000);
   var start=_icsStampUtc(startDt);
   var end=_icsStampUtc(endDt);
-  var now=new Date();
+  var now=nowET();
   var stamp=now.getUTCFullYear()+pad(now.getUTCMonth()+1)+pad(now.getUTCDate())+'T'+pad(now.getUTCHours())+pad(now.getUTCMinutes())+pad(now.getUTCSeconds())+'Z';
   var summary=icsEscape((r.client||'Ride')+(r.type?' \u2014 '+r.type:''));
   var descParts=[];
@@ -5944,7 +5959,7 @@ function exportRideToFamilyWall(rideId){
   var endDt=new Date(startDt.getTime()+60*60000); // 1-hour default block, same as addRideToCalendar
   var start=icsStampUtc(startDt);
   var end=icsStampUtc(endDt);
-  var now=new Date();
+  var now=nowET();
   var stamp=now.getUTCFullYear()+pad(now.getUTCMonth()+1)+pad(now.getUTCDate())+'T'+pad(now.getUTCHours())+pad(now.getUTCMinutes())+pad(now.getUTCSeconds())+'Z';
   var summary=icsEscape((r.client||'Ride')+(r.type?' \u2014 '+r.type:''));
   var descParts=[];
@@ -6587,7 +6602,7 @@ function buildQuoteHTML(q, cmp, logoOverride){
         +'<div style="display:inline-block;margin-top:12px;background:'+_tintColor(_docAccent)+';color:'+_docAccent+';border:1px solid '+_tintColor(_docAccent,0.65)+';border-radius:20px;padding:5px 16px;font-size:12px;font-weight:800;letter-spacing:1px;">QUOTE</div>'
       +'</div>'
       +'<div style="font-size:15px;color:#111;margin-bottom:4px;">Prepared for <strong>'+esc(who||'you')+'</strong></div>'
-      +'<div style="font-size:13px;color:#888;margin-bottom:16px;">Quoted '+esc(fmtDateShort(new Date().toISOString().slice(0,10)))+'</div>'
+      +'<div style="font-size:13px;color:#888;margin-bottom:16px;">Quoted '+esc(fmtDateShort(nowET().toISOString().slice(0,10)))+'</div>'
       +'<table style="width:100%;border-collapse:collapse;margin-bottom:16px;">'
         +detail('Date', dateStr+(timeStr?(' at '+timeStr):''))
         +detail('Trip', typeStr)
@@ -7334,7 +7349,7 @@ async function _saveNewClientInfo(){
 // assignments; broadened below to any future date, so what matters now is "today" as the
 // dividing line, not "tomorrow" as one specific day.
 function _todayDateStr(){
-  return toDateStr(new Date());
+  return toDateStr(nowET());
 }
 function addNotification(driverName, ride, action, customMsg, forceNow){
   if(!forceNow && action==='assigned'&&currentUser&&driverName===(USER_DRIVER_MAP[currentUser.name]||'')) return;
@@ -8052,7 +8067,7 @@ function vaultDriverColor(name, hex){
   var h=_normHex(hex); if(!name||!h) return false;
   var cur=driverColorVault[name];
   if(cur && _normHex(cur.hex)===h) return false;   // unchanged — keep existing who/when
-  driverColorVault[name]={ hex:h, by:(currentUser&&currentUser.name)||'', at:new Date().toISOString() };
+  driverColorVault[name]={ hex:h, by:(currentUser&&currentUser.name)||'', at:nowET().toISOString() };
   saveColorVault();
   return true;
 }
@@ -8079,7 +8094,7 @@ async function saveDriverColorToVault(name){
   if(typeof isAdmin==='function' && !isAdmin()){ showToast('Admins only','error'); return; }
   var live=_normHex(driverColor(name));
   if(!live){ showToast('No colour set for '+String(name).split(' ')[0],'error'); return; }
-  driverColorVault[name]={ hex:live, by:(currentUser&&currentUser.name)||'', at:new Date().toISOString() };
+  driverColorVault[name]={ hex:live, by:(currentUser&&currentUser.name)||'', at:nowET().toISOString() };
   try{ await saveColorVault(); }catch(e){}
   try{ renderAccessControl(); }catch(e){}
   showToast('\u2713 Saved '+String(name).split(' ')[0]+'\u2019s code '+live);
@@ -8092,7 +8107,7 @@ async function saveAllColorsToVault(){
     var live=_normHex(driverColor(d)); if(!live) return;
     var v=driverColorVault[d];
     if(v && _normHex(v.hex)===live) return;      // already saved and matching
-    driverColorVault[d]={ hex:live, by:(currentUser&&currentUser.name)||'', at:new Date().toISOString() };
+    driverColorVault[d]={ hex:live, by:(currentUser&&currentUser.name)||'', at:nowET().toISOString() };
     n++;
   });
   if(!n){ showToast('Every colour is already saved'); return; }
@@ -8175,7 +8190,7 @@ function readableInk(hex){
 
 // Tomorrow, as a date string. Notify Drivers deliberately releases ONE day at a time.
 function _tomorrowDateStr(){
-  var d=new Date(); d.setDate(d.getDate()+1); return toDateStr(d);
+  var d=nowET(); d.setDate(d.getDate()+1); return toDateStr(d);
 }
 // Returns the color for a ride — driver's color if assigned, otherwise creator's color.
 //
@@ -8215,8 +8230,8 @@ function rideDisplayType(r){
 // ═══════════════════════════════════════════
 // ── WEEK VIEW STATE ──
 // calWeekStart = Monday of the currently displayed week (Date object)
-let calWeekStart = getWeekStart(new Date());
-let myCalWeekStart = getWeekStart(new Date());
+let calWeekStart = getWeekStart(nowET());
+let myCalWeekStart = getWeekStart(nowET());
 let calDriverFilter = '';
 const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAY_SHORT=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -8231,7 +8246,7 @@ function getWeekStart(d){
 function addDays(d,n){ const r=new Date(d); r.setDate(r.getDate()+n); return r; }
 function toDateStr(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 // Hours between now and a ride's scheduled date+time (negative once the ride time has
-// passed). Parsed as LOCAL time — same convention toDateStr/toDateStr(new Date()) already
+// passed). Parsed as LOCAL time — same convention toDateStr/toDateStr(nowET()) already
 // use elsewhere — so this lines up with how r.date is compared throughout the app.
 function _hoursUntilRide(r){
   if(!r || !r.date) return Infinity;
@@ -8301,9 +8316,9 @@ function weekLabel(start){
 
 // ── VIEW STATE (week vs month) ──
 let calView = 'week';                 // 'week' | 'month'
-let calMonthDate = new Date();        // any date within the displayed month
+let calMonthDate = nowET();        // any date within the displayed month
 let myCalView = 'week';
-let myCalMonthDate = new Date();
+let myCalMonthDate = nowET();
 let myTab = 'cal';                    // My Rides: 'cal' | 'list'
 
 function monthLabel(d){ return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`; }
@@ -8323,7 +8338,7 @@ function buildCalTabs(){
 
 // Build the week-view markup for a Sunday-start week into containerId.
 function renderWeekView(containerId, weekStart, driverFilter){
-  const today = toDateStr(new Date());
+  const today = toDateStr(nowET());
   const container = document.getElementById(containerId);
   if(!container) return;
   let html='<div class="week-view">';
@@ -8402,7 +8417,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
 function renderMonthView(containerId, monthDate, driverFilter, jumpFn){
   const container=document.getElementById(containerId);
   if(!container) return;
-  const today=toDateStr(new Date());
+  const today=toDateStr(nowET());
   const year=monthDate.getFullYear(), month=monthDate.getMonth();
   const first=new Date(year,month,1);
   const gridStart=addDays(first,-first.getDay()); // back up to Sunday
@@ -8510,7 +8525,7 @@ function calJumpToWeek(ds){
 function setCalView(v){ calView=v; renderCal(); }
 function calPrev(){ if(calView==='month'){calMonthDate=new Date(calMonthDate.getFullYear(),calMonthDate.getMonth()-1,1);} else {calWeekStart=addDays(calWeekStart,-7);} renderCal(); }
 function calNext(){ if(calView==='month'){calMonthDate=new Date(calMonthDate.getFullYear(),calMonthDate.getMonth()+1,1);} else {calWeekStart=addDays(calWeekStart,7);} renderCal(); }
-function calToday(){ calWeekStart=getWeekStart(new Date()); calMonthDate=new Date(); renderCal(); }
+function calToday(){ calWeekStart=getWeekStart(nowET()); calMonthDate=nowET(); renderCal(); }
 // Topbar quick-link → all-drivers calendar
 
 // A ride belongs in "My Rides" if it's assigned to me OR I scheduled it (even if a
@@ -8595,7 +8610,7 @@ function renderMyCal(){
     renderWeekView('my-cal-grid', myCalWeekStart, isMyRide);
   }
   // upcoming list (separate tab) — clearly split: rides I'm driving vs rides I scheduled (I confirm)
-  const todayStr=toDateStr(new Date());
+  const todayStr=toDateStr(nowET());
   const ul=document.getElementById('my-rides-list');
   if(ul){
     const driving = rides.filter(r=>isMyDrivingRide(r) && r.date>=todayStr && r.status!=='cancelled')
@@ -8640,7 +8655,7 @@ function myCalJumpToWeek(ds){ myCalWeekStart=getWeekStart(new Date(ds+'T12:00:00
 function setMyCalView(v){ myCalView=v; renderMyCal(); }
 function myCalPrev(){ if(myCalView==='month'){myCalMonthDate=new Date(myCalMonthDate.getFullYear(),myCalMonthDate.getMonth()-1,1);} else {myCalWeekStart=addDays(myCalWeekStart,-7);} renderMyCal(); }
 function myCalNext(){ if(myCalView==='month'){myCalMonthDate=new Date(myCalMonthDate.getFullYear(),myCalMonthDate.getMonth()+1,1);} else {myCalWeekStart=addDays(myCalWeekStart,7);} renderMyCal(); }
-function myCalToday(){ myCalWeekStart=getWeekStart(new Date()); myCalMonthDate=new Date(); renderMyCal(); }
+function myCalToday(){ myCalWeekStart=getWeekStart(nowET()); myCalMonthDate=nowET(); renderMyCal(); }
 function switchMyTab(tab, el){
   myTab=tab;
   document.querySelectorAll('#page-myrides .cal-tab').forEach(t=>t.classList.remove('active'));
@@ -8754,8 +8769,8 @@ function renderConfirmations(){
       panel.innerHTML='<div style="padding:1.5rem 0;"><div style="font-size:.95rem;color:var(--mid);margin-bottom:.5rem;">Schedule Confirmation is turned off.</div><div style="font-size:.8rem;color:var(--mid);">Turn them back on from your card under Team.</div></div>';
       return;
     }
-    const today=toDateStr(new Date());
-    const tomorrow=toDateStr(addDays(new Date(),1));
+    const today=toDateStr(nowET());
+    const tomorrow=toDateStr(addDays(nowET(),1));
 
     // Build ride list — tomorrow's rides scheduled by this user. Confirmed ones
     // stay in the list (shown collapsed) so an accidental mark can be undone.
@@ -9169,7 +9184,7 @@ function _confWhenPhrase(dateStr){
     if(!isFinite(y) || !isFinite(mo) || !isFinite(d)) return 'tomorrow';
     var rideDay = new Date(y, mo-1, d);
     if(isNaN(rideDay.getTime())) return 'tomorrow';
-    var now = new Date();
+    var now = nowET();
     var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     var diffDays = Math.round((rideDay.getTime() - today.getTime()) / 86400000);
     var dayLabel = rideDay.toLocaleDateString('en-US', { weekday:'long', month:'short', day:'numeric' });
@@ -11860,7 +11875,7 @@ function buildDispatchInvoiceHTML(start, end){
 // them together would force switching income tabs just to build an invoice for an odd range.
 function openDispatchInvoiceRangePicker(){
   if(!kmVisible() || kmIsKat()) return;
-  var today=toDateStr(new Date());
+  var today=toDateStr(nowET());
   var monthStart=today.slice(0,7)+'-01';
   var ov=document.createElement('div'); ov.id='dispatch-invoice-range-overlay';
   ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:16000;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
@@ -14799,7 +14814,7 @@ function canSeeInterestList(r){
   return !!(me && cr && me===cr);
 }
 function _heartOwner(){ return (currentUser&&PROXY_MAP[currentUser.name])||getMyDriverName()||(currentUser&&currentUser.name)||''; }
-function myHeartedRides(){ var o=_heartOwner(); var _today=toDateStr(new Date()); return (rides||[]).filter(function(r){ return r&&r.status!=='cancelled'&&(r.date||'')>=_today&&r.interest&&Object.keys(r.interest).some(function(k){ return (USER_DRIVER_MAP[k]||PROXY_MAP[k]||k)===o; })&&canSeeRide(r); }); }
+function myHeartedRides(){ var o=_heartOwner(); var _today=toDateStr(nowET()); return (rides||[]).filter(function(r){ return r&&r.status!=='cancelled'&&(r.date||'')>=_today&&r.interest&&Object.keys(r.interest).some(function(k){ return (USER_DRIVER_MAP[k]||PROXY_MAP[k]||k)===o; })&&canSeeRide(r); }); }
 function _myHeartTs(r){ var o=_heartOwner(),ts=0; Object.keys(r.interest||{}).forEach(function(k){ if((USER_DRIVER_MAP[k]||PROXY_MAP[k]||k)===o){ var t=r.interest[k]; if(typeof t==='number'&&(!ts||t<ts)) ts=t; } }); return ts; }
 function closeHeartedRides(){ var o=document.getElementById('hearted-overlay'); if(o) o.remove(); }
 function renderHeartedList(q){ var box=document.getElementById('hearted-list'); if(!box) return; q=(q||'').toLowerCase().trim(); var all=myHeartedRides(); var list=all.slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); }); if(q){ list=list.filter(function(r){ var hay=((r.date||'')+' '+fmtDateShort(r.date)+' '+(r.client||'')+' '+(r.type||'')+' '+(r.time||'')).toLowerCase(); return hay.indexOf(q)>=0; }); } var cnt=document.getElementById('hearted-count'); if(cnt) cnt.textContent=list.length+' ride'+(list.length!==1?'s':''); if(!list.length){ box.innerHTML='<div style="text-align:center;padding:2rem;color:var(--mid);font-size:.9rem;">'+(all.length?'No hearted rides match that search.':'You have not hearted any rides yet. Tap the \uD83E\uDD0D on a ride to add it here.')+'</div>'; return; } box.innerHTML=list.map(function(r){ var c=rideColor(r); var dt=driverShortName(r.driver); var ts=_myHeartTs(r); var when=ts?('<span style="font-size:.66rem;color:var(--mid);">\u2764 '+fmtTs(ts)+'</span>'):''; return '<div onclick="closeHeartedRides();openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.8rem;padding:.7rem .85rem;border-radius:10px;margin-bottom:.45rem;background:'+c+'22;border:1.5px solid '+c+';cursor:pointer;">'+'<div style="width:7px;align-self:stretch;border-radius:3px;background:'+c+';flex-shrink:0;"></div>'+'<div style="text-align:center;min-width:54px;font-size:.72rem;font-weight:700;color:var(--black);line-height:1.2;">'+fmtDateShort(r.date)+'<br><span style="font-weight:600;color:var(--mid);">'+(fmtTime12(r.time)||'\u2014')+'</span></div>'+'<div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:.9rem;color:var(--black);">'+escHtml(r.client||'\u2014')+'</div><div style="font-size:.74rem;color:var(--mid);">'+escHtml(r.type||'')+' \u00b7 '+escHtml(dt)+'</div>'+when+'</div>'+'<div style="font-weight:700;color:var(--green);font-size:.9rem;">$'+(r.price||0)+'</div></div>'; }).join(''); }
@@ -15441,7 +15456,7 @@ async function submitTransferRequest(){
     toDriverLogin: currentUser?.name,
     reason, scope,
     status: 'pending',
-    ts: new Date().toISOString(),
+    ts: nowET().toISOString(),
   };
   clientRequests[reqId] = req;
   await saveClientRequests();
@@ -15480,10 +15495,10 @@ async function approveTransfer(reqId){
 
   req.status='approved';
   req.decidedBy=currentUser?.name;
-  req.decidedAt=new Date().toISOString();
+  req.decidedAt=nowET().toISOString();
 
   // Reassign future rides only if scope includes rides
-  const today=toDateStr(new Date());
+  const today=toDateStr(nowET());
   let reassigned=0;
   if(req.scope !== 'client_only'){
     rides.forEach(r=>{
@@ -15542,7 +15557,7 @@ async function denyTransfer(reqId){
 
   req.status='denied';
   req.decidedBy=currentUser?.name;
-  req.decidedAt=new Date().toISOString();
+  req.decidedAt=nowET().toISOString();
   await saveClientRequests();
 
   addNotification(req.toDriver, {id:reqId, client:req.clientName}, 'transfer_denied',
@@ -16568,8 +16583,8 @@ function renderAccountPage(){
   const hasInc  = hasIncomeAccess();
   const expDate = sub.upgradeExpiresAt ? new Date(sub.upgradeExpiresAt) : null;
   const trialEnd= sub.incomeTrialEnds  ? new Date(sub.incomeTrialEnds)  : null;
-  const daysLeft= expDate ? Math.max(0, Math.ceil((expDate - new Date()) / (1000*60*60*24))) : 0;
-  const trialDaysLeft = trialEnd ? Math.max(0, Math.ceil((trialEnd - new Date()) / (1000*60*60*24))) : 0;
+  const daysLeft= expDate ? Math.max(0, Math.ceil((expDate - nowET()) / (1000*60*60*24))) : 0;
+  const trialDaysLeft = trialEnd ? Math.max(0, Math.ceil((trialEnd - nowET()) / (1000*60*60*24))) : 0;
 
   const statusEl = document.getElementById('account-status-card');
   if(statusEl){
@@ -16641,7 +16656,7 @@ function requestCancelSub(){
     if(!confirm('Cancel your subscription and leave the group?\n\nThis notifies Chase \u2014 remember to also cancel on Square so you\u2019re not charged again.')) return;
     var sub = subscriptions[me] = subscriptions[me] || {};
     sub.cancelRequested = true;
-    sub.cancelRequestedAt = new Date().toISOString();
+    sub.cancelRequestedAt = nowET().toISOString();
     saveSubscriptions();
     try{
       addNotification('Chase Sweat', {}, 'cancel_request', (getMyDriverName()||me) + ' has asked to cancel their subscription and leave the group. Cancel their Square subscription, then remove access on Access Control.');
@@ -16737,7 +16752,7 @@ function previousUnpaidAPRide(refRide){
   if(!refRide || !refRide.client || !isAPRideType(refRide.type)) return null;
   const key = String(refRide.client).toLowerCase().trim();
   const refStamp = (refRide.date||'') + 'T' + (refRide.time||'00:00');
-  const today = toDateStr(new Date());
+  const today = toDateStr(nowET());
   let best = null, bestStamp = '';
   (rides||[]).forEach(function(r){
     if(!r || r.id===refRide.id) return;
@@ -16893,7 +16908,7 @@ function openQuickAddModal(){
   renderQaAddons(); recalcQa();
   // Default date to today
   const dEl=document.getElementById('qa-date');
-  if(dEl && !dEl.value) dEl.value=toDateStr(new Date());
+  if(dEl && !dEl.value) dEl.value=toDateStr(nowET());
   onQaDateTimeChange();
   const err=document.getElementById('qa-error'); if(err) err.textContent='';
   const qanc=document.getElementById('qa-new-client'); if(qanc) qanc.checked=false;
@@ -18848,7 +18863,7 @@ function rebuildQuoteDriverOptions(){
 // ═══════════════════════════════════════════
 function refreshDash(){
   if(!document.getElementById('upcoming-list')) return;
-  const now=new Date(), todayStr=toDateStr(now);
+  const now=nowET(), todayStr=toDateStr(now);
   document.getElementById('dash-date').textContent=now.toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
 
   // Anything that didn't actually save yet - the single most urgent thing to surface
@@ -19138,7 +19153,7 @@ function _isAwaitingInvoice(r){ return !!(r && r.awaitingInvoice); }
 // Paid button in the upcoming widget, so this doesn't duplicate them.
 function renderDashAwaitingInvoicePast(){
   var box=document.getElementById('dash-awaiting-invoice-past'); if(!box) return;
-  var todayStr=toDateStr(new Date());
+  var todayStr=toDateStr(nowET());
   var pastInvoiced=(rides||[]).filter(function(r){
     return r && isMyDrivingRide(r) && r.status!=='cancelled' && _isAwaitingInvoice(r) && r.date && r.date<todayStr;
   }).sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
@@ -19159,7 +19174,7 @@ function renderDashAwaitingInvoicePast(){
 }
 function renderDashNeedsAttention(){
   var box=document.getElementById('dash-needs-attention'); if(!box) return;
-  var todayStr=toDateStr(new Date());
+  var todayStr=toDateStr(nowET());
   var overdue=(rides||[]).filter(function(r){ return r && isMyDrivingRide(r) && r.status!=='cancelled' && r.status!=='paid' && !_isAwaitingInvoice(r) && parseFloat(r.price||0)>0 && ((r.date && r.date<todayStr) || r.status==='completed'); })
     .sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
   // Computed once, up front, rather than only inside the admin button's own markup - an admin
@@ -19204,7 +19219,7 @@ function _schedulingTextNeededRides(){
   // Per-driver off switch (direct instruction) - checked once here so the render and the bulk
   // action below can't disagree about whether this reminder is even active for this person.
   if(!schedTextReminderEnabled(getMyDriverName())) return [];
-  const todayStr = toDateStr(new Date());
+  const todayStr = toDateStr(nowET());
   return (rides||[]).filter(function(r){
     if(!r || r.status==='cancelled' || r.status==='placeholder' || r.status==='completed' || r.status==='paid') return false;
     if(!r.date || r.date<todayStr) return false;
@@ -19275,7 +19290,7 @@ function renderDashConfirmations(){
   if(!box) return;
   if(!hasIncomeAccess()){ box.innerHTML=''; return; }
   if(!confTextEnabled(getMyDriverName())){ box.innerHTML=''; return; }
-  const tomorrow = toDateStr(addDays(new Date(),1));
+  const tomorrow = toDateStr(addDays(nowET(),1));
   let due = rides.filter(r=>{
     if(r.date!==tomorrow || r.status==='cancelled' || r.status==='placeholder') return false;
     // You confirm rides YOU scheduled (matches the My Rides → To Confirm tab)
@@ -19434,7 +19449,7 @@ async function markFeeRidePaid(owner, driver, rideId, method){
     pm[rid]=method;
   }
   feePayments[key].paid=true;
-  feePayments[key].paidAt=new Date().toISOString();
+  feePayments[key].paidAt=nowET().toISOString();
   await saveFeePayments(key);
   renderDashFees();
   showToast('\u2713 That ride\u2019s fee is marked paid');
@@ -19647,7 +19662,7 @@ async function applyWaiveScope(scope){
   const key=owner+':recv:'+driver;
   if(!feePayments[key]) feePayments[key]={};
   feePayments[key].waived=true;
-  feePayments[key].waivedAt=new Date().toISOString();
+  feePayments[key].waivedAt=nowET().toISOString();
   feePayments[key].waiveScope=scope; delete feePayments[key].waiveFrom;
   let msg='\u2713 Fees waived';
   if(scope==='forever'){
@@ -19655,7 +19670,7 @@ async function applyWaiveScope(scope){
     msg='\u2713 Fees waived until you change it';
   }else{
     const days={day:0,week:7,month:30,year:365}[scope]||0;
-    const until=new Date(); until.setDate(until.getDate()+days);
+    const until=nowET(); until.setDate(until.getDate()+days);
     feePayments[key].waiveUntil=toDateStr(until);
     const label={day:'today',week:'this week',month:'this month',year:'this year'}[scope]||'';
     msg='\u2713 Fees waived '+label+' (through '+fmtDateShort(feePayments[key].waiveUntil)+')';
@@ -19675,7 +19690,7 @@ function renderProfileWaive(){
   var cur=sel.value;
   sel.innerHTML='<option value="">Select a driver\u2026</option>'+others.map(function(d){ return '<option value="'+escAttr(d)+'"'+(d===cur?' selected':'')+'>'+escHtml(d)+'</option>'; }).join('');
   var yrSel=document.getElementById('waive-ym-year');
-  if(yrSel && !yrSel.options.length){ var y=new Date().getFullYear(); yrSel.innerHTML=[y-1,y,y+1].map(function(yy){ return '<option value="'+yy+'"'+(yy===y?' selected':'')+'>'+yy+'</option>'; }).join(''); }
+  if(yrSel && !yrSel.options.length){ var y=nowET().getFullYear(); yrSel.innerHTML=[y-1,y,y+1].map(function(yy){ return '<option value="'+yy+'"'+(yy===y?' selected':'')+'>'+yy+'</option>'; }).join(''); }
   renderProfileWaiveStatus();
 }
 function renderProfileWaiveStatus(){
@@ -19713,7 +19728,7 @@ async function profileWaiveMonth(){
   if(!feePayments[key]) feePayments[key]={};
   var last=new Date(parseInt(yr,10), parseInt(mo,10), 0).getDate();
   feePayments[key].waived=true;
-  feePayments[key].waivedAt=new Date().toISOString();
+  feePayments[key].waivedAt=nowET().toISOString();
   feePayments[key].waiveScope='specificMonth';
   feePayments[key].waiveFrom=yr+'-'+mo+'-01';
   feePayments[key].waiveUntil=yr+'-'+mo+'-'+String(last).padStart(2,'0');
@@ -19736,7 +19751,7 @@ function profileUnwaive(){
 // other people's numbers, not just your own, deserves to say exactly whose before it happens.
 async function markAllPastRidesPaidAdmin(){
   if(!isAdmin()){ showToast('Admins only','error'); return; }
-  var today=toDateStr(new Date());
+  var today=toDateStr(nowET());
   // Excludes rides driven by Kat, per direct instruction - checks r.driver (who actually
   // drove it), not r.createdBy or client ownership, matching "rides driven by Kat" exactly.
   var list=(rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && !_isAwaitingInvoice(r) && r.driver!=='Kathleen Herringdine' && parseFloat(r.price||0)>0 && ((r.status==='completed')||(r.date && r.date<today)); });
@@ -19770,7 +19785,7 @@ async function markAllPastRidesPaidAdmin(){
 }
 
 async function markAllPrevPaid(){
-  var dName=getMyDriverName(); var today=toDateStr(new Date());
+  var dName=getMyDriverName(); var today=toDateStr(nowET());
   var list=(rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && r.driver===dName && !_isAwaitingInvoice(r) && parseFloat(r.price||0)>0 && ((r.status==='completed')||(r.date && r.date<today)); });
   if(!list.length){ showToast('Nothing to mark'); return; }
   var _choice = await showConfirmModal({
@@ -19813,7 +19828,7 @@ function renderDashFees(){
   renderDashAdminApprovals();
   const box=document.getElementById('dash-fees'); if(!box) return;
   const dName=getMyDriverName(); if(!dName&&!isAdmin()){ box.innerHTML=''; return; }
-  const today=toDateStr(new Date());
+  const today=toDateStr(nowET());
 
   // Compute all unpaid fees for this driver (settled = per-ride, see feeSettledForRide)
   const owedToMe={}, iOwe={};
@@ -19956,7 +19971,7 @@ function renderDashFees(){
 function renderDashFeesAwaitingYourApproval(){
   const box=document.getElementById('dash-fees-awaiting-your-approval'); if(!box) return;
   const dName=getMyDriverName(); if(!dName){ box.innerHTML=''; return; }
-  const today=toDateStr(new Date());
+  const today=toDateStr(nowET());
   const rows=[];
   rides.forEach(function(r){
     if(!r.date||r.date>today||r.status!=='paid'||parseFloat(r.price||0)<=0) return;
@@ -19991,7 +20006,7 @@ function renderDashFeesAwaitingYourApproval(){
 function renderDashFeesAwaitingApproval(){
   const box=document.getElementById('dash-fees-awaiting-approval'); if(!box) return;
   const dName=getMyDriverName(); if(!dName){ box.innerHTML=''; return; }
-  const today=toDateStr(new Date());
+  const today=toDateStr(nowET());
   const rows=[];
   rides.forEach(function(r){
     if(!r.date||r.date>today||r.status!=='paid'||parseFloat(r.price||0)<=0) return;
@@ -20025,7 +20040,7 @@ function renderDashIncome(){
   const box=document.getElementById('dash-income-overview');
   if(!box) return;
   if(!hasIncomeAccess()){ box.innerHTML=''; return; }
-  const now=new Date();
+  const now=nowET();
   const start=new Date(now.getFullYear(),now.getMonth(),1);
   const end=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59);
   const dName=getMyDriverName();
@@ -21009,7 +21024,7 @@ function renderPricingTracker(){
     +'color:#fff;border:none;border-radius:8px;font-weight:700;font-size:.88rem;'
     +'cursor:pointer;font-family:\'DM Sans\',sans-serif;">Save Rates</button>'
     +'</div>';
-  const now=new Date();
+  const now=nowET();
   // Pricing-summary range: defaults to the FULL PREVIOUS month (e.g. in July -> 6/1 through 6/30).
   // Auto-advances each month; admins can override with the date pickers below. Open to all admins.
   function _iso(dt){ return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'); }
@@ -21159,7 +21174,7 @@ async function confirmSubPayment(name, months){
 // Who needs to know a driver just went inactive? The OWNER of each client with a FUTURE
 // ride assigned to them — one alert per owner, listing the rides they need to reassign.
 function _futureRidesForDriver(dName){
-  var today=toDateStr(new Date());
+  var today=toDateStr(nowET());
   return (rides||[]).filter(function(r){
     return r && r.driver===dName && r.date && r.date>=today && r.status!=='cancelled';
   });
@@ -21201,7 +21216,7 @@ async function revokeSubAccess(name){
   if(!confirm(warn)) return;
   var sub = subscriptions[name] = subscriptions[name]||{};
   sub.deactivated = true;
-  sub.deactivatedAt = new Date().toISOString();
+  sub.deactivatedAt = nowET().toISOString();
   sub.deactivatedBy = (currentUser&&currentUser.name)||'';
   sub.comped = false;
   sub.upgraded = false;
@@ -22074,7 +22089,7 @@ function renderAccessControl(){
     const isCoreFree = FREE_ACCESS_USERS.includes(u.name);
     // Free access mirrors hasIncomeAccess(): core owners default ON; everyone else needs an explicit grant.
     const adminIncomeOn = isCoreFree ? (sub.adminIncomeEnabled !== false) : (sub.adminIncomeEnabled === true);
-    const hasIncome = adminIncomeOn || (sub.upgraded && new Date(sub.upgradeExpiresAt||0) > new Date()) || (sub.incomeTrial && new Date(sub.incomeTrialEnds||0) > new Date());
+    const hasIncome = adminIncomeOn || (sub.upgraded && new Date(sub.upgradeExpiresAt||0) > nowET()) || (sub.incomeTrial && new Date(sub.incomeTrialEnds||0) > nowET());
     const incExp = sub.upgradeExpiresAt ? new Date(sub.upgradeExpiresAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
 
     // App access toggle row
@@ -22202,8 +22217,8 @@ function buildDriverIncomeData(fullName){
 function buildDriverDocHTML(fullName){
   const inc = buildDriverIncomeData(fullName);
   const recs = (receipts[fullName] || []).slice().sort((a,b)=>b.date.localeCompare(a.date));
-  const year = new Date().getFullYear();
-  const today = new Date().toLocaleDateString();
+  const year = nowET().getFullYear();
+  const today = nowET().toLocaleDateString();
 
   const catColors={Fuel:'#f5a623',Maintenance:'#1e88e5',Tolls:'#43a047',Parking:'#7c3aed',Other:'#6b6b6b'};
   const recTotals={}; RECEIPT_CATEGORIES.forEach(c=>recTotals[c]=0);
@@ -22353,7 +22368,7 @@ function renderDriverSettings(){
   const membersTab = document.getElementById('dtab-members');
   if(membersTab) membersTab.classList.add('active');
   const grid=document.getElementById('driver-settings-grid');
-  const todayStr=toDateStr(new Date());
+  const todayStr=toDateStr(nowET());
   const admin=isAdmin();
   grid.innerHTML=DRIVERS.map(d=>`
     <div class="driver-card">
@@ -22893,7 +22908,7 @@ function renderAccountInProfile(){
 // Everyone can see who's off and when — standing days off + specific unavailable dates.
 function renderTeamAvailability(){
   const box=document.getElementById('team-availability-list'); if(!box) return;
-  const today=toDateStr(new Date());
+  const today=toDateStr(nowET());
   const _me=getMyDriverName();
   const rows=DRIVERS.slice().sort(function(a,b){ if(a===_me) return -1; if(b===_me) return 1; return String(a||'').localeCompare(String(b||'')); }).map(function(d){
     const prof=DRIVER_PROFILES[d]||{};
@@ -23035,7 +23050,7 @@ function buildMemberCard(d, opts){
           +'<span id="avail-chev-'+dk+'" style="display:inline-block;transition:transform .15s;transform:'+(_sectionCollapsed('availCollapsed_'+dk,false)?'rotate(-90deg)':'rotate(0deg)')+';color:var(--mid);font-size:.75rem;">\u25be</span>'
           +'</div>'
           +((function(){
-             var st = driverAvailabilityStatus(d, toDateStr(new Date()), null);
+             var st = driverAvailabilityStatus(d, toDateStr(nowET()), null);
              return '<div style="background:var(--surface);border:1px solid var(--light);border-radius:8px;padding:.55rem .7rem;margin-bottom:.6rem;font-size:.76rem;">'
                + (st.available
                    ? '<span style="color:#15803d;font-weight:700;">\u2713 Available today</span>'
@@ -23309,7 +23324,7 @@ function migrateAvailToUnified(prof){
 // once a profile is migrated, so pruning needs to happen against availRules/availExceptions now.
 function pruneExpiredAvailRules(prof){
   if(!prof) return false;
-  const today = toDateStr(new Date());
+  const today = toDateStr(nowET());
   let changed = false;
   if(Array.isArray(prof.availRules)){
     const before = prof.availRules.length;
@@ -23674,7 +23689,7 @@ function closeAvailDayModal(){
 // tied to rendering ride cards; this only ever needs a status per day.
 var _availCalMonth = {}; // keyed by driver name, so each driver's own card remembers its own month
 function _availCalMonthFor(driverName){
-  if(!_availCalMonth[driverName]) _availCalMonth[driverName] = new Date();
+  if(!_availCalMonth[driverName]) _availCalMonth[driverName] = nowET();
   return _availCalMonth[driverName];
 }
 function availCalNav(driverName, delta){
@@ -23683,7 +23698,7 @@ function availCalNav(driverName, delta){
   renderAvailCalendar(driverName);
 }
 function availCalToday(driverName){
-  _availCalMonth[driverName] = new Date();
+  _availCalMonth[driverName] = nowET();
   renderAvailCalendar(driverName);
 }
 function _hasHoursBlockOnDate(driverName, dateStr){
@@ -23704,7 +23719,7 @@ function renderAvailCalendar(driverName){
   var first = new Date(year, month, 1);
   var startDow = first.getDay();
   var daysInMonth = new Date(year, month+1, 0).getDate();
-  var todayStr = toDateStr(new Date());
+  var todayStr = toDateStr(nowET());
 
   var cells = '';
   for(var i=0;i<startDow;i++) cells += '<div></div>';
@@ -24096,7 +24111,7 @@ function getMyOutsideRidesAsRides(){
 
 function openOutsideRideModal(editId){
   if(!hasIncomeAccess()){ showToast('Please log in to use this','error'); return; }
-  const today = toDateStr(new Date());
+  const today = toDateStr(nowET());
   // Edit mode: pull the existing record so every field can be corrected.
   const _dNm = getMyDriverName()||currentUser?.name;
   const _ex = editId ? ((outsideRides[_dNm]||[]).find(o=>o.id===editId)||null) : null;
@@ -24427,8 +24442,8 @@ function _ensureTrialStarted(name){
   if(!name || !_subsLoaded) return; // never write before real data has loaded
   var sub = subscriptions[name] = subscriptions[name] || {};
   if(_isComped(name)) return;
-  if(sub.upgraded === true && new Date(sub.upgradeExpiresAt||0) > new Date()) return;
-  if(!sub.trialStart){ sub.trialStart = new Date().toISOString(); try{ saveSubscriptions(); }catch(e){} }
+  if(sub.upgraded === true && new Date(sub.upgradeExpiresAt||0) > nowET()) return;
+  if(!sub.trialStart){ sub.trialStart = nowET().toISOString(); try{ saveSubscriptions(); }catch(e){} }
 }
 function _showTrialBanner(daysLeft){
   if(BETA_HIDE_BILLING_STATUS_UI) return; // see the flag's own comment - trivially reversible later
@@ -24463,7 +24478,7 @@ async function submitPaymentClaim(){
   try{
     var me = currentUser && currentUser.name; if(!me) return;
     var sub = subscriptions[me] = subscriptions[me] || {};
-    sub.paymentSubmitted = true; sub.paymentSubmittedAt = new Date().toISOString();
+    sub.paymentSubmitted = true; sub.paymentSubmittedAt = nowET().toISOString();
     await saveSubscriptions();
     try{ addNotification('Chase Sweat', {}, 'payment_claim', (getMyDriverName()||me) + ' says they submitted their $20 subscription payment. Confirm on Access Control.'); await saveNotifs(); }catch(e){}
     if(typeof showToast === 'function') showToast('\u2713 Thanks \u2014 Chase will confirm your payment shortly.');
@@ -24472,7 +24487,7 @@ async function submitPaymentClaim(){
 }
 async function grantUpgrade(userName, months=1){
   if(!canGrantFreeAccess()){ showToast('Only Chase can grant subscription access','error'); return; }
-  const expires = new Date();
+  const expires = nowET();
   expires.setMonth(expires.getMonth()+months);
   if(!subscriptions[userName]) subscriptions[userName]={status:'active',expiresAt:expires.toISOString()};
   subscriptions[userName].upgraded = true;
@@ -24486,7 +24501,7 @@ async function grantUpgrade(userName, months=1){
 // switchIncomeTab is defined in the receipts section above
 
 function getIncomeDateRange(){
-  const now = new Date();
+  const now = nowET();
   if(incomeTab==='today'){
     const start = new Date(now); start.setHours(0,0,0,0);
     const end = new Date(now); end.setHours(23,59,59,999);
@@ -24680,7 +24695,7 @@ function renderIncome(){
   // never upcoming/scheduled ones, even if the ride's own date has already passed. A ride
   // that's driven but unpaid is money owed, not income yet — same principle as the dashboard's
   // "Rides to wrap up" banner, so the two pages never disagree about what counts as earned.
-  const _incToday = toDateStr(new Date());
+  const _incToday = toDateStr(nowET());
   const _incEarned = r => r.status!=='cancelled' && (r.status==='paid' || r._outside);
   let filtered = rides.filter(r=>{
     if(dName && r.driver!==dName && (!_incLinked||r.driver!==_incLinked)) return false;
@@ -24726,7 +24741,7 @@ function renderIncome(){
   const expenseItems = personalView ? getMyExpenses() : [];
   let proratedExp = 0;
   if(monthlyExp > 0){
-    const _now = new Date();
+    const _now = nowET();
     const daysInMonth = new Date(_now.getFullYear(), _now.getMonth()+1, 0).getDate();
     if(incomeTab==='weekly')       proratedExp = monthlyExp / daysInMonth * 7;
     else if(incomeTab==='monthly') proratedExp = monthlyExp;
@@ -25024,7 +25039,7 @@ async function renderIncomeTripProfit(dName, start, end, proratedExp){
     ${row('Maintenance', '− '+m(maint), {color:'#dc2626'})}
     ${row('Trip profit', m(profit), {strong:true, border:true, color: profit>=0?'var(--green)':'#dc2626'})}
     ${proratedExp>0?row('Monthly expenses (prorated)', m(proratedExp), {color:'#dc2626'}):''}
-    ${row('Net Take-Home · '+MONTHS[new Date().getMonth()], net>=0?m(net):'−'+m(Math.abs(net)), {strong:true, border:true, color: net>=0?'var(--green)':'#dc2626'})}
+    ${row('Net Take-Home · '+MONTHS[nowET().getMonth()], net>=0?m(net):'−'+m(Math.abs(net)), {strong:true, border:true, color: net>=0?'var(--green)':'#dc2626'})}
     <div style="font-size:.72rem;color:var(--mid);margin-top:.5rem;">Tips and per-trip costs shown here are from Trip Profit entries logged previously.</div>
   </div>`;
 }
@@ -25406,7 +25421,7 @@ async function submitCautiousFlag(){
     showToast('Sent to '+owner.split(' ')[0]+' to review before it\u2019s added');
     return;
   }
-  cautiousList.push({id:'caut_'+Date.now(),name,phoneLast4:last4,phone,reason,addedBy:me,addedAt:new Date().toISOString()});
+  cautiousList.push({id:'caut_'+Date.now(),name,phoneLast4:last4,phone,reason,addedBy:me,addedAt:nowET().toISOString()});
   await saveCautiousList();
   document.querySelector('[style*="z-index: 12000"],[style*="z-index:12000"]')?.remove();
   showToast('\u26a0\ufe0f Added to cautious list');
@@ -25415,7 +25430,7 @@ async function submitCautiousFlag(){
 // The owner reviews a pending flag on their own client \u2014 approve adds it for real.
 async function approveCautiousFlag(id){
   const req=cautiousFlagRequests[id]; if(!req||req.status!=='pending') return;
-  cautiousList.push({id:'caut_'+Date.now(),name:req.name,phoneLast4:req.phoneLast4,phone:req.phone,reason:req.reason,addedBy:req.flaggedBy,addedAt:new Date().toISOString()});
+  cautiousList.push({id:'caut_'+Date.now(),name:req.name,phoneLast4:req.phoneLast4,phone:req.phone,reason:req.reason,addedBy:req.flaggedBy,addedAt:nowET().toISOString()});
   await saveCautiousList();
   req.status='approved'; req.resolvedAt=Date.now();
   await saveCautiousFlagRequests();
@@ -26069,7 +26084,7 @@ async function submitEditClient(oldName){
   var rec=arr.find(function(c){ return c.name&&c.name.trim().toLowerCase()===newKey; });
   if(renaming && oldRec && rec && oldRec!==rec){ arr.splice(arr.indexOf(oldRec),1); }      // merge: drop old, keep target
   else if(renaming && oldRec && !rec){ oldRec.name=newName; rec=oldRec; }                   // simple rename
-  if(!rec){ rec={ name:newName, source:'client', addedAt:new Date().toISOString() }; arr.push(rec); }
+  if(!rec){ rec={ name:newName, source:'client', addedAt:nowET().toISOString() }; arr.push(rec); }
 
   var phone=formatPhoneUS(document.getElementById('ec-phone')?.value||'');
   var email=(document.getElementById('ec-email')?.value||'').trim();
@@ -26114,7 +26129,7 @@ function checkClientConflict(){
 
 async function approveOverride(reqId){
   const req=(clientRequests||{})[reqId]; if(!req) return;
-  req.status='approved'; req.approvedBy=currentUser?.name; req.approvedAt=new Date().toISOString();
+  req.status='approved'; req.approvedBy=currentUser?.name; req.approvedAt=nowET().toISOString();
   await saveClientRequests();
   addNotification(req.requestedBy?(USER_DRIVER_MAP[req.requestedBy]||req.requestedBy):req.driverName,
     {id:reqId,client:req.client},'assigned',
@@ -26125,7 +26140,7 @@ async function approveOverride(reqId){
 
 async function denyOverride(reqId){
   const req=(clientRequests||{})[reqId]; if(!req) return;
-  req.status='denied'; req.deniedBy=currentUser?.name; req.deniedAt=new Date().toISOString();
+  req.status='denied'; req.deniedBy=currentUser?.name; req.deniedAt=nowET().toISOString();
   await saveClientRequests();
   // Notify the person who requested the override that the driver declined
   const denierName = getMyDriverName() || currentUser?.name || 'Driver';
@@ -26142,7 +26157,7 @@ async function denyOverride(reqId){
 }
 
 async function _executeRelease(req){
-  req.status='approved'; req.approvedAt=new Date().toISOString();
+  req.status='approved'; req.approvedAt=nowET().toISOString();
   // Move client record from fromDriver's imported list to toDriver's
   const fromKey=Object.keys(USER_DRIVER_MAP).find(function(k){return USER_DRIVER_MAP[k]===req.fromDriver;});
   const toKey=Object.keys(USER_DRIVER_MAP).find(function(k){return USER_DRIVER_MAP[k]===req.toDriver;});
@@ -26160,7 +26175,7 @@ async function _executeRelease(req){
     }
   }
   // Reassign future rides to the new driver
-  const today=toDateStr(new Date()); let moved=0;
+  const today=toDateStr(nowET()); let moved=0;
   rides.forEach(function(r){
     if(r.client&&r.client.toLowerCase()===(req.clientName||'').toLowerCase()&&r.date>=today&&r.status!=='cancelled'){
       r.driver=req.toDriver; moved++;
@@ -26204,7 +26219,7 @@ async function approveRelease(reqId){
 
 async function denyRelease(reqId){
   const req=(clientRequests||{})[reqId]; if(!req) return;
-  req.status='denied'; req.deniedBy=currentUser?.name; req.deniedAt=new Date().toISOString();
+  req.status='denied'; req.deniedBy=currentUser?.name; req.deniedAt=nowET().toISOString();
   await saveClientRequests();
   const notifyDriver=req.submittedBy?(USER_DRIVER_MAP[req.submittedBy]||PROXY_MAP[req.submittedBy]||req.submittedBy):req.fromDriver;
   addNotification(notifyDriver,{id:reqId,client:req.clientName},'transfer_denied',
@@ -26401,7 +26416,7 @@ function kmModeChanged(){ const m=(document.getElementById('km-mode')||{}).value
 // ── View details: rides Morgan scheduled (completed), filterable by custom range ──
 function kmViewDetails(){
   if(!kmVisible()) return;
-  const today=toDateStr(new Date());
+  const today=toDateStr(nowET());
   const monthStart=today.slice(0,7)+'-01';
   const ov=document.createElement('div'); ov.id='km-report-overlay';
   ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:16000;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
@@ -26524,10 +26539,10 @@ function _dismissKmWalk(){ try{ localStorage.setItem('nwda_kmwalk_'+currentUser.
 function renderMorganCounter(){
   const box=document.getElementById('dash-morgan-counter'); if(!box) return;
   if(!currentUser||currentUser.name!=='Morgan'){ box.innerHTML=''; return; }
-  const todayStr=toDateStr(new Date());
-  const weekStart=toDateStr(addDays(new Date(),-new Date().getDay()));
-  const weekEnd=toDateStr(addDays(new Date(),6-new Date().getDay()));
-  const monthStr=toDateStr(new Date()).slice(0,7);
+  const todayStr=toDateStr(nowET());
+  const weekStart=toDateStr(addDays(nowET(),-nowET().getDay()));
+  const weekEnd=toDateStr(addDays(nowET(),6-nowET().getDay()));
+  const monthStr=toDateStr(nowET()).slice(0,7);
   const myRides=rides.filter(function(r){ return r.createdBy==='Morgan'&&r.status!=='cancelled'; });
   const todayCount=myRides.filter(function(r){ return r.date===todayStr; }).length;
   const weekCount=myRides.filter(function(r){ return r.date>=weekStart && r.date<=weekEnd; }).length;
@@ -27593,7 +27608,7 @@ async function loadTSATimes(){
     }
   }catch(e){ /* CORS or network — use fallback */ }
 
-  const now=new Date();
+  const now=nowET();
   const timeStr=now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
 
   if(liveData&&liveData.length){
@@ -27623,7 +27638,7 @@ async function loadTSATimes(){
 
 function renderFlightsPage(){
   const list=document.getElementById('flights-rides-list'); if(!list) return;
-  const today=toDateStr(new Date()); const tomorrow=toDateStr(addDays(new Date(),1));
+  const today=toDateStr(nowET()); const tomorrow=toDateStr(addDays(nowET(),1));
   const myName=getMyDriverName();
   // Only AP PICK UP rides (and AP ROUND TRIP which includes a pickup leg)
   // AP RUN = driver takes client TO airport — no tracking needed
@@ -27748,7 +27763,7 @@ function dashSendArrival(id){
 function renderDashGateCodes(){
   var box=document.getElementById('dash-gate-codes');
   if(!box) return;
-  var today=toDateStr(new Date());
+  var today=toDateStr(nowET());
   var due=rides.filter(function(r){
     if(!r || r.date!==today || r.status==='cancelled' || r.status==='placeholder') return false;
     return canSeeGateCode(r);
@@ -27901,7 +27916,7 @@ async function handleFeePaidChange(cb){
   const key=row.dataset.dname+':'+row.dataset.dir+':'+row.dataset.cp;
   if(!feePayments[key]) feePayments[key]={};
   feePayments[key].paid=cb.checked;
-  feePayments[key].paidAt=cb.checked?new Date().toISOString():null;
+  feePayments[key].paidAt=cb.checked?nowET().toISOString():null;
   const methodSel=row.querySelector('.fee-method-sel');
   if(methodSel) feePayments[key].method=methodSel.value;
   await saveFeePayments(key);
@@ -28080,7 +28095,7 @@ function buildIncomeFooterRows(admin,totalVehicleCost,netAfterVehicle,dName,expe
       rows+=`<tr style="background:#fff5f5;"><td colspan="4" style="padding:.3rem .75rem .3rem 1.5rem;font-size:.78rem;color:#dc2626;">&#8627; ${e.label}</td><td></td><td style="padding:.3rem .75rem;text-align:right;font-size:.78rem;color:#dc2626;">$${(e.amount*(proratedExp/monthlyExp||1)).toFixed(2)}</td><td></td></tr>`;
     });
     const netColor = netEarnings>=0?'var(--green)':'#dc2626';
-    const _moName = MONTHS[new Date().getMonth()];
+    const _moName = MONTHS[nowET().getMonth()];
     const _netStr = netEarnings>=0?`$${netEarnings.toFixed(2)}`:`−$${Math.abs(netEarnings).toFixed(2)}`;
     rows+=`<tr style="background:#f0fdf4;border-top:2px solid var(--green);"><td colspan="4" style="padding:.7rem .75rem;color:var(--green);font-weight:700;">NET TAKE-HOME · ${_moName}</td><td></td><td style="padding:.7rem .75rem;text-align:right;font-weight:700;font-size:1.1rem;color:${netColor};">${_netStr}</td><td></td></tr>`;
   }
@@ -28148,12 +28163,12 @@ async function exportIncomeCSV(){
       brandName: (_bp.businessName||'').trim(),
       logo: (_bp.logo||'').trim(),
       title: 'Income Report'+(_ipTypes.length?(' \u2014 '+_ipLabel):''),
-      subtitle: (dName||'All drivers')+' \u00b7 '+label+' \u00b7 Generated '+new Date().toLocaleString(),
+      subtitle: (dName||'All drivers')+' \u00b7 '+label+' \u00b7 Generated '+nowET().toLocaleString(),
       warning: _ipTypes.length
         ? '<strong>Filtered to '+escHtml(_ipLabel)+' only.</strong> Rides paid another way are not shown. This is a working view, not a complete record of income.'
         : '',
       sheets: [ {name:'Summary', rows:_sum}, {name:'Rides', rows:rows} ],
-      footer: 'Generated by the NWDA app on '+new Date().toLocaleString()+'.'
+      footer: 'Generated by the NWDA app on '+nowET().toLocaleString()+'.'
     });
     openReportDocument(_doc, 'NDA_Income_'+(dName||'All').replace(/ /g,'_')+'_'+label.replace(/ /g,'_'));
     showToast('Income report \u2014 tap Save as PDF');
@@ -28345,7 +28360,7 @@ function _exportRidesReportCSV(){
     d.drvNames.forEach(function(n){ rows.push([n, d.byDriver[n].sched, d.byDriver[n].driven, d.byDriver[n].rejected||0].map(_csvCell).join(',')); });
   }
   var csv=rows.join('\n');
-  var fname='NWDA-rides-per-month-'+(new Date().toISOString().slice(0,10))+'.csv';
+  var fname='NWDA-rides-per-month-'+(nowET().toISOString().slice(0,10))+'.csv';
   if(typeof downloadTextFile==='function'){ downloadTextFile(csv, fname, 'text/csv'); showToast('\uD83D\uDCC8 Rides report exported \u2713'); }
   else showToast('Download helper missing','error');
 }
@@ -28429,7 +28444,7 @@ function generatePricingAudit(){
   // Header context rows
   var preamble = [
     'NWDA Pricing Audit Report',
-    'Generated: '+new Date().toLocaleString(),
+    'Generated: '+nowET().toLocaleString(),
     'Range: '+label,
     'Rides: '+list.length,
     'Total Quoted: $'+sumQuoted.toFixed(2),
@@ -28440,7 +28455,7 @@ function generatePricingAudit(){
   ].map(function(l){ return _csvCell(l); }).join('\n');
 
   var csv = preamble + '\n' + rows.join('\n');
-  var fname = 'NWDA-pricing-audit-'+(new Date().toISOString().slice(0,10))+'.csv';
+  var fname = 'NWDA-pricing-audit-'+(nowET().toISOString().slice(0,10))+'.csv';
   if(typeof downloadTextFile==='function'){
     downloadTextFile(csv, fname, 'text/csv');
     showToast('\uD83D\uDCCB Pricing audit exported \u2713');
@@ -28523,7 +28538,7 @@ function irsPeriodsFor(year, dName){
 }
 // The rate that applies to a specific trip date.
 function irsRateForDate(dateStr, dName){
-  var y = parseInt(String(dateStr||'').slice(0,4),10) || new Date().getFullYear();
+  var y = parseInt(String(dateStr||'').slice(0,4),10) || nowET().getFullYear();
   var ps = irsPeriodsFor(y, dName);
   for(var i=0;i<ps.length;i++){
     if(dateStr>=ps[i].from && dateStr<=ps[i].to) return ps[i];
@@ -28567,7 +28582,7 @@ async function setIrsMileageRate(periodFrom, rate){
 function checkIrsRateCurrent(){
   try{
     if(typeof hasIncomeAccess==='function' && !hasIncomeAccess()) return;
-    var y=new Date().getFullYear();
+    var y=nowET().getFullYear();
     var info=irsRateInfo(y);
     var now=Date.now();
     var k='nwda_irs_rate_nudge_'+y;
@@ -28608,7 +28623,7 @@ function _fmtPeriod(p){
 }
 // The driver's own rate table — one row per IRS rate PERIOD, so a split year shows both.
 function _irsRatesAdminHTML(){
-  var yrNow = new Date().getFullYear();
+  var yrNow = nowET().getFullYear();
   var years = [yrNow, yrNow-1, yrNow-2].filter(function(y,i,a){ return a.indexOf(y)===i; });
   var rows='';
   years.forEach(function(y){
@@ -28893,7 +28908,7 @@ async function generateYearEndPL(){
   const dName = myName;
   if(!dName){ showToast('Could not determine driver','error'); return; }
 
-  const defYear = new Date().getFullYear();
+  const defYear = nowET().getFullYear();
   const year = parseInt(prompt('Year for the P&L / tax summary:', defYear)) || defYear;
   const ys = year+'-01-01', ye = year+'-12-31';
   // Optional payment-type view. The unfiltered totals are always computed too, so a
@@ -28934,7 +28949,7 @@ async function generateYearEndPL(){
   // receivable, not income — it's reported separately below so nothing is hidden.
   // This matches the Income page exactly, so the two can never disagree.
   const _earned = r => r.status!=='cancelled' && r.status==='paid';
-  const _unpaid = r => r.status!=='cancelled' && r.status!=='paid' && r.date && r.date < toDateStr(new Date());
+  const _unpaid = r => r.status!=='cancelled' && r.status!=='paid' && r.date && r.date < toDateStr(nowET());
 
   // App-booked rides this year that this driver drove and earned on
   const appRides = rides.filter(r=>r.driver===dName && r.date && r.date>=ys && r.date<=ye && parseFloat(r.price||0)>0 && _earned(r));
@@ -29037,7 +29052,7 @@ async function generateYearEndPL(){
     [_plCompare ? 'Year-End Profit & Loss / Tax Summary' : (_plPay.length ? 'BUSINESS REPORT \u2014 '+_plLabel+' only (NOT a tax document)' : 'Year-End Profit & Loss / Tax Summary')],
     ['Driver', dName],
     ['Year', year],
-    ['Generated', new Date().toLocaleString()],
+    ['Generated', nowET().toLocaleString()],
   ]);
   if(_plPay.length && !_plCompare){
     S.push([]);
@@ -29180,7 +29195,7 @@ async function generateYearEndPL(){
   S.push(['Note','If the vehicle is also used personally, these costs must be pro-rated to the business-use percentage.']);
   S.push(['Note','If the IRS standard mileage rate (Option A) is used, insurance and depreciation are already covered by it and should not be claimed again here.']);
   S.push([]);
-  S.push(['Prepared', new Date().toLocaleString()]);
+  S.push(['Prepared', nowET().toLocaleString()]);
   S.push(['Source','NWDA app \u2014 rides, outside rides, receipts and expenses entered by '+dName+'.']);
   S.push(['Disclaimer', (_plPay.length && !_plCompare)
     ? 'BUSINESS REPORT \u2014 filtered to '+_plLabel+' only. Not for tax filing. Run again with nothing ticked for the complete P&L.'
@@ -29266,7 +29281,7 @@ async function generateYearEndPL(){
       brandName: (_bp.businessName||'').trim(),
       logo: (_bp.logo||'').trim(),
       title: (_plPay.length && !_plCompare) ? ('Business Report \u2014 '+_plLabel) : ('Year-End Profit & Loss \u2014 '+year),
-      subtitle: dName+' \u00b7 '+year+' \u00b7 Generated '+new Date().toLocaleString(),
+      subtitle: dName+' \u00b7 '+year+' \u00b7 Generated '+nowET().toLocaleString(),
       warning: (_plPay.length && !_plCompare)
         ? '<strong>\uD83D\uDCC8 Business report \u2014 not a tax document.</strong> Filtered to <strong>'+escHtml(_plLabel)+'</strong> only. '
           +escHtml(_excludedCount+' trip'+(_excludedCount===1?'':'s')+' worth '+n(_excludedMoney))+' are excluded from every figure below. '
@@ -29274,7 +29289,7 @@ async function generateYearEndPL(){
           +'For filing, run this again with nothing ticked.'
         : 'This is a summary built from records in the NWDA app. It is <strong>not a tax form</strong> and it is not tax advice. Some figures are estimates \u2014 the notes say which. Please review before filing.',
       sheets: [ {name:'Summary', rows:S}, {name:'Trips', rows:T}, {name:'Mileage by period', rows:M} ],
-      footer: 'Generated by the NWDA app on '+new Date().toLocaleString()+'. Not prepared by a tax professional \u2014 verify every figure before filing.'
+      footer: 'Generated by the NWDA app on '+nowET().toLocaleString()+'. Not prepared by a tax professional \u2014 verify every figure before filing.'
     });
     // Comparison mode: filename and toast get NO distinguishing text either \u2014 not even
     // a private marker for whoever generated it. The instruction was "no added text of any
@@ -29345,7 +29360,7 @@ function manualICSPaste(){
   const st=document.getElementById('ics-paste-status'); if(st) st.textContent='';
   // Default the cutoff to today — covers the common case (don't re-import anything
   // already in the app) without making it mandatory to type a date every time.
-  const cutoffEl=document.getElementById('fw-cutoff-date'); if(cutoffEl) cutoffEl.value=toDateStr(new Date());
+  const cutoffEl=document.getElementById('fw-cutoff-date'); if(cutoffEl) cutoffEl.value=toDateStr(nowET());
   const modal=document.getElementById('ics-modal'); if(modal) modal.classList.add('show');
 }
 
@@ -30311,7 +30326,7 @@ let activeClientKey = null;
 
 // Client directory stat-card filters (clickable Total / Multiple drivers / This month)
 let clientStatFilter  = 'all';                                  // 'all' | 'multi' | 'month'
-let clientMonthFilter = toDateStr(new Date()).slice(0,7);    // 'YYYY-MM'
+let clientMonthFilter = toDateStr(nowET()).slice(0,7);    // 'YYYY-MM'
 function setClientStatFilter(f){
   // Clicking the active multi/month card again clears back to "all"
   clientStatFilter = (clientStatFilter===f && f!=='all') ? 'all' : f;
@@ -30658,7 +30673,7 @@ async function submitAddClient(){
     phone:formatPhoneUS(document.getElementById('ac-phone')?.value||''),
     email:document.getElementById('ac-email')?.value.trim()||'',
     notes:document.getElementById('ac-notes')?.value.trim()||'',
-    source:'client', addedAt:new Date().toISOString()
+    source:'client', addedAt:nowET().toISOString()
   });
   try{ if(currentUser && PROXY_MAP[currentUser.name]){ clientOwners[key]=(window._proxyListMode==='mine')?(getMyDriverName()||''):PROXY_MAP[currentUser.name]; await saveClientOwners(); } }catch(e){}
   var _termPref=(document.getElementById('ac-terminal-pref')?.value||'').trim();
@@ -30775,7 +30790,7 @@ async function _importClientRows(rows, driver){
         address:address,
         extraPhones:extra.join(', '),
         notes:notesParts.join(' \u00b7 '),
-        source:'imported', addedAt:new Date().toISOString()
+        source:'imported', addedAt:nowET().toISOString()
       });
       added++;
     }
@@ -30927,7 +30942,7 @@ function renderReceipts(){
 // ── UPLOAD MODAL ──
 function openReceiptUpload(){
   if(!hasIncomeAccess()){ showToast('Please log in to use this','error'); return; }
-  const today = toDateStr(new Date());
+  const today = toDateStr(nowET());
   // Create modal
   const modal = document.createElement('div');
   modal.id = 'receipt-upload-modal';
@@ -31541,7 +31556,7 @@ async function exportReceiptsPDF(){
   sorted.forEach(r=>{ totals[r.category]=(totals[r.category]||0)+parseFloat(r.amount||0); });
   const grandTotal = Object.values(totals).reduce((s,v)=>s+v,0);
 
-  const year = new Date().getFullYear();
+  const year = nowET().getFullYear();
   const driverLabel = dName||'All Drivers';
 
   // Build HTML for print/PDF
@@ -31570,7 +31585,7 @@ async function exportReceiptsPDF(){
     @media print{body{padding:0;}}
   </style></head><body>
   <div style="margin-bottom:8px;"><img src="${(document.querySelector('.topbar-logo img')||{}).src||''}" alt="NWDA" style="height:60px;width:auto;" /></div><h1 style="margin-top:0;">NWDA Transportation — Receipt Report</h1>
-  <div class="sub">${driverLabel} · Tax year ${year} · Generated ${new Date().toLocaleDateString()}</div>
+  <div class="sub">${driverLabel} · Tax year ${year} · Generated ${nowET().toLocaleDateString()}</div>
   <div class="summary">
     ${RECEIPT_CATEGORIES.map(cat=>`<div class="card"><div class="card-label">${cat}</div><div class="card-val">$${totals[cat].toFixed(2)}</div></div>`).join('')}
     <div class="card total-card"><div class="card-label">Grand Total</div><div class="card-val">$${grandTotal.toFixed(2)}</div></div>
@@ -32575,7 +32590,7 @@ function _escalateTransfers(){
             ', and there\u2019s been no response in 24 hours. You can approve or deny it.');
         });
         req.escalated=true;
-        req.escalatedAt=new Date().toISOString();
+        req.escalatedAt=nowET().toISOString();
         changed=true;
       }
     });
@@ -32610,7 +32625,7 @@ function qaRequestOverride(){
   const reqId='ovr_'+Date.now();
   if(!clientRequests) clientRequests={};
   clientRequests[reqId]={id:reqId,type:'avail_override',driverName:d,date,time,client,
-    requestedBy:currentUser?.name||'Admin',approvals:[],status:'pending',ts:new Date().toISOString()};
+    requestedBy:currentUser?.name||'Admin',approvals:[],status:'pending',ts:nowET().toISOString()};
   saveClientRequests().then(()=>{
     addNotification(d,{id:reqId,client},'avail_override',
       (currentUser?.name||'Admin').split(' ')[0]+' wants to assign you a ride for '+client+
