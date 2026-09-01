@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191043">
+<meta name="version" content="202608191044">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -860,13 +860,6 @@ input,select,textarea{font-size:16px;}
     <div style="margin-bottom:.75rem;">
       <select id="cal-driver-select" onchange="switchCalTab(this.value)" style="width:100%;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.9rem;font-weight:600;background:#fff;"></select>
     </div>
-    <div style="margin-bottom:.75rem;">
-      <select id="cal-createdby-select" onchange="switchCalCreatedByFilter(this.value)" style="width:100%;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.9rem;font-weight:600;background:#fff;">
-        <option value="">All rides</option>
-        <option value="kat">Created by Kat</option>
-        <option value="not-kat">Not created by Kat</option>
-      </select>
-    </div>
     <input type="text" id="cal-search" name="cal-search-nofill" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="🔍 Search all rides — client, phone, driver, type…" oninput="calSearch()" style="width:100%;padding:.55rem .85rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;margin-bottom:.75rem;box-sizing:border-box;" />
     <div id="cal-controls" style="display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem;flex-wrap:wrap;">
       <div style="display:flex;align-items:center;gap:.5rem;flex-shrink:0;">
@@ -1409,7 +1402,11 @@ input,select,textarea{font-size:16px;}
     <div style="background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.65rem .75rem;margin-bottom:.75rem;">
       <label for="fw-cutoff-date" style="font-size:.76rem;font-weight:600;color:var(--black);display:block;margin-bottom:.3rem;">Only import rides on or after</label>
       <input type="date" id="fw-cutoff-date" style="width:100%;padding:.4rem .5rem;border:1.5px solid var(--light);border-radius:6px;font-family:inherit;font-size:.85rem;box-sizing:border-box;">
-      <div style="font-size:.66rem;color:var(--mid);margin-top:.3rem;line-height:1.4;">Skips anything before this date so a re-import doesn't re-add rides already reflected in the app. Kat's are no longer skipped for this; Morgan's are, since she enters her own directly.</div>
+      <div style="font-size:.66rem;color:var(--mid);margin-top:.3rem;line-height:1.4;">Skips anything before this date so a re-import doesn't re-add rides already reflected in the app. Morgan's entries are always skipped, since she enters her own directly.</div>
+      <label style="display:flex;align-items:center;gap:.5rem;font-size:.8rem;color:var(--black);margin-top:.6rem;cursor:pointer;">
+        <input type="checkbox" id="fw-skip-kat" style="width:16px;height:16px;">
+        Also skip Kat's entries this time
+      </label>
     </div>
     <div style="font-size:.78rem;color:var(--mid);margin-bottom:.4rem;">Paste raw iCal text below:</div>
     <textarea id="ics-paste-box" rows="6" placeholder="BEGIN:VCALENDAR…" style="width:100%;padding:.6rem;border:1.5px solid var(--light);border-radius:8px;font-family:monospace;font-size:.78rem;resize:vertical;box-sizing:border-box;"></textarea>
@@ -8236,24 +8233,6 @@ function rideDisplayType(r){
 let calWeekStart = getWeekStart(nowET());
 let myCalWeekStart = getWeekStart(nowET());
 let calDriverFilter = '';
-// '' = no filter, 'kat' = only Kat-created rides, 'not-kat' = everything except Kat-created.
-// Direct request: filter the calendar by who created a ride, independent of who's driving it.
-let calCreatedByFilter = '';
-// Combines calDriverFilter (who's driving) with calCreatedByFilter (who created it) into a
-// single predicate function when both need to apply at once - reuses renderWeekView() and
-// renderMonthView()'s existing support for a function-shaped filter (they already accept
-// either a driver-name string OR a predicate function), so neither of those two rendering
-// functions needed to change at all to support this second, independent filter dimension.
-function _calCombinedFilter(){
-  if(!calCreatedByFilter) return calDriverFilter;
-  return function(r){
-    if(calDriverFilter && calDriverFilter!=='group' && r.driver!==calDriverFilter) return false;
-    const isKat = r.createdBy==='Kat';
-    if(calCreatedByFilter==='kat' && !isKat) return false;
-    if(calCreatedByFilter==='not-kat' && isKat) return false;
-    return true;
-  };
-}
 const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAY_SHORT=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
@@ -8346,10 +8325,6 @@ function monthLabel(d){ return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`; }
 
 function switchCalTab(driver){
   calDriverFilter=driver;
-  renderCal();
-}
-function switchCalCreatedByFilter(value){
-  calCreatedByFilter=value;
   renderCal();
 }
 function buildCalTabs(){
@@ -8491,10 +8466,10 @@ function renderCal(){
   const label=document.getElementById('cal-range-label');
   if(calView==='month'){
     if(label) label.textContent=monthLabel(calMonthDate);
-    renderMonthView('cal-grid', calMonthDate, _calCombinedFilter(), 'calJumpToWeek');
+    renderMonthView('cal-grid', calMonthDate, calDriverFilter, 'calJumpToWeek');
   } else {
     if(label) label.textContent=weekLabel(calWeekStart);
-    renderWeekView('cal-grid', calWeekStart, _calCombinedFilter());
+    renderWeekView('cal-grid', calWeekStart, calDriverFilter);
   }
   // If a search is active, re-apply it so the results stay in sync with live updates / filters
   const sb=document.getElementById('cal-search');
@@ -8522,9 +8497,7 @@ function calSearch(){
     const txt=`${r.client||''} ${r.driver||''} ${r.type||''} ${r.vehicle||''} ${r.phone||''}`.toLowerCase();
     return txt.includes(q) && canSeeRide(r);
   });
-  const _cf = _calCombinedFilter();
-  if(typeof _cf==='function') list=list.filter(_cf);
-  else if(_cf && _cf!=='group') list=list.filter(r=>r.driver===_cf);
+  if(calDriverFilter && calDriverFilter!=='group') list=list.filter(r=>r.driver===calDriverFilter);
   list.sort((a,b)=>(a.date||'').localeCompare(b.date||'')||(a.time||'').localeCompare(b.time||''));
   if(!list.length){
     results.innerHTML='<p style="color:var(--mid);font-size:.9rem;">No rides match "'+escHtml(q)+'".</p>';
@@ -29464,6 +29437,7 @@ function manualICSPaste(){
   // Default the cutoff to today — covers the common case (don't re-import anything
   // already in the app) without making it mandatory to type a date every time.
   const cutoffEl=document.getElementById('fw-cutoff-date'); if(cutoffEl) cutoffEl.value=toDateStr(nowET());
+  const skipKatEl=document.getElementById('fw-skip-kat'); if(skipKatEl) skipKatEl.checked=false;
   const modal=document.getElementById('ics-modal'); if(modal) modal.classList.add('show');
 }
 
@@ -29483,10 +29457,12 @@ function importPastedICS(){
   }
   const cutoffEl=document.getElementById('fw-cutoff-date');
   const cutoff=cutoffEl&&cutoffEl.value?cutoffEl.value:'';
+  const skipKatEl=document.getElementById('fw-skip-kat');
+  const skipKat=!!(skipKatEl&&skipKatEl.checked);
   try {
-    const imported = parseAndImportICS(text, cutoff);
+    const imported = parseAndImportICS(text, cutoff, skipKat);
     saveRides().then(()=>{ refreshDash(); renderCal(); });
-    setS(`✓ ${imported.added} added, ${imported.skipped} already existed, ${imported.skipped_owner||0} skipped (Morgan enters her own), ${imported.skipped_date||0} before the cutoff date, ${imported.skipped_nonride||0} non-ride events skipped`);
+    setS(`✓ ${imported.added} added, ${imported.skipped} already existed, ${imported.skipped_owner||0} skipped (Morgan${skipKat?' & Kat enter their own':' enters her own'}), ${imported.skipped_date||0} before the cutoff date, ${imported.skipped_nonride||0} non-ride events skipped`);
     showToast(`✓ Imported ${imported.added} rides`);
     setTimeout(()=>{ const m=document.getElementById('ics-modal'); if(m) m.classList.remove('show'); }, 1800);
   } catch(e){
@@ -29494,7 +29470,7 @@ function importPastedICS(){
   }
 }
 
-function parseAndImportICS(icsText, cutoffDate){
+function parseAndImportICS(icsText, cutoffDate, skipKat){
   // Split into VEVENT blocks
   const eventBlocks = icsText.split('BEGIN:VEVENT').slice(1)
     .map(b=>b.split('END:VEVENT')[0]);
@@ -29619,9 +29595,10 @@ function parseAndImportICS(icsText, cutoffDate){
     }
 
     // Morgan enters her own rides directly — importing FamilyWall data attributed to her
-    // would create duplicates, not catch anything new. Kat's are no longer skipped here,
-    // per direct request — her FamilyWall entries now import like anyone else's.
-    if(createdBy==='Morgan'){ skipped_owner++; return; }
+    // would create duplicates, not catch anything new. Kat's are only skipped when the
+    // person importing explicitly asks to (the skipKat checkbox on the import screen) -
+    // otherwise her FamilyWall entries import like anyone else's, per v1040.
+    if(createdBy==='Morgan' || (skipKat && createdBy==='Kat')){ skipped_owner++; return; }
 
     // Parse date/time
     let date='', time='';
