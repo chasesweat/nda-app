@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191034">
+<meta name="version" content="202608191036">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -21785,10 +21785,32 @@ function _findSuspiciousFamilyWallRides(){
     return true;
   });
 }
+// Same name, same date, same time - direct request. Groups every active ride by that key
+// (client normalized to lowercase/trimmed, since a real duplicate might only differ in casing
+// or stray whitespace; date/time compared exactly, since both are already machine-normalized
+// values here) and flags any group of 2+ that includes at least one FamilyWall import - a
+// duplicate against a manually-entered ride is just as worth catching in this tool as one
+// between two imports, but the group has to involve an import to belong here at all.
+function _findDuplicateFamilyWallGroups(){
+  const groups = {};
+  rides.forEach(function(r){
+    // xxlPair rides are deliberately two vehicles for the ONE same trip - same client, date,
+    // and time by design, not an accidental double-booking. Excluded here, not because their
+    // type field says "XXL" (it doesn't - splitXXLRide() copies the original ride's own type
+    // onto both legs unchanged), but because they're flagged with r.xxlPair specifically.
+    if(!r || r.status==='cancelled' || r.xxlPair || !r.client || !r.date || !r.time) return;
+    const key = r.client.toLowerCase().trim()+'|'+r.date+'|'+r.time;
+    (groups[key] = groups[key]||[]).push(r);
+  });
+  return Object.values(groups).filter(function(g){
+    return g.length>=2 && g.some(function(r){ return !!r.fwUID; });
+  });
+}
 
 async function _showFamilyWallReviewModal(){
   if(!currentUser || currentUser.name!=='Chase'){ showToast('Chase only','error'); return; }
   const matches = _findSuspiciousFamilyWallRides();
+  const dupGroups = _findDuplicateFamilyWallGroups();
   var back=document.createElement('div'); back.id='fw-review-modal-back';
   back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13500;display:flex;align-items:center;justify-content:center;padding:1rem;';
   const rowsHtml = matches.length ? matches.map(function(r){
@@ -21801,12 +21823,32 @@ async function _showFamilyWallReviewModal(){
       + '<div style="font-size:.72rem;color:var(--mid);">'+escHtml(r.type||'')+' \u00b7 '+dateStr+(timeStr?' '+timeStr:'')+' \u00b7 $'+(r.price!==undefined?r.price:'?')+' \u00b7 driver: '+escHtml(r.driver||'(unassigned)')+'</div>'
       + '</div></label>';
   }).join('') : '<div style="padding:1rem;text-align:center;color:var(--mid);font-size:.85rem;">No suspicious FamilyWall imports found \u2014 everything on record mentions a ride-type word in the client name.</div>';
+  const dupHtml = dupGroups.length ? dupGroups.map(function(g){
+    const first=g[0];
+    const dateStr = fmtDateShort(first.date), timeStr = fmtTime12(first.time);
+    return '<div style="border:1.5px solid #fcd34d;border-radius:10px;padding:.5rem;margin-bottom:.5rem;background:#fffbeb;">'
+      + '<div style="font-size:.72rem;font-weight:700;color:#92400e;margin-bottom:.3rem;">'+escHtml(first.client)+' \u00b7 '+dateStr+' '+timeStr+' \u2014 '+g.length+' matching rides</div>'
+      + g.map(function(r){
+          return '<label style="display:flex;align-items:flex-start;gap:.5rem;padding:.3rem .2rem;cursor:pointer;">'
+            + '<input type="checkbox" class="fw-review-check" value="'+r.id+'" style="margin-top:.2rem;accent-color:#f0997b;">'
+            + '<div style="flex:1;min-width:0;font-size:.76rem;color:var(--black);">'
+            + (r.fwUID?'<span style="color:#f0997b;font-weight:700;">FamilyWall\u00a0\u00b7\u00a0</span>':'')
+            + escHtml(r.type||'')+' \u00b7 $'+(r.price!==undefined?r.price:'?')+' \u00b7 driver: '+escHtml(r.driver||'(unassigned)')+' \u00b7 status: '+escHtml(r.status||'scheduled')
+            + '</div></label>';
+        }).join('')
+      + '</div>';
+  }).join('') : '';
+  const totalFlagged = matches.length + dupGroups.reduce(function(a,g){ return a+g.length; },0);
   back.innerHTML='<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;padding:1.25rem;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
     +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\uD83E\uDDF9 Review FamilyWall imports</div>'
-    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.7rem;line-height:1.45;">'+matches.length+' FamilyWall-imported '+(matches.length===1?'ride':'rides')+' with no ride-type word in the client name AND no address or real price \u2014 likely non-ride calendar noise (holiday fees, concerts, notes), but check before deleting. This deletes immediately, no second-admin approval, no undo.</div>'
-    +(matches.length ? '<label style="display:flex;align-items:center;gap:.5rem;padding:.4rem .5rem;font-size:.78rem;font-weight:700;color:var(--black);border-bottom:2px solid var(--light);"><input type="checkbox" id="fw-review-selectall" onchange="document.querySelectorAll(\'.fw-review-check\').forEach(function(c){c.checked=this.checked}.bind(this))" style="accent-color:#f0997b;">Select all</label>' : '')
-    +'<div style="flex:1;overflow-y:auto;margin-bottom:.7rem;">'+rowsHtml+'</div>'
-    +(matches.length ? '<button type="button" onclick="_deleteSelectedFamilyWallRides()" style="width:100%;padding:.6rem;background:#f0997b;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.85rem;margin-bottom:.5rem;">Delete selected</button>' : '')
+    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.7rem;line-height:1.45;">Checked for two things: possible duplicate bookings (same client, date, and time), and likely non-ride calendar noise (holiday fees, concerts, notes) with no ride-type word, address, or real price. Check before deleting \u2014 this deletes immediately, no second-admin approval, no undo.</div>'
+    +(totalFlagged ? '<label style="display:flex;align-items:center;gap:.5rem;padding:.4rem .5rem;font-size:.78rem;font-weight:700;color:var(--black);border-bottom:2px solid var(--light);"><input type="checkbox" id="fw-review-selectall" onchange="document.querySelectorAll(\'.fw-review-check\').forEach(function(c){c.checked=this.checked}.bind(this))" style="accent-color:#f0997b;">Select all</label>' : '')
+    +'<div style="flex:1;overflow-y:auto;margin-bottom:.7rem;">'
+    +(dupGroups.length ? '<div style="font-size:.72rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#92400e;margin:.3rem 0 .4rem;">\u26a0\ufe0f Possible duplicates \u00b7 '+dupGroups.length+'</div>'+dupHtml : '')
+    +'<div style="font-size:.72rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin:.5rem 0 .3rem;">Likely calendar noise \u00b7 '+matches.length+'</div>'
+    +rowsHtml
+    +'</div>'
+    +(totalFlagged ? '<button type="button" onclick="_deleteSelectedFamilyWallRides()" style="width:100%;padding:.6rem;background:#f0997b;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.85rem;margin-bottom:.5rem;">Delete selected</button>' : '')
     +'<button onclick="var b=document.getElementById(\'fw-review-modal-back\');if(b)b.remove();" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">Close</button>'
     +'</div>';
   document.body.appendChild(back);
