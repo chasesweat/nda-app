@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191038">
+<meta name="version" content="202608191043">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -860,6 +860,13 @@ input,select,textarea{font-size:16px;}
     <div style="margin-bottom:.75rem;">
       <select id="cal-driver-select" onchange="switchCalTab(this.value)" style="width:100%;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.9rem;font-weight:600;background:#fff;"></select>
     </div>
+    <div style="margin-bottom:.75rem;">
+      <select id="cal-createdby-select" onchange="switchCalCreatedByFilter(this.value)" style="width:100%;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.9rem;font-weight:600;background:#fff;">
+        <option value="">All rides</option>
+        <option value="kat">Created by Kat</option>
+        <option value="not-kat">Not created by Kat</option>
+      </select>
+    </div>
     <input type="text" id="cal-search" name="cal-search-nofill" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="🔍 Search all rides — client, phone, driver, type…" oninput="calSearch()" style="width:100%;padding:.55rem .85rem;border:1.5px solid var(--light);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;margin-bottom:.75rem;box-sizing:border-box;" />
     <div id="cal-controls" style="display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem;flex-wrap:wrap;">
       <div style="display:flex;align-items:center;gap:.5rem;flex-shrink:0;">
@@ -1402,14 +1409,9 @@ input,select,textarea{font-size:16px;}
     <div style="background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.65rem .75rem;margin-bottom:.75rem;">
       <label for="fw-cutoff-date" style="font-size:.76rem;font-weight:600;color:var(--black);display:block;margin-bottom:.3rem;">Only import rides on or after</label>
       <input type="date" id="fw-cutoff-date" style="width:100%;padding:.4rem .5rem;border:1.5px solid var(--light);border-radius:6px;font-family:inherit;font-size:.85rem;box-sizing:border-box;">
-      <div style="font-size:.66rem;color:var(--mid);margin-top:.3rem;line-height:1.4;">Skips anything before this date so a re-import doesn't re-add rides already reflected in the app. Kat and Morgan's rides are always skipped &mdash; they enter their own directly. Applies to both options below.</div>
+      <div style="font-size:.66rem;color:var(--mid);margin-top:.3rem;line-height:1.4;">Skips anything before this date so a re-import doesn't re-add rides already reflected in the app. Kat's are no longer skipped for this; Morgan's are, since she enters her own directly.</div>
     </div>
-    <div style="background:var(--gold-pale);border:1.5px solid var(--gold);border-radius:8px;padding:.75rem;margin-bottom:.85rem;">
-      <div style="font-size:.85rem;font-weight:600;margin-bottom:.35rem;">⚡ One-tap import (recommended)</div>
-      <div style="font-size:.8rem;color:var(--mid);margin-bottom:.6rem;">Your upcoming rides from FamilyWall are already prepared. Tap once to load them — duplicates are skipped automatically.</div>
-      <button class="btn-primary" onclick="runFamilyWallImport()" style="width:100%;padding:.7rem;">Import upcoming rides now</button>
-    </div>
-    <div style="font-size:.78rem;color:var(--mid);margin-bottom:.4rem;">Or paste raw iCal text manually:</div>
+    <div style="font-size:.78rem;color:var(--mid);margin-bottom:.4rem;">Paste raw iCal text below:</div>
     <textarea id="ics-paste-box" rows="6" placeholder="BEGIN:VCALENDAR…" style="width:100%;padding:.6rem;border:1.5px solid var(--light);border-radius:8px;font-family:monospace;font-size:.78rem;resize:vertical;box-sizing:border-box;"></textarea>
     <div id="ics-paste-status" style="font-size:.8rem;color:var(--mid);min-height:1.1rem;margin:.4rem 0;"></div>
     <button class="btn-primary" onclick="importPastedICS()" style="width:100%;padding:.8rem;">Import rides</button>
@@ -2248,7 +2250,7 @@ function _updateAdminAuditBtn(){ try{ var b=document.getElementById('admin-audit
 function toggleChaseAudit(){ if(!currentUser || currentUser.name!=='Chase') return; chaseAuditOn=!chaseAuditOn; saveChaseAudit(); if(typeof showToast==='function') showToast(chaseAuditOn?'\u2713 Admin change alerts ON':'Admin change alerts OFF'); try{ if(typeof _updateAdminAuditBtn==='function') _updateAdminAuditBtn(); }catch(e){} }
 const _AUDIT_SKIP = ['kat:rides','kat:ridesArchive','kat:outsideRides','kat:feePayments','kat:receipts',
   'kat:notifications','kat:chatLastRead','kat:comments','kat:biometricCreds','kat:pendingAdminTutorial',
-  'kat:sos','kat:presence','kat:chaseAuditOn','kat:uiPrefs','kat:driverExpenses','kat:fcmTokens'];
+  'kat:sos','kat:presence','kat:chaseAuditOn','kat:uiPrefs','kat:driverExpenses','kat:fcmTokens','kat:fwApprovedDuplicates'];
 // Profile keys: notify ONLY when editing someone else's profile, never your own (even for admins).
 const _AUDIT_PERSONAL = ['kat:driverProfiles','kat:driverSettings','kat:driverVenmo','kat:driverPhotoOverrides'];
 const _AUDIT_LABELS = {
@@ -2839,6 +2841,7 @@ async function _loadAppData() {
     loadDocs(),
     loadDriverSettings(),
     loadFeePayments(),
+    loadFwApprovedDuplicates(),
   ]);
   try{ await _migrateLegacyProfileTemplates(); }catch(e){ console.warn('legacy template migration', e); }
   try{ await _promoteChaseTemplatesToGlobalDefault(); }catch(e){ console.warn('Chase default promotion', e); }
@@ -8233,6 +8236,24 @@ function rideDisplayType(r){
 let calWeekStart = getWeekStart(nowET());
 let myCalWeekStart = getWeekStart(nowET());
 let calDriverFilter = '';
+// '' = no filter, 'kat' = only Kat-created rides, 'not-kat' = everything except Kat-created.
+// Direct request: filter the calendar by who created a ride, independent of who's driving it.
+let calCreatedByFilter = '';
+// Combines calDriverFilter (who's driving) with calCreatedByFilter (who created it) into a
+// single predicate function when both need to apply at once - reuses renderWeekView() and
+// renderMonthView()'s existing support for a function-shaped filter (they already accept
+// either a driver-name string OR a predicate function), so neither of those two rendering
+// functions needed to change at all to support this second, independent filter dimension.
+function _calCombinedFilter(){
+  if(!calCreatedByFilter) return calDriverFilter;
+  return function(r){
+    if(calDriverFilter && calDriverFilter!=='group' && r.driver!==calDriverFilter) return false;
+    const isKat = r.createdBy==='Kat';
+    if(calCreatedByFilter==='kat' && !isKat) return false;
+    if(calCreatedByFilter==='not-kat' && isKat) return false;
+    return true;
+  };
+}
 const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAY_SHORT=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
@@ -8325,6 +8346,10 @@ function monthLabel(d){ return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`; }
 
 function switchCalTab(driver){
   calDriverFilter=driver;
+  renderCal();
+}
+function switchCalCreatedByFilter(value){
+  calCreatedByFilter=value;
   renderCal();
 }
 function buildCalTabs(){
@@ -8466,10 +8491,10 @@ function renderCal(){
   const label=document.getElementById('cal-range-label');
   if(calView==='month'){
     if(label) label.textContent=monthLabel(calMonthDate);
-    renderMonthView('cal-grid', calMonthDate, calDriverFilter, 'calJumpToWeek');
+    renderMonthView('cal-grid', calMonthDate, _calCombinedFilter(), 'calJumpToWeek');
   } else {
     if(label) label.textContent=weekLabel(calWeekStart);
-    renderWeekView('cal-grid', calWeekStart, calDriverFilter);
+    renderWeekView('cal-grid', calWeekStart, _calCombinedFilter());
   }
   // If a search is active, re-apply it so the results stay in sync with live updates / filters
   const sb=document.getElementById('cal-search');
@@ -8497,7 +8522,9 @@ function calSearch(){
     const txt=`${r.client||''} ${r.driver||''} ${r.type||''} ${r.vehicle||''} ${r.phone||''}`.toLowerCase();
     return txt.includes(q) && canSeeRide(r);
   });
-  if(calDriverFilter && calDriverFilter!=='group') list=list.filter(r=>r.driver===calDriverFilter);
+  const _cf = _calCombinedFilter();
+  if(typeof _cf==='function') list=list.filter(_cf);
+  else if(_cf && _cf!=='group') list=list.filter(r=>r.driver===_cf);
   list.sort((a,b)=>(a.date||'').localeCompare(b.date||'')||(a.time||'').localeCompare(b.time||''));
   if(!list.length){
     results.innerHTML='<p style="color:var(--mid);font-size:.9rem;">No rides match "'+escHtml(q)+'".</p>';
@@ -21802,9 +21829,18 @@ function _findDuplicateFamilyWallGroups(){
     const key = r.client.toLowerCase().trim()+'|'+r.date+'|'+r.time;
     (groups[key] = groups[key]||[]).push(r);
   });
-  return Object.values(groups).filter(function(g){
-    return g.length>=2 && g.some(function(r){ return !!r.fwUID; });
-  });
+  return Object.keys(groups)
+    .filter(function(key){ return !fwApprovedDuplicates[key]; })
+    .map(function(key){ return {key: key, rides: groups[key]}; })
+    .filter(function(g){ return g.rides.length>=2 && g.rides.some(function(r){ return !!r.fwUID; }); });
+}
+// Marks a duplicate group as reviewed and genuinely fine - two real, separate rides, not an
+// accidental double-booking. No approval step of its own to click anymore, per direct follow-up
+// request - a group is approved implicitly, by having been shown in the review and left alone
+// (see _applyFamilyWallReview below), rather than needing a separate confirmation action.
+async function _approveDuplicateGroup(key){
+  fwApprovedDuplicates[key] = {approvedBy: currentUser.name, at: Date.now()};
+  try{ await storageSetOne('kat:fwApprovedDuplicates', key, fwApprovedDuplicates[key], fwApprovedDuplicates); }catch(e){}
 }
 
 async function _showFamilyWallReviewModal(){
@@ -21824,13 +21860,13 @@ async function _showFamilyWallReviewModal(){
       + '</div></label>';
   }).join('') : '<div style="padding:1rem;text-align:center;color:var(--mid);font-size:.85rem;">No suspicious FamilyWall imports found \u2014 everything on record mentions a ride-type word in the client name.</div>';
   const dupHtml = dupGroups.length ? dupGroups.map(function(g){
-    const first=g[0];
+    const first=g.rides[0];
     const dateStr = fmtDateShort(first.date), timeStr = fmtTime12(first.time);
     return '<div style="border:1.5px solid #fcd34d;border-radius:10px;padding:.5rem;margin-bottom:.5rem;background:#fffbeb;">'
-      + '<div style="font-size:.72rem;font-weight:700;color:#92400e;margin-bottom:.3rem;">'+escHtml(first.client)+' \u00b7 '+dateStr+' '+timeStr+' \u2014 '+g.length+' matching rides</div>'
-      + g.map(function(r){
+      + '<div style="font-size:.72rem;font-weight:700;color:#92400e;margin-bottom:.3rem;">'+escHtml(first.client)+' \u00b7 '+dateStr+' '+timeStr+' \u2014 '+g.rides.length+' matching rides</div>'
+      + g.rides.map(function(r){
           return '<label style="display:flex;align-items:flex-start;gap:.5rem;padding:.3rem .2rem;cursor:pointer;">'
-            + '<input type="checkbox" class="fw-review-check" value="'+r.id+'" style="margin-top:.2rem;accent-color:#f0997b;">'
+            + '<input type="checkbox" class="fw-review-check fw-dup-check" data-group="'+escAttr(g.key)+'" value="'+r.id+'" style="margin-top:.2rem;accent-color:#f0997b;">'
             + '<div style="flex:1;min-width:0;font-size:.76rem;color:var(--black);">'
             + (r.fwUID?'<span style="color:#f0997b;font-weight:700;">FamilyWall\u00a0\u00b7\u00a0</span>':'')
             + escHtml(r.type||'')+' \u00b7 $'+(r.price!==undefined?r.price:'?')+' \u00b7 driver: '+escHtml(r.driver||'(unassigned)')+' \u00b7 status: '+escHtml(r.status||'scheduled')
@@ -21838,38 +21874,54 @@ async function _showFamilyWallReviewModal(){
         }).join('')
       + '</div>';
   }).join('') : '';
-  const totalFlagged = matches.length + dupGroups.reduce(function(a,g){ return a+g.length; },0);
+  const totalFlagged = matches.length + dupGroups.reduce(function(a,g){ return a+g.rides.length; },0);
   back.innerHTML='<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;padding:1.25rem;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
     +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\uD83E\uDDF9 Review FamilyWall imports</div>'
-    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.7rem;line-height:1.45;">Checked for two things: possible duplicate bookings (same client, date, and time), and likely non-ride calendar noise (holiday fees, concerts, notes) with no ride-type word, address, or real price. Check before deleting \u2014 this deletes immediately, no second-admin approval, no undo.</div>'
+    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.7rem;line-height:1.45;">Checked for two things: possible duplicate bookings (same client, date, and time), and likely non-ride calendar noise (holiday fees, concerts, notes) with no ride-type word, address, or real price. Check anything to delete it \u2014 immediately, no second-admin approval, no undo. Any duplicate you leave unchecked is treated as reviewed and fine, and won\u2019t be flagged again.</div>'
     +(totalFlagged ? '<label style="display:flex;align-items:center;gap:.5rem;padding:.4rem .5rem;font-size:.78rem;font-weight:700;color:var(--black);border-bottom:2px solid var(--light);"><input type="checkbox" id="fw-review-selectall" onchange="document.querySelectorAll(\'.fw-review-check\').forEach(function(c){c.checked=this.checked}.bind(this))" style="accent-color:#f0997b;">Select all</label>' : '')
     +'<div style="flex:1;overflow-y:auto;margin-bottom:.7rem;">'
     +(dupGroups.length ? '<div style="font-size:.72rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#92400e;margin:.3rem 0 .4rem;">\u26a0\ufe0f Possible duplicates \u00b7 '+dupGroups.length+'</div>'+dupHtml : '')
     +'<div style="font-size:.72rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin:.5rem 0 .3rem;">Likely calendar noise \u00b7 '+matches.length+'</div>'
     +rowsHtml
     +'</div>'
-    +(totalFlagged ? '<button type="button" onclick="_deleteSelectedFamilyWallRides()" style="width:100%;padding:.6rem;background:#f0997b;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.85rem;margin-bottom:.5rem;">Delete selected</button>' : '')
+    +(totalFlagged ? '<button type="button" onclick="_applyFamilyWallReview()" style="width:100%;padding:.6rem;background:#f0997b;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.85rem;margin-bottom:.5rem;">Apply \u2014 delete checked, approve the rest</button>' : '')
     +'<button onclick="var b=document.getElementById(\'fw-review-modal-back\');if(b)b.remove();" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">Close</button>'
     +'</div>';
   document.body.appendChild(back);
 }
 
-async function _deleteSelectedFamilyWallRides(){
+async function _applyFamilyWallReview(){
   if(!currentUser || currentUser.name!=='Chase'){ showToast('Chase only','error'); return; }
-  const checked = Array.from(document.querySelectorAll('.fw-review-check:checked'));
-  if(!checked.length){ showToast('Nothing selected','error'); return; }
-  const ids = checked.map(function(c){ return c.value; });
+  const checkedEls = Array.from(document.querySelectorAll('.fw-review-check:checked'));
+  const checkedIds = checkedEls.map(function(c){ return String(c.value); });
+
+  // Any duplicate group with nothing checked in it is treated as reviewed and fine - left
+  // alone on purpose, not overlooked. A group with at least one ride checked skips approval
+  // entirely, since deleting from it is what actually resolves the duplicate.
+  const dupGroups = _findDuplicateFamilyWallGroups();
+  const groupsToApprove = dupGroups.filter(function(g){
+    return !g.rides.some(function(r){ return checkedIds.indexOf(String(r.id))>-1; });
+  });
+
+  if(!checkedIds.length){
+    for(const g of groupsToApprove){ await _approveDuplicateGroup(g.key); }
+    showToast(groupsToApprove.length ? ('\u2713 '+groupsToApprove.length+' duplicate group'+(groupsToApprove.length===1?'':'s')+' approved') : 'Nothing to review');
+    const back=document.getElementById('fw-review-modal-back'); if(back) back.remove();
+    _showFamilyWallReviewModal();
+    return;
+  }
+
   const _ok = await showConfirmModal({
     icon:'\uD83E\uDDF9', iconColor:'#f0997b', iconBg:'#3a1a1a',
-    title:'Delete '+ids.length+' ride'+(ids.length===1?'':'s')+'?',
-    message:'This permanently removes '+ids.length+' FamilyWall-imported ride'+(ids.length===1?'':'s')+' and cannot be undone.',
+    title:'Delete '+checkedIds.length+' ride'+(checkedIds.length===1?'':'s')+'?',
+    message:'This permanently removes '+checkedIds.length+' FamilyWall-imported ride'+(checkedIds.length===1?'':'s')+' and cannot be undone.'+(groupsToApprove.length?' Every other duplicate you left unchecked will be marked reviewed and won\u2019t be flagged again.':''),
     buttons:[
       {label:'Cancel', style:'neutral', value:false},
-      {label:'Delete '+ids.length, style:'danger', value:true}
+      {label:'Delete '+checkedIds.length, style:'danger', value:true}
     ]
   });
   if(!_ok) return;
-  for(const id of ids){
+  for(const id of checkedIds){
     const r=_rideById(id);
     // noApproval:true — this is deliberate cleanup of recognized import noise, not a normal
     // operational ride deletion, so it's exempt from the usual "someone else's ride needs a
@@ -21878,7 +21930,8 @@ async function _deleteSelectedFamilyWallRides(){
     // actual deletion logic itself can never drift out of sync between the two paths.
     await queueAdminAction('ride_delete', {id: id}, 'FamilyWall cleanup: delete '+((r&&r.client)||'a ride'), {noApproval: true});
   }
-  showToast('\u2713 Deleted '+ids.length+' ride'+(ids.length===1?'':'s'));
+  for(const g of groupsToApprove){ await _approveDuplicateGroup(g.key); }
+  showToast('\u2713 Deleted '+checkedIds.length+' ride'+(checkedIds.length===1?'':'s')+(groupsToApprove.length?(', approved '+groupsToApprove.length+' more'):''));
   const back=document.getElementById('fw-review-modal-back'); if(back) back.remove();
   _showFamilyWallReviewModal();
 }
@@ -25294,6 +25347,14 @@ async function persistRideTip(rideId,val){
 // Key format: "driverName:owe|recv:counterpartyName"
 let feePayments = {};
 async function loadFeePayments(){ const d=await storageGet('kat:feePayments'); if(d) feePayments=d; }
+// Duplicate groups Chase has looked at and confirmed are genuinely two separate, real rides -
+// not an accidental double-booking. Keyed identically to _findDuplicateFamilyWallGroups()'s own
+// grouping key (client|date|time), so a group can only ever be approved as exactly the same
+// thing that was flagged. Direct request: reviewing the duplicate scan needed a way to say "no,
+// these are fine" without deleting anything, so the same pair doesn't keep reappearing on every
+// future review.
+let fwApprovedDuplicates = {};
+async function loadFwApprovedDuplicates(){ const d=await storageGet('kat:fwApprovedDuplicates'); if(d) fwApprovedDuplicates=d; }
 let cautiousList=[]; let clientOwners={};
 // A client's stored preference for which airport terminal they always want, regardless of
 // what a given flight would otherwise suggest - keyed by lowercased client name, same pattern
@@ -29407,63 +29468,6 @@ function manualICSPaste(){
 }
 
 
-// ── FAMILYWALL BULK IMPORT — START (see matching END marker below for easy removal later) ──
-// The 280-ride historical batch used to be embedded directly in this file as a JavaScript
-// constant (147KB of JSON) — meaning every driver's phone downloaded and parsed it on every
-// single app load, whether or not anyone ever touched this button. Moved to a separate file
-// (familywall-import-data.json, same folder as this app) that's only fetched when this button
-// is actually clicked. Chase asked to keep the ability to re-run this later when the full
-// migration off FamilyWall happens, so the DATA wasn't removed — only where it lives and when
-// it loads changed. Existing duplicate-skip logic (fwUID already seen) is untouched, so
-// re-running this after a real migration is still exactly as safe as it always was.
-async function runFamilyWallImport(){
-  const btn = document.getElementById('cal-familywall-btn');
-  if(btn){ btn.disabled = true; btn.textContent = 'Loading…'; }
-  let FW_IMPORT_RIDES;
-  try{
-    const resp = await fetch('familywall-import-data.json');
-    if(!resp.ok) throw new Error('fetch failed: ' + resp.status);
-    FW_IMPORT_RIDES = await resp.json();
-  }catch(e){
-    console.warn('FamilyWall import data fetch failed', e);
-    showToast('Could not load FamilyWall import data — check your connection and try again', 'error');
-    if(btn){ btn.disabled = false; btn.textContent = '⬆ Import from FamilyWall'; }
-    return;
-  }
-  if(btn){ btn.disabled = false; btn.textContent = '⬆ Import from FamilyWall'; }
-  if(!confirm('Import '+FW_IMPORT_RIDES.length+' upcoming rides from FamilyWall? Safe to run once — duplicates are skipped.')) return;
-  const cutoffEl=document.getElementById('fw-cutoff-date');
-  const cutoff=cutoffEl&&cutoffEl.value?cutoffEl.value:'';
-  const existing=new Set(rides.map(r=>r.fwUID).filter(Boolean));
-  let maxId=rides.reduce((m,r)=>Math.max(m,r.id||0),100);
-  let added=0, skippedDupe=0, skippedOwner=0, skippedDate=0;
-  FW_IMPORT_RIDES.forEach(r=>{
-    if(r.fwUID && existing.has(r.fwUID)){ skippedDupe++; return; }
-    // Kat and Morgan enter their own rides directly — importing FamilyWall data
-    // attributed to them would create duplicates, not catch anything new.
-    if(r.createdBy==='Kat' || r.createdBy==='Morgan'){ skippedOwner++; return; }
-    if(cutoff && r.date && r.date<cutoff){ skippedDate++; return; }
-    const copy=Object.assign({},r); copy.id=++maxId;
-    // Same cleanup already used for the client list: normalize phone formatting,
-    // strip leftover ride-type labels baked into the client name (e.g. "2XL … 1 of 2",
-    // "THE FOX RT PREMIUM Skip Getchell").
-    if(copy.phone) copy.phone=formatPhoneUS(copy.phone);
-    if(copy.client) copy.client=_cleanClientLabel(copy.client);
-    rides.push(copy); added++;
-  });
-  saveRides().then(()=>{ refreshDash(); renderCal();  });
-  showToast("✓ Imported "+added+" rides from FamilyWall");
-  const st=document.getElementById("ics-paste-status");
-  if(st) st.textContent="✓ Imported "+added+" rides ("+skippedDupe+" already existed, "+skippedOwner+" skipped — Kat/Morgan enter their own, "+skippedDate+" before the cutoff date)";
-}
-// ── FAMILYWALL BULK IMPORT — END ──
-// To fully remove this feature later: delete this whole block (from the START marker above),
-// delete familywall-import-data.json from the hosting folder, and remove the
-// "⬆ Import from FamilyWall" button and its onclick="manualICSPaste()" wiring in the Calendar
-// page toolbar. The paste-your-own-.ics flow directly below this is a SEPARATE feature (it
-// doesn't depend on the bulk batch or its data file) — removing one doesn't require removing
-// the other.
-
 // ── FAMILYWALL PASTE-YOUR-OWN-.ICS IMPORT — START (see matching END marker below) ──
 // Separate feature from the bulk historical import above — this is the "paste a fresh .ics
 // export whenever you want" flow, with its own non-ride-event filtering. Doesn't depend on
@@ -29482,7 +29486,7 @@ function importPastedICS(){
   try {
     const imported = parseAndImportICS(text, cutoff);
     saveRides().then(()=>{ refreshDash(); renderCal(); });
-    setS(`✓ ${imported.added} added, ${imported.skipped} already existed, ${imported.skipped_owner||0} skipped (Kat/Morgan enter their own), ${imported.skipped_date||0} before the cutoff date, ${imported.skipped_nonride||0} non-ride events skipped`);
+    setS(`✓ ${imported.added} added, ${imported.skipped} already existed, ${imported.skipped_owner||0} skipped (Morgan enters her own), ${imported.skipped_date||0} before the cutoff date, ${imported.skipped_nonride||0} non-ride events skipped`);
     showToast(`✓ Imported ${imported.added} rides`);
     setTimeout(()=>{ const m=document.getElementById('ics-modal'); if(m) m.classList.remove('show'); }, 1800);
   } catch(e){
@@ -29614,9 +29618,10 @@ function parseAndImportICS(icsText, cutoffDate){
       createdBy = nickMap[hint] || nickMap[hint.split(' ')[0]] || 'FamilyWall';
     }
 
-    // Kat and Morgan enter their own rides directly — importing FamilyWall data
-    // attributed to them would create duplicates, not catch anything new.
-    if(createdBy==='Kat' || createdBy==='Morgan'){ skipped_owner++; return; }
+    // Morgan enters her own rides directly — importing FamilyWall data attributed to her
+    // would create duplicates, not catch anything new. Kat's are no longer skipped here,
+    // per direct request — her FamilyWall entries now import like anyone else's.
+    if(createdBy==='Morgan'){ skipped_owner++; return; }
 
     // Parse date/time
     let date='', time='';
