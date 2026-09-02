@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191053">
+<meta name="version" content="202608191054">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -4402,9 +4402,8 @@ function calcQuote() {
   const subtotal = tripTotal + flatTotal;
   let fuelFee = 0;
   if(addonState.fuel){ fuelFee=subtotal*fuelRate(); lines.push({label:fuelLabel(), val:fuelFee}); }
-  // Round to the cent (never floor): the saved price must equal the computed breakdown exactly,
-  // so "Manual adjustment" only ever appears when someone actually overrides the price.
-  const total = Math.floor(subtotal + fuelFee);   // fare rounds DOWN to a whole dollar, never up
+  // The fare rounds DOWN to a whole dollar, never up and never to the nearest cent.
+  const total = Math.floor(subtotal + fuelFee);
   document.getElementById('quote-lines').innerHTML=lines.map(l=>`<div class="quote-line"><span style="color:#aaa">${l.label}${l.note?'<br><span style="font-size:.7rem;color:#999">'+l.note+'</span>':''}</span><span style="${l.val===0?'color:#999':''}">$${l.val.toFixed(2)}</span></div>`).join('');
   document.getElementById('quote-total').textContent=`$${total.toFixed(2)}`;
   return total;
@@ -11627,7 +11626,13 @@ function buildRideBreakdown(r){
   }
   // Reconcile to the actual saved price
   const savedTotal = parseFloat(r.price||0)||0;
-  const rebuilt = lines.reduce((s,l)=>s+l.val,0);
+  // _roundedSum (computed just above) is already the correctly-floored whole-dollar total -
+  // re-summing the (lossy, rounded-to-cents-for-display) line items instead, as this used to,
+  // could land a cent or more off a clean whole dollar whenever a line like mileageCharge
+  // carries more than 2 decimal places to begin with (confirmed directly: 19.75mi x $2.50/mi
+  // produces $49.375, and re-summing after rounding just the adjusted line for display gave
+  // $59.005, not $59). Using the pre-computed floor here instead means this can never happen.
+  const rebuilt = _roundedSum;
   const diff = Math.round((savedTotal - rebuilt)*100)/100;
   if(savedTotal>0 && Math.abs(diff)>=0.01){
     lines.push({label: diff>0?'Additional charges':'Discount', val: diff});
