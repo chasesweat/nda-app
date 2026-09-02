@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191045">
+<meta name="version" content="202608191053">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -664,7 +664,7 @@ input,select,textarea{font-size:16px;}
         <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--gold-text,#7c3aed);margin-bottom:.4rem;">Personal Info</div>
         <div class="form-group">
           <label>Client name</label>
-          <input type="text" id="q-client" placeholder="Full name" list="q-client-list" autocomplete="off" oninput="checkClientConflict();maybeAutofillClient('q');renderAddrPickers('q');checkPriceShopping('q')" /><div id="q-priceshop-alert" style="display:none;font-size:.8rem;font-weight:600;color:#92400e;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:.5rem .7rem;margin-top:.5rem;line-height:1.4;"></div>
+          <input type="text" id="q-client" placeholder="Full name" list="q-client-list" autocomplete="off" oninput="checkClientConflict();maybeAutofillClient('q');renderAddrPickers('q');checkPriceShopping('q');debounceMileage()" /><div id="q-priceshop-alert" style="display:none;font-size:.8rem;font-weight:600;color:#92400e;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:.5rem .7rem;margin-top:.5rem;line-height:1.4;"></div>
           <datalist id="q-client-list"></datalist>
           <div id="q-client-status" style="font-size:.78rem;min-height:1.2rem;margin-top:.3rem;"></div>
         </div>
@@ -824,6 +824,8 @@ input,select,textarea{font-size:16px;}
         <div class="mtip-btn-wrap" style="margin-top:.5rem;"><button onclick="emailQuoteFromForm()" style="width:100%;padding:.7rem;background:none;border:1.5px solid var(--accent);border-radius:8px;color:var(--accent);font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">✉️ Email Quote</button><span class="mtip-dot mtip-dot-btn" id="mtd-q-email" onclick="toggleMtip('q-email-tip')" title="What&#8217;s this?">i</span></div><div class="mtip-pop" id="mtp-q-email-tip">Opens your email app with the client's address (if entered above) and the full quote already written in the body. Also opens the branded PDF view so you can save and attach it manually if you want a true attachment — email links can't attach files automatically.</div>
         <button onclick="viewRouteOnMaps()" style="width:100%;margin-top:.5rem;padding:.7rem;background:none;border:1.5px solid var(--accent);border-radius:8px;color:var(--accent);font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">↗ View route in Google Maps</button>
         <div style="font-size:.68rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin:1.2rem 0 .4rem;padding-top:.8rem;border-top:1px solid var(--light);">Saved quotes<span class="mtip-dot" id="mtd-q-saved" onclick="toggleMtip('q-saved')" title="What&#8217;s this?">i</span></div><div class="mtip-pop" id="mtp-q-saved">Tap one to re-send it, open the PDF, or schedule it in one tap — scheduling is the only moment a client actually joins your client list.</div>
+        <!-- ── RETROACTIVE SAVED-QUOTE PRICE FIX BUTTON — START (to remove: delete this button, delete quote-price-review-btn's visibility line inside enterApp() in the script, and delete the "RETROACTIVE SAVED-QUOTE PRICE FIX" block in the script - search that exact heading for the matching START/END markers) ── -->        <button id="quote-price-review-btn" onclick="_showSavedQuotePriceReviewModal()" style="display:none;width:100%;margin-bottom:.6rem;background:#7c3aed;border:1.5px solid #7c3aed;color:#fff;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">💲 Fix mispriced saved quotes</button>
+        <!-- ── RETROACTIVE SAVED-QUOTE PRICE FIX BUTTON — END ── -->
         <div id="saved-quotes-wrap"></div>
       </div>
     </div>
@@ -4192,7 +4194,9 @@ function tripMath(type, vehicle, miles, medHours){
               apType:apType, apRt:apRt, rtType:rtType, owType:owType, lcType:lcType,
               legs: apRt?2:1, base:0, overMiles:0, overage:0,
               mileageCharge:0, serviceFee:0, vehUp:0, tripTotal:0 };
-  // Local/one-way/round trip: priced on mileage, not a flat base.
+  // Local/one-way/round trip: priced purely on mileage, not a flat base at all - vehicle base
+  // rates only apply to airport-type rides. If the math works out to $60, the ride is $60; no
+  // minimum tied to any vehicle's base rate.
   if(rtType || owType || lcType){
     const mult = rtType?2:1;
     r.mileageCharge = miles*mult*mileageRate();
@@ -4245,13 +4249,18 @@ function calcQuote() {
   const vehicle2 = isXXL?(document.getElementById('q-vehicle2')?.value||'Sedan'):'';
   const base2    = isXXL?(BASE[vehicle2]||105):0;
   const price2   = isXXL?(parseFloat(document.getElementById('q-price2')?.value)||base2):0;
-  // Sprinter Van: $405 flat for airport, $150/hr for round trips
-  const _sprintAP=BASE['Sprinter Van']||(globalSettings.baseRates&&globalSettings.baseRates['Sprinter Van'])||405;
-  const _sprintHr=globalSettings.sprintHourly||150;
-  const apType  = type==='AP RUN'||type==='AP PICK UP'||type==='AP ROUND TRIP';
-  const base=vehicle==='Sprinter Van'?(apType?_sprintAP:_sprintHr):BASE[vehicle]||0;
   const rtType  = type==='ROUND TRIP';
   const apRtType= type==='AP ROUND TRIP';
+  const apType  = type==='AP RUN'||type==='AP PICK UP'||apRtType;
+  // Called exactly once, here — every number below (base rate, mileage overage, Sprinter Van's
+  // own special-case, the mileage-based formula for One Way/Round Trip/Local, the minimum-fare
+  // floor) comes from this single call. Nothing past this point recomputes any of tripMath()'s
+  // own logic independently anymore, including the AP Round Trip branch just below, which used
+  // to duplicate the Sprinter Van check, the base-rate lookup, AND the overage math a second
+  // time — three separate copies of the same formula that could each drift out of sync on their
+  // own. If this formula is ever wrong again, there is exactly one place to fix it.
+  const tm0 = tripMath(type, vehicle, miles, 0);
+  const base = tm0.base;
 
   // ── Shared surcharge helpers ──
   const waitFee = wait * waitRate();
@@ -4285,17 +4294,21 @@ function calcQuote() {
 
   // ── AP ROUND TRIP — two separate leg breakdowns ──
   if(apRtType){
-    const overMiles = miles > mileageTrigger() ? miles - includedMiles() : 0;
-    const overage   = overMiles * mileageRate();
+    const overMiles = tm0.overMiles;
+    const overage   = tm0.overage;
 
     // Outbound leg (AP Run) — uses the dropoff date/time + surcharges selected
     const leg1Lines = [];
     leg1Lines.push({label:`Base rate (${vehicle}) — incl. ${includedMiles()} mi`, val:base});
     if(miles > 0 && miles <= mileageTrigger()) leg1Lines.push({label:`Mileage (${miles} mi — within radius)`, val:0, note:'No overage'});
     if(overage > 0) leg1Lines.push({label:'Mileage overage', val:overage, note:`(${miles} − ${includedMiles()}) = ${overMiles} mi × $${mileageRate().toFixed(2)}`});
+    // XXL / Double Vehicle applies to BOTH legs, per direct confirmation - each leg is its own
+    // genuine, independently-charged fare, so the 2nd vehicle rides along (and gets charged)
+    // on both, not just one.
+    if(isXXL && price2>0) leg1Lines.push({label:`2nd vehicle (${vehicle2})`, val:price2});
     const surcharges = getSurchargeLines();
     surcharges.forEach(s=>leg1Lines.push(s));
-    const leg1Sub = base + overage + sumLines(surcharges);
+    const leg1Sub = base + overage + (isXXL?price2:0) + sumLines(surcharges);
     const leg1Fuel = addonState.fuel ? leg1Sub*fuelRate() : 0;
     if(leg1Fuel>0) leg1Lines.push({label:fuelLabel(), val:leg1Fuel});
     // Each leg floors to a whole dollar on its OWN - it's now a genuine, independently-charged
@@ -4309,11 +4322,12 @@ function calcQuote() {
     leg2Lines.push({label:`Base rate (${vehicle}) — incl. ${includedMiles()} mi`, val:base});
     if(miles > 0 && miles <= mileageTrigger()) leg2Lines.push({label:`Mileage (${miles} mi — within radius)`, val:0, note:'No overage'});
     if(overage > 0) leg2Lines.push({label:'Mileage overage', val:overage, note:`(${miles} − ${includedMiles()}) = ${overMiles} mi × $${mileageRate().toFixed(2)}`});
+    if(isXXL && price2>0) leg2Lines.push({label:`2nd vehicle (${vehicle2})`, val:price2});
     // Return leg surcharges — now the return leg's OWN manual toggle state (addonStateLeg2),
     // auto-populated from return date/time but independently overridable per surcharge.
     const leg2Surcharges = getSurchargeLinesFor(addonStateLeg2);
     leg2Surcharges.forEach(s=>leg2Lines.push(s));
-    const leg2Sub = base + overage + sumLines(leg2Surcharges);
+    const leg2Sub = base + overage + (isXXL?price2:0) + sumLines(leg2Surcharges);
     const leg2Fuel = addonStateLeg2.fuel ? leg2Sub*fuelRate() : 0;
     if(leg2Fuel>0) leg2Lines.push({label:fuelLabel(), val:leg2Fuel});
     const leg2Total = Math.floor(leg2Sub + leg2Fuel);
@@ -4353,8 +4367,10 @@ function calcQuote() {
   const owType  = type==='ONE WAY';
   const lcType  = type==='LOCAL';
 
-  // Every number below comes from the shared pricing core so Add a Ride can't disagree.
-  const tm = tripMath(type, vehicle, miles, 0);
+  // Every number below comes from the shared pricing core, computed once already (tm0) at the
+  // top of this function, so Add a Ride can't disagree and this can't call tripMath() twice
+  // with the same arguments.
+  const tm = tm0;
   tripTotal = tm.tripTotal;
   if(rtType){
     lines.push(miles>0?{label:'Round trip mileage', val:tm.mileageCharge, note:`${miles} mi × 2 = ${miles*2} mi × $${mileageRate().toFixed(2)}/mi`}:{label:'Round trip mileage', val:0, note:'Enter miles above'});
@@ -4368,6 +4384,16 @@ function calcQuote() {
     lines.push({label:`Base rate (${vehicle}) — includes up to ${includedMiles()} mi`, val:tm.base});
     if(apType && miles > 0 && miles <= mileageTrigger()) lines.push({label:`Mileage (${miles} mi — within free radius)`, val:0, note:'No overage — within '+mileageTrigger()+' mi grace buffer'});
     if(tm.overage > 0) lines.push({label:'Mileage overage', val:tm.overage, note:`(${miles} mi − ${includedMiles()}) = ${tm.overMiles} mi × $${mileageRate().toFixed(2)}/mi`});
+  }
+  // XXL / Double Vehicle: the 2nd vehicle's own charge, folded into the same running total as
+  // everything else - previously computed (price2) but never actually added anywhere, silently
+  // dropping the entire second vehicle's charge from every XXL quote. Combined into tripTotal
+  // (not added separately after surcharges/fuel) so it's treated the same as the rest of the
+  // trip's own charges - subject to the same surcharges and fuel percentage, consistent with
+  // how mileage/service fee/vehicle upcharge above already combine before those apply.
+  if(isXXL && price2>0){
+    lines.push({label:`2nd vehicle (${vehicle2})`, val:price2});
+    tripTotal += price2;
   }
 
   const surcharges = getSurchargeLines();
@@ -5519,15 +5545,24 @@ function setActiveTog(btn){
 // client who hasn't had this new field populated yet (an older saved quote, or before
 // maybeAutofillClient() has run). Only ever moves autofilled/empty values, never a manual entry.
 function _qPlaceHomeAddress(t){
-  if(!(t==='AP RUN'||t==='AP PICK UP'||t==='AP ROUND TRIP')) return;
+  var _isAirport = (t==='AP RUN'||t==='AP PICK UP'||t==='AP ROUND TRIP');
+  var _isPlain = (t==='ONE WAY'||t==='ROUND TRIP'||t==='LOCAL');
+  if(!_isAirport && !_isPlain) return;
   var _ck=((document.getElementById('q-client')||{}).value||'').trim().toLowerCase();
   var _homeFieldVal=(document.getElementById('q-home-address')||{}).value||'';
   var _home=_homeFieldVal.trim() || (_ck ? (getClientDefaultAddress(_ck)||((buildClientDB(clientLookupScope())[_ck]||{}).address)||'') : '');
   if(!_home) return;
-  var homeField=(t==='AP PICK UP')?'q-dropoff':'q-pickup';
-  var otherField=(t==='AP PICK UP')?'q-pickup':'q-dropoff';
-  var oel=document.getElementById(otherField);
-  if(oel && oel.value===_home){ oel.value=''; if(typeof _autofilledVals!=='undefined') _autofilledVals[otherField]=''; }
+  // Airport types: the home address goes wherever the airport ISN'T (AP PICK UP has the
+  // airport as the pickup, so home is the dropoff; the other two have it as the dropoff, so
+  // home is the pickup). Plain point-to-point types have no airport leg at all, so there's no
+  // "other end" to protect - home always goes to pickup, the natural expectation (a client is
+  // picked up from their own saved address), leaving dropoff for the user to type per trip.
+  var homeField = _isAirport ? ((t==='AP PICK UP')?'q-dropoff':'q-pickup') : 'q-pickup';
+  var otherField = _isAirport ? ((t==='AP PICK UP')?'q-pickup':'q-dropoff') : null;
+  if(otherField){
+    var oel=document.getElementById(otherField);
+    if(oel && oel.value===_home){ oel.value=''; if(typeof _autofilledVals!=='undefined') _autofilledVals[otherField]=''; }
+  }
   var hel=document.getElementById(homeField);
   if(hel && (hel.value==='' || hel.value===(_autofilledVals&&_autofilledVals[homeField]) || hel.value===_home)){
     hel.value=_home; if(typeof _autofilledVals!=='undefined') _autofilledVals[homeField]=_home;
@@ -11493,7 +11528,25 @@ function buildRideBreakdown(r){
   const isRT = /ROUND TRIP/i.test(r.type||'') || !!r.rt;
   const legs = isRT ? 2 : 1;
 
-  if(base>0) lines.push({label:'Base rate ('+vehicle+', incl. '+includedMiles()+' mi)'+(legs>1?' \u00d7'+legs:''), val: base*legs});
+  // Non-airport types (One Way / Round Trip / Local) are priced on mileage, not a flat base -
+  // calling tripMath() directly here (the same shared pricing core calcQuote() already uses)
+  // rather than duplicating that formula a second time in this file, which is exactly how it
+  // drifted out of sync before: isRT's own regex matches "ROUND TRIP" AND "AP ROUND TRIP" (both
+  // contain that substring), but the old Base Rate line below pushed unconditionally regardless
+  // of isAP - so a plain Round Trip was silently priced with the flat airport formula (ignoring
+  // mileage entirely) instead of the correct one, with no safety net on an unsaved quote.
+  if(!isAP && (r.type==='ONE WAY'||r.type==='ROUND TRIP'||r.type==='LOCAL')){
+    const miles = parseFloat(r.miles||0)||0;
+    const tm = tripMath(r.type, vehicle, miles, 0);
+    const mult = isRT?2:1;
+    lines.push(miles>0
+      ? {label:(isRT?'Round trip mileage':'Mileage'), val:tm.mileageCharge, note:`${miles} mi${isRT?' × 2 = '+(miles*2)+' mi':''} × $${mileageRate().toFixed(2)}/mi`}
+      : {label:(isRT?'Round trip mileage':'Mileage'), val:0});
+    lines.push({label:'Pickup/Drop-off fee', val:tm.serviceFee});
+    if(tm.vehUp>0) lines.push({label:`Vehicle upcharge (${vehicle})`, val:tm.vehUp});
+  } else if(base>0){
+    lines.push({label:'Base rate ('+vehicle+', incl. '+includedMiles()+' mi)'+(legs>1?' \u00d7'+legs:''), val: base*legs});
+  }
 
   // Mileage overage (AP rides charge over the included miles, once past the 2-mile grace)
   const miles = parseFloat(r.miles||0)||0;
@@ -20783,6 +20836,80 @@ function computeExpectedPrice(ride){
   return Math.floor(sub);   // fare rounds DOWN
 }
 
+// ── RETROACTIVE SAVED-QUOTE PRICE FIX — START (see matching END marker below) ──
+// Direct request, immediately after the v1049 fix: go back through savedQuotes and correct any
+// that were priced with the old, buggy airport-style formula for a plain One Way/Round Trip/
+// Local. Reuses computeExpectedPrice() (already correct - it was fixed earlier for the exact
+// same class of bug) rather than a fourth copy of this math.
+//
+// Deliberately, honestly scoped: _gatherQuoteRide() never saved whether a quote was an XXL
+// (Double Vehicle) booking or what the 2nd vehicle's own rate was - that data was never
+// persisted on the quote object at all, for quotes saved either before or after the XXL fix.
+// There is no way to recompute what a 2nd vehicle charge should be without knowing it was ever
+// there, so any quote whose stored price looks larger than a single-vehicle recompute would
+// ever produce (a plausible XXL signature) is explicitly skipped rather than silently
+// "corrected" down to a wrong, smaller number.
+function _findMispricedSavedQuotes(){
+  const mismatches = [];
+  (savedQuotes||[]).forEach(function(q, idx){
+    if(!q || !q.type || !q.vehicle) return;
+    const stored = parseFloat(q.price)||0;
+    if(stored<=0) return;
+    const expected = computeExpectedPrice(q);
+    const diff = Math.round((stored-expected)*100)/100;
+    if(Math.abs(diff)<1) return; // within a dollar - not the bug this tool targets
+    // A stored price well above the recomputed single-vehicle expectation could be a real,
+    // never-recorded XXL booking - skip it rather than guess, per the limitation above.
+    if(stored > expected*1.4) return;
+    mismatches.push({ idx: idx, quote: q, stored: stored, expected: expected, diff: diff });
+  });
+  return mismatches;
+}
+async function _applySavedQuotePriceFixes(indices){
+  var fixed = 0;
+  indices.forEach(function(idx){
+    var q = savedQuotes[idx]; if(!q) return;
+    var expected = computeExpectedPrice(q);
+    q.price = expected;
+    fixed++;
+  });
+  if(fixed>0) await saveSavedQuotes();
+  return fixed;
+}
+async function _showSavedQuotePriceReviewModal(){
+  if(!currentUser || (currentUser.name!=='Chase' && currentUser.name!=='Morgan')){ showToast('Chase or Morgan only','error'); return; }
+  const mismatches = _findMispricedSavedQuotes();
+  var back=document.createElement('div'); back.id='quote-price-review-back';
+  back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13600;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  const rowsHtml = mismatches.length ? mismatches.map(function(m){
+    const q=m.quote;
+    return '<label style="display:flex;align-items:flex-start;gap:.5rem;padding:.5rem;border-bottom:1px solid var(--light);cursor:pointer;">'
+      + '<input type="checkbox" class="quote-price-check" value="'+m.idx+'" checked style="margin-top:.2rem;accent-color:#7c3aed;">'
+      + '<div style="flex:1;min-width:0;">'
+      + '<div style="font-size:.85rem;font-weight:700;color:var(--black);">'+escHtml(q.client||'(no client name)')+'</div>'
+      + '<div style="font-size:.72rem;color:var(--mid);">'+escHtml(q.type||'')+' \u00b7 '+escHtml(q.vehicle||'')+' \u00b7 '+(q.miles||0)+' mi</div>'
+      + '<div style="font-size:.78rem;margin-top:.2rem;"><span style="color:#b03a2e;text-decoration:line-through;">$'+m.stored.toFixed(2)+'</span> <span style="color:var(--mid);">\u2192</span> <span style="color:#15803d;font-weight:700;">$'+m.expected.toFixed(2)+'</span></div>'
+      + '</div></label>';
+  }).join('') : '<div style="padding:1rem;text-align:center;color:var(--mid);font-size:.85rem;">No mispriced saved quotes found.</div>';
+  back.innerHTML='<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;padding:1.25rem;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
+    +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\uD83D\uDCB2 Fix mispriced saved quotes</div>'
+    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.7rem;line-height:1.45;">Rechecks every saved quote for the airport-style pricing bug (One Way/Round Trip/Local priced as a flat base instead of by mileage). Any quote whose saved price looks like it may have included a Double Vehicle (XXL) charge is skipped \u2014 that was never recorded on saved quotes, so it can\u2019t be safely recomputed here.</div>'
+    +'<div style="flex:1;overflow-y:auto;margin-bottom:.7rem;">'+rowsHtml+'</div>'
+    +(mismatches.length ? '<button type="button" onclick="_applyQuotePriceReview()" style="width:100%;padding:.6rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.85rem;margin-bottom:.5rem;">Fix checked quotes</button>' : '')
+    +'<button onclick="var b=document.getElementById(\'quote-price-review-back\');if(b)b.remove();" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">Close</button>'
+    +'</div>';
+  document.body.appendChild(back);
+}
+async function _applyQuotePriceReview(){
+  const checked = Array.from(document.querySelectorAll('.quote-price-check:checked')).map(function(c){ return parseInt(c.value); });
+  if(!checked.length){ showToast('Nothing checked','error'); return; }
+  const fixed = await _applySavedQuotePriceFixes(checked);
+  showToast('\u2713 Fixed '+fixed+' saved quote'+(fixed===1?'':'s'));
+  const back=document.getElementById('quote-price-review-back'); if(back) back.remove();
+  _showSavedQuotePriceReviewModal();
+}
+// ── RETROACTIVE SAVED-QUOTE PRICE FIX — END ──
+
 async function toggleGlobalFuel(){
   if(typeof isAdmin==='function' && !isAdmin()){ showToast('Only admins can change pricing','error'); return; }
   var _next = globalSettings.fuelEnabled === false ? true : false;
@@ -29794,6 +29921,8 @@ function enterApp(){
   // Kat and Morgan). Deliberate: this deletes data immediately with no approval and no undo,
   // scoped tighter than the rest of the admin surface on purpose.
   if(fwReviewBtn) fwReviewBtn.style.display = (currentUser && currentUser.name==='Chase' && typeof _findSuspiciousFamilyWallRides==='function' && typeof _findDuplicateFamilyWallGroups==='function' && (_findSuspiciousFamilyWallRides().length>0 || _findDuplicateFamilyWallGroups().length>0)) ? 'inline-block' : 'none';
+  const quotePriceReviewBtn = document.getElementById('quote-price-review-btn');
+  if(quotePriceReviewBtn) quotePriceReviewBtn.style.display = (currentUser && (currentUser.name==='Chase' || currentUser.name==='Morgan') && typeof _findMispricedSavedQuotes==='function' && _findMispricedSavedQuotes().length>0) ? 'inline-block' : 'none';
   const archivedTab2=document.getElementById('mptab-archived'); if(archivedTab2) archivedTab2.style.display=admin?'inline-block':'none';
   const pricingTab2=document.getElementById('mptab-pricing'); if(pricingTab2) pricingTab2.style.display=admin?'inline-block':'none';
   const templatesTab=document.getElementById('mptab-templates');
