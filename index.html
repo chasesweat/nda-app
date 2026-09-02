@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191054">
+<meta name="version" content="202608191055">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -20812,29 +20812,51 @@ function computeExpectedPrice(ride){
   const xstop=parseInt(ride.xstop)||0;
   const wait=parseFloat(ride.wait)||0;
   const WAIT=waitRate();
-  const dateStr=ride.date||'';
-  const timeStr=ride.time||'';
-  const [th=0,tm=0]=(timeStr||'').split(':').map(Number);
-  const mins=th*60+tm;
-  const dt=dateStr?new Date(dateStr+'T12:00:00'):null;
-  const dow=dt?dt.getDay():-1;
-  const mmdd=dateStr.slice(5);
-  const isChristmas=isChristmasDate(mmdd);
-  const isHoliday=!isChristmas&&isHolidayDate(mmdd);
-  const isPremium=isPremiumTime(mins);
-  const isTraffic=dow>=0&&isTrafficTime(dow,mins);
+  // One leg's own surcharge total, from its own date/time (auto-detectable surcharges) and its
+  // own correctly-prefixed manual flags ('late', any custom surcharge) - never assumes the
+  // OTHER leg's surcharges apply here too. prefix is '' for a single-leg ride or AP Round
+  // Trip's outbound leg, 'rt_' for its return leg - matching exactly how _gatherQuoteRide()
+  // saves each leg's own flags.
+  function legSurcharge(dateStr, timeStr, flags, prefix){
+    const [th=0,tm=0]=(timeStr||'').split(':').map(Number);
+    const mins=th*60+tm;
+    const dt=dateStr?new Date(dateStr+'T12:00:00'):null;
+    const dow=dt?dt.getDay():-1;
+    const mmdd=(dateStr||'').slice(5);
+    const isChristmas=isChristmasDate(mmdd);
+    const isHoliday=!isChristmas&&isHolidayDate(mmdd);
+    const isPremium=isPremiumTime(mins);
+    const isTraffic=dow>=0&&isTrafficTime(dow,mins);
+    let s=0;
+    if(isPremium) s+=surcharge('premium');
+    if(isHoliday) s+=surcharge('holiday');
+    if(isChristmas) s+=surcharge('christmas');
+    if(flags[prefix+'late']==='Y') s+=surcharge('late');
+    if(isTraffic) s+=surcharge('traffic');
+    customSurchargeList().forEach(function(c){ if(flags[prefix+c.key]==='Y') s+=surcharge(c.key); });
+    return s;
+  }
   // Same pricing core as the Quote form / Add a Ride / receipts — this used to have its own
   // copy of the fare formula that only ever handled the airport flat-base case, so a $170
   // Round Trip was scored as if it should have cost $105 (the Sedan base rate). Any ride
   // type priced on mileage or by the hour was silently wrong in this report.
   const tm2=tripMath(ride.type, vehicle, miles, parseFloat(ride.medHours)||0);
-  let sub=tm2.tripTotal*(tm2.legs||1);
-  if(isPremium) sub+=surcharge('premium')*(tm2.legs||1);
-  if(isHoliday) sub+=surcharge('holiday')*(tm2.legs||1);
-  if(isChristmas) sub+=surcharge('christmas')*(tm2.legs||1);
-  if(ride.late==='Y') sub+=surcharge('late')*(tm2.legs||1);
-  if(isTraffic) sub+=surcharge('traffic')*(tm2.legs||1);
-  customSurchargeList().forEach(function(c){ if(ride[c.key]==='Y') sub+=surcharge(c.key)*(tm2.legs||1); });
+
+  if(ride.type==='AP ROUND TRIP'){
+    // Two genuinely separate legs, each independently surcharged, independently fueled, and
+    // independently floored - matching calcQuote()'s real AP Round Trip branch exactly, since
+    // that's the actual source of truth for what a client was charged.
+    const leg1Sub = tm2.tripTotal + legSurcharge(ride.date, ride.time, ride, '');
+    const leg1Total = ride.fuel==='Y' ? leg1Sub*(1+fuelRate()) : leg1Sub;
+    const leg2Sub = tm2.tripTotal + legSurcharge(ride.rtDateAP, ride.rtTime, ride, 'rt_');
+    const leg2Total = ride.rt_fuel==='Y' ? leg2Sub*(1+fuelRate()) : leg2Sub;
+    let sub = Math.floor(leg1Total) + Math.floor(leg2Total);
+    if(xstop>0) sub+=xstop*extraStopFee();
+    if(wait>0) sub+=wait*WAIT;
+    return Math.floor(sub);
+  }
+
+  let sub=tm2.tripTotal + legSurcharge(ride.date, ride.time, ride, '');
   if(xstop>0) sub+=xstop*extraStopFee();
   if(wait>0) sub+=wait*WAIT;
   if(ride.fuel==='Y') sub=sub*(1+fuelRate());
