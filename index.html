@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191082">
+<meta name="version" content="202608191085">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1950,6 +1950,13 @@ function _isValidLogoDataUri(s){
   if(!/^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,/i.test(s)) return false;
   return s.length > 100; // a genuinely tiny/truncated base64 payload can't be a real logo
 }
+// The real, visible top-bar logo to fall back to when a driver's own logo is missing or
+// invalid. Scoped to .topbar-logo specifically, not just alt="NWDA Logo" - the page has a
+// second, hidden element sharing that same alt text, and matching it silently broke this
+// fallback for every driver until v1058 traced and fixed it. Was three separate, identical
+// copies of this expression; consolidated so the fix can't need re-applying if the selector
+// ever changes again.
+function _appLogo(){ return (document.querySelector('.topbar-logo img')||{}).src || ''; }
 
 // Reported: closing a modal (e.g. Add Ride via Cancel) and reopening it later showed it
 // scrolled to wherever it was left, instead of starting at the top. Root cause: .modal has
@@ -6607,7 +6614,7 @@ function buildQuoteHTML(q, cmp, logoOverride){
   // quirk), not a blank string - meaning "fallback to the app logo" had actually never worked
   // at all, for any driver, whenever their own logo was missing or invalid. Scoped to .topbar-logo
   // specifically so this can never again match the wrong element sharing the same alt text.
-  const appLogo = (document.querySelector('.topbar-logo img')||{}).src || '';
+  const appLogo = _appLogo(); // was a separate, identical inline copy of this exact expression
   const _rawDriverLogo = logoOverride ? (logoOverride.logo||'') : (_ownerProf.logo||'');
   const shownLogo = _isValidLogoDataUri(_rawDriverLogo) ? _rawDriverLogo : appLogo;
   // The static check above catches an obviously empty/malformed value, but can't guarantee
@@ -10020,107 +10027,7 @@ async function textClient(id, opts){
     }
   }
 
-  const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
-  const sep=isIOS?'&':'?';
-  const smsURL='sms:'+nums.join(',')+sep+'body='+encodeURIComponent(_fullMsg);
-  const cardFile=files.find(function(f){ return f.type==='image/png'; });
-
-  // Copy the driver card image to the clipboard FIRST, so it is always available to
-  // paste into Messages — even if the OS share sheet drops the image (which can happen
-  // when a contact card is shared alongside it).
-  let _cardCopied=false;
-  if(cardFile && window.ClipboardItem && navigator.clipboard && navigator.clipboard.write){
-    try{ await navigator.clipboard.write([new ClipboardItem({'image/png':cardFile})]); _cardCopied=true; }catch(e){ console.warn('clipboard write failed',e); }
-  }
-
-
-  // BUG FIX - reported repeatedly: "driver cards still aren't going out."
-  //
-  // The single-file design above is deliberate and stays: pre-addressed thread, card on the
-  // clipboard, driver long-presses to paste. But it rests ENTIRELY on the clipboard write
-  // above having succeeded, and that write is genuinely fragile - navigator.clipboard.write
-  // needs a focused document and, on several browsers, still-live user activation. By the time
-  // it runs, sendAllConf() has already awaited the card build, the selfie build, the combine,
-  // and sometimes an entire vCard share. That is the same gesture-expiry class of bug this app
-  // has already been bitten by twice in the Venmo handoffs.
-  //
-  // When that write fails it is caught and logged, _cardCopied stays false - and then the code
-  // opens an sms: URL, which CANNOT carry an attachment under any circumstance. The text goes,
-  // the card silently does not, and nothing on screen says so. v968's honesty fix does not
-  // catch this either: the card built perfectly well, _wantsCard is true, it simply never
-  // reached anyone. Note _sendTextWithFiles() below never had this problem - it shares on ANY
-  // file count; only this function gates on more-than-one.
-  //
-  // So: if there is a card to send and it is NOT on the clipboard, the paste route is a dead
-  // end. Use the share sheet, which attaches a single file perfectly well. That costs the
-  // pre-addressed recipient - the exact tradeoff weighed above - but only in the case where the
-  // alternative is the card not arriving at all.
-  // REGRESSION FIX, dated from evidence. A screenshot of a real send on Aug 15 shows the driver
-  // card and day-of selfie ARRIVING AUTOMATICALLY, attached, with no paste step. v939 (Aug 22)
-  // then combined those two images into one file. Before that change there were 2 files, so
-  // _multiFile was true and the send went through the share sheet, which genuinely attaches
-  // images. After it there was 1 file, so it fell to the copy-to-clipboard + sms: route - and
-  // sms: cannot carry an attachment at all, leaving the driver to paste it by hand, or leaving
-  // the image behind entirely whenever the clipboard write quietly failed.
-  //
-  // So the auto-attach wasn't lost to a deliberate decision - v939 was about collapsing "Send
-  // everything" to one path, and this was unintended fallout of going from two files to one.
-  // Chase confirmed directly that it used to bundle and attach automatically and that he never
-  // asked for that to change.
-  //
-  // Fix: whenever there is ANY file to send and the share sheet is available, use it. That is
-  // exactly what the pre-v939 behaviour did, and what _sendTextWithFiles() below has always
-  // done (it gates on files.length, never on more-than-one). The cost is picking the recipient
-  // in the share sheet - which is what was already happening on Aug 15, when this worked.
-  // Attachments that actually arrive beat a pre-addressed thread that silently drops them.
-  const _useShareSheet = files.length > 0;
-
-  // ── iOS: single navigator.share call — image + vCard + text all land in iMessage ──
-  if(isIOS && navigator.canShare && _useShareSheet){
-    const shareData={files:files, text:_fullMsg};
-    try{
-      if(navigator.canShare(shareData)){
-        await navigator.share(shareData);
-        if(_cardCopied) setTimeout(function(){ showToast('\uD83D\uDDBC\uFE0F '+_copiedImageLabel(cardFile)+' also copied \u2014 long-press to paste it if it is missing'); },900);
-        return true;
-      }
-    }catch(e){
-      // Same real bug as sendArrivalText() had, same fix: every exit point now reports what
-      // actually happened instead of returning undefined either way, so sendAllConf() (the
-      // caller) can tell a genuine cancel/failure apart from a real send before marking a ride
-      // confirmed. A user-cancelled share sheet is a real "nothing sent," not a success.
-      if(e.name==='AbortError') return false;
-      console.warn('iOS share failed',e);
-    }
-  }
-
-  // ── Android: navigator.share handles image + vCard together via share sheet ──
-  // Falls back to clipboard+SMS if share isn't available
-  if(!isIOS && navigator.canShare && _useShareSheet){
-    const shareData={files:files, text:_fullMsg};
-    try{
-      if(navigator.canShare(shareData)){
-        await navigator.share(shareData);
-        if(_cardCopied) setTimeout(function(){ showToast('\uD83D\uDDBC\uFE0F '+_copiedImageLabel(cardFile)+' also copied \u2014 long-press to paste it if it is missing'); },900);
-        return true;
-      }
-    }catch(e){
-      if(e.name==='AbortError') return false;
-      console.warn('Android share failed, trying clipboard fallback',e);
-    }
-  }
-
-  // ── Fallback: the card image is already on the clipboard (copied up front); just
-  // open the pre-addressed SMS thread so the sender can paste it and send. ──
-  const toasts=[];
-  if(_cardCopied) toasts.push('\uD83D\uDDBC\uFE0F '+_copiedImageLabel(cardFile)+' copied \u2014 long-press to paste in Messages');
-  // Reaching here WITH a card but WITHOUT it on the clipboard means the share sheet was
-  // unavailable too - the image genuinely cannot travel with this message. Say so, rather
-  // than opening a text-only thread and letting the summary imply the card went.
-  else if(cardFile) toasts.push('\u26a0\ufe0f Driver card couldn\u2019t be attached \u2014 send it separately from the ride');
-  window.location.href=smsURL;
-  if(toasts.length) setTimeout(function(){ showToast(toasts.join(' \u00b7 ')); },800);
-  return true;
+  return await _sendTextWithFiles(nums, _fullMsg, files);
 }
 
 function closeDayModal(){document.getElementById('day-modal').classList.remove('show');}
@@ -10130,13 +10037,16 @@ function closeDayModal(){document.getElementById('day-modal').classList.remove('
 // silent in-app push, addNotification) hears about it — the client, and whoever owns that
 // client (Kat/Morgan), find out only if someone remembers to tell them by hand.
 //
-// Text-sending mechanism duplicated from textClient just above rather than refactored into a
-// shared helper: textClient is existing, working, tested code, and this session has a real
-// track record of edits introducing regressions in code that "obviously" wasn't touched.
-// Refactoring a working function to serve a brand-new caller is exactly the kind of change
-// that's cheap to get subtly wrong and expensive to notice — the duplication costs a few dozen
-// lines; a regression in client confirmation texts costs a lot more. Same iOS/Android/
-// clipboard-fallback shape, kept independent on purpose.
+// _sendTextWithFiles() below was originally built as its own, separate copy of textClient()'s
+// send logic rather than textClient() being refactored to call a shared helper: textClient was
+// "existing, working, tested code" at the time, and this session had a real track record of
+// edits introducing regressions in code that "obviously" wasn't touched - refactoring a working
+// function to serve a brand-new caller seemed like exactly the kind of change that's cheap to
+// get subtly wrong. That reasoning no longer applies: v1084's duplication scan did exactly this
+// refactor, verified it carefully (correct arguments, correct return value, the one behavior
+// difference between the two ported over first), and textClient() now calls this same function
+// directly. Both this feature's three send points below and textClient() share one
+// implementation now, not two.
 // The clipboard paste-fallback grabs whatever image is being sent so it can be pasted if the
 // OS share sheet drops attachments. Picking the first PNG is correct for that purpose - but the
 // toast used to call it "Driver card" unconditionally, which is wrong whenever the image is
@@ -10180,6 +10090,12 @@ async function _sendTextWithFiles(nums, message, files){
 
   const toasts=[];
   if(_cardCopied) toasts.push('\uD83D\uDDBC\uFE0F '+_copiedImageLabel(cardFile)+' copied \u2014 long-press to paste in Messages');
+  // Reaching here WITH a card but WITHOUT it on the clipboard means the share sheet was
+  // unavailable too - the image genuinely cannot travel with this message. Say so, rather
+  // than opening a text-only thread and letting the summary imply the card went. Found while
+  // consolidating this with textClient()'s own, separate copy - textClient already had this
+  // case, this shared helper didn't, so every caller gets it now rather than just one.
+  else if(cardFile) toasts.push('\u26a0\ufe0f Driver card couldn\u2019t be attached \u2014 send it separately from the ride');
   window.location.href=smsURL;
   if(toasts.length) setTimeout(function(){ showToast(toasts.join(' \u00b7 ')); },800);
   return true;
@@ -11819,7 +11735,7 @@ function buildReceiptHTML(r, logoOverride){
   // quirk), not a blank string - meaning "fallback to the app logo" had actually never worked
   // at all, for any driver, whenever their own logo was missing or invalid. Scoped to .topbar-logo
   // specifically so this can never again match the wrong element sharing the same alt text.
-  const appLogo = (document.querySelector('.topbar-logo img')||{}).src || '';
+  const appLogo = _appLogo(); // was a separate, identical inline copy of this exact expression
   const shownLogo = _isValidLogoDataUri(logo) ? logo : appLogo;
   const logoHtml = shownLogo
     ? '<img src="'+shownLogo+'" alt="logo" onerror="this.onerror=null;this.src=\''+appLogo+'\';" style="max-height:70px;max-width:180px;object-fit:contain;margin-bottom:10px;">'
@@ -11979,7 +11895,7 @@ function buildDispatchInvoiceHTML(start, end){
   // quirk), not a blank string - meaning "fallback to the app logo" had actually never worked
   // at all, for any driver, whenever their own logo was missing or invalid. Scoped to .topbar-logo
   // specifically so this can never again match the wrong element sharing the same alt text.
-  const appLogo = (document.querySelector('.topbar-logo img')||{}).src || '';
+  const appLogo = _appLogo(); // was a separate, identical inline copy of this exact expression
   const shownLogo = _isValidLogoDataUri(logo) ? logo : appLogo;
   const logoHtml = shownLogo
     ? '<img src="'+shownLogo+'" alt="logo" onerror="this.onerror=null;this.src=\''+appLogo+'\';" style="max-height:70px;max-width:180px;object-fit:contain;margin-bottom:10px;">'
