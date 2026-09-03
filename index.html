@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191092">
+<meta name="version" content="202608191094">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -22818,7 +22818,9 @@ function renderBusinessLogoManager(){
   const box = document.getElementById('business-logo-manager');
   if(!box) return;
   if(!(currentUser && currentUser.role==='admin')){ box.innerHTML=''; return; }
-  const rows = driversForDisplay().map(function(d){
+  const drivers = driversForDisplay();
+  const withLogo = drivers.filter(function(d){ return (DRIVER_PROFILES[d]||{}).logo; }).length;
+  const rows = drivers.map(function(d){
     const prof = DRIVER_PROFILES[d]||{};
     const dk = d.replace(/ /g,'_');
     const preview = prof.logo
@@ -22830,13 +22832,22 @@ function renderBusinessLogoManager(){
       + '<div style="font-size:.85rem;font-weight:700;color:var(--black);">'+escHtml(d)+'</div>'
       + '<div style="font-size:.7rem;color:var(--mid);">'+(prof.logo?'Logo set':'No logo uploaded yet')+(prof.businessName?' \u00b7 '+escHtml(prof.businessName):'')+'</div>'
       + '</div>'
+      + (prof.logo ? '<button type="button" onclick="_openMoveLogoPicker(\''+d+'\')" style="padding:.45rem .7rem;border-radius:8px;border:1.5px solid var(--light);background:none;color:var(--black);font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.76rem;cursor:pointer;white-space:nowrap;">Move</button>' : '')
       + '<button type="button" onclick="openBusinessLogoUpload(\''+d+'\')" style="padding:.45rem .8rem;border-radius:8px;border:1.5px solid var(--accent);background:none;color:var(--accent);font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.76rem;cursor:pointer;white-space:nowrap;">'+(prof.logo?'Change':'Upload')+'</button>'
       + '</div>';
   }).join('');
   box.innerHTML = '<div style="border:1px solid var(--light);border-radius:10px;padding:.85rem;margin-bottom:1rem;background:var(--surface);">'
-    + '<div style="font-size:.8rem;font-weight:700;color:var(--black);margin-bottom:.25rem;">\uD83C\uDFE2 Business logos</div>'
-    + '<div style="font-size:.72rem;color:var(--mid);line-height:1.5;margin-bottom:.7rem;">Upload a business logo for any driver here, not just your own. Whichever logo a quote or receipt should show gets asked at send time whenever there\u2019s a real choice between two.</div>'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem;">'
+    + '<div>'
+    + '<div style="font-size:.8rem;font-weight:700;color:var(--black);">\uD83C\uDFE2 Business logos</div>'
+    + '<div style="font-size:.72rem;color:var(--mid);margin-top:.15rem;">'+withLogo+' of '+drivers.length+' drivers have a logo set.</div>'
+    + '</div>'
+    + '<button type="button" onclick="var b=document.getElementById(\'business-logo-rows\'); var open=b.style.display!==\'none\'; b.style.display=open?\'none\':\'block\'; this.textContent=open?\'Manage\':\'Hide\';" style="padding:.4rem .8rem;border-radius:8px;border:1.5px solid var(--light);background:none;color:var(--black);font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.76rem;cursor:pointer;white-space:nowrap;">Manage</button>'
+    + '</div>'
+    + '<div id="business-logo-rows" style="display:none;margin-top:.7rem;">'
+    + '<div style="font-size:.72rem;color:var(--mid);line-height:1.5;margin-bottom:.4rem;">Upload a business logo for any driver here, not just your own. Whichever logo a quote or receipt should show gets asked at send time whenever there\u2019s a real choice between two \u2014 each side of that choice needs its own logo uploaded under its own name below, not both under one.</div>'
     + rows
+    + '</div>'
     + '</div>';
 }
 // Direct request: moved here from a calendar-toolbar button, a more natural home for an admin
@@ -27629,6 +27640,46 @@ function openBusinessLogoUpload(driverName){
       showToast('\u2713 Business logo saved');
     }catch(err){ console.warn('logo save failed', err); showToast('Could not save logo','error'); }
   }});
+}
+// Direct report: a logo uploaded for one driver (Kat) ended up saved under a different one
+// (Morgan) instead - an easy mistake, since the self-service upload path only ever targets
+// whoever's currently logged in, with no way to say "this is actually for someone else." Moves
+// the logo, business name, and accent color together as one unit to the target driver, clearing
+// them from the source rather than leaving a duplicate copy sitting there too, so a mistake like
+// this can be corrected without needing the original image file again.
+async function moveBusinessLogo(fromDriver, toDriver){
+  if(!fromDriver || !toDriver || fromDriver===toDriver) return;
+  const src = DRIVER_PROFILES[fromDriver]||{};
+  if(!src.logo){ showToast('No logo to move for '+fromDriver.split(' ')[0],'error'); return; }
+  if(!DRIVER_PROFILES[toDriver]) DRIVER_PROFILES[toDriver]={};
+  DRIVER_PROFILES[toDriver].logo = src.logo;
+  if(src.businessName) DRIVER_PROFILES[toDriver].businessName = src.businessName;
+  if(src.logoAccentColor) DRIVER_PROFILES[toDriver].logoAccentColor = src.logoAccentColor;
+  delete DRIVER_PROFILES[fromDriver].logo;
+  delete DRIVER_PROFILES[fromDriver].businessName;
+  delete DRIVER_PROFILES[fromDriver].logoAccentColor;
+  try{
+    await storageSetOne('kat:driverProfiles', toDriver, DRIVER_PROFILES[toDriver], DRIVER_PROFILES);
+    await storageSetOne('kat:driverProfiles', fromDriver, DRIVER_PROFILES[fromDriver], DRIVER_PROFILES);
+    if(typeof renderBusinessLogoManager==='function') renderBusinessLogoManager();
+    showToast('\u2713 Logo moved to '+toDriver.split(' ')[0]);
+  }catch(err){ console.warn('logo move failed', err); showToast('Could not move logo','error'); }
+}
+function _openMoveLogoPicker(fromDriver){
+  const others = driversForDisplay().filter(function(d){ return d!==fromDriver; });
+  const ov=document.createElement('div'); ov.id='move-logo-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:16700;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  const options = others.map(function(d){ return '<option value="'+escHtml(d)+'">'+escHtml(d)+'</option>'; }).join('');
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:360px;width:100%;padding:1.3rem;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
+    +'<div style="font-size:.95rem;font-weight:800;color:#0f172a;margin-bottom:.3rem;">Move this logo to...</div>'
+    +'<div style="font-size:.76rem;color:var(--mid);margin-bottom:.8rem;">Moves the logo (and business name, if set) off '+escHtml(fromDriver)+' and onto whoever it actually belongs to.</div>'
+    +'<select id="move-logo-target" style="width:100%;padding:.55rem;border-radius:8px;border:1px solid var(--light);font-size:.85rem;margin-bottom:.9rem;">'+options+'</select>'
+    +'<div style="display:flex;gap:.5rem;">'
+    +'<button onclick="document.getElementById(\'move-logo-overlay\').remove()" style="flex:1;padding:.6rem;background:var(--light);color:var(--black);border:none;border-radius:8px;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;">Cancel</button>'
+    +'<button onclick="moveBusinessLogo(\''+fromDriver+'\', document.getElementById(\'move-logo-target\').value); document.getElementById(\'move-logo-overlay\').remove();" style="flex:1;padding:.6rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;">Move</button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
 }
 
 function openDriverSelfieUpload(driverName){
