@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191091">
+<meta name="version" content="202608191092">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -3150,8 +3150,29 @@ async function initApp() {
   }catch(e){ console.warn('instant-paint skipped:', e); }
 
   // Cold path: first-ever open / no valid snapshot -> normal blocking load.
-  await fbReady;
-  await _loadAppData();
+  // Bounded rather than an unguarded await - see the comment just above this function's
+  // closing brace for the full reasoning. A hung Firebase auth/read here used to mean the
+  // loading screen never went away, with no error and no way out short of a reinstall.
+  const _coldLoad = Promise.resolve(fbReady).then(function(){ return _loadAppData(); });
+  try{
+    const _coldTimedOut = await Promise.race([
+      _coldLoad.then(function(){ return false; }),
+      new Promise(function(r){ setTimeout(function(){ r(true); }, 15000); })
+    ]);
+    if(_coldTimedOut){
+      try{ _logCrash('cold-load-timeout', 'Initial app load exceeded 15s - revealing with whatever data is available', ''); }catch(e){}
+      // The load itself isn't cancelled by losing the race - if it eventually succeeds anyway
+      // (just slow, not truly hung), make sure that data actually reaches the screen rather
+      // than sitting loaded-but-unrendered for the rest of the session.
+      _coldLoad.then(function(){
+        try{ if(currentUser && typeof _cacheRerenderAfterRefresh==='function') _cacheRerenderAfterRefresh(); }catch(e){}
+        try{ _cacheSnapshotWrite(); }catch(e){}
+      }).catch(function(){});
+    }
+  }catch(e){
+    console.warn('cold load failed, revealing app anyway:', e);
+    try{ _logCrash('cold-load-error', (e && e.message) || String(e), e && e.stack); }catch(e2){}
+  }
   window._dataFresh = true;
   _revealAfterLoad();
   try{ _cacheSnapshotWrite(); }catch(e){}
