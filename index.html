@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191078">
+<meta name="version" content="202608191082">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -6387,6 +6387,7 @@ async function saveQuote(){
   if(!client){showToast('Please enter a client name','error');return;}
   if(!window._qOwnerResolved && typeof _maybePromptClientOwner==='function' && _maybePromptClientOwner(client,'quote')){ return; }
   window._qOwnerResolved=false;
+  if(!(await _confirmIfPossibleDuplicate('q'))) return;
   if(!(await _confirmIfSameAddress('q'))) return;
   const driverVal=document.getElementById('q-driver').value || defaultRideDriver();
   // _gatherQuoteRide() below already builds this exact same object from these exact same form
@@ -18310,6 +18311,33 @@ function _addrListFor(prefix){ return _clientAddrListByKey(_addrClientKey(prefix
 // airport are never expected to coincide, so equal addresses there would already be a different,
 // more obvious problem). A warning, not a hard block: the rare deliberate case (a driver
 // literally waiting at one spot) still needs a way through.
+// Reported directly: rides sometimes get duplicated - the most likely explanation, given no
+// single code path automatically creates one, is two people independently, manually entering
+// the same trip without realizing the other already had. Rather than only catch this after the
+// fact (the duplicate-review tool), this warns right at the moment of creation, before a
+// duplicate is ever saved. Reuses the exact same client/date/time matching key
+// _findDuplicateRideGroups() already uses, so what counts as a duplicate can never drift
+// between this warning and that tool.
+async function _confirmIfPossibleDuplicate(prefix){
+  var client=((document.getElementById(prefix+'-client')||{}).value||'').trim();
+  var date=(document.getElementById(prefix+'-date')||{}).value||'';
+  var time=(document.getElementById(prefix+'-time')||{}).value||'';
+  if(!client || !date || !time) return true;
+  var key=client.toLowerCase()+'|'+date+'|'+time;
+  var existing=(rides||[]).find(function(r){
+    return r && r.status!=='cancelled' && !r.xxlPair && r.client && r.date && r.time
+      && (r.client.toLowerCase().trim()+'|'+r.date+'|'+r.time)===key;
+  });
+  if(!existing) return true;
+  if(typeof showConfirmModal!=='function') return true;
+  var choice=await showConfirmModal({
+    icon:'\u26A0\uFE0F', iconColor:'#f0997b', iconBg:'#3a1a1a',
+    title:'A ride already exists for this trip',
+    message:'<b>'+escHtml(client)+'</b> already has a ride scheduled for '+fmtDateShort(date)+' at '+fmtTime12(time)+', created by '+escHtml(existing.createdBy||'someone')+'. Saving this one anyway will create a second, separate ride for the same trip.',
+    buttons:[ {label:'Go back and check', value:'cancel'}, {label:'Save anyway', style:'primary', value:'continue'} ]
+  });
+  return choice==='continue';
+}
 async function _confirmIfSameAddress(prefix){
   var type=(document.getElementById(prefix+'-type')||{}).value||'';
   if(type!=='ONE WAY' && type!=='ROUND TRIP') return true;
@@ -18547,6 +18575,7 @@ async function saveQuickAddRide(){
   errEl.textContent='';
   if(saveBtn){ saveBtn.disabled=true; saveBtn.style.opacity='0.55'; }
   const qaType = document.getElementById('qa-type').value;
+  if(!(await _confirmIfPossibleDuplicate('qa'))){ _reenableBtn(); return; }
   if(!(await _confirmIfSameAddress('qa'))){ _reenableBtn(); return; }
   if(qaType==='AP ROUND TRIP'){
     if(!document.getElementById('qa-leg-run')?.checked||!document.getElementById('qa-leg-pickup')?.checked){
@@ -29923,8 +29952,8 @@ function importPastedICS(){
   const skipKat=!!(skipKatEl&&skipKatEl.checked);
   try {
     const imported = parseAndImportICS(text, cutoff, skipKat);
-    saveRides().then(()=>{ refreshDash(); renderCal(); });
-    setS(`✓ ${imported.added} added, ${imported.skipped} already existed, ${imported.skipped_owner||0} skipped (Morgan${skipKat?' & Kat enter their own':' enters her own'}), ${imported.skipped_date||0} before the cutoff date, ${imported.skipped_nonride||0} non-ride events skipped`);
+    Promise.all([saveRides(), saveClientOwners()]).then(()=>{ refreshDash(); renderCal(); });
+    setS(`✓ ${imported.added} added, ${imported.skipped} already existed, ${imported.skipped_owner||0} skipped (Morgan${skipKat?' & Kat enter their own':' enters her own'}), ${imported.skipped_nocreator||0} skipped (couldn't tell who created them), ${imported.skipped_date||0} before the cutoff date, ${imported.skipped_nonride||0} non-ride events skipped`);
     showToast(`✓ Imported ${imported.added} rides`);
     setTimeout(()=>{ const m=document.getElementById('ics-modal'); if(m) m.classList.remove('show'); }, 1800);
   } catch(e){
@@ -29937,7 +29966,7 @@ function parseAndImportICS(icsText, cutoffDate, skipKat){
   const eventBlocks = icsText.split('BEGIN:VEVENT').slice(1)
     .map(b=>b.split('END:VEVENT')[0]);
 
-  let added=0, skipped=0, skipped_nonride=0, skipped_owner=0, skipped_date=0;
+  let added=0, skipped=0, skipped_nonride=0, skipped_owner=0, skipped_date=0, skipped_nocreator=0;
   const existingUIDs = new Set(rides.map(r=>r.fwUID).filter(Boolean));
 
   eventBlocks.forEach(block=>{
@@ -30048,19 +30077,66 @@ function parseAndImportICS(icsText, cutoffDate, skipKat){
     // The ride can still be reassigned to someone else afterward.
     if(!driver) driver = getMyDriverName() || '';
 
-    // CREATED BY from parentheses in summary e.g. (kat), (Allen), (Jenn)
-    let createdBy = 'FamilyWall';
+    // Actual ride creator, from the calendar event's own ORGANIZER field - verified directly
+    // against a real, complete .ics export: 3205 of 3310 events (97%) carry this. This is the
+    // real, per-event signal for who actually scheduled this specific ride, confirmed to exist
+    // separately from the "(Kat)" ownership hint below - an event for a Kat-owned client can
+    // genuinely show ORGANIZER;CN=Morgan (she did the scheduling) or ORGANIZER;CN=Kat
+    // Herringdine (Kat scheduled her own client herself), and the two cases are only
+    // distinguishable through this field, not the summary text.
+    let organizerCreatedBy = '';
+    const organizerMatch = block.match(/ORGANIZER[^:]*CN=([^:;\r\n]+)/);
+    if(organizerMatch){
+      const cn = organizerMatch[1].trim().toLowerCase();
+      organizerCreatedBy = nickMap[cn] || nickMap[cn.split(' ')[0]] || '';
+    }
+
+    // Client-owner hint from parentheses in summary, e.g. (kat), (Allen), (Jenn) - who OWNS
+    // this client relationship, not who created this ride record. Reported directly, with a
+    // real screenshot: this used to be assigned straight to createdBy, so an imported ride
+    // showed createdBy='Kat' even when the source calendar event's own metadata explicitly said
+    // "Created by Morgan" - createdBy was being overloaded to mean two different things at
+    // once (client ownership here, dispatch-pay credit everywhere else, including
+    // _dispatchInvoiceRides()). Routed into clientOwners instead - the same, dedicated
+    // mechanism getClientOwner() already checks first, before ever falling back to createdBy -
+    // so ownership tracking still works correctly without hijacking a field that means
+    // something else everywhere it's actually read for pay purposes.
+    let clientOwnerHint = '';
+    let clientOwnerHintFullName = '';
     const parensMatch = summary.match(/\(([^)]+)\)\s*(?:$|\*)/);
     if(parensMatch){
       const hint = parensMatch[1].toLowerCase().trim();
-      createdBy = nickMap[hint] || nickMap[hint.split(' ')[0]] || 'FamilyWall';
+      clientOwnerHint = nickMap[hint] || nickMap[hint.split(' ')[0]] || '';
+      clientOwnerHintFullName = driverNameMap[hint] || driverNameMap[hint.split(' ')[0]] || '';
     }
+    // ORGANIZER is the real, per-event signal and takes priority whenever it's present and maps
+    // to a known driver. Falls back to the same-as-before default (Morgan for a Kat-owned
+    // client, since that's the entire basis of her dispatch pay; the hint itself otherwise) only
+    // for the small minority of events missing a usable ORGANIZER.
+    // A Kat-owned client's imported ride defaults createdBy to Morgan specifically - not
+    // because she happened to run the import (confirmed directly: one person, usually Chase or
+    // Morgan, imports everyone's events in a single batch, so "whoever clicked import" would
+    // misattribute every ride in that batch to the importer regardless of whose dispatch work
+    // it actually was) - but because dispatching for Kat's clients is the entire, direct basis
+    // of her dispatch pay to begin with. Matches the reported screenshot exactly: the source
+    // calendar event's own metadata said "Created by Morgan" for a Kat-owned client's ride.
+    // Every other owner hint maps directly to itself, since those drivers dispatch for
+    // themselves, not through Morgan.
+    const importedCreatedBy = organizerCreatedBy || (clientOwnerHint==='Kat' ? 'Morgan' : clientOwnerHint);
+    // Direct instruction, after confirming the exact scope: skip an event entirely when we
+    // can't reliably tell who created it - ORGANIZER doesn't map to a known driver, and there's
+    // no client-ownership hint to fall back on either - even when the driver (ATTENDEE) itself
+    // is known, e.g. "Airport Pick up - Chris Lastinger" (organizer "Jeff Roland", not in the
+    // app; driver Jim Fortner, a real driver) still gets skipped. Replaces the old, final
+    // 'FamilyWall' catch-all, which was silently importing exactly these unreliable-attribution
+    // rides instead of leaving them out.
+    if(!importedCreatedBy){ skipped_nocreator++; return; }
 
     // Morgan enters her own rides directly — importing FamilyWall data attributed to her
     // would create duplicates, not catch anything new. Kat's are only skipped when the
     // person importing explicitly asks to (the skipKat checkbox on the import screen) -
     // otherwise her FamilyWall entries import like anyone else's, per v1040.
-    if(createdBy==='Morgan' || (skipKat && createdBy==='Kat')){ skipped_owner++; return; }
+    if(clientOwnerHint==='Morgan' || (skipKat && clientOwnerHint==='Kat')){ skipped_owner++; return; }
 
     // Parse date/time
     let date='', time='';
@@ -30134,13 +30210,19 @@ function parseAndImportICS(icsText, cutoffDate, skipKat){
       wait:0, email:'',
       confirmed,
       notes: isCancelled ? '❌ CANCELLED' : '',
-      createdBy,
+      createdBy: importedCreatedBy,
     };
     rides.push(ride);
+    if(clientOwnerHintFullName){
+      try{
+        const ownerKey = cleanClient.toLowerCase().trim();
+        if(!clientOwners[ownerKey]) clientOwners[ownerKey] = clientOwnerHintFullName;
+      }catch(e){}
+    }
     added++;
   });
 
-  return { added, skipped, skipped_nonride, skipped_owner, skipped_date };
+  return { added, skipped, skipped_nonride, skipped_owner, skipped_date, skipped_nocreator };
 }
 // ── FAMILYWALL PASTE-YOUR-OWN-.ICS IMPORT — END ──
 // To fully remove this feature later: delete this block AND importPastedICS() above it
