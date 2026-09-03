@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191055">
+<meta name="version" content="202608191078">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -852,7 +852,7 @@ input,select,textarea{font-size:16px;}
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;justify-content:center;">
         <button id="cal-familywall-btn" onclick="manualICSPaste()" style="background:var(--accent);border:1.5px solid var(--accent);color:#fff;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">⬆ Import from FamilyWall</button>
         <button id="cal-feed-btn" onclick="_showCalendarFeedModal()" style="background:var(--accent);border:1.5px solid var(--accent);color:#fff;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">📅 Subscribe my calendar</button>
-        <button id="fw-review-btn" onclick="_showFamilyWallReviewModal()" style="display:none;background:#f0997b;border:1.5px solid #f0997b;color:#fff;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">🧹 Review FamilyWall imports</button>
+        <button id="fw-review-btn" onclick="_showFamilyWallReviewModal()" style="display:none;background:#f0997b;border:1.5px solid #f0997b;color:#fff;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">🧹 Review imports &amp; duplicates</button>
         <button id="cal-quickadd-btn" onclick="openQuickAddModal()" style="background:var(--gold);color:#fff;border:1.5px solid var(--gold);border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">+ Add Ride</button>
       </div>
     </div>
@@ -1063,7 +1063,7 @@ input,select,textarea{font-size:16px;}
         <button id="mp-settings-save" onclick="saveDriverProfile(getMyDriverName())" style="display:none;width:100%;margin-bottom:1.25rem;padding:.6rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-weight:700;font-size:.85rem;cursor:pointer;">Save settings</button>
       </div>
     </div>
-    <div id="driver-panel-access" style="display:none;"><div id="access-control-list"></div></div>
+    <div id="driver-panel-access" style="display:none;"><div id="business-logo-manager"></div><div id="access-control-list"></div></div>
     <div id="driver-panel-archived" style="display:none;"><div id="archived-drivers-list"></div></div>
     <div id="driver-panel-pricing" style="display:none;"></div>
     <div id="driver-panel-templates" style="display:none;"></div>
@@ -1937,6 +1937,18 @@ input,select,textarea{font-size:16px;}
 // sites happened to get individually reviewed.
 function nowET(){
   return new Date(new Date().toLocaleString('en-US', {timeZone: 'America/New_York'}));
+}
+
+// A stored logo can be present but malformed - truncated mid-save, or a canvas-resize failure
+// that fell back to a raw, oversized file the storage layer cut short. Rather than let a
+// broken image icon show up on a client-facing quote or receipt, this is a fast sanity check
+// (not full image decoding, which is too expensive to run on every document generated) for the
+// shape any genuinely valid image data URI must have - reported directly: Morgan's logo
+// appearing as a broken link on her invoices.
+function _isValidLogoDataUri(s){
+  if(!s || typeof s!=='string') return false;
+  if(!/^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,/i.test(s)) return false;
+  return s.length > 100; // a genuinely tiny/truncated base64 payload can't be a real logo
 }
 
 // Reported: closing a modal (e.g. Add Ride via Cancel) and reopening it later showed it
@@ -2837,6 +2849,7 @@ async function _loadAppData() {
     loadExpenses(),
     loadOutsideRides(),
     loadReceipts(),
+    _loadReceiptPhotoCache(),
     loadDocs(),
     loadDriverSettings(),
     loadFeePayments(),
@@ -4547,16 +4560,18 @@ async function _editCalcMileage(){
   }catch(e){ console.warn('edit mileage', e); }
 }
 function _editAutoPrice(){
-  // Auto-fills the add-ride Price from mileage for the non-airport types only.
-  // Airport types keep manual entry because fuel/surcharges aren't captured on this form.
+  // NOTE: as of this investigation, no #edit-price element exists anywhere in this file - this
+  // function is effectively a no-op every time it's called, and has been for some time (the
+  // v1062 "fix" earlier today targeted this same function and, for the same reason, never
+  // actually took effect). Left in place, unchanged, pending a real fix at the actual mechanism
+  // that sets a ride's saved price - see saveRideEdits() and the separate "fee edit" tool instead.
   var pe=document.getElementById('edit-price'); if(!pe) return;
   var type=(document.getElementById('edit-type')||{}).value||'';
   var miles=parseFloat((document.getElementById('edit-miles')||{}).value)||0;
   if(miles<=0) return;
+  if(type!=='ROUND TRIP' && type!=='ONE WAY' && type!=='LOCAL') return;
   var vehicle=(document.getElementById('edit-vehicle')||{}).value||'Sedan';
-  var vehUp=vehUpcharge(vehicle);
-  if(type==='ROUND TRIP'){ pe.value=Math.floor(miles*2*mileageRate()+pickupFee()*2+vehUp); }   // fare rounds DOWN
-  else if(type==='ONE WAY'||type==='LOCAL'){ pe.value=Math.floor(miles*mileageRate()+pickupFee()+vehUp); }   // fare rounds DOWN
+  pe.value = Math.floor(tripMath(type, vehicle, miles, 0).tripTotal);
 }
 function debounceMileage(){
   clearTimeout(mileageTimer);
@@ -4945,14 +4960,15 @@ async function calcMileage(){
 function updateMilesDisplay(){
   const miles  = parseFloat(document.getElementById('q-miles').value)||0;
   const type   = document.getElementById('q-type').value;
+  const vehicle = document.getElementById('q-ride')?.value || 'Sedan';
   const disp   = document.getElementById('q-miles-display');
   if(disp) disp.textContent = miles>0 ? miles+' mi' : '—';
   const noteEl = document.getElementById('miles-overage-note');
   if(!noteEl) return;
   const apType = type==='AP RUN'||type==='AP PICK UP'||type==='AP ROUND TRIP';
   if(apType && miles > mileageTrigger()){
-    const over = miles - includedMiles();
-    noteEl.textContent = `${over.toFixed(1)} mi over ${includedMiles()} → +$${(over*mileageRate()).toFixed(2)} overage`;
+    const tmPreview = tripMath(type, vehicle, miles, 0);
+    noteEl.textContent = `${tmPreview.overMiles.toFixed(1)} mi over ${includedMiles()} → +$${tmPreview.overage.toFixed(2)} overage`;
   } else if(apType && miles > 0 && miles <= mileageTrigger()){
     noteEl.textContent = `✓ Within ${includedMiles()} mi radius`;
   } else {
@@ -5009,7 +5025,7 @@ function updateSuggestedPickupTime(){
   // rather than something that could shift back and forth across a window's edge.
   const rushHour = _isAtlantaRushHour(suggested);
   if(rushHour) suggested = new Date(suggested.getTime() - 20*60*1000);
-  const suggestedDateStr = suggested.getFullYear()+'-'+String(suggested.getMonth()+1).padStart(2,'0')+'-'+String(suggested.getDate()).padStart(2,'0');
+  const suggestedDateStr = toDateStr(suggested); // was an inline duplicate of this exact function
   const dayNote = (suggestedDateStr !== dateVal) ? ' <strong>(the day before)</strong>' : '';
   const timeStr = suggested.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
   const driveMin = Math.round(route.seconds/60);
@@ -5067,7 +5083,7 @@ function updateQaSuggestedPickupTime(){
   var suggested = new Date(flightDep.getTime() - bufferHrs*3600*1000 - route.seconds*1000);
   const rushHour = _isAtlantaRushHour(suggested);
   if(rushHour) suggested = new Date(suggested.getTime() - 20*60*1000);
-  const suggestedDateStr = suggested.getFullYear()+'-'+String(suggested.getMonth()+1).padStart(2,'0')+'-'+String(suggested.getDate()).padStart(2,'0');
+  const suggestedDateStr = toDateStr(suggested); // was an inline duplicate of this exact function
   const dayNote = (suggestedDateStr !== dateVal) ? ' <strong>(the day before)</strong>' : '';
   const timeStr = suggested.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
   const driveMin = Math.round(route.seconds/60);
@@ -6030,6 +6046,26 @@ function defaultRideDriver(){
 // driver's device happens to run the periodic check. Attributing that to "whoever's logged in
 // right now" would be actively wrong, not just imprecise - it would look like that specific
 // driver did something they had no part in.
+// Compares a "before" snapshot against the ride's current (already-edited) values for a given
+// list of fields, and returns a short, human-readable summary of what actually changed - e.g.
+// "mileage (55→73 mi), pickup address, time (10:00 AM→11:30 AM)" - rather than every edit
+// showing up in the trail as an undifferentiated "edited". Each descriptor is
+// {key, label, format?}: key reads from both the before snapshot and the current ride,
+// label is what's shown, and an optional format(oldVal,newVal) can return a custom "old→new"
+// string (used sparingly - fields like addresses just say the field changed, not the actual
+// text, since the trail is shared history other people may see).
+function _summarizeFieldChanges(before, after, fieldDescriptors){
+  var changed = [];
+  fieldDescriptors.forEach(function(d){
+    var oldVal = before[d.key], newVal = after[d.key];
+    var oldCmp = (oldVal==null) ? '' : String(oldVal).trim();
+    var newCmp = (newVal==null) ? '' : String(newVal).trim();
+    if(oldCmp === newCmp) return;
+    if(d.format){ changed.push(d.label+' ('+d.format(oldVal,newVal)+')'); }
+    else{ changed.push(d.label); }
+  });
+  return changed;
+}
 function touchRide(r, action, whoOverride){
   if(!r) return;
   const who = whoOverride || getMyDriverName() || currentUser?.name || 'Someone';
@@ -6563,9 +6599,22 @@ function buildQuoteHTML(q, cmp, logoOverride){
   // just being layered on top of it, so the accent color matches whichever logo actually shows.
   const _docAccent = logoOverride ? (logoOverride.accentColor||'#2d2d2d') : (_ownerProf.logoAccentColor || '#2d2d2d');
   const _docAccentText = _readableTextOn(_docAccent);
-  const appLogo = (document.querySelector('img[alt="NWDA Logo"]')||{}).src || '';
-  const shownLogo = logoOverride ? (logoOverride.logo||'') : ((_ownerProf.logo||'') || appLogo);
-  const logoHtml = shownLogo ? '<img src="'+shownLogo+'" alt="logo" style="max-height:70px;max-width:180px;object-fit:contain;margin-bottom:10px;">' : '';
+  // FOUND, MAJOR BUG: two elements share alt="NWDA Logo" - a hidden menu-drawer placeholder
+  // with src="" (which appears FIRST in the document and was always the one matched) and the
+  // real, visible top-bar logo. Confirmed directly: querySelector was matching the empty one
+  // every time, and reading an empty src property resolves to the page's own URL (a browser
+  // quirk), not a blank string - meaning "fallback to the app logo" had actually never worked
+  // at all, for any driver, whenever their own logo was missing or invalid. Scoped to .topbar-logo
+  // specifically so this can never again match the wrong element sharing the same alt text.
+  const appLogo = (document.querySelector('.topbar-logo img')||{}).src || '';
+  const _rawDriverLogo = logoOverride ? (logoOverride.logo||'') : (_ownerProf.logo||'');
+  const shownLogo = _isValidLogoDataUri(_rawDriverLogo) ? _rawDriverLogo : appLogo;
+  // The static check above catches an obviously empty/malformed value, but can't guarantee
+  // the image data is genuinely decodable - confirmed directly: a real logo passed that check
+  // and still showed as a broken image. onerror lets the browser's own, definitive decoding be
+  // the judge instead of trying to replicate it - swaps to the app's own logo the moment
+  // rendering actually fails, for any reason, rather than showing a broken image icon.
+  const logoHtml = shownLogo ? '<img src="'+shownLogo+'" alt="logo" onerror="this.onerror=null;this.src=\''+appLogo+'\';" style="max-height:70px;max-width:180px;object-fit:contain;margin-bottom:10px;">' : '';
   const orgName = logoOverride ? (logoOverride.businessName||'Your Driver') : (((_ownerProf.businessName||'').trim()) || 'Your Driver');
   const ownerPhone = (_ownerProf.phone||'').trim();
   const bd = buildRideBreakdown(q);
@@ -9603,6 +9652,15 @@ function formatPhoneUS(v){
   if(d.length===10){ return d.slice(0,3)+'-'+d.slice(3,6)+'-'+d.slice(6); }
   return raw;
 }
+// Last 10/4 digits of a phone number, for comparing two numbers regardless of formatting
+// (dashes, parens, a leading "1", etc.) - two small utilities that were each already being
+// reimplemented inline in more than one place instead of reused. phoneLast10 existed only as a
+// locally-scoped arrow function inside _baseRideTextRecipients(), unreachable anywhere else,
+// so openArrivalThread()/openGroupThread() each carried an identical, separate copy of the same
+// three lines instead. phoneLast4 didn't exist as a shared helper at all - getCautiousMatches()
+// and submitCautiousFlag() both had the identical one-line regex+slice independently.
+function phoneLast10(v){ return (v||'').replace(/\D/g,'').slice(-10); }
+function phoneLast4(v){ return (v||'').replace(/\D/g,'').slice(-4); }
 function formatPhoneList(v){
   if(v==null) return '';
   var raw=String(v).trim(); if(!raw) return '';
@@ -9706,15 +9764,14 @@ function _baseRideTextRecipients(r){
   const seen=new Set();
   const out=[];
   // Never text the sender themselves: compute the current user's own number to exclude it.
-  const _digits10 = s => (s||'').replace(/\D/g,'').slice(-10);
   const _meName = (typeof currentUser!=='undefined' && currentUser) ? currentUser.name : null;
   const _meDriver = _meName ? (USER_DRIVER_MAP[_meName] || _meName) : null;
-  const _mePhone = _digits10(_meDriver ? (DRIVER_PROFILES[_meDriver]||{}).phone : '');
+  const _mePhone = phoneLast10(_meDriver ? (DRIVER_PROFILES[_meDriver]||{}).phone : '');
   const add=(name,raw)=>{
     if(!_looksLikePhone(raw)) return; // skip addresses / junk so we never text a wrong number
     const d=(raw||'').replace(/[^0-9+]/g,'');
     if(!d || seen.has(d)) return;
-    if(_mePhone && _digits10(d)===_mePhone) return; // never text the sender (creator) themselves
+    if(_mePhone && phoneLast10(d)===_mePhone) return; // never text the sender (creator) themselves
     seen.add(d);
     out.push({ name:(name||d), phone:d });
   };
@@ -10301,18 +10358,12 @@ function openRideModal(id){
   const _dangerZone=document.getElementById('rm-danger-zone');
   if(_dangerZone) _dangerZone.style.display=(_canDelete||_canCancel)?'flex':'none';
   // edit button — client owner (Kat↔Morgan proxy-aware) or the assigned driver.
-  // Kept identical to the permission check in saveRideEdits() so what's visible here
-  // always matches what can actually be saved - no more showing Edit to someone who'll
-  // just get silently blocked when they try to save.
+  // Calls canEditRide() directly - the same shared check saveRideEdits() itself uses to decide
+  // whether a save actually succeeds - so what's visible here can never drift from what can
+  // actually be saved.
   const editBtn=document.getElementById('rm-edit-btn');
   if(editBtn){
-    const _eMyDriverName = getMyDriverName();
-    const _eIsDriver = (_eMyDriverName && (r.driver===_eMyDriverName || r.driver2===_eMyDriverName));
-    const _eMyLogin = currentUser && currentUser.name;
-    const _eMyResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[_eMyLogin]) || _eMyDriverName;
-    const _eOwner = getClientOwner(r.client) || feeOwnerFor(r.createdBy);
-    const _eIsOwner = !!(_eOwner && _eOwner===_eMyResolvedIdentity);
-    editBtn.style.display=(_eIsOwner||_eIsDriver)?'inline-flex':'none';
+    editBtn.style.display = canEditRide(r) ? 'inline-flex' : 'none';
   }
   setCancelBtn(r.status==='cancelled');
   // build view mode detail grid
@@ -11429,7 +11480,6 @@ function buildRideBreakdown(r){
   const lines = [];
   if(!r) return { lines, total: 0 };
   const vehicle = r.vehicle || 'Sedan';
-  const base = (typeof BASE!=='undefined' && BASE[vehicle]) ? BASE[vehicle] : 0;
 
   // AP ROUND TRIP is genuinely two separate legs with independently-determined surcharges
   // (premium/traffic/christmas/holiday auto-detect from EACH leg's own date & time, same
@@ -11439,8 +11489,14 @@ function buildRideBreakdown(r){
   // exactly what surfaced as a confusing "Discount" reconciliation line on receipts.
   if(r.type==='AP ROUND TRIP'){
     const miles = parseFloat(r.miles||0)||0;
-    const overMiles = miles > mileageTrigger() ? miles - includedMiles() : 0;
-    const overage = overMiles * mileageRate();
+    // base/overMiles/overage come from tripMath() - the same shared pricing core every other
+    // consumer in this file uses - rather than an independent copy of this same arithmetic.
+    // Only the surcharge-derivation logic below stays separate, since it genuinely differs:
+    // this reconstructs what should have applied from a saved ride's own date fields, which
+    // calcQuote()'s live-form version has no equivalent of.
+    const tmRt = tripMath('AP ROUND TRIP', vehicle, miles, 0);
+    const overMiles = tmRt.overMiles;
+    const overage = tmRt.overage;
     const flagLabels = {premium:'Premium hours',holiday:'Holiday',christmas:'Christmas',late:'Late notice',traffic:'Traffic'};
 
     function legTimeSurcharges(dateVal, timeVal){
@@ -11483,7 +11539,7 @@ function buildRideBreakdown(r){
 
     function buildLeg(label, dateVal, timeVal, isReturnLeg){
       const legLines = [];
-      if(base>0) legLines.push({label:'Base rate ('+vehicle+', incl. '+includedMiles()+' mi) \u2014 '+label, val: base});
+      if(tmRt.base>0) legLines.push({label:'Base rate ('+vehicle+', incl. '+includedMiles()+' mi) \u2014 '+label, val: tmRt.base});
       if(overage>0) legLines.push({label:'Mileage overage ('+overMiles+' mi \u00d7 $'+mileageRate().toFixed(2)+') \u2014 '+label, val: overage});
       const timeBased = (isReturnLeg && hasManualLegFlags) ? legManualSurcharges() : legTimeSurcharges(dateVal, timeVal);
       timeBased.forEach(function(s){ legLines.push({label:s.label+' \u2014 '+label, val:s.val}); });
@@ -11543,16 +11599,13 @@ function buildRideBreakdown(r){
       : {label:(isRT?'Round trip mileage':'Mileage'), val:0});
     lines.push({label:'Pickup/Drop-off fee', val:tm.serviceFee});
     if(tm.vehUp>0) lines.push({label:`Vehicle upcharge (${vehicle})`, val:tm.vehUp});
-  } else if(base>0){
-    lines.push({label:'Base rate ('+vehicle+', incl. '+includedMiles()+' mi)'+(legs>1?' \u00d7'+legs:''), val: base*legs});
-  }
-
-  // Mileage overage (AP rides charge over the included miles, once past the 2-mile grace)
-  const miles = parseFloat(r.miles||0)||0;
-  if(isAP && miles>mileageTrigger()){
-    const over = miles - includedMiles();
-    const overFee = over * mileageRate();
-    lines.push({label:'Mileage overage ('+over+' mi \u00d7 $'+(mileageRate().toFixed(2))+')'+(legs>1?' \u00d7'+legs:''), val: overFee*legs});
+  } else if(isAP){
+    const apMiles = parseFloat(r.miles||0)||0;
+    const tmAp = tripMath(r.type, vehicle, apMiles, 0);
+    if(tmAp.base>0) lines.push({label:'Base rate ('+vehicle+', incl. '+includedMiles()+' mi)'+(legs>1?' \u00d7'+legs:''), val: tmAp.base*legs});
+    if(apMiles>mileageTrigger()){
+      lines.push({label:'Mileage overage ('+tmAp.overMiles+' mi \u00d7 $'+(mileageRate().toFixed(2))+')'+(legs>1?' \u00d7'+legs:''), val: tmAp.overage*legs});
+    }
   }
 
   // Flat surcharges from the ride's Y/N flags
@@ -11758,10 +11811,17 @@ function buildReceiptHTML(r, logoOverride){
   // Header identity: business name if set, else NWDA; driver always shown as provider.
   const orgName = ((_ownerProf.businessName||'').trim()) || bizName || 'Your Driver';
   // Receipt logo: the driver's uploaded business logo, or the app's standard logo if they haven't set one.
-  const appLogo = (document.querySelector('img[alt="NWDA Logo"]')||{}).src || '';
-  const shownLogo = logo || appLogo;
+  // FOUND, MAJOR BUG: two elements share alt="NWDA Logo" - a hidden menu-drawer placeholder
+  // with src="" (which appears FIRST in the document and was always the one matched) and the
+  // real, visible top-bar logo. Confirmed directly: querySelector was matching the empty one
+  // every time, and reading an empty src property resolves to the page's own URL (a browser
+  // quirk), not a blank string - meaning "fallback to the app logo" had actually never worked
+  // at all, for any driver, whenever their own logo was missing or invalid. Scoped to .topbar-logo
+  // specifically so this can never again match the wrong element sharing the same alt text.
+  const appLogo = (document.querySelector('.topbar-logo img')||{}).src || '';
+  const shownLogo = _isValidLogoDataUri(logo) ? logo : appLogo;
   const logoHtml = shownLogo
-    ? '<img src="'+shownLogo+'" alt="logo" style="max-height:70px;max-width:180px;object-fit:contain;margin-bottom:10px;">'
+    ? '<img src="'+shownLogo+'" alt="logo" onerror="this.onerror=null;this.src=\''+appLogo+'\';" style="max-height:70px;max-width:180px;object-fit:contain;margin-bottom:10px;">'
     : '';
 
   const rowsHtml = bd.lines.map(function(l){
@@ -11834,6 +11894,49 @@ function buildReceiptHTML(r, logoOverride){
 // Deliberately independent of buildReceiptHTML() itself (no shared call), for the same reason
 // v962's tip-payment-method fix stayed independent of the working Mark Paid modal: zero risk to
 // a document real clients already receive from touching it while building this new one.
+// Reported directly: two rides added to the schedule weren't populating onto an invoice, with
+// the total off by exactly what those two would have added. The real gate a ride has to clear
+// to count - reaching "paid" status on the ride itself, not just being scheduled - was
+// previously completely silent: nothing showed which rides in a range weren't counting yet or
+// why. Returns the rides in range that _dispatchInvoiceRides() left out, each with the specific
+// reason, so "not marked paid yet" looks nothing like "manually excluded" or "cancelled".
+function _dispatchInvoiceExcludedRides(start, end){
+  var includedIds = new Set(_dispatchInvoiceRides(start,end).map(function(r){ return r.id; }));
+  var result = (rides||[]).filter(function(r){
+    if(!r || r.createdBy!=='Morgan' || !r.date) return false;
+    var d = new Date(r.date+'T12:00:00');
+    if(start && end && (d<start||d>end)) return false;
+    return !includedIds.has(r.id);
+  }).map(function(r){
+    var reason = r.status==='cancelled' ? 'cancelled'
+      : kmExcludedRides[r.id] ? 'manually excluded'
+      : !_kmRideDone(r) ? 'not marked paid yet'
+      : 'excluded';
+    return { ride:r, reason:reason };
+  });
+  var alreadyShownIds = new Set(result.map(function(x){ return x.ride.id; }));
+  // Reported directly: a ride can go completely missing from this diagnostic too, not just the
+  // invoice itself, if its own createdBy field doesn't exactly match 'Morgan' for some reason -
+  // both this and the real invoice filter require the identical exact match, so a mismatch would
+  // be invisible to both at once. Cross-references the duplicate-detection already built for a
+  // different feature (same client/date/time, regardless of who created what) to catch this case
+  // too: any ride in a duplicate group that fell in this date range but isn't already accounted
+  // for above, tagged with who actually created it so the mismatch itself becomes visible.
+  (typeof _findDuplicateRideGroups==='function' ? _findDuplicateRideGroups() : []).forEach(function(g){
+    var inRange = g.rides.some(function(r){
+      if(!r.date) return false;
+      var d = new Date(r.date+'T12:00:00');
+      return !(start && end && (d<start||d>end));
+    });
+    if(!inRange) return;
+    g.rides.forEach(function(r){
+      if(alreadyShownIds.has(r.id) || includedIds.has(r.id)) return;
+      alreadyShownIds.add(r.id);
+      result.push({ ride:r, reason: r.createdBy ? 'created by '+r.createdBy+', not Morgan' : 'no creator on record' });
+    });
+  });
+  return result.sort(function(a,b){ return (a.ride.date||'').localeCompare(b.ride.date||''); });
+}
 function _dispatchInvoiceRides(start, end){
   return (rides||[]).filter(function(r){
     if(!r || r.createdBy!=='Morgan' || r.status==='cancelled') return false;
@@ -11868,10 +11971,17 @@ function buildDispatchInvoiceHTML(start, end){
     : 'All time';
   const total = rowsData.reduce(function(a,r){ return a+kmRideValue(r); }, 0);
 
-  const appLogo = (document.querySelector('img[alt="NWDA Logo"]')||{}).src || '';
-  const shownLogo = logo || appLogo;
+  // FOUND, MAJOR BUG: two elements share alt="NWDA Logo" - a hidden menu-drawer placeholder
+  // with src="" (which appears FIRST in the document and was always the one matched) and the
+  // real, visible top-bar logo. Confirmed directly: querySelector was matching the empty one
+  // every time, and reading an empty src property resolves to the page's own URL (a browser
+  // quirk), not a blank string - meaning "fallback to the app logo" had actually never worked
+  // at all, for any driver, whenever their own logo was missing or invalid. Scoped to .topbar-logo
+  // specifically so this can never again match the wrong element sharing the same alt text.
+  const appLogo = (document.querySelector('.topbar-logo img')||{}).src || '';
+  const shownLogo = _isValidLogoDataUri(logo) ? logo : appLogo;
   const logoHtml = shownLogo
-    ? '<img src="'+shownLogo+'" alt="logo" style="max-height:70px;max-width:180px;object-fit:contain;margin-bottom:10px;">'
+    ? '<img src="'+shownLogo+'" alt="logo" onerror="this.onerror=null;this.src=\''+appLogo+'\';" style="max-height:70px;max-width:180px;object-fit:contain;margin-bottom:10px;">'
     : '';
 
   const rowsHtml = rowsData.map(function(r){
@@ -11959,6 +12069,17 @@ async function _generateDispatchInvoice(){
   var fromStr=(fromEl&&fromEl.value)||'', toStr=(toEl&&toEl.value)||'';
   if(!fromStr || !toStr){ showToast('Pick both dates','error'); return; }
   if(fromStr>toStr){ showToast('The From date is after the To date','error'); return; }
+  // Warns before creating an invoice overlapping an existing, non-voided one for the same
+  // period - reported directly: nothing previously stopped generating twice (or for a range
+  // already invoiced), which is exactly how two separate $280 invoices for the same rides got
+  // created with no warning either time.
+  var overlapping = Object.values(dispatchInvoices||{}).filter(function(inv){
+    return inv.status!=='voided' && inv.startDate<=toStr && inv.endDate>=fromStr;
+  });
+  if(overlapping.length){
+    var oi=overlapping[0];
+    if(!confirm('An invoice for '+fmtDateShort(oi.startDate)+'\u2013'+fmtDateShort(oi.endDate)+' ($'+oi.total.toFixed(2)+') already covers part of this range. Create another one anyway?')) return;
+  }
   var start=new Date(fromStr+'T00:00:00'), end=new Date(toStr+'T23:59:59');
   var rowsData=_dispatchInvoiceRides(start,end);
   var total=rowsData.reduce(function(a,r){ return a+kmRideValue(r); },0);
@@ -11974,10 +12095,31 @@ async function _generateDispatchInvoice(){
   try{ await saveDispatchInvoices(); }catch(e){ console.warn(e); }
   var ov=document.getElementById('dispatch-invoice-range-overlay'); if(ov) ov.remove();
   showToast('\uD83E\uDD1D Invoice created \u2014 '+rowsData.length+' ride'+(rowsData.length===1?'':'s')+', $'+total.toFixed(2));
+  // If any of Morgan's rides in this same range weren't counted, show exactly which ones and
+  // why, right now - the most useful moment for this to actually help. Previously silent.
+  var excluded = _dispatchInvoiceExcludedRides(start,end);
+  if(excluded.length){
+    var reasonLabel = {'not marked paid yet':'Not marked paid yet','manually excluded':'Manually excluded','cancelled':'Cancelled'};
+    var exOv=document.createElement('div'); exOv.id='dispatch-invoice-excluded-overlay'; exOv.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:16100;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+    exOv.onclick=function(e){ if(e.target===exOv) exOv.remove(); };
+    exOv.innerHTML='<div style="background:#fff;border-radius:16px;max-width:380px;width:100%;padding:1.35rem;box-shadow:0 24px 60px rgba(0,0,0,.4);">'
+      +'<div style="font-size:1rem;font-weight:800;color:#0f172a;margin-bottom:.3rem;">\u26A0\uFE0F '+excluded.length+' ride'+(excluded.length===1?'':'s')+' in this range not on the invoice</div>'
+      +'<div style="font-size:.8rem;color:#64748b;margin-bottom:.9rem;">These rides fell in the same date range but weren\u2019t counted:</div>'
+      +excluded.map(function(x){
+        return '<div style="display:flex;justify-content:space-between;gap:.5rem;padding:.4rem 0;border-bottom:1px solid #f1f5f9;font-size:.8rem;">'
+          +'<div><b>'+escHtml(x.ride.client||'')+'</b><br><span style="color:#64748b;">'+fmtDateShort(x.ride.date)+'</span></div>'
+          +'<div style="color:#b45309;text-align:right;white-space:nowrap;">'+(reasonLabel[x.reason]||x.reason)+'</div>'
+          +'</div>';
+      }).join('')
+      +'<button onclick="document.getElementById(\'dispatch-invoice-excluded-overlay\').remove()" style="width:100%;margin-top:1rem;padding:.6rem;background:#0d9488;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">Got it</button>'
+      +'</div>';
+    document.body.appendChild(exOv);
+  }
   try{ renderIncome(); }catch(e){}
   try{ await shareDispatchInvoice(start,end); }catch(e){}
 }
 function _dispatchInvoiceStatusLabel(inv){
+  if(inv.status==='voided') return { text:'\u2715 Voided', color:'#94a3b8' };
   if(inv.status==='settled') return { text:'\u2713 Settled', color:'#0d9488' };
   if(inv.status==='paid_pending') return { text:'\u23F3 Awaiting Morgan\u2019s confirmation', color:'#b45309' };
   return { text:'\u23F3 Awaiting Kat\u2019s payment', color:'#b45309' };
@@ -12009,6 +12151,22 @@ async function rejectDispatchInvoicePaid(id){
   inv.status='sent'; inv.paidAt=null; inv.paidBy=null; inv.paidMethod=null;
   try{ await saveDispatchInvoices(); }catch(e){ console.warn(e); }
   showToast('\u21a9 Marked not received \u2014 back to awaiting payment');
+  try{ renderIncome(); }catch(e){}
+}
+// Reported directly: no way to void a wrong invoice, resulting in two duplicate pending
+// invoices with no way to fix it. Only allowed while status is still 'sent' - before Kat has
+// confirmed any payment - since voiding after that means unwinding a real, confirmed payment,
+// a different and more careful problem than correcting a mistake made before money changed
+// hands. Soft-deletes (marks voided, doesn't remove the record) since this is financial
+// history worth keeping visible even once corrected.
+async function voidDispatchInvoice(id){
+  if(!kmVisible()) return;
+  var inv=dispatchInvoices[id]; if(!inv) return;
+  if(inv.status!=='sent'){ showToast('Only an invoice still awaiting payment can be voided','error'); return; }
+  if(!confirm('Void this $'+inv.total.toFixed(2)+' invoice? This can\u2019t be undone.')) return;
+  inv.status='voided'; inv.voidedAt=Date.now(); inv.voidedBy=currentUser&&currentUser.name||'';
+  try{ await saveDispatchInvoices(); }catch(e){ console.warn(e); }
+  showToast('\u2713 Invoice voided');
   try{ renderIncome(); }catch(e){}
 }
 function downloadDispatchInvoice(start, end){
@@ -12521,21 +12679,12 @@ function toggleEditMode(on){
   var emg=document.getElementById('edit-miles-group');if(emg)emg.style.display=on&&hasIncomeAccess()?'':'none';
   // Was unconditionally showing Edit whenever not actively editing, silently overriding
   // the permission-based visibility set in openRideModal (client owner / assigned driver
-  // only). Recompute the same check here so exiting edit mode doesn't make the button
-  // reappear for someone who was never supposed to see it.
+  // only). Recomputes via canEditRide() so exiting edit mode doesn't make the button
+  // reappear for someone who was never supposed to see it - the same shared check
+  // saveRideEdits() itself enforces, not a separate copy of the same logic.
   (function(){
     var _r = (typeof activeRideId!=='undefined' && activeRideId!=null) ? rides.find(function(x){return x.id===activeRideId;}) : null;
-    var _show = false;
-    if(on){ _show = false; }
-    else if(_r){
-      var _tMyDriverName = getMyDriverName();
-      var _tIsDriver = (_tMyDriverName && (_r.driver===_tMyDriverName || _r.driver2===_tMyDriverName));
-      var _tMyLogin = currentUser && currentUser.name;
-      var _tMyResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[_tMyLogin]) || _tMyDriverName;
-      var _tOwner = getClientOwner(_r.client) || feeOwnerFor(_r.createdBy);
-      var _tIsOwner = !!(_tOwner && _tOwner===_tMyResolvedIdentity);
-      _show = _tIsOwner || _tIsDriver;
-    }
+    var _show = on ? false : canEditRide(_r);
     var _eb=document.getElementById('rm-edit-btn'); if(_eb) _eb.style.display = _show?'inline-flex':'none';
   })();
   document.getElementById('rm-save-btn').style.display   = on?'inline-block':'none';
@@ -12629,18 +12778,34 @@ async function saveRideEdits(){
   window._pendingUnsavedRideIds.add(r.id);
   setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
   // Edit permission: the client owner (Kat/Morgan proxy-aware, same rule that decides who
-  // earns the fee - NOT admin status) or the assigned driver. Mirrors canSeeGateCode's
-  // exact pattern for the same reasoning: the owner manages everything about their client's
-  // rides, and a substitute/assigned driver still needs to fix their own ride's details
-  // even if they don't own the client relationship.
-  const _seMyDriverName = getMyDriverName();
-  const _seIsDriver = (_seMyDriverName && (r.driver===_seMyDriverName || r.driver2===_seMyDriverName));
-  const _seMyLogin = currentUser && currentUser.name;
-  const _seMyResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[_seMyLogin]) || _seMyDriverName;
-  const _seOwner = getClientOwner(r.client) || feeOwnerFor(r.createdBy);
-  const _seIsOwner = !!(_seOwner && _seOwner===_seMyResolvedIdentity);
-  if(!_seIsOwner && !_seIsDriver){ showToast('Only the client owner or assigned driver can edit this ride','error'); return; }
+  // earns the fee - NOT admin status) or the assigned driver. canEditRide() itself mirrors
+  // canSeeGateCode's exact pattern for the same reasoning: the owner manages everything about
+  // their client's rides, and a substitute/assigned driver still needs to fix their own ride's
+  // details even if they don't own the client relationship. This is the real, authoritative
+  // check a save is gated on - the same shared function the Edit button's own visibility now
+  // calls too, so the two can never disagree with each other again.
+  if(!canEditRide(r)){ showToast('Only the client owner or assigned driver can edit this ride','error'); return; }
   if(!(await _confirmIfSameAddress('edit'))) return;
+  // Reported directly, with a real screenshot: an address change correctly updated mileage, but
+  // the price silently stayed at whatever it was before - by design, per the comment on r.price
+  // below, this form deliberately never touches price so it can't accidentally overwrite a real,
+  // intentional fee set through Edit Fee. But nothing told the person that a mileage change
+  // might mean the price now needs a look too - it just stayed stale until someone happened to
+  // reopen Edit Fee separately, and until then showed up disguised as a confusing "Manual
+  // adjustment" line on the breakdown. Captured here, before r.miles gets overwritten below, so
+  // the save can tell whether mileage actually changed enough to matter for pricing.
+  var _preEditMiles = parseFloat(r.miles)||0;
+  // Direct request: the trail should say what was actually edited, not just "edited". Snapshot
+  // of every field this form can change, taken before any of them get overwritten below, so the
+  // save can build a real summary afterward via _summarizeFieldChanges() instead of a generic
+  // label. Covers everything this form touches - not exhaustive of every possible ride field,
+  // deliberately, since a trail entry listing a dozen things is less useful than one that
+  // highlights what actually changed.
+  var _rideEditSnapshot = {
+    client: r.client, phone: r.phone, email: r.email, date: r.date, time: r.time,
+    miles: r.miles, pax: r.pax, flight: r.flight, terminal: r.terminal, vehicle: r.vehicle,
+    type: r.type, pickup: r.pickup, home: r.home, notes: r.notes,
+  };
   // Apply all edits
   r.client    = document.getElementById('edit-client').value.trim()||r.client;
   r.phone     = formatPhoneUS(document.getElementById('edit-phone').value);
@@ -12690,7 +12855,23 @@ async function saveRideEdits(){
   var _prevReqNote=r.reqDriverNote||'';
   if(currentUser&&currentUser.name===r.createdBy){ var _rdv=document.getElementById('edit-reqdriver'); if(_rdv){ var _v=_rdv.value.trim(); if(_v) r.reqDriverNote=_v; else delete r.reqDriverNote; } }
   notifyRequestedDriver(r, _prevReqNote);
-  touchRide(r, 'edited');
+  var _editSummary = _summarizeFieldChanges(_rideEditSnapshot, r, [
+    {key:'client', label:'client name'},
+    {key:'phone', label:'phone'},
+    {key:'email', label:'email'},
+    {key:'date', label:'date', format:function(o,n){ return o+'\u2192'+n; }},
+    {key:'time', label:'time', format:function(o,n){ return (o?fmtTime12(o):'—')+'\u2192'+(n?fmtTime12(n):'—'); }},
+    {key:'miles', label:'mileage', format:function(o,n){ return (parseFloat(o)||0)+'\u2192'+(parseFloat(n)||0)+' mi'; }},
+    {key:'pax', label:'passengers', format:function(o,n){ return o+'\u2192'+n; }},
+    {key:'flight', label:'flight number'},
+    {key:'terminal', label:'terminal'},
+    {key:'vehicle', label:'vehicle', format:function(o,n){ return o+'\u2192'+n; }},
+    {key:'type', label:'trip type', format:function(o,n){ return (typeof _tripTypeLabel==='function'?_tripTypeLabel(o):o)+'\u2192'+(typeof _tripTypeLabel==='function'?_tripTypeLabel(n):n); }},
+    {key:'pickup', label:'pickup address'},
+    {key:'home', label:'destination address'},
+    {key:'notes', label:'notes'},
+  ]);
+  touchRide(r, _editSummary.length ? ('edited: '+_editSummary.join(', ')) : 'edited');
   // If this ride is being set to XXL with a 2nd driver actually chosen, split it into two
   // independent ride records now, same wrapped-in-try/catch safety as splitApRoundTripRide's
   // call sites — if the split fails for any reason, nothing partially saves.
@@ -12726,7 +12907,12 @@ async function saveRideEdits(){
   renderRideView(r);
   renderInterest(r);
   refreshDash(); renderCal(); updateNotifBadge();
-  showToast('Ride updated ✓');
+  var _milesChanged = Math.abs((parseFloat(r.miles)||0) - _preEditMiles) >= 0.5;
+  if(_milesChanged){
+    showToast('Ride updated \u2713 \u2014 mileage changed, check the fee via \u2709\uFE0F Edit fee', 'error');
+  } else {
+    showToast('Ride updated \u2713');
+  }
 }
 
 // 'cancel' used to be a valid feeType here too (Quick Fees' own "Cancel — X% fee" button),
@@ -13293,15 +13479,19 @@ function _previewOdoTotal(r, val){
     ? parseFloat(((r.odoPause - r.odoStart) + (val - r.odoResume)).toFixed(2))
     : parseFloat((val - r.odoStart).toFixed(2));
 }
-function _mpPreviewOdoMiles(rideId){
+// Shared by both the Mark Paid and Log Miles odometer previews - each is a thin wrapper
+// around this, differing only by which DOM elements they read/write. Both used to carry an
+// identical, independent copy of this same logic.
+function _previewOdoMiles(prefix, rideId){
   var r=_rideById(rideId);
-  var endInput=document.getElementById('mp-odo-end');
-  var milesInput=document.getElementById('mp-miles');
+  var endInput=document.getElementById(prefix+'-odo-end');
+  var milesInput=document.getElementById(prefix+'-miles');
   if(!r || !endInput || !milesInput) return;
   var total=_previewOdoTotal(r, parseFloat(endInput.value));
   if(total==null) return;
   milesInput.value=total;
 }
+function _mpPreviewOdoMiles(rideId){ _previewOdoMiles('mp', rideId); }
 
 // Pause/Resume exist only for genuine ROUND TRIP rides (not AP ROUND TRIP) - Chase's explicit
 // design: Stop Ride is gone everywhere, but a regular round trip has two real driving segments
@@ -14039,16 +14229,9 @@ function renderDashPendingAccept(){
 }
 
 
-// Same idea as _mpPreviewOdoMiles for Mark Paid - display-only, mutates nothing real.
-function _lmPreviewOdoMiles(rideId){
-  var r=_rideById(rideId);
-  var endInput=document.getElementById('lm-odo-end');
-  var milesInput=document.getElementById('lm-miles');
-  if(!r || !endInput || !milesInput) return;
-  var total=_previewOdoTotal(r, parseFloat(endInput.value));
-  if(total==null) return;
-  milesInput.value=total;
-}
+// Thin wrapper around the shared _previewOdoMiles() - same logic as Mark Paid's version,
+// just this form's own element ids.
+function _lmPreviewOdoMiles(rideId){ _previewOdoMiles('lm', rideId); }
 async function _saveLogMiles(rideId, billLater){
   // This `if(!r)` used to be a bare `return` — no toast, no throw, no console line. Combined
   // with the id-type coercion described on _rideById, that made Save a button that visibly
@@ -15165,14 +15348,16 @@ function _feeEditSetMiles(val){
 function recalcFeeEdit(setAmount){
   if(!_feeEdit) return;
   const veh=_feeEdit.vehicle||'Sedan';
-  const base=(typeof BASE!=='undefined'?(BASE[veh]||105):105);
-  let sub=base;
-  // Mileage overage: only the miles OVER the included radius are charged (AP rides).
-  const apType = _feeEdit.type==='AP RUN'||_feeEdit.type==='AP PICK UP'||_feeEdit.type==='AP ROUND TRIP';
   const miles = parseFloat(_feeEdit.miles)||0;
-  const rate = mileageRate();
-  let overage = 0;
-  if(apType && miles>mileageTrigger()){ overage = (miles-includedMiles())*rate; sub += overage; }
+  // Routed through tripMath() - this used to always start from the flat airport base rate
+  // regardless of ride type, and only ever added mileage overage for airport types, meaning a
+  // One Way/Round Trip/Local ride's suggested fee here never actually reflected mileage at all
+  // - the same class of bug as the original "Round Trip priced as airport" finding, in a
+  // completely separate, previously-unaudited function.
+  const tm = tripMath(_feeEdit.type, veh, miles, 0);
+  let sub = tm.tripTotal;
+  const overage = tm.overage;
+  const base = tm.base>0 ? tm.base : tm.tripTotal;
   let sub2=sub; // base + mileage overage, before flat surcharges (for fuel base)
   const flat={premium:30,holiday:30,christmas:35,late:20,traffic:15};
   Object.keys(flat).forEach(k=>{ if(_feeEdit.state[k]){ if(k==='holiday'&&_feeEdit.state.christmas) return; sub+=surcharge(k); } });
@@ -15181,7 +15366,7 @@ function recalcFeeEdit(setAmount){
   // Fuel surcharge (8%) applies to the full subtotal (base + mileage + surcharges).
   let total=_feeEdit.state.fuel ? Math.floor(sub*(1+fuelRate())) : Math.floor(sub);   // fare rounds DOWN
   const sug=document.getElementById('fee-edit-suggest');
-  if(sug) sug.textContent=`Suggested (${veh} base $${base}${overage>0?' + $'+overage.toFixed(2)+' mileage':''} + surcharges): $${total.toFixed(2)}`;
+  if(sug) sug.textContent=`Suggested (${veh} base $${base.toFixed(0)}${overage>0?' + $'+overage.toFixed(2)+' mileage':''} + surcharges): $${total.toFixed(2)}`;
   if(setAmount){ const a=document.getElementById('fee-edit-amount'); if(a) a.value=total.toFixed(2); }
 }
 
@@ -15192,6 +15377,14 @@ async function saveFeeEdit(id){
   const noteEl=document.getElementById('fee-edit-note');
   const newPrice = parseFloat(amtEl && amtEl.value);
   if(isNaN(newPrice) || newPrice < 0){ showToast('Enter a valid fee amount','error'); return; }
+  // Direct request: the trail should say what was actually edited. Snapshot before any of
+  // these fields change, so a real summary can be built afterward via the same shared
+  // _summarizeFieldChanges() helper saveRideEdits() uses, rather than a second copy of the
+  // same comparison logic.
+  const _feeEditSnapshot = {
+    premium: r.premium, holiday: r.holiday, christmas: r.christmas, late: r.late,
+    traffic: r.traffic, fuel: r.fuel, miles: r.miles, xstop: r.xstop, wait: r.wait, price: r.price,
+  };
   if(_feeEdit && _feeEdit.id===id){
     const st=_feeEdit.state;
     r.premium=st.premium?'Y':'N'; r.holiday=st.holiday?'Y':'N'; r.christmas=st.christmas?'Y':'N';
@@ -15207,7 +15400,20 @@ async function saveFeeEdit(id){
   r.price = Math.round(newPrice*100)/100;
   const note=(noteEl && noteEl.value||'').trim();
   if(note) r.feeNote = note; else delete r.feeNote;
-  touchRide(r, 'edited fee');
+  const _feeEditSummary = _summarizeFieldChanges(_feeEditSnapshot, r, [
+    {key:'premium', label:'surcharges'}, // grouped: any one of these six changing is reported once
+    {key:'holiday', label:'surcharges'},
+    {key:'christmas', label:'surcharges'},
+    {key:'late', label:'surcharges'},
+    {key:'traffic', label:'surcharges'},
+    {key:'fuel', label:'surcharges'},
+    {key:'miles', label:'mileage', format:function(o,n){ return (parseFloat(o)||0)+'\u2192'+(parseFloat(n)||0)+' mi'; }},
+    {key:'xstop', label:'extra stops', format:function(o,n){ return (o||0)+'\u2192'+(n||0); }},
+    {key:'wait', label:'wait time'},
+    {key:'price', label:'fee amount', format:function(o,n){ return '$'+(parseFloat(o)||0).toFixed(2)+'\u2192$'+(parseFloat(n)||0).toFixed(2); }},
+  ]);
+  var _feeEditUniqueSummary = _feeEditSummary.filter(function(v,i){ return _feeEditSummary.indexOf(v)===i; }); // de-dupe repeated "surcharges" entries
+  touchRide(r, _feeEditUniqueSummary.length ? ('edited fee: '+_feeEditUniqueSummary.join(', ')) : 'edited fee');
   await saveRides();
   // BUG FIX, reported directly: the fee saved correctly but the editor stayed open. Closing
   // it used to depend entirely on the full renderRideView(r) rebuild below succeeding -
@@ -15235,7 +15441,9 @@ function cancelFeeEdit(id){
 }
 
 function buildFeeBreakdown(r){
-  const parts = [`${BASE[r.vehicle]||105}`];
+  const miles = parseFloat(r.miles)||0;
+  const tm = tripMath(r.type, r.vehicle, miles, 0);
+  const parts = tm.base>0 ? [`${tm.base}`] : [`${tm.mileageCharge.toFixed(2)} mileage + ${tm.serviceFee} fee`];
   if(r.premium==='Y'||r.premium===true) parts.push(`+${surcharge('premium')} premium`);
   if(r.holiday==='Y'||r.holiday===true) parts.push(`+${surcharge('holiday')} holiday`);
   if(r.christmas==='Y'||r.christmas===true) parts.push(`+${surcharge('christmas')} christmas`);
@@ -15243,12 +15451,8 @@ function buildFeeBreakdown(r){
   if(r.traffic==='Y'||r.traffic===true) parts.push(`+${surcharge('traffic')} traffic`);
   if(r.xstop && r.xstop > 0) parts.push(`+${r.xstop*extraStopFee()} extra stops`);
   if(r.fuel==='Y'||r.fuel===true) parts.push(`+ ${fuelPct()}% fuel`);
-  const miles = parseFloat(r.miles)||0;
-  const apType = r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP';
-  if(apType && miles > mileageTrigger()){
-    const over = miles - includedMiles();
-    parts.push(`+${(over*mileageRate()).toFixed(2)} mileage`);
-  }
+  if(tm.overage > 0) parts.push(`+${tm.overage.toFixed(2)} mileage`);
+  if(tm.vehUp > 0) parts.push(`+${tm.vehUp} vehicle upcharge`);
   return parts.length > 1 ? `(${parts.join(' ')})` : `(${parts[0]})`;
 }
 // ═══════════════════════════════════════════
@@ -16839,6 +17043,23 @@ function getClientOwner(clientName){
 // decides who earns the fee) and whoever is literally assigned to drive this specific ride
 // (checked directly, no proxy resolution — a substitute driver still needs to get in the
 // gate even if they don't own the client). Nobody else — not other drivers, not other admins.
+// The client owner (Kat/Morgan proxy-aware - the same rule that decides who earns the fee,
+// not admin status) or the assigned driver. This exact check used to be three separate,
+// explicitly-acknowledged-as-duplicated copies - the real, authoritative one inside
+// saveRideEdits() (what actually decides whether a save succeeds), and two more that only
+// decided whether to show the Edit button at all, each carrying its own comment admitting it
+// had to be manually kept in sync with the real one. One shared function now, so there's
+// exactly one place this can ever drift.
+function canEditRide(ride){
+  if(!ride) return false;
+  const myDriverName = getMyDriverName();
+  const isDriver = !!(myDriverName && (ride.driver===myDriverName || ride.driver2===myDriverName));
+  const myLogin = currentUser && currentUser.name;
+  const myResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[myLogin]) || myDriverName;
+  const owner = getClientOwner(ride.client) || feeOwnerFor(ride.createdBy);
+  const isOwner = !!(owner && owner===myResolvedIdentity);
+  return isOwner || isDriver;
+}
 function canSeeGateCode(ride){
   try{
     if(!ride || !ride.gateCode) return false;
@@ -17271,7 +17492,11 @@ function recalcQa(){
     const leg2Sub = tm.base + tm.overage + legFlat(qaAddonStateLeg2);
     const leg1Fuel = qaAddonState.fuel ? leg1Sub*fuelRate() : 0;
     const leg2Fuel = qaAddonStateLeg2.fuel ? leg2Sub*fuelRate() : 0;
-    sub = leg1Sub+leg1Fuel + leg2Sub+leg2Fuel;
+    // Each leg is a genuinely separate, independently-charged fare - floors on its own before
+    // being summed, exactly like calcQuote()'s real AP Round Trip branch. Combining both first
+    // and flooring once at the end (as this used to) can differ by a real dollar from flooring
+    // each leg first - confirmed directly: $313 vs the correct $312 for one real test case.
+    sub = Math.floor(leg1Sub+leg1Fuel) + Math.floor(leg2Sub+leg2Fuel);
   } else {
     sub=tm.tripTotal;
     Object.keys(ADDONS_FLAT).forEach(k=>{ if(k==='fuel') return; if(qaAddonState[k]){ if(k==='holiday'&&qaAddonState.christmas) return; sub+=surcharge(k); } });
@@ -17430,6 +17655,7 @@ function _pickAndReadImage(opts){
   var resize = !!opts.resize;
   var cleanupDelayMs = opts.cleanupDelayMs != null ? opts.cleanupDelayMs : 1000;
   var onResult = opts.onResult || function(){};
+  var onError = opts.onError || function(){ showToast('That file doesn\u2019t look like a valid image \u2014 try a different one','error'); };
   var inp = document.createElement('input');
   inp.type='file'; inp.accept='image/*'; inp.style.display='none';
   inp.onchange = function(){
@@ -17444,9 +17670,26 @@ function _pickAndReadImage(opts){
           if(w>max||h>max){ var s=Math.min(max/w,max/h); w=Math.round(w*s); h=Math.round(h*s); }
           var cv=document.createElement('canvas'); cv.width=w; cv.height=h;
           cv.getContext('2d').drawImage(img,0,0,w,h);
-          onResult(cv.toDataURL('image/png'));
+          var resized = cv.toDataURL('image/png');
+          // Confirm the resized output actually decodes before ever saving it - reported
+          // directly: a driver's logo, already through this exact resize step, still showed
+          // as a broken image later. A canvas can produce a dataURL that's structurally
+          // shaped like a real image but isn't genuinely decodable (a size/memory limit, a
+          // browser quirk) - loading it back into a fresh Image() is the only way to actually
+          // know, rather than guessing after the fact once it's already been saved and shown
+          // to a client. Falls back to the original selection, not a blank/failed save - it's
+          // already proven decodable once, via this same img.onload, to get here at all.
+          var verify = new Image();
+          verify.onload = function(){ onResult(resized); };
+          verify.onerror = function(){ onResult(e.target.result); };
+          verify.src = resized;
         }catch(err){ onResult(e.target.result); }
       };
+      // The originally-selected file itself failing to load as an image is a different,
+      // more fundamental problem than the resize step above - there's no sensible fallback
+      // to that same unloadable data, so this reports it instead of silently hanging with
+      // no feedback at all.
+      img.onerror = onError;
       img.src = e.target.result;
     };
     reader.readAsDataURL(file);
@@ -21181,10 +21424,9 @@ function renderPricingTracker(){
   const now=nowET();
   // Pricing-summary range: defaults to the FULL PREVIOUS month (e.g. in July -> 6/1 through 6/30).
   // Auto-advances each month; admins can override with the date pickers below. Open to all admins.
-  function _iso(dt){ return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'); }
   const _pmStart=new Date(now.getFullYear(), now.getMonth()-1, 1);
   const _pmEnd=new Date(now.getFullYear(), now.getMonth(), 0);
-  const defFrom=_iso(_pmStart), defTo=_iso(_pmEnd);
+  const defFrom=toDateStr(_pmStart), defTo=toDateStr(_pmEnd);
   let rFrom=panel.dataset.from||defFrom;
   let rTo=panel.dataset.to||defTo;
   if(rFrom>rTo){ const _t=rFrom; rFrom=rTo; rTo=_t; }
@@ -21919,8 +22161,8 @@ async function clearTemplateField(scope, key){
 // Both conditions required together - real rides with a $0 comp fare but a real pickup address
 // (or vice versa) are correctly left alone.
 // ── REVIEW FAMILYWALL IMPORTS TOOL — START (see matching END marker below) ──
-// Chase-only cleanup tool for FamilyWall-imported non-ride calendar noise. See its own v886/
-// v887 handoff entries for the full filter-design reasoning. Independent of both import
+// Chase-or-Morgan cleanup tool for FamilyWall-imported non-ride calendar noise. See its own
+// v886/v887 handoff entries for the full filter-design reasoning. Independent of both import
 // features — deleting this doesn't affect either import flow, and vice versa.
 function _findSuspiciousFamilyWallRides(){
   // RT and OW checked case-sensitively as whole uppercase words — lowercase "rt"/"ow" show up
@@ -21945,7 +22187,15 @@ function _findSuspiciousFamilyWallRides(){
 // values here) and flags any group of 2+ that includes at least one FamilyWall import - a
 // duplicate against a manually-entered ride is just as worth catching in this tool as one
 // between two imports, but the group has to involve an import to belong here at all.
-function _findDuplicateFamilyWallGroups(){
+// Broadened from FamilyWall-import-specific duplicate detection to catch any duplicate ride
+// group, regardless of how each ride was created. Reported directly, with a real screenshot:
+// two separate ride records for the same actual trip - same client, date, and time - both
+// marked paid, one created by Kat and one by Morgan. The grouping logic itself (same
+// client/date/time) was already generic and correct; only the final filter (requiring at
+// least one ride to carry r.fwUID, a FamilyWall-import-specific field) was narrowing this to
+// FamilyWall-involving duplicates only, meaning a manually-created duplicate like this one
+// could never have been caught here no matter how obvious it was.
+function _findDuplicateRideGroups(){
   const groups = {};
   rides.forEach(function(r){
     // xxlPair rides are deliberately two vehicles for the ONE same trip - same client, date,
@@ -21959,7 +22209,7 @@ function _findDuplicateFamilyWallGroups(){
   return Object.keys(groups)
     .filter(function(key){ return !fwApprovedDuplicates[key]; })
     .map(function(key){ return {key: key, rides: groups[key]}; })
-    .filter(function(g){ return g.rides.length>=2 && g.rides.some(function(r){ return !!r.fwUID; }); });
+    .filter(function(g){ return g.rides.length>=2; });
 }
 // Marks a duplicate group as reviewed and genuinely fine - two real, separate rides, not an
 // accidental double-booking. No approval step of its own to click anymore, per direct follow-up
@@ -21971,9 +22221,9 @@ async function _approveDuplicateGroup(key){
 }
 
 async function _showFamilyWallReviewModal(){
-  if(!currentUser || currentUser.name!=='Chase'){ showToast('Chase only','error'); return; }
+  if(!currentUser || (currentUser.name!=='Chase' && currentUser.name!=='Morgan')){ showToast('Chase or Morgan only','error'); return; }
   const matches = _findSuspiciousFamilyWallRides();
-  const dupGroups = _findDuplicateFamilyWallGroups();
+  const dupGroups = _findDuplicateRideGroups();
   var back=document.createElement('div'); back.id='fw-review-modal-back';
   back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13500;display:flex;align-items:center;justify-content:center;padding:1rem;';
   const rowsHtml = matches.length ? matches.map(function(r){
@@ -21992,10 +22242,18 @@ async function _showFamilyWallReviewModal(){
     return '<div style="border:1.5px solid #fcd34d;border-radius:10px;padding:.5rem;margin-bottom:.5rem;background:#fffbeb;">'
       + '<div style="font-size:.72rem;font-weight:700;color:#92400e;margin-bottom:.3rem;">'+escHtml(first.client)+' \u00b7 '+dateStr+' '+timeStr+' \u2014 '+g.rides.length+' matching rides</div>'
       + g.rides.map(function(r){
+          // Who created this specific ride matters here: only a ride with createdBy==='Morgan'
+          // counts toward her dispatch invoice, so whoever resolves this duplicate needs to be
+          // able to tell which copy is hers before checking one to delete - otherwise the wrong
+          // one could get kept, silently costing her credit for a real ride.
+          var creatorLabel = r.createdBy==='Morgan'
+            ? '<span style="color:#0d9488;font-weight:700;">created by Morgan\u00a0\u00b7\u00a0</span>'
+            : (r.createdBy ? 'created by '+escHtml(r.createdBy)+'\u00a0\u00b7\u00a0' : '');
           return '<label style="display:flex;align-items:flex-start;gap:.5rem;padding:.3rem .2rem;cursor:pointer;">'
             + '<input type="checkbox" class="fw-review-check fw-dup-check" data-group="'+escAttr(g.key)+'" data-fw="'+(r.fwUID?'1':'0')+'" value="'+r.id+'" style="margin-top:.2rem;accent-color:#f0997b;">'
             + '<div style="flex:1;min-width:0;font-size:.76rem;color:var(--black);">'
             + (r.fwUID?'<span style="color:#f0997b;font-weight:700;">FamilyWall\u00a0\u00b7\u00a0</span>':'')
+            + creatorLabel
             + escHtml(r.type||'')+' \u00b7 $'+(r.price!==undefined?r.price:'?')+' \u00b7 driver: '+escHtml(r.driver||'(unassigned)')+' \u00b7 status: '+escHtml(r.status||'scheduled')
             + '</div></label>';
         }).join('')
@@ -22003,7 +22261,7 @@ async function _showFamilyWallReviewModal(){
   }).join('') : '';
   const totalFlagged = matches.length + dupGroups.reduce(function(a,g){ return a+g.rides.length; },0);
   back.innerHTML='<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;padding:1.25rem;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
-    +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\uD83E\uDDF9 Review FamilyWall imports</div>'
+    +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\uD83E\uDDF9 Review imports &amp; duplicates</div>'
     +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.7rem;line-height:1.45;">Checked for two things: possible duplicate bookings (same client, date, and time), and likely non-ride calendar noise (holiday fees, concerts, notes) with no ride-type word, address, or real price. Check anything to delete it \u2014 immediately, no second-admin approval, no undo. Any duplicate you leave unchecked is treated as reviewed and fine, and won\u2019t be flagged again.</div>'
     +(totalFlagged ? '<label style="display:flex;align-items:center;gap:.5rem;padding:.4rem .5rem;font-size:.78rem;font-weight:700;color:var(--black);border-bottom:2px solid var(--light);"><input type="checkbox" id="fw-review-selectall" onchange="document.querySelectorAll(\'.fw-review-check[data-fw=&quot;1&quot;]\').forEach(function(c){c.checked=this.checked}.bind(this))" style="accent-color:#f0997b;">Select all FamilyWall imports</label>' : '')
     +'<div style="flex:1;overflow-y:auto;margin-bottom:.7rem;">'
@@ -22018,14 +22276,14 @@ async function _showFamilyWallReviewModal(){
 }
 
 async function _applyFamilyWallReview(){
-  if(!currentUser || currentUser.name!=='Chase'){ showToast('Chase only','error'); return; }
+  if(!currentUser || (currentUser.name!=='Chase' && currentUser.name!=='Morgan')){ showToast('Chase or Morgan only','error'); return; }
   const checkedEls = Array.from(document.querySelectorAll('.fw-review-check:checked'));
   const checkedIds = checkedEls.map(function(c){ return String(c.value); });
 
   // Any duplicate group with nothing checked in it is treated as reviewed and fine - left
   // alone on purpose, not overlooked. A group with at least one ride checked skips approval
   // entirely, since deleting from it is what actually resolves the duplicate.
-  const dupGroups = _findDuplicateFamilyWallGroups();
+  const dupGroups = _findDuplicateRideGroups();
   const groupsToApprove = dupGroups.filter(function(g){
     return !g.rides.some(function(r){ return checkedIds.indexOf(String(r.id))>-1; });
   });
@@ -22038,10 +22296,15 @@ async function _applyFamilyWallReview(){
     return;
   }
 
+  // Direct follow-up: a ride created by Morgan is the one that counts toward her dispatch
+  // invoice, so deleting it specifically - keeping someone else's duplicate instead - would
+  // silently cost her credit for a real ride. Warns explicitly right here, at the actual,
+  // irreversible moment, on top of the creator label already shown in the list itself.
+  const deletingMorgans = checkedIds.some(function(id){ const r=_rideById(id); return r && r.createdBy==='Morgan'; });
   const _ok = await showConfirmModal({
     icon:'\uD83E\uDDF9', iconColor:'#f0997b', iconBg:'#3a1a1a',
     title:'Delete '+checkedIds.length+' ride'+(checkedIds.length===1?'':'s')+'?',
-    message:'This permanently removes '+checkedIds.length+' FamilyWall-imported ride'+(checkedIds.length===1?'':'s')+' and cannot be undone.'+(groupsToApprove.length?' Every other duplicate you left unchecked will be marked reviewed and won\u2019t be flagged again.':''),
+    message:'This permanently removes '+checkedIds.length+' ride'+(checkedIds.length===1?'':'s')+' and cannot be undone.'+(groupsToApprove.length?' Every other duplicate you left unchecked will be marked reviewed and won\u2019t be flagged again.':'')+(deletingMorgans?' \u26a0\ufe0f At least one of these was created by Morgan and counts toward her dispatch invoice \u2014 deleting it removes that credit.':''),
     buttons:[
       {label:'Cancel', style:'neutral', value:false},
       {label:'Delete '+checkedIds.length, style:'danger', value:true}
@@ -22050,12 +22313,12 @@ async function _applyFamilyWallReview(){
   if(!_ok) return;
   for(const id of checkedIds){
     const r=_rideById(id);
-    // noApproval:true — this is deliberate cleanup of recognized import noise, not a normal
-    // operational ride deletion, so it's exempt from the usual "someone else's ride needs a
-    // second admin" rule (see deleteRide() above for the normal path this intentionally
-    // bypasses). Reuses the exact same registered ride_delete handler either way, so the
-    // actual deletion logic itself can never drift out of sync between the two paths.
-    await queueAdminAction('ride_delete', {id: id}, 'FamilyWall cleanup: delete '+((r&&r.client)||'a ride'), {noApproval: true});
+    // noApproval:true — this is deliberate cleanup of a recognized duplicate or import noise,
+    // not a normal operational ride deletion, so it's exempt from the usual "someone else's
+    // ride needs a second admin" rule (see deleteRide() above for the normal path this
+    // intentionally bypasses). Reuses the exact same registered ride_delete handler either way,
+    // so the actual deletion logic itself can never drift out of sync between the two paths.
+    await queueAdminAction('ride_delete', {id: id}, 'Duplicate/import cleanup: delete '+((r&&r.client)||'a ride'), {noApproval: true});
   }
   for(const g of groupsToApprove){ await _approveDuplicateGroup(g.key); }
   showToast('\u2713 Deleted '+checkedIds.length+' ride'+(checkedIds.length===1?'':'s')+(groupsToApprove.length?(', approved '+groupsToApprove.length+' more'):''));
@@ -22290,11 +22553,37 @@ async function clearPerTerminalPickupInstructions(){
 // restriction as every other global default field; the UI that called this no longer exists,
 // since there's no more live app-wide-editable layer for per-terminal instructions at all -
 // just the hardcoded default and a driver's own personal override, which still always wins.
+function renderBusinessLogoManager(){
+  const box = document.getElementById('business-logo-manager');
+  if(!box) return;
+  if(!(currentUser && currentUser.role==='admin')){ box.innerHTML=''; return; }
+  const rows = driversForDisplay().map(function(d){
+    const prof = DRIVER_PROFILES[d]||{};
+    const dk = d.replace(/ /g,'_');
+    const preview = prof.logo
+      ? '<span style="width:44px;height:44px;border-radius:8px;flex-shrink:0;background:#f3eeff url(\''+prof.logo+'\') center/contain no-repeat;border:1px solid var(--light);"></span>'
+      : '<span style="width:44px;height:44px;border-radius:8px;flex-shrink:0;background:#f3eeff;border:1px solid var(--light);display:flex;align-items:center;justify-content:center;font-size:1.2rem;">\uD83C\uDFE2</span>';
+    return '<div style="display:flex;align-items:center;gap:.75rem;padding:.6rem 0;border-bottom:1px solid var(--light);">'
+      + preview
+      + '<div style="flex:1;min-width:0;">'
+      + '<div style="font-size:.85rem;font-weight:700;color:var(--black);">'+escHtml(d)+'</div>'
+      + '<div style="font-size:.7rem;color:var(--mid);">'+(prof.logo?'Logo set':'No logo uploaded yet')+(prof.businessName?' \u00b7 '+escHtml(prof.businessName):'')+'</div>'
+      + '</div>'
+      + '<button type="button" onclick="openBusinessLogoUpload(\''+d+'\')" style="padding:.45rem .8rem;border-radius:8px;border:1.5px solid var(--accent);background:none;color:var(--accent);font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.76rem;cursor:pointer;white-space:nowrap;">'+(prof.logo?'Change':'Upload')+'</button>'
+      + '</div>';
+  }).join('');
+  box.innerHTML = '<div style="border:1px solid var(--light);border-radius:10px;padding:.85rem;margin-bottom:1rem;background:var(--surface);">'
+    + '<div style="font-size:.8rem;font-weight:700;color:var(--black);margin-bottom:.25rem;">\uD83C\uDFE2 Business logos</div>'
+    + '<div style="font-size:.72rem;color:var(--mid);line-height:1.5;margin-bottom:.7rem;">Upload a business logo for any driver here, not just your own. Whichever logo a quote or receipt should show gets asked at send time whenever there\u2019s a real choice between two.</div>'
+    + rows
+    + '</div>';
+}
 function renderAccessControl(){
   if(!(currentUser && currentUser.role==='admin')){
     document.getElementById('access-control-list').innerHTML='<p style="color:var(--mid);">Admins only.</p>';
     return;
   }
+  renderBusinessLogoManager();
   const list = document.getElementById('access-control-list');
   const _onbResetPanel = '<div style="border:1px solid var(--light);border-radius:10px;padding:.85rem;margin-bottom:1rem;background:var(--surface);">'
     +'<div style="font-size:.8rem;font-weight:700;color:var(--black);margin-bottom:.25rem;">\uD83D\uDD04 Re-prompt drivers to update their info</div>'
@@ -22458,7 +22747,7 @@ function buildDriverDocHTML(fullName){
   const recRows = recs.map(r=>{
     const col = catColors[r.category]||'#6b6b6b';
     return `<div class="rc">
-      <div class="rc-img">${r.imageData?`<img src="${r.imageData}" alt="Receipt photo" />`:'<div class="ph">🧾</div>'}</div>
+      <div class="rc-img">${_receiptPhotoCache[r.id]?`<img src="${_receiptPhotoCache[r.id]}" alt="Receipt photo" />`:'<div class="ph">🧾</div>'}</div>
       <div class="rc-info">
         <span class="rc-cat" style="background:${col}22;color:${col};">${r.category}</span>
         <span class="rc-amt">$${parseFloat(r.amount||0).toFixed(2)}</span>
@@ -25475,7 +25764,7 @@ async function persistRideTip(rideId,val){
 let feePayments = {};
 async function loadFeePayments(){ const d=await storageGet('kat:feePayments'); if(d) feePayments=d; }
 // Duplicate groups Chase has looked at and confirmed are genuinely two separate, real rides -
-// not an accidental double-booking. Keyed identically to _findDuplicateFamilyWallGroups()'s own
+// not an accidental double-booking. Keyed identically to _findDuplicateRideGroups()'s own
 // grouping key (client|date|time), so a group can only ever be approved as exactly the same
 // thing that was flagged. Direct request: reviewing the duplicate scan needed a way to say "no,
 // these are fine" without deleting anything, so the same pair doesn't keep reappearing on every
@@ -25554,7 +25843,7 @@ function clearLockedRoute(origin, dest){
 
 function getCautiousMatches(name,phone){
   const n=(name||'').trim().toLowerCase(); if(!n) return [];
-  const last4=(phone||'').replace(/\D/g,'').slice(-4); if(last4.length<4) return [];
+  const last4=phoneLast4(phone); if(last4.length<4) return [];
   return cautiousList.filter(e=>e.name.toLowerCase()===n&&e.phoneLast4===last4);
 }
 function showCautiousWarning(matches,onProceed,onCancel){
@@ -25624,7 +25913,7 @@ async function submitCautiousFlag(){
   const reason=(document.getElementById('caut-reason')?.value||'').trim();
   const errEl=document.getElementById('caut-err');
   if(!name){ if(errEl) errEl.textContent='Client name is required.'; return; }
-  const last4=(phone||'').replace(/\D/g,'').slice(-4);
+  const last4=phoneLast4(phone);
   if(last4.length<4){ if(errEl) errEl.textContent='Need a valid phone number.'; return; }
   if(!reason){ if(errEl) errEl.textContent='A reason is required.'; return; }
   const me=getMyDriverName()||currentUser?.name;
@@ -26630,10 +26919,29 @@ function _dispatchInvoiceListHtml(isKat){
     } else if(!isKat && inv.status==='paid_pending'){
       actionBtn = '<button onclick="markDispatchInvoiceReceived(\''+inv.id+'\')" style="padding:.35rem .7rem;background:#fff;color:#0f766e;border:none;border-radius:7px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;margin-right:.35rem;">\u2713 Received</button>'
         + '<button onclick="rejectDispatchInvoicePaid(\''+inv.id+'\')" style="padding:.35rem .6rem;background:none;color:#fff;border:1.5px solid rgba(255,255,255,.5);border-radius:7px;font-family:inherit;font-size:.72rem;font-weight:600;cursor:pointer;">\u2717 Not received</button>';
+    } else if(!isKat && inv.status==='sent'){
+      actionBtn = '<button onclick="voidDispatchInvoice(\''+inv.id+'\')" style="padding:.35rem .6rem;background:none;color:#fff;border:1.5px solid rgba(255,255,255,.5);border-radius:7px;font-family:inherit;font-size:.72rem;font-weight:600;cursor:pointer;">\u2715 Void</button>';
+    }
+    // Direct follow-up, confirmed by a real ride's own creation timestamp: invoices store a
+    // fixed, one-time snapshot of which rides counted, captured the moment they're generated -
+    // a ride created afterward, even with a date that falls inside the invoice's own range,
+    // could never have been picked up, since nothing re-checks after that first moment. Flags
+    // this directly instead of leaving it silently invisible.
+    var staleNote = '';
+    if(inv.status!=='voided' && typeof _dispatchInvoiceRides==='function'){
+      try{
+        var _s=new Date(inv.startDate+'T00:00:00'), _e=new Date(inv.endDate+'T23:59:59');
+        var _originalIds = new Set(inv.rideIds||[]);
+        var _newSince = _dispatchInvoiceRides(_s,_e).filter(function(r){ return !_originalIds.has(r.id); });
+        if(_newSince.length){
+          staleNote = '<div style="font-size:.68rem;color:#fde68a;margin-top:.15rem;">\u26a0\ufe0f '+_newSince.length+' ride'+(_newSince.length===1?'':'s')+' created since this invoice \u2014 void and re-invoice to include '+(_newSince.length===1?'it':'them')+'.</div>';
+        }
+      }catch(e){}
     }
     return '<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.5rem 0;border-bottom:1px solid rgba(255,255,255,.15);flex-wrap:wrap;">'
       + '<div style="min-width:0;"><div style="font-size:.78rem;font-weight:700;">'+periodLbl+'</div>'
-      + '<div style="font-size:.72rem;opacity:.85;">$'+inv.total.toFixed(2)+' \u00b7 <span style="color:'+st.color+';">'+st.text+'</span></div></div>'
+      + '<div style="font-size:.72rem;opacity:.85;">$'+inv.total.toFixed(2)+' \u00b7 <span style="color:'+st.color+';">'+st.text+'</span></div>'
+      + staleNote + '</div>'
       + (actionBtn?'<div style="flex-shrink:0;">'+actionBtn+'</div>':'')
       + '</div>';
   }).join('');
@@ -27035,6 +27343,7 @@ function openBusinessLogoUpload(driverName){
       DRIVER_PROFILES[driverName].logo=dataUrl;
       await storageSetOne('kat:driverProfiles', driverName, DRIVER_PROFILES[driverName], DRIVER_PROFILES);
       if(typeof renderMyProfileCard==='function') renderMyProfileCard();
+      if(typeof renderBusinessLogoManager==='function') renderBusinessLogoManager();
       showToast('\u2713 Business logo saved');
     }catch(err){ console.warn('logo save failed', err); showToast('Could not save logo','error'); }
   }});
@@ -27547,9 +27856,8 @@ function openArrivalThread(id, body){
   const recips=arrivalTextRecipients(r);
   const nums=recips.map(function(x){ return x.phone; });
   if(!nums.length){ showToast('\u26a0 No phone numbers found for this ride \u2014 add the client\'s number first'); return false; }
-  const cp=(clientPhoneFor(r)||'').replace(/[^0-9+]/g,'');
-  const cp10=cp.replace(/\D/g,'').slice(-10);
-  const clientIn = !!cp10 && recips.some(function(x){ return (x.phone||'').replace(/\D/g,'').slice(-10)===cp10; });
+  const cp10=phoneLast10(clientPhoneFor(r));
+  const clientIn = !!cp10 && recips.some(function(x){ return phoneLast10(x.phone)===cp10; });
   if(!clientIn){
     showToast('\u26a0 '+(r.client||'The client')+' has no phone on file \u2014 this text reaches only the driver. Add their number to the ride, then resend.');
   }
@@ -27563,9 +27871,8 @@ function openGroupThread(id, body){
   const nums=recips.map(function(x){ return x.phone; });
   if(!nums.length){ showToast('\u26a0 No phone numbers found for this ride \u2014 add the client\'s number first'); return false; }
   // Make sure the CLIENT is actually in the thread — texting only drivers is a silent miss.
-  const cp=(clientPhoneFor(r)||'').replace(/[^0-9+]/g,'');
-  const cp10=cp.replace(/\D/g,'').slice(-10);
-  const clientIn = !!cp10 && recips.some(function(x){ return (x.phone||'').replace(/\D/g,'').slice(-10)===cp10; });
+  const cp10=phoneLast10(clientPhoneFor(r));
+  const clientIn = !!cp10 && recips.some(function(x){ return phoneLast10(x.phone)===cp10; });
   if(!clientIn){
     showToast('\u26a0 '+(r.client||'The client')+' has no phone on file \u2014 this text reaches only the drivers. Add their number to the ride, then resend.');
   }
@@ -28449,28 +28756,29 @@ function _auditSurchargeLines(r){
 
 function _auditBaseBreakdown(r){
   // Reconstruct the base + mileage portion (before surcharges & manual adj)
-  var RPM = (typeof RATE_PER_MILE!=='undefined')?RATE_PER_MILE:2.50;
-  var baseRates = (typeof BASE!=='undefined')?BASE:{'Sedan':105,'SUV/Van':145,'Premium':185};
   var miles = parseFloat(r.miles)||0;
   var type = (r.type||'').toUpperCase();
-  var out = { baseLabel:'', baseAmount:0, mileageLabel:'', mileageAmount:0, serviceFee:0 };
+  var out = { baseLabel:'', baseAmount:0, mileageLabel:'', mileageAmount:0, serviceFee:0, vehUpAmount:0 };
+  // Routed through tripMath() - this used to be its own, independent copy of the formula that
+  // bypassed mileageRate()/pickupFee() entirely (a hardcoded rate and hardcoded fees, ignoring
+  // any admin-configured custom rate), had the same Sprinter-Van base-rate blind spot already
+  // fixed elsewhere, and never accounted for vehicle upcharges at all - meaning this audit
+  // report could flag a correctly-priced SUV or Premium ride as "under-computed" purely because
+  // its own math never included the upcharge, not because anything was actually wrong.
+  var tm = tripMath(r.type, r.vehicle, miles, 0);
 
-  if(type==='ROUND TRIP'){
-    out.mileageLabel = miles+' mi × 2 × $'+RPM.toFixed(2);
-    out.mileageAmount = miles*2*RPM;
-    out.serviceFee = 20;
-  } else if(type==='ONE WAY' || type==='LOCAL'){
-    out.mileageLabel = miles+' mi × $'+RPM.toFixed(2);
-    out.mileageAmount = miles*RPM;
-    out.serviceFee = 10;
+  if(type==='ROUND TRIP' || type==='ONE WAY' || type==='LOCAL'){
+    out.mileageLabel = miles+' mi'+(type==='ROUND TRIP'?' × 2':'')+' × $'+mileageRate().toFixed(2);
+    out.mileageAmount = tm.mileageCharge;
+    out.serviceFee = tm.serviceFee;
+    out.vehUpAmount = tm.vehUp;
   } else {
     // AP types: base rate includes the configured miles; overage beyond that (2-mile grace)
-    var base = baseRates[r.vehicle]||0;
     out.baseLabel = (r.vehicle||'?')+' base (incl '+includedMiles()+' mi)';
-    out.baseAmount = base;
-    if(miles>mileageTrigger()){
-      out.mileageLabel = 'Overage '+(miles-includedMiles())+' mi × $'+RPM.toFixed(2);
-      out.mileageAmount = (miles-includedMiles())*RPM;
+    out.baseAmount = tm.base;
+    if(tm.overage>0){
+      out.mileageLabel = 'Overage '+tm.overMiles+' mi × $'+mileageRate().toFixed(2);
+      out.mileageAmount = tm.overage;
     }
   }
   return out;
@@ -28633,7 +28941,7 @@ function generatePricingAudit(){
       adjNote = r.feeNote || r.feeType || '';
     }
 
-    var computed = bb.baseAmount + bb.mileageAmount + bb.serviceFee + surTotal + manualAdj;
+    var computed = bb.baseAmount + bb.mileageAmount + bb.serviceFee + bb.vehUpAmount + surTotal + manualAdj;
     var quoted = parseFloat(r.price)||0;
     // Round trip second leg
     if((r.type||'').toUpperCase()==='AP ROUND TRIP' && r.price2){
@@ -29943,11 +30251,11 @@ function enterApp(){
   // Same bug class as Archive old (see that fix's own comment): this used to show for Chase
   // regardless of whether _findSuspiciousFamilyWallRides() would actually find anything -
   // found during a full pass over every button in the app checking for exactly this pattern.
-  // Chase-only, not admin-only - the same currentUser.name==='Chase' check already used for
-  // the Message Templates tab and the owner-override toggle, not isAdmin() (which also covers
-  // Kat and Morgan). Deliberate: this deletes data immediately with no approval and no undo,
-  // scoped tighter than the rest of the admin surface on purpose.
-  if(fwReviewBtn) fwReviewBtn.style.display = (currentUser && currentUser.name==='Chase' && typeof _findSuspiciousFamilyWallRides==='function' && typeof _findDuplicateFamilyWallGroups==='function' && (_findSuspiciousFamilyWallRides().length>0 || _findDuplicateFamilyWallGroups().length>0)) ? 'inline-block' : 'none';
+  // Chase-or-Morgan, not admin-only - the same currentUser.name check pattern already used for
+  // the quote price-review tool, not isAdmin() (which also covers Kat). Deliberate: this
+  // deletes data immediately with no approval and no undo, scoped tighter than the rest of the
+  // admin surface on purpose.
+  if(fwReviewBtn) fwReviewBtn.style.display = (currentUser && (currentUser.name==='Chase' || currentUser.name==='Morgan') && typeof _findSuspiciousFamilyWallRides==='function' && typeof _findDuplicateRideGroups==='function' && (_findSuspiciousFamilyWallRides().length>0 || _findDuplicateRideGroups().length>0)) ? 'inline-block' : 'none';
   const quotePriceReviewBtn = document.getElementById('quote-price-review-btn');
   if(quotePriceReviewBtn) quotePriceReviewBtn.style.display = (currentUser && (currentUser.name==='Chase' || currentUser.name==='Morgan') && typeof _findMispricedSavedQuotes==='function' && _findMispricedSavedQuotes().length>0) ? 'inline-block' : 'none';
   const archivedTab2=document.getElementById('mptab-archived'); if(archivedTab2) archivedTab2.style.display=admin?'inline-block':'none';
@@ -31021,7 +31329,77 @@ setTimeout(()=>{
 // ═══════════════════════════════════════════
 
 const RECEIPT_CATEGORIES = ['Fuel','Maintenance','Tolls','Parking','Other'];
-let receipts = {}; // { driverName: [ {id, date, category, amount, notes, imageData, ts} ] }
+let receipts = {}; // { driverName: [ {id, date, category, amount, notes, ts} ] } - no imageData: see _receiptPhotoDB below
+
+// Direct request: receipt photos should live on the driver's phone, in the app's own local
+// storage, never uploaded to app servers. Built as a dedicated, local-only IndexedDB store
+// rather than trying to strip the image out at every individual save/sync call site, which
+// would be fragile and easy to miss a spot on. Since `receipts` syncs via a realtime listener
+// that can overwrite this whole object at any time, the photo is never part of that synced
+// object at all, not even in memory - it lives exclusively here, looked up only when actually
+// needed for display, so a realtime update can never clobber a locally-cached photo. IndexedDB
+// specifically, not localStorage, since a phone camera photo can easily be 1-3MB and
+// localStorage's much smaller per-origin limit is shared across everything else this app
+// already keeps there.
+let _receiptPhotoCache = {}; // in-memory mirror, keyed by receipt id, so every display site can read synchronously
+const _receiptPhotoDB = (function(){
+  let dbPromise = null;
+  function open(){
+    if(dbPromise) return dbPromise;
+    dbPromise = new Promise(function(resolve, reject){
+      if(!('indexedDB' in window)){ reject(new Error('IndexedDB unavailable')); return; }
+      var req = indexedDB.open('nwda-receipt-photos', 1);
+      req.onupgradeneeded = function(){ req.result.createObjectStore('photos'); };
+      req.onsuccess = function(){ resolve(req.result); };
+      req.onerror = function(){ reject(req.error); };
+    });
+    return dbPromise;
+  }
+  return {
+    set: async function(id, dataUrl){
+      try{
+        var db = await open();
+        return await new Promise(function(resolve, reject){
+          var tx = db.transaction('photos','readwrite');
+          tx.objectStore('photos').put(dataUrl, id);
+          tx.oncomplete = function(){ resolve(true); };
+          tx.onerror = function(){ reject(tx.error); };
+        });
+      }catch(e){ console.warn('receipt photo save failed (kept in this session only)', e); return false; }
+    },
+    delete: async function(id){
+      try{
+        var db = await open();
+        return await new Promise(function(resolve){
+          var tx = db.transaction('photos','readwrite');
+          tx.objectStore('photos').delete(id);
+          tx.oncomplete = function(){ resolve(true); };
+          tx.onerror = function(){ resolve(false); };
+        });
+      }catch(e){ return false; }
+    },
+    getAll: async function(){
+      try{
+        var db = await open();
+        return await new Promise(function(resolve){
+          var tx = db.transaction('photos','readonly');
+          var store = tx.objectStore('photos');
+          var out = {};
+          var cursorReq = store.openCursor();
+          cursorReq.onsuccess = function(){
+            var cursor = cursorReq.result;
+            if(cursor){ out[cursor.key] = cursor.value; cursor.continue(); }
+            else{ resolve(out); }
+          };
+          cursorReq.onerror = function(){ resolve(out); };
+        });
+      }catch(e){ return {}; }
+    }
+  };
+})();
+async function _loadReceiptPhotoCache(){
+  _receiptPhotoCache = await _receiptPhotoDB.getAll();
+}
 
 async function loadReceipts(){
   const d = await storageGet('kat:receipts');
@@ -31096,9 +31474,9 @@ function renderReceipts(){
       ? '<div style="text-align:center;color:var(--mid);padding:3rem 1rem;"><div style="font-size:2rem;margin-bottom:.5rem;">🧾</div><div>No receipts yet — tap Add Receipt to upload your first one.</div></div>'
       : sorted.map(r=>`
         <div style="background:var(--white);border-radius:12px;border:1.5px solid var(--light);overflow:hidden;margin-bottom:.85rem;display:flex;gap:1rem;align-items:stretch;">
-          ${r.imageData
+          ${_receiptPhotoCache[r.id]
             ? `<div style="width:90px;flex-shrink:0;background:#f0f0f0;display:flex;align-items:center;justify-content:center;cursor:pointer;" onclick="viewReceiptImage('${r.id}','${dName||r.driverName||''}')">
-                <img src="${r.imageData}" style="width:90px;height:90px;object-fit:cover;" alt="receipt" />
+                <img src="${_receiptPhotoCache[r.id]}" style="width:90px;height:90px;object-fit:cover;" alt="receipt" />
                </div>`
             : `<div style="width:90px;flex-shrink:0;background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:2rem;">🧾</div>`}
           <div style="flex:1;padding:.75rem .75rem .75rem 0;">
@@ -31300,10 +31678,14 @@ async function saveReceipt(){
     category: cat,
     amount,
     notes,
-    imageData: receiptImageData || null,
     driverName: dName,
     ts: Date.now(),
   };
+
+  if(receiptImageData){
+    await _receiptPhotoDB.set(rec.id, receiptImageData);
+    _receiptPhotoCache[rec.id] = receiptImageData;
+  }
 
   receipts[dName].unshift(rec);
   await saveReceipts(dName);
@@ -31319,6 +31701,8 @@ async function deleteReceipt(id, driverName){
   if(!receipts[key]) return;
   receipts[key] = receipts[key].filter(r=>r.id!==id);
   await saveReceipts(key);
+  delete _receiptPhotoCache[id];
+  _receiptPhotoDB.delete(id);
   showToast('Receipt deleted');
   renderReceipts();
 }
@@ -31326,11 +31710,12 @@ async function deleteReceipt(id, driverName){
 function viewReceiptImage(id, driverName){
   const key = driverName || getMyDriverName() || currentUser?.name || '';
   const rec = (receipts[key]||[]).find(r=>r.id===id);
-  if(!rec||!rec.imageData) return;
+  const photo = rec ? _receiptPhotoCache[rec.id] : null;
+  if(!photo) return;
   const m = document.createElement('div');
   m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:600;display:flex;align-items:center;justify-content:center;';
   m.onclick=()=>m.remove();
-  m.innerHTML=`<img src="${rec.imageData}" alt="Receipt photo, enlarged" style="max-width:95vw;max-height:90vh;border-radius:8px;object-fit:contain;" />`;
+  m.innerHTML=`<img src="${photo}" alt="Receipt photo, enlarged" style="max-width:95vw;max-height:90vh;border-radius:8px;object-fit:contain;" />`;
   document.body.appendChild(m);
 }
 
@@ -31776,7 +32161,7 @@ async function exportReceiptsPDF(){
   sorted.forEach(r=>{
     const col = catColors[r.category]||'#6b6b6b';
     html += `<div class="receipt-item">
-      <div class="receipt-img">${r.imageData?`<img src="${r.imageData}" alt="Receipt photo" />`:'<div class="receipt-img-placeholder">🧾</div>'}</div>
+      <div class="receipt-img">${_receiptPhotoCache[r.id]?`<img src="${_receiptPhotoCache[r.id]}" alt="Receipt photo" />`:'<div class="receipt-img-placeholder">🧾</div>'}</div>
       <div class="receipt-info">
         <span class="receipt-cat" style="background:${col}22;color:${col};">${r.category}</span>
         <span class="receipt-amount">$${parseFloat(r.amount||0).toFixed(2)}</span>
