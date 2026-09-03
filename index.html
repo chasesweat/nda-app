@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191085">
+<meta name="version" content="202608191091">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -725,6 +725,14 @@ input,select,textarea{font-size:16px;}
           <div id="miles-overage-note" style="font-size:.74rem;color:var(--gold);margin-top:.2rem;"></div>
           <input type="hidden" id="q-miles" value="0" />
         </div>
+        <div id="q-sprinter-hours-box" style="display:none;background:var(--black);border-radius:10px;padding:1rem;margin-bottom:1rem;">
+          <div style="font-size:.72rem;color:#9b8fb8;margin-bottom:.4rem;">Sprinter Van bills hourly for Local/Round Trip \u2014 hours \u00d7 $<span id="q-sprinter-rate-display"></span>/hr</div>
+          <div style="display:flex;align-items:center;gap:.5rem;">
+            <input type="number" id="q-sprinter-hours" min="0" step="0.25" oninput="calcQuote()" style="width:90px;padding:.4rem .5rem;border-radius:8px;border:1px solid #4a3a6e;background:#241640;color:#fff;font-size:1.1rem;font-weight:700;" />
+            <span style="color:#9b8fb8;font-size:.85rem;">hours</span>
+          </div>
+          <div id="q-sprinter-hours-estimate-note" style="font-size:.72rem;color:var(--gold);margin-top:.3rem;"></div>
+        </div>
         <div class="form-group">
           <label>Vehicle <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(pick one — or several to send a side-by-side comparison)</span></label>
           <div class="toggle-group" id="q-vehicle-group">
@@ -1063,7 +1071,7 @@ input,select,textarea{font-size:16px;}
         <button id="mp-settings-save" onclick="saveDriverProfile(getMyDriverName())" style="display:none;width:100%;margin-bottom:1.25rem;padding:.6rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-weight:700;font-size:.85rem;cursor:pointer;">Save settings</button>
       </div>
     </div>
-    <div id="driver-panel-access" style="display:none;"><div id="business-logo-manager"></div><div id="access-control-list"></div></div>
+    <div id="driver-panel-access" style="display:none;"><div id="business-logo-manager"></div><div id="crash-log-section"></div><div id="access-control-list"></div></div>
     <div id="driver-panel-archived" style="display:none;"><div id="archived-drivers-list"></div></div>
     <div id="driver-panel-pricing" style="display:none;"></div>
     <div id="driver-panel-templates" style="display:none;"></div>
@@ -2143,6 +2151,162 @@ let driverColors = {...DEFAULT_COLORS};
 let driverColorVault = {}; // admin "color code vault": official saved hex per driver + who/when
 let currentUser = null;
 let activeRideId = null;
+// Which page is currently showing - tracked here specifically so a captured crash/error can
+// report what someone was actually doing when it happened, not just that something went wrong.
+let _currentPageId = 'dashboard';
+
+// Direct report: users say the app sometimes freezes or goes white, with no pattern found yet -
+// because nothing was capturing what actually happened when it did. Installed as early as
+// possible in the script, before almost anything else runs, so it can catch failures during
+// initial load too, not just after the UI is up. Catches both plain synchronous errors and
+// unhandled promise rejections - the second matters a lot here specifically, since this app is
+// heavily async/await-based, and a rejected promise with no .catch() can silently break a
+// render path while leaving no visible error at all.
+let _lastLoggedErrorKey = '';
+let _lastLoggedErrorTs = 0;
+function _logCrash(kind, message, stack){
+  try{
+    // Rate-limited: the same error repeating in a tight loop shouldn't flood storage with
+    // thousands of near-identical entries - one every 3s per distinct message is plenty to
+    // still see it's happening without drowning out everything else.
+    var key = kind+'|'+message;
+    var now = Date.now();
+    if(key===_lastLoggedErrorKey && (now-_lastLoggedErrorTs)<3000) return;
+    _lastLoggedErrorKey = key; _lastLoggedErrorTs = now;
+
+    var entry = {
+      ts: now,
+      kind: kind, // 'error' or 'unhandledrejection'
+      msg: String(message||'').slice(0, 500),
+      stack: String(stack||'').slice(0, 2000),
+      page: (typeof _currentPageId!=='undefined') ? _currentPageId : '',
+      who: (typeof currentUser!=='undefined' && currentUser && currentUser.name) || '(not logged in)',
+      build: (document.querySelector('meta[name="version"]')||{}).content || '',
+      ua: navigator.userAgent
+    };
+
+    // Written directly and synchronously to localStorage first, as the one guaranteed-reliable
+    // path - a white-screen crash may happen before Firebase is even set up, so nothing here
+    // can depend on it. Kept to the most recent 25 entries, oldest dropped first.
+    var localKey = 'nda-crashlog';
+    var existing = [];
+    try{ existing = JSON.parse(localStorage.getItem(localKey)||'[]'); }catch(e){ existing = []; }
+    existing.push(entry);
+    if(existing.length>25) existing = existing.slice(existing.length-25);
+    try{ localStorage.setItem(localKey, JSON.stringify(existing)); }catch(e){}
+
+    // Best-effort mirror to a shared location, so an admin can see errors from any driver's
+    // device, not just whichever one they're holding. Never awaited and wrapped defensively -
+    // this must never be able to throw or block, since it's running inside error-handling code
+    // itself.
+    if(typeof storageSetOne==='function'){
+      var entryKey = 'e'+now+'_'+Math.random().toString(36).slice(2,8);
+      storageSetOne('kat:crashLog', entryKey, entry).catch(function(){});
+    }
+  }catch(e){ /* logging a crash must never itself be able to crash */ }
+}
+window.addEventListener('error', function(ev){
+  _logCrash('error', ev.message, ev.error && ev.error.stack);
+});
+window.addEventListener('unhandledrejection', function(ev){
+  var r = ev.reason;
+  _logCrash('unhandledrejection', (r && r.message) || String(r), r && r.stack);
+});
+
+// Direct report: someone was entering info and the app closed, losing everything typed.
+// Generic, reusable draft auto-save/restore for a form container - built once, not once per
+// form, so any form can opt in by wrapping its fields in an element with a known id and calling
+// the three functions below at the right moments (see their use on the Quote page and Quick Add
+// for the actual wiring). Captures every input/textarea/select within the container by
+// querying for them directly, rather than a hardcoded field list, so it keeps working if fields
+// are ever added to a form later without this needing to be updated too.
+var _draftDebounceTimers = {};
+function _draftKey(containerId){ return 'nda-draft-'+containerId; }
+function _draftCapture(containerId){
+  var container = document.getElementById(containerId);
+  if(!container) return null;
+  var data = {};
+  container.querySelectorAll('input, textarea, select').forEach(function(el){
+    if(!el.id) return;
+    data[el.id] = (el.type==='checkbox' || el.type==='radio') ? el.checked : el.value;
+  });
+  return data;
+}
+// "Has content" means at least one field is genuinely non-empty - an all-default, untouched
+// form isn't a draft worth saving or worth offering to restore.
+function _draftHasContent(data){
+  if(!data) return false;
+  return Object.keys(data).some(function(k){
+    var v = data[k];
+    return v===true || (v && typeof v==='string' && v.trim().length>0);
+  });
+}
+function _draftSave(containerId){
+  clearTimeout(_draftDebounceTimers[containerId]);
+  _draftDebounceTimers[containerId] = setTimeout(function(){
+    var data = _draftCapture(containerId);
+    if(!_draftHasContent(data)){ try{ localStorage.removeItem(_draftKey(containerId)); }catch(e){} return; }
+    try{ localStorage.setItem(_draftKey(containerId), JSON.stringify({ ts: Date.now(), fields: data })); }catch(e){}
+  }, 1200);
+}
+function _draftClear(containerId){
+  clearTimeout(_draftDebounceTimers[containerId]);
+  try{ localStorage.removeItem(_draftKey(containerId)); }catch(e){}
+}
+// Deliberately conservative about when to actually offer a restore: never if the form already
+// has real content in it (restoring over active typing would be actively harmful, not helpful),
+// never if the saved draft turned out to be empty, and never if it's more than a day old - an
+// old, presumably-abandoned draft resurfacing days later is more likely to confuse than help.
+async function _draftMaybeOffer(containerId, clientFieldId){
+  var raw;
+  try{ raw = localStorage.getItem(_draftKey(containerId)); }catch(e){ return; }
+  if(!raw) return;
+  var saved;
+  try{ saved = JSON.parse(raw); }catch(e){ _draftClear(containerId); return; }
+  // "Meaningful" specifically means the client-name field has real content - several other
+  // fields (passenger count, ride type, an "add to client list" checkbox) carry non-empty
+  // defaults on a completely untouched form, so checking every field would treat that default
+  // state as "already in use" and silently block the offer every time. Confirmed directly:
+  // this happened on a fresh page load with nothing actually typed anywhere.
+  var savedClientVal = clientFieldId ? String(saved && saved.fields && saved.fields[clientFieldId] || '').trim() : '';
+  if(!saved || !savedClientVal) { _draftClear(containerId); return; }
+  if(Date.now() - (saved.ts||0) > 24*60*60*1000){ _draftClear(containerId); return; }
+  var current = _draftCapture(containerId);
+  var currentClientVal = clientFieldId ? String(current && current[clientFieldId] || '').trim() : '';
+  if(currentClientVal) return; // something's already being typed - never overwrite it
+
+  var who = savedClientVal;
+  var minsAgo = Math.max(1, Math.round((Date.now()-(saved.ts||0))/60000));
+  var whenTxt = minsAgo<60 ? (minsAgo+' minute'+(minsAgo===1?'':'s')+' ago') : Math.round(minsAgo/60)+' hour'+(Math.round(minsAgo/60)===1?'':'s')+' ago';
+  var choice = await showConfirmModal({
+    icon:'\uD83D\uDCBE', iconColor:'#f5a623', iconBg:'#3a2a10',
+    title:'Restore unsaved info?',
+    message:'It looks like you were entering info for <b>'+escHtml(String(who))+'</b> '+whenTxt+' when the app closed before it saved. Restore it?',
+    buttons:[ {label:'Discard', style:'neutral', value:'discard'}, {label:'Restore', style:'primary', value:'restore'} ]
+  });
+  if(choice==='restore'){
+    var container = document.getElementById(containerId);
+    Object.keys(saved.fields).forEach(function(id){
+      var el = document.getElementById(id);
+      if(!el || !container || !container.contains(el)) return;
+      if(el.type==='checkbox' || el.type==='radio') el.checked = !!saved.fields[id];
+      else el.value = saved.fields[id];
+      el.dispatchEvent(new Event('input', {bubbles:true}));
+      el.dispatchEvent(new Event('change', {bubbles:true}));
+    });
+  }
+  _draftClear(containerId);
+}
+// Auto-save on any input/change within either form, via event delegation on the container - one
+// listener per form covers every current and future field inside it, rather than attaching to
+// each field individually. Safe to attach immediately: the main script tag runs after both
+// #page-quote and #quick-add-modal already exist in the parsed DOM.
+['page-quote','quick-add-modal'].forEach(function(cid){
+  var c = document.getElementById(cid);
+  if(!c) return;
+  c.addEventListener('input', function(){ _draftSave(cid); });
+  c.addEventListener('change', function(){ _draftSave(cid); });
+});
 
 // ═══════════════════════════════════════════
 // FIREBASE REALTIME DATABASE
@@ -4213,7 +4377,21 @@ function tripMath(type, vehicle, miles, medHours){
   const r = { type:type, vehicle:vehicle, miles:miles,
               apType:apType, apRt:apRt, rtType:rtType, owType:owType, lcType:lcType,
               legs: apRt?2:1, base:0, overMiles:0, overage:0,
-              mileageCharge:0, serviceFee:0, vehUp:0, tripTotal:0 };
+              mileageCharge:0, serviceFee:0, vehUp:0, tripTotal:0, hourly:false, hours:0 };
+  // Reported directly: for Local and Round Trip specifically, Sprinter Van bills hourly (hours
+  // \u00d7 rate), not by mileage - the actual gap behind the original pricing question. Deliberately
+  // scoped to Local/Round Trip only, not One Way, which stays mileage-based like an airport run
+  // (point-to-point, not typically involving waiting or multiple stops the way Local/Round Trip
+  // do). medHours already existed as a parameter here and was already read by one caller (the
+  // pricing-audit report - see that call site's own comment) but was never actually used in any
+  // calculation, and never had any UI to set it until this.
+  if(vehicle==='Sprinter Van' && (rtType || lcType)){
+    r.hourly = true;
+    r.hours = medHours;
+    r.base = medHours * _sprintHr;
+    r.tripTotal = r.base;
+    return r;
+  }
   // Local/one-way/round trip: priced purely on mileage, not a flat base at all - vehicle base
   // rates only apply to airport-type rides. If the math works out to $60, the ride is $60; no
   // minimum tied to any vehicle's base rate.
@@ -4279,7 +4457,8 @@ function calcQuote() {
   // to duplicate the Sprinter Van check, the base-rate lookup, AND the overage math a second
   // time — three separate copies of the same formula that could each drift out of sync on their
   // own. If this formula is ever wrong again, there is exactly one place to fix it.
-  const tm0 = tripMath(type, vehicle, miles, 0);
+  const sprinterHours = parseFloat((document.getElementById('q-sprinter-hours')||{}).value)||0;
+  const tm0 = tripMath(type, vehicle, miles, sprinterHours);
   const base = tm0.base;
 
   // ── Shared surcharge helpers ──
@@ -4392,7 +4571,9 @@ function calcQuote() {
   // with the same arguments.
   const tm = tm0;
   tripTotal = tm.tripTotal;
-  if(rtType){
+  if(tm.hourly){
+    lines.push({label:'Sprinter Van hourly', val:tm.base, note:`${tm.hours} hr × $${(globalSettings.sprintHourly||150).toFixed(2)}/hr`});
+  } else if(rtType){
     lines.push(miles>0?{label:'Round trip mileage', val:tm.mileageCharge, note:`${miles} mi × 2 = ${miles*2} mi × $${mileageRate().toFixed(2)}/mi`}:{label:'Round trip mileage', val:0, note:'Enter miles above'});
     lines.push({label:'Pickup/Drop-off fee', val:tm.serviceFee});
     if(tm.vehUp>0) lines.push({label:`Vehicle upcharge (${vehicle})`, val:tm.vehUp});
@@ -5006,6 +5187,49 @@ function _isAtlantaRushHour(d){
   var eveningStart = 16*60, eveningEnd = 18*60+30;         // 4:00–6:30 PM
   return (mins>=morningStart && mins<morningEnd) || (mins>=eveningStart && mins<eveningEnd);
 }
+// Direct request: for a Sprinter Van Local/Round Trip, estimate the hours needed rather than
+// leaving the field blank - reuses the same drive-time mechanism (getLockedRoute()) the
+// suggested-pickup-time feature above already uses for AP Runs, rather than a separate distance
+// lookup. Round Trip estimates there-and-back drive time plus a buffer for time actually spent
+// at the destination; Local uses the same pickup-to-destination route as a baseline, since this
+// form still has a real pickup/destination pair for that type. Never overwrites a value the
+// creator already typed in themselves - only pre-fills an empty field, or one still holding this
+// function's own last estimate (tracked via the box's own dataset, the same pattern
+// applySuggestedPickupTime() already uses to avoid recalculating what it already showed).
+function updateSprinterHoursEstimate(prefix){
+  const box = document.getElementById(prefix+'-sprinter-hours-box');
+  const rateDisp = document.getElementById(prefix+'-sprinter-rate-display');
+  if(!box) return;
+  const type = (document.getElementById(prefix+'-type')||{}).value;
+  const vehicle = prefix==='q' ? (document.getElementById('q-ride')||{}).value : (document.getElementById(prefix+'-vehicle')||{}).value;
+  const isEligible = vehicle==='Sprinter Van' && (type==='ROUND TRIP' || type==='LOCAL');
+  box.style.display = isEligible ? 'block' : 'none';
+  if(!isEligible) return;
+  if(rateDisp) rateDisp.textContent = globalSettings.sprintHourly||150;
+
+  const hoursInput = document.getElementById(prefix+'-sprinter-hours');
+  const noteEl = document.getElementById(prefix+'-sprinter-hours-estimate-note');
+  const pickup = (document.getElementById(prefix+'-pickup')||{}).value?.trim();
+  const dest = (document.getElementById(prefix+'-dropoff')||document.getElementById(prefix+'-home')||{}).value?.trim();
+  if(!pickup || !dest){ if(noteEl) noteEl.textContent=''; return; }
+  const route = (typeof getLockedRoute==='function') ? getLockedRoute(pickup, dest) : null;
+  if(!route || !route.seconds){
+    if(noteEl) noteEl.textContent = 'Estimate will appear once the distance finishes calculating.';
+    return;
+  }
+  // Only touch the field if it's empty, or still holds exactly what this function estimated
+  // last time - never a value the creator deliberately typed in themselves.
+  const alreadyHasManualValue = hoursInput.value && hoursInput.value !== box.dataset.lastEstimate;
+  if(alreadyHasManualValue) return;
+
+  const driveHrs = route.seconds/3600;
+  const type_ = document.getElementById(prefix+'-type').value;
+  const estimate = type_==='ROUND TRIP' ? Math.ceil((driveHrs*2 + 1)*4)/4 : Math.ceil((driveHrs + 1)*4)/4;
+  hoursInput.value = estimate;
+  box.dataset.lastEstimate = String(estimate);
+  const driveMin = Math.round(route.seconds/60);
+  if(noteEl) noteEl.textContent = 'Estimated: '+Math.round(driveMin*(type_==='ROUND TRIP'?2:1))+'min drive + 1hr buffer, rounded up \u2014 adjust as needed.';
+}
 function updateSuggestedPickupTime(){
   const box = document.getElementById('q-suggested-pickup-box');
   if(!box) return;
@@ -5477,6 +5701,7 @@ function updateTripFields(){
   const isRT    = type==='ROUND TRIP';
   const isOneWay= type==='ONE WAY';
   const show=(id,on)=>{ const el=document.getElementById(id); if(el) el.style.display = on?'block':'none'; };
+  try{ updateSprinterHoursEstimate('q'); }catch(e){}
   // Flight # + Terminal visibility - shared with Add Ride and Edit Ride.
   applyAirportFieldVisibility('q');
   // The type decides which address slot is the airport terminal, so the pickers must follow it.
@@ -5681,6 +5906,7 @@ function toggleVehicle(v, btn){
   var i=list.indexOf(v);
   if(i>-1) list.splice(i,1); else list.push(v);
   setSelectedVehicles(list);
+  try{ updateSprinterHoursEstimate('q'); }catch(e){}
 }
 
 // ── SHARED AUTO-SURCHARGE EVALUATOR (quote form) ──
@@ -6377,7 +6603,14 @@ function textQuoteToClient(){
     if(typeof _gatherQuoteRide==='function' && typeof savedQuotes!=='undefined'){
       var _qc=client.toLowerCase(); var _qd=date;
       var _ex=savedQuotes.find(function(q){ return q && (q.client||'').trim().toLowerCase()===_qc && q.date===_qd; });
-      if(_ex){ _ex.sentAt=Date.now(); }
+      // Reported directly, with real screenshots: a quote's stored price stayed stale after its
+      // vehicle was changed and re-sent - only sentAt used to update here, never the actual
+      // quote details (vehicle, price, miles, surcharges), so a saved record could silently
+      // drift away from whatever was actually just sent. _gatherQuoteRide() already builds a
+      // fresh, correct object from the live form - the sibling branch below already uses it for
+      // a brand-new quote; this refreshes an existing one with it too now, keeping only its
+      // original identity (_quoteId, savedAt) rather than treating it as immutable once created.
+      if(_ex){ var _fresh=_gatherQuoteRide(); Object.assign(_ex, _fresh); _ex.sentAt=Date.now(); }
       else { var _q=_gatherQuoteRide(); _q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); _q.savedAt=Date.now(); _q.sentAt=Date.now(); savedQuotes.push(_q); }
       if(typeof saveSavedQuotes==='function') saveSavedQuotes();
       if(typeof renderSavedQuotes==='function') renderSavedQuotes();
@@ -6475,6 +6708,7 @@ async function saveQuote(){
   const qnc=document.getElementById('q-new-client'); if(qnc) qnc.checked=false;
   refreshDash(); updateNotifBadge(); renderCal();
   try{ await _markBookingRequestHandled(); }catch(e){}
+  _draftClear('page-quote');
   _afterRideScheduled(ride);
 }
 
@@ -6499,6 +6733,7 @@ function _gatherQuoteRide(){
     rtDateAP:document.getElementById('q-rt-date')?.value||'',
     type:document.getElementById('q-type').value,
     vehicle:document.getElementById('q-ride').value,
+    medHours:parseFloat(document.getElementById('q-sprinter-hours')?.value)||0,
     price: parseFloat(total.toFixed(2)),
     flight:document.getElementById('q-flight').value,
     terminal:document.getElementById('q-terminal').value,
@@ -6855,7 +7090,9 @@ async function quoteAsPdfFromForm(){
     if(typeof _gatherQuoteRide==='function' && typeof savedQuotes!=='undefined'){
       var _qc=client.trim().toLowerCase(), _qd=(document.getElementById('q-date')||{}).value||'';
       var _ex=savedQuotes.find(function(x){ return x && (x.client||'').trim().toLowerCase()===_qc && x.date===_qd; });
-      if(_ex){ _ex.sentAt=Date.now(); }
+      // Same fix as the sibling text-send flow (see that one's comment for the full reasoning) -
+      // this is the document/email-send path, which had the identical gap.
+      if(_ex){ var _fresh2=_gatherQuoteRide(); Object.assign(_ex, _fresh2); _ex.sentAt=Date.now(); }
       else { var _q=_gatherQuoteRide(); _q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); _q.savedAt=Date.now(); _q.sentAt=Date.now(); savedQuotes.push(_q); }
       if(typeof saveSavedQuotes==='function') await saveSavedQuotes();
       if(typeof renderSavedQuotes==='function') renderSavedQuotes();
@@ -7192,6 +7429,7 @@ function editSavedQuote(qid){
     set('q-extra-phones', q.extraPhones||'');
     set('q-email', q.email||'');
     set('q-wait', q.wait||0);
+    set('q-sprinter-hours', q.medHours||'');
     set('q-driver', q.driver||'');
     // Vehicle - find and click the matching toggle button so its active state stays in sync
     // A saved quote is always for one vehicle, so restoring selects exactly that one. Matching
@@ -8300,8 +8538,15 @@ function rideColor(r){
   return '#6b6b6b';
 }
 
-// Short vehicle designator: SUV/Van → "XL", Premium → "Premium", else "Sedan"
-function vehTag(v){ const s=(v||'').toString().toLowerCase(); if(s.includes('suv')||s.includes('van')||s.includes('xl')) return 'XL'; if(s.includes('premium')) return 'Premium'; return 'Sedan'; }
+// Short vehicle designator: SUV/Van → "XL", Sprinter Van → "Sprinter", Premium → "Premium",
+// else "Sedan". Reported directly, with a real screenshot: the pricing settings page showed two
+// "XL" cards - one of which was actually Sprinter Van. Root cause: "Sprinter Van" contains the
+// substring "van", which was silently matching the same check meant only for "SUV/Van" - so this
+// function returned "XL" for a Sprinter Van everywhere it's called (13 call sites: calendar ride
+// display, quote/receipt text messages, CSV export, the XXL-pair summary text, and this settings
+// page), not just the one place this happened to be spotted. Checks for "sprinter" specifically,
+// before the generic van/SUV check, so the two vehicles can never collide again.
+function vehTag(v){ const s=(v||'').toString().toLowerCase().replace(/\+xxl$/,''); if(s.includes('sprinter')) return 'Sprinter'; if(s.includes('suv')||s.includes('van')||s.includes('xl')) return 'XL'; if(s.includes('premium')) return 'Premium'; return 'Sedan'; }
 // Vehicle suffix shown on AP-type ride badges (e.g. " · XL")
 function apVehSuffix(r){ const ap=(r.type==='AP RUN'||r.type==='AP PICK UP'||r.type==='AP ROUND TRIP'); return ap?(' · '+vehTag(r.vehicle)):''; }
 function rideDisplayType(r){
@@ -11509,13 +11754,17 @@ function buildRideBreakdown(r){
   // mileage entirely) instead of the correct one, with no safety net on an unsaved quote.
   if(!isAP && (r.type==='ONE WAY'||r.type==='ROUND TRIP'||r.type==='LOCAL')){
     const miles = parseFloat(r.miles||0)||0;
-    const tm = tripMath(r.type, vehicle, miles, 0);
+    const tm = tripMath(r.type, vehicle, miles, parseFloat(r.medHours)||0);
     const mult = isRT?2:1;
-    lines.push(miles>0
-      ? {label:(isRT?'Round trip mileage':'Mileage'), val:tm.mileageCharge, note:`${miles} mi${isRT?' × 2 = '+(miles*2)+' mi':''} × $${mileageRate().toFixed(2)}/mi`}
-      : {label:(isRT?'Round trip mileage':'Mileage'), val:0});
-    lines.push({label:'Pickup/Drop-off fee', val:tm.serviceFee});
-    if(tm.vehUp>0) lines.push({label:`Vehicle upcharge (${vehicle})`, val:tm.vehUp});
+    if(tm.hourly){
+      lines.push({label:'Sprinter Van hourly', val:tm.base, note:`${tm.hours} hr × $${(globalSettings.sprintHourly||150).toFixed(2)}/hr`});
+    } else {
+      lines.push(miles>0
+        ? {label:(isRT?'Round trip mileage':'Mileage'), val:tm.mileageCharge, note:`${miles} mi${isRT?' × 2 = '+(miles*2)+' mi':''} × $${mileageRate().toFixed(2)}/mi`}
+        : {label:(isRT?'Round trip mileage':'Mileage'), val:0});
+      lines.push({label:'Pickup/Drop-off fee', val:tm.serviceFee});
+      if(tm.vehUp>0) lines.push({label:`Vehicle upcharge (${vehicle})`, val:tm.vehUp});
+    }
   } else if(isAP){
     const apMiles = parseFloat(r.miles||0)||0;
     const tmAp = tripMath(r.type, vehicle, apMiles, 0);
@@ -15088,10 +15337,13 @@ function _computeFeeRebuild(r){
   // the whole difference surfaced as a phantom "Manual adjustment" nobody actually made.
   // Reusing tripMath() here means this can never drift from the original quote formula again,
   // for any type, the same guarantee calcQuote() already had.
-  const tm = tripMath(r.type, veh, miles, 0);
+  const tm = tripMath(r.type, veh, miles, parseFloat(r.medHours)||0);
   const rows = [];
   let sub;
-  if(tm.rtType || tm.owType || tm.lcType){
+  if(tm.hourly){
+    rows.push({label:'Sprinter Van hourly', val: tm.base, add:false, note: `${tm.hours} hr × $${(globalSettings.sprintHourly||150).toFixed(2)}/hr`});
+    sub = tm.tripTotal;
+  } else if(tm.rtType || tm.owType || tm.lcType){
     rows.push({
       label: tm.rtType ? 'Round trip mileage' : 'Mileage',
       val: tm.mileageCharge, add:false,
@@ -15200,7 +15452,7 @@ function openFeeEditor(id){
   const price = parseFloat(r.price)||0;
   const noteVal = String(r.feeNote||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
   const _on = v => v==='Y'||v===true;
-  _feeEdit = { id, vehicle:r.vehicle, miles:parseFloat(r.miles)||0, type:r.type, state:{ premium:_on(r.premium), holiday:_on(r.holiday), christmas:_on(r.christmas), late:_on(r.late), traffic:_on(r.traffic), fuel:_on(r.fuel) } };
+  _feeEdit = { id, vehicle:r.vehicle, miles:parseFloat(r.miles)||0, medHours:parseFloat(r.medHours)||0, type:r.type, state:{ premium:_on(r.premium), holiday:_on(r.holiday), christmas:_on(r.christmas), late:_on(r.late), traffic:_on(r.traffic), fuel:_on(r.fuel) } };
   sec.innerHTML = `
     <div style="font-size:.68rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Edit fee & surcharges</div>
     <div style="display:flex;flex-direction:column;gap:.55rem;">
@@ -15271,7 +15523,7 @@ function recalcFeeEdit(setAmount){
   // One Way/Round Trip/Local ride's suggested fee here never actually reflected mileage at all
   // - the same class of bug as the original "Round Trip priced as airport" finding, in a
   // completely separate, previously-unaudited function.
-  const tm = tripMath(_feeEdit.type, veh, miles, 0);
+  const tm = tripMath(_feeEdit.type, veh, miles, _feeEdit.medHours||0);
   let sub = tm.tripTotal;
   const overage = tm.overage;
   const base = tm.base>0 ? tm.base : tm.tripTotal;
@@ -15283,7 +15535,9 @@ function recalcFeeEdit(setAmount){
   // Fuel surcharge (8%) applies to the full subtotal (base + mileage + surcharges).
   let total=_feeEdit.state.fuel ? Math.floor(sub*(1+fuelRate())) : Math.floor(sub);   // fare rounds DOWN
   const sug=document.getElementById('fee-edit-suggest');
-  if(sug) sug.textContent=`Suggested (${veh} base $${base.toFixed(0)}${overage>0?' + $'+overage.toFixed(2)+' mileage':''} + surcharges): $${total.toFixed(2)}`;
+  if(sug) sug.textContent = tm.hourly
+    ? `Suggested (${veh} ${tm.hours} hr × $${(globalSettings.sprintHourly||150).toFixed(0)}/hr + surcharges): $${total.toFixed(2)}`
+    : `Suggested (${veh} base $${base.toFixed(0)}${overage>0?' + $'+overage.toFixed(2)+' mileage':''} + surcharges): $${total.toFixed(2)}`;
   if(setAmount){ const a=document.getElementById('fee-edit-amount'); if(a) a.value=total.toFixed(2); }
 }
 
@@ -15359,7 +15613,7 @@ function cancelFeeEdit(id){
 
 function buildFeeBreakdown(r){
   const miles = parseFloat(r.miles)||0;
-  const tm = tripMath(r.type, r.vehicle, miles, 0);
+  const tm = tripMath(r.type, r.vehicle, miles, parseFloat(r.medHours)||0);
   const parts = tm.base>0 ? [`${tm.base}`] : [`${tm.mileageCharge.toFixed(2)} mileage + ${tm.serviceFee} fee`];
   if(r.premium==='Y'||r.premium===true) parts.push(`+${surcharge('premium')} premium`);
   if(r.holiday==='Y'||r.holiday===true) parts.push(`+${surcharge('holiday')} holiday`);
@@ -17119,6 +17373,7 @@ function openQuickAddModal(){
   try{ applyAirportFieldVisibility('qa'); }catch(e){}
   try{ qaUpdateDateTimeLabels(); }catch(e){}
   try{ renderQaAddrPickers(); }catch(e){}
+  _draftMaybeOffer('quick-add-modal', 'qa-client');
 }
 
 let clientAddressOverrides={};
@@ -18570,6 +18825,7 @@ async function saveQuickAddRide(){
   if(!_addClient||_addClient.checked){ await upsertClientFromRide(ride); }
   _notifyOwnerOfForeignSchedule(ride);
   try{ await _markBookingRequestHandled(); }catch(e){}
+  _draftClear('quick-add-modal');
   closeQuickAddModal();
   _reenableBtn();
   try{ setTimeout(function(){ if(ride.newClient){ if(typeof promptNewClientInfo==='function') promptNewClientInfo(ride); } else { _qaMaybeSaveTypedAddresses(ride); } }, 350); }catch(e){}
@@ -22165,6 +22421,45 @@ async function _approveDuplicateGroup(key){
   try{ await storageSetOne('kat:fwApprovedDuplicates', key, fwApprovedDuplicates[key], fwApprovedDuplicates); }catch(e){}
 }
 
+// Direct request: users reporting the app freezing/going white with no pattern found - this is
+// the actual, visible way to see what _logCrash() (see near the top of this script, right after
+// currentUser is declared) has been capturing since that was added. Merges this device's own
+// local log with the shared, cross-device one so a crash on someone else's phone shows up here
+// too, not just the one currently being held.
+async function _showCrashLogModal(){
+  var local = [];
+  try{ local = JSON.parse(localStorage.getItem('nda-crashlog')||'[]'); }catch(e){}
+  var shared = [];
+  try{
+    var d = await storageGet('kat:crashLog');
+    if(d && typeof d==='object') shared = Object.values(d);
+  }catch(e){}
+  var seen = new Set();
+  var all = local.concat(shared).filter(function(e){
+    var k = e.ts+'|'+e.who+'|'+e.msg;
+    if(seen.has(k)) return false;
+    seen.add(k); return true;
+  }).sort(function(a,b){ return (b.ts||0)-(a.ts||0); }).slice(0, 50);
+
+  var back=document.createElement('div'); back.id='crash-log-modal-back';
+  back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13500;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  back.onclick=function(e){ if(e.target===back) back.remove(); };
+  var rowsHtml = all.length ? all.map(function(e){
+    var when = e.ts ? new Date(e.ts).toLocaleString() : '(no timestamp)';
+    return '<div style="border:1.5px solid #fecaca;border-radius:10px;padding:.55rem .65rem;margin-bottom:.5rem;background:#fef2f2;">'
+      + '<div style="font-size:.7rem;color:#991b1b;font-weight:700;">'+escHtml(when)+' \u00b7 '+escHtml(e.who||'?')+' \u00b7 '+escHtml(e.page||'?')+' \u00b7 build '+escHtml(e.build||'?')+'</div>'
+      + '<div style="font-size:.76rem;color:var(--black);margin-top:.2rem;word-break:break-word;">'+escHtml(e.msg||'')+'</div>'
+      + (e.stack ? '<div style="font-size:.66rem;color:var(--mid);margin-top:.3rem;font-family:monospace;white-space:pre-wrap;word-break:break-word;max-height:100px;overflow-y:auto;">'+escHtml(e.stack)+'</div>' : '')
+      + '</div>';
+  }).join('') : '<div style="text-align:center;color:var(--mid);padding:1.5rem 0;">No crashes logged yet.</div>';
+  back.innerHTML = '<div style="background:#fff;border-radius:16px;max-width:480px;width:100%;max-height:85vh;overflow-y:auto;padding:1.35rem;box-shadow:0 24px 60px rgba(0,0,0,.4);">'
+    + '<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\uD83D\uDEA8 Crash log</div>'
+    + '<div style="font-size:.78rem;color:var(--mid);margin-bottom:.8rem;">Most recent '+all.length+' error'+(all.length===1?'':'s')+' from any device, newest first.</div>'
+    + rowsHtml
+    + '<button onclick="document.getElementById(\'crash-log-modal-back\').remove()" style="width:100%;margin-top:.6rem;padding:.6rem;background:var(--light);color:var(--black);border:none;border-radius:8px;font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">Close</button>'
+    + '</div>';
+  document.body.appendChild(back);
+}
 async function _showFamilyWallReviewModal(){
   if(!currentUser || (currentUser.name!=='Chase' && currentUser.name!=='Morgan')){ showToast('Chase or Morgan only','error'); return; }
   const matches = _findSuspiciousFamilyWallRides();
@@ -22523,12 +22818,33 @@ function renderBusinessLogoManager(){
     + rows
     + '</div>';
 }
+// Direct request: moved here from a calendar-toolbar button, a more natural home for an admin
+// diagnostic tool. Shows a summary at a glance rather than requiring a click just to see if
+// there's anything to look at - full detail (stack traces, every recent entry) still lives in
+// _showCrashLogModal(), already built and tested, not duplicated here.
+function renderCrashLogSection(){
+  const box = document.getElementById('crash-log-section');
+  if(!box) return;
+  if(!(currentUser && currentUser.role==='admin')){ box.innerHTML=''; return; }
+  var local = [];
+  try{ local = JSON.parse(localStorage.getItem('nda-crashlog')||'[]'); }catch(e){}
+  var mostRecent = local.length ? local[local.length-1] : null;
+  var summaryLine = local.length
+    ? local.length+' crash'+(local.length===1?'':'es')+' logged on this device \u00b7 most recent: '+escHtml(mostRecent.who||'?')+' on '+escHtml(mostRecent.page||'?')+', '+new Date(mostRecent.ts).toLocaleString()
+    : 'No crashes logged on this device yet.';
+  box.innerHTML = '<div style="border:1px solid var(--light);border-radius:10px;padding:.85rem;margin-bottom:1rem;background:var(--surface);">'
+    + '<div style="font-size:.8rem;font-weight:700;color:var(--black);margin-bottom:.25rem;">\uD83D\uDEA8 Crash log</div>'
+    + '<div style="font-size:.72rem;color:var(--mid);line-height:1.5;margin-bottom:.6rem;">'+summaryLine+'</div>'
+    + '<button type="button" onclick="_showCrashLogModal()" style="padding:.45rem .8rem;border-radius:8px;border:1.5px solid #b91c1c;background:none;color:#b91c1c;font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.76rem;cursor:pointer;">View full log</button>'
+    + '</div>';
+}
 function renderAccessControl(){
   if(!(currentUser && currentUser.role==='admin')){
     document.getElementById('access-control-list').innerHTML='<p style="color:var(--mid);">Admins only.</p>';
     return;
   }
   renderBusinessLogoManager();
+  renderCrashLogSection();
   const list = document.getElementById('access-control-list');
   const _onbResetPanel = '<div style="border:1px solid var(--light);border-radius:10px;padding:.85rem;margin-bottom:1rem;background:var(--surface);">'
     +'<div style="font-size:.8rem;font-weight:700;color:var(--black);margin-bottom:.25rem;">\uD83D\uDD04 Re-prompt drivers to update their info</div>'
@@ -31070,6 +31386,7 @@ function logout(){
   });
 })();
 function showPage(id, el){
+  _currentPageId = id;
   // Hide all pages, show the target
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   const pg = document.getElementById('page-'+id);
@@ -31079,7 +31396,7 @@ function showPage(id, el){
   window.scrollTo(0,0);
   // Page-specific render
   if(id==='dashboard') refreshDash();
-  if(id==='quote'){ populateDriverFilter(); renderAddons(); updateTripFields(); calcQuote(); populateClientDatalist(); if(gmapsLoaded) setTimeout(initAddressAutocomplete, 100); }
+  if(id==='quote'){ populateDriverFilter(); renderAddons(); updateTripFields(); calcQuote(); populateClientDatalist(); if(gmapsLoaded) setTimeout(initAddressAutocomplete, 100); _draftMaybeOffer('page-quote', 'q-client'); }
   if(id==='calendar') renderCal();
   if(id==='clients') renderClients();
   if(id==='documents') renderDocuments();
