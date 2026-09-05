@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191101">
+<meta name="version" content="202608191103">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2917,6 +2917,7 @@ async function _loadAppData() {
       })(),
     ]);
     try{ await _migrateVenmoHandles(); }catch(e){ console.warn('venmo migration', e); }
+    try{ await _migrateVenmoHandles1103(); }catch(e){ console.warn('venmo restore migration', e); }
     try{ _backfillLogoAccentColors(); }catch(e){ console.warn('logo accent backfill', e); } // deliberately not awaited - background task
     // Local (non-Firebase) session recovery is cheap — run it immediately. The six Firebase
     // loads that used to sit here (passwords, subscriptions, imported clients, client requests,
@@ -12275,6 +12276,43 @@ async function markDispatchInvoicePaid(id){
   showToast('\u23F3 Marked paid \u2014 stays here until Morgan taps \u2713 Received');
   try{ renderIncome(); }catch(e){}
 }
+// Direct instruction: gives Kat the same Venmo pay-and-auto-mark flow drivers already get for
+// the 15% fee. Same state transition as markDispatchInvoicePaid() above (sent -> paid_pending),
+// but also records the method as Venmo specifically, which the plain "Mark paid" button never
+// has occasion to know.
+async function venmoAutoMarkDispatchInvoice(id){
+  if(!kmVisible() || !kmIsKat()) return;
+  var inv=dispatchInvoices[id]; if(!inv || inv.status!=='sent') return;
+  inv.status='paid_pending'; inv.paidAt=Date.now(); inv.paidBy=currentUser&&currentUser.name||'Kat'; inv.paidMethod='Venmo';
+  try{ await saveDispatchInvoices(); }catch(e){ console.warn(e); }
+  showToast('\u23F3 Marked paid \u2014 stays here until Morgan taps \u2713 Received');
+  try{ renderIncome(); }catch(e){}
+}
+// Note text per direct instruction: date range first, then invoice number. _dispatchInvoiceNumber()
+// takes a Date, but an invoice's own startDate is stored as a plain string, so it's parsed back
+// into one here the same way invoice creation itself does.
+function _dispatchInvoiceVenmoNote(inv){
+  var periodLbl = fmtDateShort(inv.startDate)+' \u2013 '+fmtDateShort(inv.endDate);
+  var invNum = _dispatchInvoiceNumber(new Date(inv.startDate+'T00:00:00'));
+  return 'Pay for '+periodLbl+', invoice #'+invNum;
+}
+// Mirrors venmoPayRideBtn()'s exact preventDefault/await-save/then-open sequence - the same race
+// that function's own comment documents finding and fixing once already (a real device handing
+// off to the native Venmo app before an in-flight write finishes) would be exactly as real here,
+// for the exact same reason, so it gets the exact same fix rather than a fresh, simpler version
+// that could reintroduce it.
+function venmoPayDispatchInvoiceBtn(inv){
+  var handle=(typeof driverVenmo!=='undefined')?driverVenmo['Morgan Newton']:'';
+  var url=venmoPayUrl(handle, inv.total, _dispatchInvoiceVenmoNote(inv));
+  if(!url) return '';
+  var _openVenmo='(function(e){e.preventDefault();e.stopPropagation();'
+    +'Promise.resolve(venmoAutoMarkDispatchInvoice(\''+inv.id+'\')).catch(function(){showToast(\'\\u26a0\\ufe0f Payment tracking failed to save \\u2014 opening Venmo anyway; mark it paid manually after\',\'error\');}).then(function(){'
+    +'window.open(\''+url.replace(/'/g,"\\'")+'\',\'_blank\',\'noopener\');'
+    +'});})(event)';
+  return '<a href="'+url.replace(/"/g,'&quot;')+'" rel="noopener" '
+    +'onclick="'+_openVenmo+'" '
+    +'style="padding:.35rem .7rem;background:#3d95ce;color:#fff;border:none;border-radius:7px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;margin-right:.35rem;">Venmo</a>';
+}
 // Morgan confirms she actually received it - the second half of the dual approval.
 async function markDispatchInvoiceReceived(id){
   if(!kmVisible() || kmIsKat()) return;
@@ -20051,6 +20089,12 @@ async function _confirmFeePaymentMethod(owner, driver, rideId, method){
   await markFeeRidePaid(owner, driver, rideId, method);
 }
 function _feeRidePending(fp, rideId){ return !!(fp && fp.pendingRides && fp.pendingRides.indexOf(rideId)>=0); }
+// Mirrors _feeRidePending()'s exact shape above, but for a pending waiver request instead of a
+// pending Venmo payment - a separate data structure (feeWaiveRequests), checked separately so a
+// requested-but-not-yet-approved waiver moves the ride out of the active list the same way a
+// sent-but-not-yet-confirmed Venmo payment already does, without touching feeSettledForRide()'s
+// own, correct behavior of only treating an APPROVED waiver as actually settled.
+function _feeWaivePending(rideId){ var q=feeWaiveRequests[rideId]||feeWaiveRequests[String(rideId)]; return !!(q && q.status==='pending'); }
 async function _feeUndoRide(owner, driver, rideId){
   await _ensureFresh();
   const key=owner+':recv:'+driver; const fp=feePayments[key]; if(!fp) return;
@@ -20064,12 +20108,31 @@ async function _feeUndoRide(owner, driver, rideId){
 // Reset / mark the 15% fee from the OPEN ride card, then refresh the card so its status updates.
 // Venmo "pay" only marks the fee as SENT (pending). It stays on the card until the
 // recipient taps \u2713 Received, so nothing disappears before the other side confirms.
+// Direct instruction: a driver with no app account yet can't log in to tap "Received"
+// themselves, so a Venmo payment to them would sit "Awaiting confirmation" forever waiting on
+// someone who has no way to confirm it. Checked against driversLoggedIn (set the first time
+// login() actually succeeds for someone) rather than USER_DRIVER_MAP or USERS - both of those
+// are pre-configured with real, working credentials for every driver in advance, regardless of
+// whether that person has ever actually used the app, so neither one distinguishes "has
+// credentials" from "has ever logged in." The moment this person actually logs in for the first
+// time, driversLoggedIn picks it up on its own, and this stops applying to them from that point
+// on with nothing separate to clean up or turn off by hand.
+function _driverHasAppAccount(name){
+  if(!name) return false;
+  return !!driversLoggedIn[name];
+}
 async function venmoAutoMarkRide(owner, payer, rideId){
   await _ensureFresh();
-  const key=owner+':recv:'+payer;
-  if(!feePayments[key]) feePayments[key]={};
   const rr=(rides||[]).find(function(x){return x&&(x.id===rideId||String(x.id)===String(rideId));});
   const rid=rr?rr.id:rideId;
+  if(!_driverHasAppAccount(owner)){
+    // No account yet - they have no way to log in and tap Received, so this settles now.
+    await markFeeRidePaid(owner, payer, rid, 'Venmo');
+    showToast('\u2713 Marked paid \u2014 '+owner.split(' ')[0]+' doesn\u2019t have an app account yet, so this is auto-approved until they log in');
+    return;
+  }
+  const key=owner+':recv:'+payer;
+  if(!feePayments[key]) feePayments[key]={};
   const pend=feePayments[key].pendingRides=(feePayments[key].pendingRides||[]);
   if(pend.indexOf(rid)<0) pend.push(rid);
   const pendAt=feePayments[key].pendingRidesAt=(feePayments[key].pendingRidesAt||{});
@@ -20415,14 +20478,14 @@ function renderDashFees(){
     return escHtml(ri.client||'Ride')+(ri.date?' \u00b7 '+ri.date.slice(5).replace('-','/'):'')+' \u00b7 $'+ri.fee.toFixed(2);
   }
 
-  let html=_cautHtml+_waiveHtml+'<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">Client Fees — To Be Paid '+mtipDot('dash-fees','The fifteen percent applies to fare and surcharges only \u2014 never tips, and is only ever settled by Venmo, Zelle, CashApp, or Apple Pay. Pay by Venmo and it shows Awaiting confirmation until the person owed taps Received. Any other method, tap \u2713 Paid (or \u2713 Received) and you\u2019ll be asked which one. Waive forgives a single ride\'s fee; Waive [name]\u2019s sets a standing arrangement for that person \u2014 either is the owed person\u2019s own call, no approval needed. On a fee you owe, Ask to waive sends a request instead \u2014 it stays owed until the person you\u2019re asking approves it.')+'</div>'
+  let html=_cautHtml+_waiveHtml+'<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">Client Fees — To Be Paid '+mtipDot('dash-fees','The fifteen percent applies to fare and surcharges only \u2014 never tips, and is only ever settled by Venmo, Zelle, CashApp, or Apple Pay. Pay by Venmo and it shows Awaiting confirmation until the person owed taps Received. Any other method, tap \u2713 Paid (or \u2713 Received) and you\u2019ll be asked which one. Waive forgives a single ride\'s fee; Waive [name]\u2019s sets a standing arrangement for that person \u2014 either is the owed person\u2019s own call, no approval needed. On a fee you owe, tap \u2713 Paid and choose Waived at the bottom of that same list instead \u2014 it moves off this list right away, the same as a sent Venmo payment, but isn\u2019t final until the person you asked approves it.')+'</div>'
     +'<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:12px;overflow:hidden;">';
 
   if(hasOwed){
     var _owedEntries = Object.entries(owedToMe).map(function(entry){
       var name=entry[0], v=entry[1];
       var _fpr=feePayments[dName+':recv:'+name]||{};
-      var _remaining=(v.rides||[]).filter(function(ri){ return !_feeRidePending(_fpr, ri.id); });
+      var _remaining=(v.rides||[]).filter(function(ri){ return !_feeRidePending(_fpr, ri.id) && !_feeWaivePending(ri.id); });
       return {name:name, v:v, remaining:_remaining};
     }).filter(function(e){ return e.remaining.length; });
     if(_owedEntries.length){
@@ -20460,7 +20523,7 @@ function renderDashFees(){
       // below - a fee the payer already marked paid and is only waiting on confirmation for
       // shouldn't still read as "you owe" here, per direct request.
       var _fpo=feePayments[name+':recv:'+dName]||{};
-      var _remaining=(v.rides||[]).filter(function(ri){ return !_feeRidePending(_fpo, ri.id); });
+      var _remaining=(v.rides||[]).filter(function(ri){ return !_feeRidePending(_fpo, ri.id) && !_feeWaivePending(ri.id); });
       return {name:name, v:v, remaining:_remaining};
     }).filter(function(e){ return e.remaining.length; });
     if(_oweEntries.length){
@@ -20473,7 +20536,6 @@ function renderDashFees(){
         +'</div>';
       // One row per ride — pay and mark each ride on its own
       entry.remaining.forEach(function(ri){
-        var _fpo=feePayments[name+':recv:'+dName]||{};
         var _actions = venmoPayRideBtn(name, ri.fee, dName, ri.id)
             +'<button onclick="promptFeePaymentMethod(\''+escAttr(name)+'\',\''+escAttr(dName)+'\','+_feeIdArg(ri.id)+',true)" style="flex:1;min-width:78px;padding:.42rem;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;">\u2713 Paid</button>';
         html+='<div style="padding:.4rem .85rem .55rem 1.4rem;border-bottom:1px solid var(--light);">'
@@ -20657,10 +20719,19 @@ function renderDashIncome(){
 // DRIVER SETTINGS & MEMBERS
 // ═══════════════════════════════════════════
 let driverVenmo = {}; // { driverName: venmoHandle }
+// Direct instruction: some drivers (currently Allen Westerfield, Omead) have real login
+// credentials set up in advance but haven't actually used the app yet - existing structures
+// like USER_DRIVER_MAP and USERS don't distinguish "has credentials" from "has ever actually
+// logged in," since both are pre-configured for every driver regardless of use. This tracks the
+// real thing: set once, the first time login() actually succeeds for someone, and never cleared
+// afterward - not tied to being currently online the way presence is, which clears on logout.
+let driversLoggedIn = {}; // { driverFullName: true }
 
 async function loadDriverExtras(){
   const v = await storageGet('kat:driverVenmo');
   if(v) driverVenmo = v;
+  const dl = await storageGet('kat:driversLoggedIn');
+  if(dl) driversLoggedIn = dl;
 }
 
 // ── ONE-TIME VENMO CLEANUP (build 421) ────────────────────────────────────
@@ -20687,6 +20758,30 @@ async function _migrateVenmoHandles(){
     await storageSet('kat:driverVenmo', driverVenmo);
     await storageSet('kat:venmoFix421', true);
   }catch(e){ console.warn('venmo migration failed', e); }
+}
+
+// ── ONE-TIME VENMO RESTORE (build 1103) ───────────────────────────────────
+// Direct report, with a screenshot of the real Venmo account list: Kathleen's handle had gone
+// missing. Traced this first rather than assuming - the only existing code that ever clears a
+// Venmo handle is the build-421 migration right above (which specifically preserves hers, not
+// clears it) and the archive-a-driver cleanup (which only fires if she'd been archived, which
+// she hasn't been) - so nothing in this session's own work explains it, though the underlying
+// live data itself isn't something this file has direct visibility into either way. Restores
+// hers and adds two more pulled directly from that same screenshot. Allen Westerfield's own
+// Venmo account displays under the name "Morris Westerfield," confirmed directly, so his
+// app-side key gets that exact handle rather than his own name. Runs once, guarded the same way
+// as the migration above it.
+async function _migrateVenmoHandles1103(){
+  try{
+    var done = await storageGet('kat:venmoFix1103');
+    if(done) return;                    // already applied — never touch handles again
+    if(!driverVenmo || typeof driverVenmo!=='object'){ driverVenmo = driverVenmo || {}; }
+    driverVenmo['Kathleen Herringdine'] = 'Kathleen-Herringdine';
+    driverVenmo['Omead']                = 'omeadara';
+    driverVenmo['Allen Westerfield']    = 'Morris-Westerfield';
+    await storageSet('kat:driverVenmo', driverVenmo);
+    await storageSet('kat:venmoFix1103', true);
+  }catch(e){ console.warn('venmo restore migration failed', e); }
 }
 
 // Backfills a brand accent color for every driver profile that already has a logo uploaded
@@ -27240,7 +27335,8 @@ function _dispatchInvoiceListHtml(isKat){
     var periodLbl = fmtDateShort(inv.startDate)+' \u2013 '+fmtDateShort(inv.endDate);
     var actionBtn = '';
     if(isKat && inv.status==='sent'){
-      actionBtn = '<button onclick="markDispatchInvoicePaid(\''+inv.id+'\')" style="padding:.35rem .7rem;background:#fff;color:#0f766e;border:none;border-radius:7px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">\u2713 Mark paid</button>';
+      actionBtn = venmoPayDispatchInvoiceBtn(inv)
+        + '<button onclick="markDispatchInvoicePaid(\''+inv.id+'\')" style="padding:.35rem .7rem;background:#fff;color:#0f766e;border:none;border-radius:7px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">\u2713 Mark paid</button>';
     } else if(!isKat && inv.status==='paid_pending'){
       actionBtn = '<button onclick="markDispatchInvoiceReceived(\''+inv.id+'\')" style="padding:.35rem .7rem;background:#fff;color:#0f766e;border:none;border-radius:7px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;margin-right:.35rem;">\u2713 Received</button>'
         + '<button onclick="rejectDispatchInvoicePaid(\''+inv.id+'\')" style="padding:.35rem .6rem;background:none;color:#fff;border:1.5px solid rgba(255,255,255,.5);border-radius:7px;font-family:inherit;font-size:.72rem;font-weight:600;cursor:pointer;">\u2717 Not received</button>';
@@ -31322,6 +31418,18 @@ function login(){
   if(!user||pw!==user.password){document.getElementById('auth-error').textContent='Incorrect password.';return;}
   if(user.disabled){document.getElementById('auth-error').textContent='Your access has been disabled. Please contact an admin.';return;}
   currentUser=user;
+  // Direct instruction: records the first time this person actually logs in - the real signal
+  // for _driverHasAppAccount(), since USER_DRIVER_MAP/USERS have real credentials pre-configured
+  // for everyone regardless of actual use. Fire-and-forget: a login shouldn't wait on this, and
+  // it's idempotent (only writes when this is genuinely the first time), so it never re-fires or
+  // overwrites itself on every subsequent login afterward.
+  try{
+    var _fullName = USER_DRIVER_MAP[user.name];
+    if(_fullName && !driversLoggedIn[_fullName]){
+      driversLoggedIn[_fullName] = true;
+      storageSetOne('kat:driversLoggedIn', _fullName, true, driversLoggedIn).catch(function(){});
+    }
+  }catch(e){}
   // Stay logged in on this device if the box is checked
   try{
     if(document.getElementById('stay-logged-in') && document.getElementById('stay-logged-in').checked){
