@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191106">
+<meta name="version" content="202608191110">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -11446,7 +11446,7 @@ function _dashRideCompletedPrompt(rideId){
     +'</div></div>';
   document.body.appendChild(ov);
   ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
-  ov.querySelector('#ride-completed-paid').onclick=function(){ ov.remove(); toggleRidePaid(rideId); };
+  ov.querySelector('#ride-completed-paid').onclick=function(){ ov.remove(); openMarkPaidCombined(rideId); };
   ov.querySelector('#ride-completed-invoice').onclick=function(){ ov.remove(); openLogMiles(rideId, true); };
 }
 
@@ -11590,7 +11590,7 @@ async function toggleRidePaid(id){
   // markRideUnpaid() directly, never this function. In real use this only ever runs in the
   // marking-paid direction; the flip-back branch below is a defensive fallback, not a real path.
   if(r.status!=='paid'){
-    openMarkPaidCombined(r.id);
+    _dashRideCompletedPrompt(r.id);
     return;
   }
   await setRideStatus(r.id, 'scheduled');
@@ -12611,7 +12611,7 @@ async function markRideUnpaid(id){
         if(fp.paidRides){ var _i=fp.paidRides.indexOf(r.id); if(_i>=0) fp.paidRides.splice(_i,1); }
         if(fp.pendingRides){ var _j=fp.pendingRides.indexOf(r.id); if(_j>=0) fp.pendingRides.splice(_j,1); }
         if(!fp.paidRides||!fp.paidRides.length){ delete fp.paid; delete fp.paidAt; delete fp.legacyPaidThrough; }
-        try{ await saveFeePayments(); }catch(e){}
+        try{ await saveFeePayments(_k); }catch(e){}
       }
     }
   }catch(e){}
@@ -14325,12 +14325,11 @@ function _maybeOfferFeeAndPaid(rideId){
   if(fare<=0) return;
   var key=owner+':recv:'+dName;
   var fp=feePayments[key]||{};
-  if(_feeRidePending(fp, rideId) || (fp.paidRides && fp.paidRides.indexOf(rideId)>=0)) return; // already sent or paid
+  if(_feeRidePending(fp, rideId) || (fp.paidRides && fp.paidRides.indexOf(rideId)>=0) || (typeof _feeWaivedForRide==='function' && _feeWaivedForRide(fp, r))) return; // already sent, paid, or waived
   var fee=Math.round(fare*(typeof clientFeeRate==='function'?clientFeeRate():0.15)*100)/100;
+  if(fee<=0) return;
   var handle=(typeof driverVenmo!=='undefined')?driverVenmo[owner]:'';
-  if(!handle || fee<=0) return; // nothing to pay to
-  var venmoUrl=(typeof venmoPayUrl==='function')?venmoPayUrl(handle, fee, (typeof _venmoRideNote==='function')?_venmoRideNote(r):''):'';
-  if(!venmoUrl) return;
+  var venmoUrl=handle?((typeof venmoPayUrl==='function')?venmoPayUrl(handle, fee, (typeof _venmoRideNote==='function')?_venmoRideNote(r):''):''):'';
 
   // BUG FIX (reported directly: "hands me off to a plain white screen"). This used to be a
   // native confirm() immediately followed by window.open() - both individually fine on their
@@ -14354,18 +14353,35 @@ function _maybeOfferFeeAndPaid(rideId){
   ov.id='venmo-offer-overlay';
   ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14000;display:flex;align-items:center;justify-content:center;padding:1.5rem;';
   ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:320px;width:100%;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.3);">'
-    +'<div style="font-size:.95rem;font-weight:700;color:#0f172a;margin-bottom:.9rem;">Pay '+escHtml(owner.split(' ')[0])+'\u2019s $'+fee.toFixed(2)+' fee via Venmo now?</div>'
-    +'<div style="display:flex;gap:.5rem;">'
-    +'<button id="venmo-offer-skip" style="flex:1;padding:.6rem;border-radius:8px;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;border:1.5px solid var(--light);background:none;color:var(--mid);">Not now</button>'
-    +'<a id="venmo-offer-pay" href="'+venmoUrl.replace(/"/g,'&quot;')+'" rel="noopener" style="flex:1;padding:.6rem;border-radius:8px;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;border:none;background:#3d95ce;color:#fff;text-decoration:none;text-align:center;display:flex;align-items:center;justify-content:center;">Pay via Venmo</a>'
-    +'</div></div>';
+    +'<div style="font-size:.95rem;font-weight:700;color:#0f172a;margin-bottom:.9rem;">Pay '+escHtml(owner.split(' ')[0])+'\u2019s $'+fee.toFixed(2)+' fee now?</div>'
+    +'<div style="display:flex;gap:.5rem;margin-bottom:.5rem;">'
+    +(venmoUrl?('<a id="venmo-offer-pay" href="'+venmoUrl.replace(/"/g,'&quot;')+'" rel="noopener" style="flex:1;display:flex;align-items:center;justify-content:center;padding:.6rem;border-radius:8px;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;border:none;background:#3d95ce;color:#fff;text-decoration:none;box-sizing:border-box;">Venmo</a>'):'')
+    +'<button id="venmo-offer-other" style="flex:1;padding:.6rem;border-radius:8px;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;border:none;background:#dc2626;color:#fff;">\u2713 Paid</button>'
+    +'</div>'
+    +'<button id="venmo-offer-skip" style="width:100%;padding:.55rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:600;cursor:pointer;border:none;background:none;color:var(--mid);">Not now</button>'
+    +'</div>';
   document.body.appendChild(ov);
-  ov.querySelector('#venmo-offer-skip').onclick=function(){ ov.remove(); };
-  ov.querySelector('#venmo-offer-pay').onclick=function(e){
+  // "Not now" genuinely settles nothing - the fee stays exactly as unpaid as it already was -
+  // but this fee is newly OUTSTANDING the moment this prompt appears (the ride was just marked
+  // paid), and nothing was previously refreshing the dashboard's own Client Fees card to reflect
+  // that. Direct report: it correctly stayed off the "to be paid" list-looking view until some
+  // unrelated navigation happened to re-render it later, reading as if the fee had vanished
+  // rather than genuinely still being owed.
+  ov.querySelector('#venmo-offer-skip').onclick=function(){ ov.remove(); try{ renderDashFees(); }catch(e){} };
+  var _payLink=ov.querySelector('#venmo-offer-pay');
+  if(_payLink) _payLink.onclick=function(e){
     e.preventDefault();
     Promise.resolve(typeof venmoAutoMarkRide==='function'?venmoAutoMarkRide(owner, dName, rideId):null)
       .catch(function(){ showToast('\u26a0\ufe0f Payment tracking failed to save \u2014 opening Venmo anyway; mark it paid manually after','error'); })
       .then(function(){ window.open(venmoUrl, '_blank', 'noopener'); ov.remove(); });
+  };
+  // Direct instruction: this flows exactly the same as the dashboard's own "You owe" row now,
+  // not a differently-worded equivalent - reuses promptFeePaymentMethod() directly (allowWaive:true,
+  // identical to the driver's own dashboard row), the exact same modal and options, not a second,
+  // parallel picker that could drift out of sync with it over time.
+  ov.querySelector('#venmo-offer-other').onclick=function(){
+    ov.remove();
+    promptFeePaymentMethod(owner, dName, rideId, true);
   };
 }
 
@@ -20180,6 +20196,7 @@ async function _feeCorrectPaidToWaived(owner, driver, rideId){
     await saveNotifs();
   }catch(e){}
   try{ renderDashFees(); }catch(e){}
+  try{ renderIncome(); }catch(e){}
   showToast('\u2713 Corrected \u2014 that fee is now waived, not charged');
 }
 // Reset / mark the 15% fee from the OPEN ride card, then refresh the card so its status updates.
@@ -26240,7 +26257,7 @@ function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm,
         <div style="display:flex;justify-content:space-between;padding:.3rem 0;font-size:.82rem;color:#dc2626;">
           <span>Vehicle cost <span style="font-size:.7rem;">(gas + maint)</span></span><span>−$${(gas+maint).toFixed(2)}</span>
         </div>
-        ${fee>0?`<div style="display:flex;justify-content:space-between;padding:.3rem 0;font-size:.82rem;color:#dc2626;"><span>Client fee (15%)</span><span>−$${fee.toFixed(2)}</span></div>`:''}
+        ${fee>0?`<div style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;font-size:.82rem;color:#dc2626;gap:.5rem;"><span>Client fee (15%)</span><span style="display:flex;align-items:center;gap:.5rem;"><span>\u2212$${fee.toFixed(2)}</span>${isAdmin()?`<button onclick="event.stopPropagation();_feeCorrectPaidToWaived('${owner}','${dName}',${_feeIdArg(r.id)})" style="padding:.2rem .5rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:7px;font-family:inherit;font-size:.66rem;font-weight:600;cursor:pointer;white-space:nowrap;">\u21a9 Shouldn\u2019t have charged</button>`:''}</span></div>`:''}
         <div style="display:flex;justify-content:space-between;padding:.45rem 0 0;margin-top:.3rem;border-top:1.5px solid var(--light);font-size:.9rem;">
           <span style="font-weight:700;">Net</span><span class="row-net" style="font-weight:700;color:${net>=0?'var(--green)':'#dc2626'};">$${net.toFixed(2)}</span>
         </div>
