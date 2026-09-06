@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191103">
+<meta name="version" content="202608191104">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2918,6 +2918,7 @@ async function _loadAppData() {
     ]);
     try{ await _migrateVenmoHandles(); }catch(e){ console.warn('venmo migration', e); }
     try{ await _migrateVenmoHandles1103(); }catch(e){ console.warn('venmo restore migration', e); }
+    try{ await _seedDriversLoggedIn1104(); }catch(e){ console.warn('driversLoggedIn seed', e); }
     try{ _backfillLogoAccentColors(); }catch(e){ console.warn('logo accent backfill', e); } // deliberately not awaited - background task
     // Local (non-Firebase) session recovery is cheap — run it immediately. The six Firebase
     // loads that used to sit here (passwords, subscriptions, imported clients, client requests,
@@ -20782,6 +20783,32 @@ async function _migrateVenmoHandles1103(){
     await storageSet('kat:driverVenmo', driverVenmo);
     await storageSet('kat:venmoFix1103', true);
   }catch(e){ console.warn('venmo restore migration failed', e); }
+}
+// ── ONE-TIME driversLoggedIn SEED (build 1104) ────────────────────────────
+// Direct bug report, with a screenshot: Venmo payments to Kat - actively using the app right
+// now - were incorrectly auto-settling instead of showing as pending, the exact opposite of what
+// v1103's auto-approval was supposed to do, and only for drivers with no account yet. Root
+// cause: driversLoggedIn starts empty and is only ever recorded going forward, the next time
+// someone calls the (new, as of v1103) login() function - but Kat, like every other
+// already-active driver, is almost certainly still signed in via a persisted "stay logged in"
+// session from before v1103 even existed, so she never triggered that new recording logic. Not
+// unique to Kat - this would have silently misfired for whichever currently-active driver
+// happened to go longest without logging out and back in. Seeds the real, current state
+// directly instead of waiting for it to self-correct one login at a time: everyone except Allen
+// Westerfield and Omead specifically, confirmed directly as the only two who haven't actually
+// used the app yet.
+async function _seedDriversLoggedIn1104(){
+  try{
+    var done = await storageGet('kat:driversLoggedInSeed1104');
+    if(done) return;                    // already applied — never re-seed, never overwrite
+    if(!driversLoggedIn || typeof driversLoggedIn!=='object'){ driversLoggedIn = driversLoggedIn || {}; }
+    DRIVERS.forEach(function(name){
+      if(name==='Allen Westerfield' || name==='Omead') return;   // genuinely haven't logged in yet
+      driversLoggedIn[name] = true;
+    });
+    await storageSet('kat:driversLoggedIn', driversLoggedIn);
+    await storageSet('kat:driversLoggedInSeed1104', true);
+  }catch(e){ console.warn('driversLoggedIn seed failed', e); }
 }
 
 // Backfills a brand accent color for every driver profile that already has a logo uploaded
