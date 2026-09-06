@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191104">
+<meta name="version" content="202608191105">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -19906,6 +19906,24 @@ function feeSettledForRide(fp, r){
   if(lp&&r.date&&r.date<=lp) return true;
   return false;
 }
+// Extracted from feeSettledForRide()'s own waiver logic above - a genuinely separate question
+// from "settled." A paid fee is a real expense that should still reduce a driver's actual
+// take-home total; a waived one never should, since the driver never actually owed it. Used
+// where a total needs to know specifically whether a fee was excused, not just whether it's
+// been dealt with one way or another.
+function _feeWaivedForRide(fp, r){
+  if(!fp) return false;
+  if(fp.waived){
+    if(fp.waiveFrom){
+      if(r.date && r.date>=fp.waiveFrom && r.date<=fp.waiveUntil) return true;
+    } else {
+      if(!fp.waiveUntil) return true;
+      if(r.date && r.date<=fp.waiveUntil) return true;
+    }
+  }
+  if((fp.waivedRides||[]).indexOf(r.id)>=0) return true;
+  return false;
+}
 // Preserve pre-tracking coverage before writing per-ride data, so old settled rides
 // stay settled after this pair moves to the per-ride system.
 function _feePreserveLegacy(key){
@@ -20693,7 +20711,18 @@ function renderDashIncome(){
     // Round each fee to whole cents the SAME way the Venmo-payment prompt does (Math.round
     // *100/100), so the income summary's accrued total and the amounts actually charged can't
     // drift apart by fractions of a cent across many rides.
-    if(owner && owner!==dName) feeCost += Math.round(fare*clientFeeRate()*100)/100;
+    //
+    // BUG FIX, reported directly with a screenshot: this never checked whether the fee had
+    // actually been settled or waived - it charged it unconditionally whenever the ride
+    // belonged to another owner's client. A waived fee still reduced this "net take-home"
+    // total exactly as if it had genuinely been charged. Now checked the same way the main
+    // Client Fees section and the pending-approval lists already correctly do.
+    if(owner && owner!==dName){
+      var _fpInc = feePayments[owner+':recv:'+dName]||{};
+      if(!_feeWaivedForRide(_fpInc, r)){
+        feeCost += Math.round(fare*clientFeeRate()*100)/100;
+      }
+    }
   });
   const monthlyExp=getMonthlyExpenseTotal();
   const tips=monthRides.reduce((_s,r)=>_s+parseFloat(r.tip||0),0);
@@ -26110,7 +26139,8 @@ function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm,
     // Exception: if the CLIENT is themselves a driver in the group, the ride is
     // that driver's own client and never owes a fee, no matter who drives it.
     const owner = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
-    const fee   = (owner && owner!==dName) ? fare*clientFeeRate() : 0;
+    const _fpRow = (owner && owner!==dName) ? (feePayments[owner+':recv:'+dName]||{}) : null;
+    const fee   = (owner && owner!==dName && !_feeWaivedForRide(_fpRow, r)) ? fare*clientFeeRate() : 0;
     const gross = fare + tip;
     const cost  = gas + maint + fee;
     const net   = gross - cost;
@@ -29877,7 +29907,11 @@ async function generateYearEndPL(){
     // 15% client fee: charged only when the client is owned by someone other than this driver
     const owner = (typeof clientIsDriver==='function' && clientIsDriver(r.client)) ? null
                  : ((typeof feeOwnerFor==='function' ? feeOwnerFor(r.createdBy) : null) || (typeof getClientOwner==='function' ? getClientOwner(r.client) : null));
-    const fee = (owner && owner!==dName) ? fare*clientFeeRate() : 0;
+    // BUG FIX, reported directly with a screenshot: a genuinely waived fee still counted as a
+    // deductible expense here. Cash-basis, Schedule C-mapped tax report - a fee never actually
+    // paid should never reduce it, the same fix applied to renderDashIncome for the same reason.
+    const _fpYepl = (owner && owner!==dName) ? (feePayments[owner+':recv:'+dName]||{}) : null;
+    const fee = (owner && owner!==dName && !_feeWaivedForRide(_fpYepl, r)) ? fare*clientFeeRate() : 0;
     const gas   = mi * (parseFloat((DRIVER_PROFILES[dName]||{}).mpg)? (parseFloat((DRIVER_PROFILES[dName]||{}).gasPrice||3.50)/parseFloat((DRIVER_PROFILES[dName]||{}).mpg)) : 0);
     const maint = mi * (parseFloat((DRIVER_PROFILES[dName]||{}).maintRate)||IRS_MAINTENANCE_RATE);
     const profit = fare + tip - fee - gas - maint;
