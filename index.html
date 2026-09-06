@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191105">
+<meta name="version" content="202608191106">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -20021,6 +20021,39 @@ function _renderFeeWaiveRequestsHTML(dName){
   h+='</div>';
   return h;
 }
+// Direct follow-up: gives the owner a low-friction way to catch and correct a fee that already,
+// mistakenly went through as paid - the exact gap disclosed in v1104 rather than silently worked
+// around. Collects the most recent few paid rides where dName is the recipient, across every
+// driver who owes them. No per-ride timestamp exists to filter by actual recency, so this relies
+// on array order instead - each ride landed in paidRides at the moment it settled, so the last
+// few entries already are the most recent ones. Collapsed by default and deliberately muted -
+// this is for the rare correction, not a routine action that belongs next to the real to-be-paid
+// list.
+function _renderRecentlyPaidFeesHTML(dName){
+  if(!dName) return '';
+  var recent=[];
+  Object.keys(feePayments||{}).forEach(function(key){
+    var m=key.match(/^(.+):recv:(.+)$/); if(!m || m[1]!==dName) return;
+    var driver=m[2], fp=feePayments[key]||{};
+    (fp.paidRides||[]).forEach(function(rid){
+      var rr=(rides||[]).find(function(x){ return x&&(x.id===rid||String(x.id)===String(rid)); });
+      recent.push({ owner:dName, driver:driver, rideId:rid, client:rr?rr.client:'', date:rr?rr.date:'', fee:rr?parseFloat(rr.price||0)*clientFeeRate():0 });
+    });
+  });
+  if(!recent.length) return '';
+  recent = recent.slice(-3).reverse();
+  var rows = recent.map(function(x){
+    var who=(typeof driverDisplayName==='function'?driverDisplayName(x.driver):x.driver)||x.driver;
+    return '<div style="padding:.5rem .75rem;border-bottom:1px solid var(--light);display:flex;align-items:center;justify-content:space-between;gap:.5rem;">'
+      +'<div style="font-size:.78rem;color:var(--mid);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+escHtml(who)+' paid \u00b7 '+escHtml(x.client||'ride')+(x.date?' \u00b7 '+fmtDateShort(x.date):'')+' \u00b7 $'+x.fee.toFixed(2)+'</div>'
+      +'<button onclick="_feeCorrectPaidToWaived(\''+escAttr(x.owner)+'\',\''+escAttr(x.driver)+'\','+_feeIdArg(x.rideId)+')" style="flex-shrink:0;padding:.3rem .55rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:7px;font-family:inherit;font-size:.68rem;font-weight:600;cursor:pointer;white-space:nowrap;">\u21a9 Shouldn\u2019t have charged</button>'
+      +'</div>';
+  }).join('');
+  return '<div style="margin-top:.6rem;">'
+    +'<div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'block\':\'none\';" style="font-size:.7rem;color:var(--mid);cursor:pointer;text-decoration:underline;padding:.2rem 0;">Recently settled \u2014 correct a mistake?</div>'
+    +'<div style="display:none;background:var(--surface);border:1.5px solid var(--light);border-radius:10px;overflow:hidden;margin-top:.35rem;">'+rows+'</div>'
+    +'</div>';
+}
 
 // Mark ONE ride's fee paid — never the whole pair.
 async function markFeeRidePaid(owner, driver, rideId, method){
@@ -20123,6 +20156,31 @@ async function _feeUndoRide(owner, driver, rideId){
   if((!fp.paidRides||!fp.paidRides.length)){ delete fp.paid; delete fp.paidAt; delete fp.legacyPaidThrough; }
   await saveFeePayments(key); try{ renderDashFees(); }catch(e){}
   showToast('\u21a9 Undone \u2014 that fee is owed again');
+}
+// Direct follow-up: corrects a fee that already, mistakenly went all the way through to paid -
+// the specific gap v1104 disclosed rather than silently working around (no existing option to
+// undo an already-fully-settled fee). Removes it from paidRides the same way _feeUndoRide()
+// does above, but then adds it to waivedRides directly rather than leaving it at merely "owed
+// again" - the owner already has direct, no-approval waive authority elsewhere, so correcting a
+// mistake like this shouldn't need to go through the separate request/approval flow that exists
+// specifically for a driver-initiated ask.
+async function _feeCorrectPaidToWaived(owner, driver, rideId){
+  await _ensureFresh();
+  const key=owner+':recv:'+driver; const fp=feePayments[key]; if(!fp) return;
+  if(fp.paidRides){ const j=fp.paidRides.indexOf(rideId); if(j>=0) fp.paidRides.splice(j,1); }
+  if(fp.paidRideMethod){ delete fp.paidRideMethod[rideId]; }
+  if((!fp.paidRides||!fp.paidRides.length)){ delete fp.paid; delete fp.paidAt; delete fp.legacyPaidThrough; }
+  const wr=fp.waivedRides=(fp.waivedRides||[]);
+  if(wr.indexOf(rideId)<0) wr.push(rideId);
+  await saveFeePayments(key);
+  try{
+    const rr=(rides||[]).find(function(x){ return x&&(x.id===rideId||String(x.id)===String(rideId)); });
+    addNotification(driver, {id:rideId,client:rr?rr.client:'',date:rr?rr.date:''}, 'fee_waive_approved',
+      (owner.split(' ')[0])+' corrected a mistake \u2014 the fee for '+(rr&&rr.client||'that')+'\u2019s ride is now waived, not charged');
+    await saveNotifs();
+  }catch(e){}
+  try{ renderDashFees(); }catch(e){}
+  showToast('\u2713 Corrected \u2014 that fee is now waived, not charged');
 }
 // Reset / mark the 15% fee from the OPEN ride card, then refresh the card so its status updates.
 // Venmo "pay" only marks the fee as SENT (pending). It stays on the card until the
@@ -20490,8 +20548,9 @@ function renderDashFees(){
   });
   const hasOwed=Object.keys(owedToMe).length, hasOwe=Object.keys(iOwe).length;
   var _waiveHtml=(typeof _renderFeeWaiveRequestsHTML==='function')?_renderFeeWaiveRequestsHTML(dName):'';
+  var _recentPaidHtml=(typeof _renderRecentlyPaidFeesHTML==='function')?_renderRecentlyPaidFeesHTML(dName):'';
   var _cautHtml=(typeof _renderCautiousFlagRequestsHTML==='function')?_renderCautiousFlagRequestsHTML(dName):'';
-  if(!hasOwed&&!hasOwe&&!_waiveHtml&&!_cautHtml){ box.innerHTML=''; return; }
+  if(!hasOwed&&!hasOwe&&!_waiveHtml&&!_cautHtml&&!_recentPaidHtml){ box.innerHTML=''; return; }
 
   function _rideLabel(ri){
     return escHtml(ri.client||'Ride')+(ri.date?' \u00b7 '+ri.date.slice(5).replace('-','/'):'')+' \u00b7 $'+ri.fee.toFixed(2);
@@ -20590,7 +20649,8 @@ function renderDashFees(){
     });
   }
   html+='<div style="padding:.5rem .85rem;font-size:.72rem;color:var(--mid);">View full breakdown in <span onclick="nav(\'income\')" style="color:var(--accent);cursor:pointer;text-decoration:underline;">Income</span></div>'
-    +'</div>';
+    +'</div>'
+    +_recentPaidHtml;
   box.innerHTML=html;
 }
 
