@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191117">
+<meta name="version" content="202608191118">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -20621,7 +20621,6 @@ function renderDashFees(){
       if(driver===dName&&!settled){ const k=owner; (iOwe[k]=iOwe[k]||{fee:0,rides:[]}); iOwe[k].fee+=fee; iOwe[k].rides.push({id:r.id,client:r.client,date:r.date,fee:fee}); }
     }
   });
-  const hasOwed=Object.keys(owedToMe).length, hasOwe=Object.keys(iOwe).length;
   // Waived-by-you section - computed here, before the card is built, so its presence can
   // correctly be part of the one, real condition for showing this specific card at all (moved
   // up from its previous spot further down, where it was too late to be part of that decision).
@@ -20637,33 +20636,45 @@ function renderDashFees(){
     if(fp2.waived && (fp2.waiveFrom ? (r.date>=fp2.waiveFrom && r.date<=fp2.waiveUntil) : (!fp2.waiveUntil || r.date<=fp2.waiveUntil))){ const fee2=parseFloat(r.price)*clientFeeRate(); (waivedByMe[dr]=waivedByMe[dr]||{fee:0,n:0,until:fp2.waiveUntil||null}); waivedByMe[dr].fee+=fee2; waivedByMe[dr].n++; }
   });
   const hasWaivedByMe=Object.keys(waivedByMe).length;
+  // BUG FIX, reported directly and confirmed precisely: the header below used to show even with
+  // genuinely nothing rendered under it. The prior version's hasOwed/hasOwe (now removed) only
+  // reflected whether ANY ride exists at all for a counterparty, before the further filtering
+  // (pending confirmation, pending waiver request) that decides what actually gets shown - if
+  // every single one of a counterparty's rides happened to be pending, that count stayed truthy
+  // while these, the real, filtered lists actually rendered, came back completely empty.
+  // Computed here, using the exact same filtering the rows themselves use, so the one decision
+  // for showing this card is based on what actually gets displayed, not a broader proxy for it.
+  var _owedEntries = Object.entries(owedToMe).map(function(entry){
+    var name=entry[0], v=entry[1];
+    var _fpr=feePayments[dName+':recv:'+name]||{};
+    var _remaining=(v.rides||[]).filter(function(ri){ return !_feeRidePending(_fpr, ri.id) && !_feeWaivePending(ri.id); });
+    return {name:name, v:v, remaining:_remaining};
+  }).filter(function(e){ return e.remaining.length; });
+  var _oweEntries = Object.entries(iOwe).map(function(entry){
+    var name=entry[0], v=entry[1];
+    // Pending-confirmation rides move to the dedicated "Fees awaiting approval" section
+    // below - a fee the payer already marked paid and is only waiting on confirmation for
+    // shouldn't still read as "you owe" here, per direct request.
+    var _fpo=feePayments[name+':recv:'+dName]||{};
+    var _remaining=(v.rides||[]).filter(function(ri){ return !_feeRidePending(_fpo, ri.id) && !_feeWaivePending(ri.id); });
+    return {name:name, v:v, remaining:_remaining};
+  }).filter(function(e){ return e.remaining.length; });
   var _waiveHtml=(typeof _renderFeeWaiveRequestsHTML==='function')?_renderFeeWaiveRequestsHTML(dName):'';
   var _cautHtml=(typeof _renderCautiousFlagRequestsHTML==='function')?_renderCautiousFlagRequestsHTML(dName):'';
-  if(!hasOwed&&!hasOwe&&!hasWaivedByMe&&!_waiveHtml&&!_cautHtml){ box.innerHTML=''; return; }
+  if(!_owedEntries.length&&!_oweEntries.length&&!hasWaivedByMe&&!_waiveHtml&&!_cautHtml){ box.innerHTML=''; return; }
 
   function _rideLabel(ri){
     return escHtml(ri.client||'Ride')+(ri.date?' \u00b7 '+ri.date.slice(5).replace('-','/'):'')+' \u00b7 $'+ri.fee.toFixed(2);
   }
 
   let html=_cautHtml+_waiveHtml;
-  // BUG FIX, reported directly with a screenshot: this card - header, "View full breakdown"
-  // link, everything - used to build unconditionally the moment the box above passed its own,
-  // broader guard, even when there was genuinely nothing owed, received, or waived to actually
-  // show inside it. That guard only ever checked whether ANYTHING in the whole box had content
-  // (including the separate Recently-settled and waiver-request sections), never whether this
-  // specific card did. Now only builds when something genuinely belongs in it.
-  if(hasOwed||hasOwe||hasWaivedByMe){
+  // Now checks the same, real, filtered entries computed above - hasOwed/hasOwe (which used to
+  // drive this decision, and let this exact bug happen) have been removed entirely.
+  if(_owedEntries.length||_oweEntries.length||hasWaivedByMe){
   html+='<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">Client Fees — To Be Paid '+mtipDot('dash-fees','The fifteen percent applies to fare and surcharges only \u2014 never tips, and is only ever settled by Venmo, Zelle, CashApp, or Apple Pay. Pay by Venmo and it shows Awaiting confirmation until the person owed taps Received. Any other method, tap \u2713 Paid (or \u2713 Received) and you\u2019ll be asked which one. Waive forgives a single ride\'s fee; Waive [name]\u2019s sets a standing arrangement for that person \u2014 either is the owed person\u2019s own call, no approval needed. On a fee you owe, tap \u2713 Paid and choose Waived at the bottom of that same list instead \u2014 it moves off this list right away, the same as a sent Venmo payment, but isn\u2019t final until the person you asked approves it.')+'</div>'
     +'<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:12px;overflow:hidden;">';
 
-  if(hasOwed){
-    var _owedEntries = Object.entries(owedToMe).map(function(entry){
-      var name=entry[0], v=entry[1];
-      var _fpr=feePayments[dName+':recv:'+name]||{};
-      var _remaining=(v.rides||[]).filter(function(ri){ return !_feeRidePending(_fpr, ri.id) && !_feeWaivePending(ri.id); });
-      return {name:name, v:v, remaining:_remaining};
-    }).filter(function(e){ return e.remaining.length; });
-    if(_owedEntries.length){
+  if(_owedEntries.length){
     html+='<div style="font-size:.72rem;font-weight:600;color:var(--green);padding:.45rem .85rem;border-bottom:1px solid var(--light);background:#f0fdf4;">Owed to you</div>';
     _owedEntries.forEach(function(entry){
       var name=entry.name, v=entry.v;
@@ -20690,18 +20701,7 @@ function renderDashFees(){
       });
     });
     }
-  }
-  if(hasOwe){
-    var _oweEntries = Object.entries(iOwe).map(function(entry){
-      var name=entry[0], v=entry[1];
-      // Pending-confirmation rides move to the dedicated "Fees awaiting approval" section
-      // below - a fee the payer already marked paid and is only waiting on confirmation for
-      // shouldn't still read as "you owe" here, per direct request.
-      var _fpo=feePayments[name+':recv:'+dName]||{};
-      var _remaining=(v.rides||[]).filter(function(ri){ return !_feeRidePending(_fpo, ri.id) && !_feeWaivePending(ri.id); });
-      return {name:name, v:v, remaining:_remaining};
-    }).filter(function(e){ return e.remaining.length; });
-    if(_oweEntries.length){
+  if(_oweEntries.length){
     html+='<div style="font-size:.72rem;font-weight:600;color:#dc2626;padding:.45rem .85rem;border-bottom:1px solid var(--light);background:#fff5f5;">You owe</div>';
     _oweEntries.forEach(function(entry){
       var name=entry.name, v=entry.v;
@@ -20720,7 +20720,6 @@ function renderDashFees(){
       });
     });
     }
-  }
 
   if(hasWaivedByMe){
     html+='<div style="font-size:.72rem;font-weight:600;color:var(--mid);padding:.45rem .85rem;border-bottom:1px solid var(--light);border-top:1px solid var(--light);">Waived by you</div>';
@@ -20735,7 +20734,7 @@ function renderDashFees(){
   }
   html+='<div style="padding:.5rem .85rem;font-size:.72rem;color:var(--mid);">View full breakdown in <span onclick="nav(\'income\')" style="color:var(--accent);cursor:pointer;text-decoration:underline;">Income</span></div>'
     +'</div>';
-  } // closes: if(hasOwed||hasOwe||hasWaivedByMe) - this whole card only exists when reached
+  } // closes: if(_owedEntries.length||_oweEntries.length||hasWaivedByMe) - the real, filtered content check
   box.innerHTML=html;
 }
 
