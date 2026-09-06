@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191111">
+<meta name="version" content="202608191117">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -642,6 +642,7 @@ input,select,textarea{font-size:16px;}
     <div id="dash-fees" style="margin-bottom:1.5rem;"></div>
     <!-- Action blocks: confirmations to send, then rides to wrap up, then upcoming -->
     <div id="dash-save-failed" style="margin-bottom:1.5rem;"></div>
+    <div id="dash-rides-load-failed" style="margin-bottom:1.5rem;"></div>
     <div id="dash-fees-awaiting-your-approval" style="margin-bottom:1.5rem;"></div>
     <div id="dash-pending-accept" style="margin-bottom:1.5rem;"></div>
     <div id="dash-gate-codes" style="margin-bottom:1.5rem;"></div>
@@ -2871,7 +2872,22 @@ function _cacheRerenderAfterRefresh(){
 async function _ensureFresh(){
   if(window._dataFresh) return;
   try{ if(typeof showToast==='function') showToast('Syncing latest data...'); }catch(e){}
-  try{ await window._dataFreshPromise; }catch(e){}
+  // BUG FIX, reported directly with a screenshot: tapping Received/how-it-was-paid showed this
+  // exact toast, then nothing - the row never disappeared. This await had no timeout at all,
+  // even though this same codebase already establishes the pattern elsewhere for exactly this
+  // reason (storageGet's 8s timeout, the cold-load path's 15s timeout): an unbounded await on a
+  // background refresh can hang forever on a weak or unstable connection, and this function sits
+  // in front of most of the fee-payment actions in the app. If the underlying refresh chain
+  // ever genuinely stalled, every one of those actions would show this toast and then simply
+  // never complete - no error, no way out short of reloading. Same fix as those other two spots:
+  // bounded by a timeout, so a slow-but-eventually-working refresh still finishes in the
+  // background on its own, but a genuinely hung one can no longer block the action itself.
+  try{
+    await Promise.race([
+      window._dataFreshPromise,
+      new Promise(function(r){ setTimeout(r, 8000); })
+    ]);
+  }catch(e){}
 }
 
 async function _loadAppData() {
@@ -2882,7 +2898,25 @@ async function _loadAppData() {
       storageGet('kat:notifications'),
       storageGet('kat:driverColors'),
     ]);
-    rides        = storedRides    || SEED_RIDES;
+    // BUG FIX, reported directly with a screenshot: a real account's dashboard showed $0.00 and
+    // zero rides, with no warning of any kind. Traced to this exact line - rides falls back to
+    // SEED_RIDES (hardcoded demo data dated January-June 2026) whenever both Firebase and the
+    // localStorage backup fail to provide a value, completely silently. That fallback makes
+    // sense for a brand-new install with genuinely nothing to load yet, but substituting old
+    // demo content for a RETURNING device whose real data just failed to load this one time is
+    // exactly backwards - it looks identical to actual data loss, when the real rides are still
+    // safe on the server the whole time. 'nda-session' is only ever set after a real, successful
+    // prior login on this device, so its presence reliably distinguishes "genuinely new install"
+    // from "this device has real data, it just didn't load this time."
+    var _returningDevice = false;
+    try{ _returningDevice = !!localStorage.getItem('nda-session'); }catch(e){}
+    if(!storedRides && _returningDevice){
+      rides = [];
+      window._ridesLoadFailed = true;
+      try{ showToast('\u26a0\ufe0f Couldn\u2019t load your rides \u2014 check your connection and reload'); }catch(e){}
+    } else {
+      rides = storedRides || SEED_RIDES;
+    }
     // Seed the delta baseline from whatever we just loaded. If this is the SEED_RIDES fallback
     // (nothing in Firebase or localStorage) the baseline still matches `rides`, so the first
     // save correctly diffs to "nothing changed" rather than uploading seed data as if it were
@@ -12610,7 +12644,7 @@ async function markRideUnpaid(id){
       if(fp){
         if(fp.paidRides){ var _i=fp.paidRides.indexOf(r.id); if(_i>=0) fp.paidRides.splice(_i,1); }
         if(fp.pendingRides){ var _j=fp.pendingRides.indexOf(r.id); if(_j>=0) fp.pendingRides.splice(_j,1); }
-        if(!fp.paidRides||!fp.paidRides.length){ delete fp.paid; delete fp.paidAt; delete fp.legacyPaidThrough; }
+        if(!fp.paidRides||!fp.paidRides.length){ delete fp.paid; delete fp.paidAt; }
         try{ await saveFeePayments(_k); }catch(e){}
       }
     }
@@ -14406,10 +14440,59 @@ async function _retryPendingSaves(){
   try{ renderDashSaveFailed(); }catch(e){}
   try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
 }
+// Direct request: automatically retries a failed save the moment the device actually
+// reconnects, rather than requiring the person to notice the "didn't save" banner and tap Retry
+// themselves. Only fires when there's genuinely something to retry (_rideSaveHasFailed already
+// true) - the browser's 'online' event fires on any network change, not just a real return from
+// being offline, so this stays a no-op the rest of the time rather than saving on every blip.
+window.addEventListener('online', function(){
+  if(window._rideSaveHasFailed){
+    showToast('\ud83d\udd04 Back online \u2014 retrying your save');
+    _retryPendingSaves();
+  }
+});
 // A ride that failed to save stays visibly flagged until it actually saves - not a toast that
 // can be missed and forgotten, a persistent banner that only goes away once resolved. Lives
 // alongside the dashboard's other action-block banners, same "gone once its job is done"
 // pattern all of them already follow.
+// Direct follow-up to the SEED_RIDES fallback fix in _loadAppData(): a reliable, persistent
+// banner rather than depending solely on the toast fired at load time, which could fire before
+// the dashboard UI is even visible to show it. Manual retry here, paired with an automatic retry
+// on reconnect right below - same two-layer pattern already established for a failed save.
+async function _retryRidesLoad(){
+  var fresh = null;
+  try{ fresh = await storageGet('kat:rides'); }catch(e){}
+  if(fresh){
+    rides = fresh;
+    _snapshotRidesBaseline(rides);
+    window._ridesLoadFailed = false;
+    showToast('\u2705 Loaded your rides');
+    try{ refreshDash(); }catch(e){}
+  } else {
+    showToast('\u26a0\ufe0f Still couldn\u2019t load \u2014 check your connection and try again');
+  }
+  try{ renderDashRidesLoadFailed(); }catch(e){}
+}
+function renderDashRidesLoadFailed(){
+  var box=document.getElementById('dash-rides-load-failed'); if(!box) return;
+  if(!window._ridesLoadFailed){ box.innerHTML=''; return; }
+  box.innerHTML='<div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:12px;padding:1rem;margin-bottom:.75rem;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.4rem;">'
+    +'<span style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#b91c1c;">\u26a0\ufe0f Couldn\u2019t load your rides</span>'
+    +'<button onclick="_retryRidesLoad()" style="background:#b91c1c;color:#fff;border:none;border-radius:8px;padding:.4rem .8rem;font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;">Retry</button>'
+    +'</div>'
+    +'<div style="font-size:.75rem;color:var(--mid);line-height:1.45;">Your real rides are safe on the server \u2014 this device just couldn\u2019t reach them right now, likely a connection issue. Tap Retry once you\u2019re back online.</div>'
+    +'</div>';
+}
+// Direct follow-up: automatically retries the moment the device actually reconnects, the exact
+// same reasoning as the save-retry listener above - gated on _ridesLoadFailed genuinely being
+// true, since 'online' fires on any network change, not just a real return from being offline.
+window.addEventListener('online', function(){
+  if(window._ridesLoadFailed){
+    showToast('\ud83d\udd04 Back online \u2014 retrying');
+    _retryRidesLoad();
+  }
+});
 function renderDashSaveFailed(){
   var box=document.getElementById('dash-save-failed'); if(!box) return;
   // BUG FIX, reported directly with a screenshot: this used to check
@@ -19425,6 +19508,9 @@ function refreshDash(){
 
   // Anything that didn't actually save yet - the single most urgent thing to surface
   try{ renderDashSaveFailed(); }catch(e){}
+  // Rides that failed to load at all (fell back to empty rather than stale demo data) - the
+  // other half of this same "something didn't reach the server" category.
+  try{ renderDashRidesLoadFailed(); }catch(e){}
 
   // Fee payments this user needs to confirm receipt of - needs action, so this sits near the
   // very top, ahead of everything else. Split out of the main Client Fees card per direct
@@ -20037,40 +20123,6 @@ function _renderFeeWaiveRequestsHTML(dName){
   h+='</div>';
   return h;
 }
-// Direct follow-up: gives the owner a low-friction way to catch and correct a fee that already,
-// mistakenly went through as paid - the exact gap disclosed in v1104 rather than silently worked
-// around. Collects the most recent few paid rides where dName is the recipient, across every
-// driver who owes them. No per-ride timestamp exists to filter by actual recency, so this relies
-// on array order instead - each ride landed in paidRides at the moment it settled, so the last
-// few entries already are the most recent ones. Collapsed by default and deliberately muted -
-// this is for the rare correction, not a routine action that belongs next to the real to-be-paid
-// list.
-function _renderRecentlyPaidFeesHTML(dName){
-  if(!dName) return '';
-  var recent=[];
-  Object.keys(feePayments||{}).forEach(function(key){
-    var m=key.match(/^(.+):recv:(.+)$/); if(!m || m[1]!==dName) return;
-    var driver=m[2], fp=feePayments[key]||{};
-    (fp.paidRides||[]).forEach(function(rid){
-      var rr=(rides||[]).find(function(x){ return x&&(x.id===rid||String(x.id)===String(rid)); });
-      recent.push({ owner:dName, driver:driver, rideId:rid, client:rr?rr.client:'', date:rr?rr.date:'', fee:rr?parseFloat(rr.price||0)*clientFeeRate():0 });
-    });
-  });
-  if(!recent.length) return '';
-  recent = recent.slice(-3).reverse();
-  var rows = recent.map(function(x){
-    var who=(typeof driverDisplayName==='function'?driverDisplayName(x.driver):x.driver)||x.driver;
-    return '<div style="padding:.5rem .75rem;border-bottom:1px solid var(--light);display:flex;align-items:center;justify-content:space-between;gap:.5rem;">'
-      +'<div style="font-size:.78rem;color:var(--mid);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+escHtml(who)+' paid \u00b7 '+escHtml(x.client||'ride')+(x.date?' \u00b7 '+fmtDateShort(x.date):'')+' \u00b7 $'+x.fee.toFixed(2)+'</div>'
-      +'<button onclick="_feeCorrectPaidToWaived(\''+escAttr(x.owner)+'\',\''+escAttr(x.driver)+'\','+_feeIdArg(x.rideId)+')" style="flex-shrink:0;padding:.3rem .55rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:7px;font-family:inherit;font-size:.68rem;font-weight:600;cursor:pointer;white-space:nowrap;">\u21a9 Shouldn\u2019t have charged</button>'
-      +'</div>';
-  }).join('');
-  return '<div style="margin-top:.6rem;">'
-    +'<div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'block\':\'none\';" style="font-size:.7rem;color:var(--mid);cursor:pointer;text-decoration:underline;padding:.2rem 0;">Recently settled \u2014 correct a mistake?</div>'
-    +'<div style="display:none;background:var(--surface);border:1.5px solid var(--light);border-radius:10px;overflow:hidden;margin-top:.35rem;">'+rows+'</div>'
-    +'</div>';
-}
-
 // Mark ONE ride's fee paid — never the whole pair.
 async function markFeeRidePaid(owner, driver, rideId, method){
   await _ensureFresh();
@@ -20169,7 +20221,13 @@ async function _feeUndoRide(owner, driver, rideId){
   if(fp.pendingRides){ const i=fp.pendingRides.indexOf(rideId); if(i>=0) fp.pendingRides.splice(i,1); }
   if(fp.pendingRidesAt){ delete fp.pendingRidesAt[rideId]; }
   if(fp.paidRides){ const j=fp.paidRides.indexOf(rideId); if(j>=0) fp.paidRides.splice(j,1); }
-  if((!fp.paidRides||!fp.paidRides.length)){ delete fp.paid; delete fp.paidAt; delete fp.legacyPaidThrough; }
+  // BUG FIX, reported directly with a screenshot: this used to also delete legacyPaidThrough
+  // whenever paidRides became empty - but that marker is a completely separate, older
+  // settlement mechanism covering a different, unrelated batch of rides entirely (anything dated
+  // on or before that marker's own date, regardless of paidRides). Undoing one specific ride's
+  // paidRides entry should never touch it - doing so could silently un-settle every other,
+  // unrelated ride that marker was covering, all at once.
+  if((!fp.paidRides||!fp.paidRides.length)){ delete fp.paid; delete fp.paidAt; }
   await saveFeePayments(key); try{ renderDashFees(); }catch(e){}
   showToast('\u21a9 Undone \u2014 that fee is owed again');
 }
@@ -20185,7 +20243,7 @@ async function _feeCorrectPaidToWaived(owner, driver, rideId){
   const key=owner+':recv:'+driver; const fp=feePayments[key]; if(!fp) return;
   if(fp.paidRides){ const j=fp.paidRides.indexOf(rideId); if(j>=0) fp.paidRides.splice(j,1); }
   if(fp.paidRideMethod){ delete fp.paidRideMethod[rideId]; }
-  if((!fp.paidRides||!fp.paidRides.length)){ delete fp.paid; delete fp.paidAt; delete fp.legacyPaidThrough; }
+  if((!fp.paidRides||!fp.paidRides.length)){ delete fp.paid; delete fp.paidAt; }
   const wr=fp.waivedRides=(fp.waivedRides||[]);
   if(wr.indexOf(rideId)<0) wr.push(rideId);
   await saveFeePayments(key);
@@ -20564,16 +20622,38 @@ function renderDashFees(){
     }
   });
   const hasOwed=Object.keys(owedToMe).length, hasOwe=Object.keys(iOwe).length;
+  // Waived-by-you section - computed here, before the card is built, so its presence can
+  // correctly be part of the one, real condition for showing this specific card at all (moved
+  // up from its previous spot further down, where it was too late to be part of that decision).
+  const waivedByMe={};
+  rides.forEach(function(r){
+    // Same rule as the owed/received loop above \u2014 a waiver only makes sense once
+    // there was actually a fee to waive, which requires the ride to be marked paid.
+    if(!r.date||r.date>today||r.status!=='paid'||parseFloat(r.price||0)<=0) return;
+    const ow=feeOwnerFor(r.createdBy);
+    const dr=r.driver||null;
+    if(!ow||!dr||ow===dr||ow!==dName) return;
+    const fp2=feePayments[ow+':recv:'+dr]||{};
+    if(fp2.waived && (fp2.waiveFrom ? (r.date>=fp2.waiveFrom && r.date<=fp2.waiveUntil) : (!fp2.waiveUntil || r.date<=fp2.waiveUntil))){ const fee2=parseFloat(r.price)*clientFeeRate(); (waivedByMe[dr]=waivedByMe[dr]||{fee:0,n:0,until:fp2.waiveUntil||null}); waivedByMe[dr].fee+=fee2; waivedByMe[dr].n++; }
+  });
+  const hasWaivedByMe=Object.keys(waivedByMe).length;
   var _waiveHtml=(typeof _renderFeeWaiveRequestsHTML==='function')?_renderFeeWaiveRequestsHTML(dName):'';
-  var _recentPaidHtml=(typeof _renderRecentlyPaidFeesHTML==='function')?_renderRecentlyPaidFeesHTML(dName):'';
   var _cautHtml=(typeof _renderCautiousFlagRequestsHTML==='function')?_renderCautiousFlagRequestsHTML(dName):'';
-  if(!hasOwed&&!hasOwe&&!_waiveHtml&&!_cautHtml&&!_recentPaidHtml){ box.innerHTML=''; return; }
+  if(!hasOwed&&!hasOwe&&!hasWaivedByMe&&!_waiveHtml&&!_cautHtml){ box.innerHTML=''; return; }
 
   function _rideLabel(ri){
     return escHtml(ri.client||'Ride')+(ri.date?' \u00b7 '+ri.date.slice(5).replace('-','/'):'')+' \u00b7 $'+ri.fee.toFixed(2);
   }
 
-  let html=_cautHtml+_waiveHtml+'<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">Client Fees — To Be Paid '+mtipDot('dash-fees','The fifteen percent applies to fare and surcharges only \u2014 never tips, and is only ever settled by Venmo, Zelle, CashApp, or Apple Pay. Pay by Venmo and it shows Awaiting confirmation until the person owed taps Received. Any other method, tap \u2713 Paid (or \u2713 Received) and you\u2019ll be asked which one. Waive forgives a single ride\'s fee; Waive [name]\u2019s sets a standing arrangement for that person \u2014 either is the owed person\u2019s own call, no approval needed. On a fee you owe, tap \u2713 Paid and choose Waived at the bottom of that same list instead \u2014 it moves off this list right away, the same as a sent Venmo payment, but isn\u2019t final until the person you asked approves it.')+'</div>'
+  let html=_cautHtml+_waiveHtml;
+  // BUG FIX, reported directly with a screenshot: this card - header, "View full breakdown"
+  // link, everything - used to build unconditionally the moment the box above passed its own,
+  // broader guard, even when there was genuinely nothing owed, received, or waived to actually
+  // show inside it. That guard only ever checked whether ANYTHING in the whole box had content
+  // (including the separate Recently-settled and waiver-request sections), never whether this
+  // specific card did. Now only builds when something genuinely belongs in it.
+  if(hasOwed||hasOwe||hasWaivedByMe){
+  html+='<div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">Client Fees — To Be Paid '+mtipDot('dash-fees','The fifteen percent applies to fare and surcharges only \u2014 never tips, and is only ever settled by Venmo, Zelle, CashApp, or Apple Pay. Pay by Venmo and it shows Awaiting confirmation until the person owed taps Received. Any other method, tap \u2713 Paid (or \u2713 Received) and you\u2019ll be asked which one. Waive forgives a single ride\'s fee; Waive [name]\u2019s sets a standing arrangement for that person \u2014 either is the owed person\u2019s own call, no approval needed. On a fee you owe, tap \u2713 Paid and choose Waived at the bottom of that same list instead \u2014 it moves off this list right away, the same as a sent Venmo payment, but isn\u2019t final until the person you asked approves it.')+'</div>'
     +'<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:12px;overflow:hidden;">';
 
   if(hasOwed){
@@ -20642,19 +20722,7 @@ function renderDashFees(){
     }
   }
 
-  // Waived-by-me section
-  const waivedByMe={};
-  rides.forEach(function(r){
-    // Same rule as the owed/received loop above \u2014 a waiver only makes sense once
-    // there was actually a fee to waive, which requires the ride to be marked paid.
-    if(!r.date||r.date>today||r.status!=='paid'||parseFloat(r.price||0)<=0) return;
-    const ow=feeOwnerFor(r.createdBy);
-    const dr=r.driver||null;
-    if(!ow||!dr||ow===dr||ow!==dName) return;
-    const fp2=feePayments[ow+':recv:'+dr]||{};
-    if(fp2.waived && (fp2.waiveFrom ? (r.date>=fp2.waiveFrom && r.date<=fp2.waiveUntil) : (!fp2.waiveUntil || r.date<=fp2.waiveUntil))){ const fee2=parseFloat(r.price)*clientFeeRate(); (waivedByMe[dr]=waivedByMe[dr]||{fee:0,n:0,until:fp2.waiveUntil||null}); waivedByMe[dr].fee+=fee2; waivedByMe[dr].n++; }
-  });
-  if(Object.keys(waivedByMe).length){
+  if(hasWaivedByMe){
     html+='<div style="font-size:.72rem;font-weight:600;color:var(--mid);padding:.45rem .85rem;border-bottom:1px solid var(--light);border-top:1px solid var(--light);">Waived by you</div>';
     Object.entries(waivedByMe).forEach(function([name,v]){
       html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.5rem .85rem;border-bottom:1px solid var(--light);gap:.6rem;">'
@@ -20666,8 +20734,8 @@ function renderDashFees(){
     });
   }
   html+='<div style="padding:.5rem .85rem;font-size:.72rem;color:var(--mid);">View full breakdown in <span onclick="nav(\'income\')" style="color:var(--accent);cursor:pointer;text-decoration:underline;">Income</span></div>'
-    +'</div>'
-    +_recentPaidHtml;
+    +'</div>';
+  } // closes: if(hasOwed||hasOwe||hasWaivedByMe) - this whole card only exists when reached
   box.innerHTML=html;
 }
 
