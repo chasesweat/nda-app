@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191118">
+<meta name="version" content="202608191119">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2732,8 +2732,9 @@ let _archiveLoaded = false;   // whether the ride archive is currently merged in
 // this set the same way _saveMarkPaidCombined() does below - add the id, set a ~90s timeout to
 // self-clear it, delete it on confirmed save. This was found missing from three separate save
 // functions built across this same session (_saveLogMiles, _dashSaveInvoicePaid,
-// _changeReturnDest, sendAllConf's confirmation-sent save) before being fixed - each one a real,
-// reported bug where a correct local change silently reverted because of exactly this gap.
+// the since-removed _changeReturnDest, sendAllConf's confirmation-sent save) before being fixed -
+// each one a real, reported bug where a correct local change silently reverted because of
+// exactly this gap.
 // Before shipping any new ride-mutating save, check: does this need the same protection? A
 // brand-new record being created for the first time doesn't (nothing existing to race against);
 // a mutation to a record that could plausibly be open or edited elsewhere around the same time
@@ -13474,19 +13475,16 @@ function openStartRide(rideId){
   var r=rides.find(function(x){return x.id===rideId;});
   if(!r){ showToast('Ride not found'); return; }
 
-  // RESUME: already started. "Resume navigation" used to run this ENTIRE function again from
-  // the top - re-confirming, re-prompting for odometer, re-asking where to return to, and
-  // silently overwriting rideStartedAt with a fresh timestamp every single tap. Reported
-  // directly as serving no real function, which was accurate - none of that made sense for a
-  // ride already underway. If the return destination was already saved (see
-  // _openStartRideWithHome, which now persists it), skip straight to relaunching navigation.
-  // If it wasn't - a ride started before this existed - skip the confirm/odometer (the ride is
-  // provably already started) but do ask the destination question once, same as first-time.
-  if(r.rideStartedAt && !r.rideStoppedAt){
-    if(r.startRideReturnDest){ _resumeStartRideNavigation(rideId); }
-    else { _getGpsForNav(function(locStr){ _askReturnDest(rideId, locStr||_rtGetHome()); }); }
-    return;
-  }
+  // Direct instruction: "Resume navigation" was removed entirely - it rebuilt the ride's full,
+  // original multi-stop route (every original stop, including ones already completed, like an
+  // airport pickup already finished) rather than genuinely resuming from wherever the driver
+  // currently was. Reported directly as functionally broken for any ride with more than one
+  // stop, and with no reliable way to detect which stops were already done, there wasn't a
+  // sound way to fix it rather than remove it. The button that called this on an already-started
+  // ride is gone; this defensive guard just prevents the confusing alternative (silently
+  // re-running the entire Start Ride flow - confirm dialog, odometer prompt - on a ride already
+  // underway) if this function is ever reached on one from some other, unforeseen path.
+  if(r.rideStartedAt && !r.rideStoppedAt) return;
 
   // A stray tap on any of the three places this button lives (dashboard card, ride modal,
   // upcoming list) used to silently mark the ride started with zero chance to catch the
@@ -13901,26 +13899,6 @@ function _openStartRideFromCurrent(rideId){
   });
 }
 
-// RESUME (see openStartRide()'s resume branch): the return destination was already saved from
-// the first time this ride was started, so no odometer prompt, no "where to" question - just a
-// fresh GPS fix (the driver's moved since starting) and straight back into navigation.
-function _resumeStartRideNavigation(rideId){
-  var r=rides.find(function(x){return x.id===rideId;});
-  if(!r){ showToast('Ride not found'); return; }
-  _getGpsForNav(function(locStr){
-    _openStartRideWithHome(rideId, locStr||_rtGetHome(), r.startRideReturnDest);
-  });
-}
-
-// CHANGE DESTINATION: the actual fix for "no way to go back if you picked the wrong return
-// location." Reopens just the return-destination picker - no confirm dialog, no odometer -
-// and _openStartRideWithHome() saves whatever's picked over the old value automatically.
-function _changeReturnDest(rideId){
-  _getGpsForNav(function(locStr){
-    _askReturnDest(rideId, locStr||_rtGetHome());
-  });
-}
-
 // Starting from current location: ask where the route should END —
 // home, back to this same spot, or a typed address.
 function _rideDropAddr(id){ var r=rides.find(function(x){return x&&x.id===id;}); if(!r) return ''; var t=r.type||''; var term=(typeof terminalToAddress==='function')?terminalToAddress(r.terminal):''; if((t==='AP RUN'||t==='AP ROUND TRIP')&&term) return term; return (r.home||r.dropoff||'').trim(); }
@@ -14080,24 +14058,6 @@ function _navOptimize(){
 function _openStartRideWithHome(rideId, startAddr, endAddr, swapPickupDropoff){
   var r=rides.find(function(x){return x.id===rideId;});
   if(!r){ showToast('Ride not found'); return; }
-  // Remember the chosen return destination so "Resume navigation" can relaunch instantly next
-  // time - no odometer prompt, no "where to" question - instead of re-running the entire Start
-  // Ride flow from scratch on every tap, which is what made it feel like it served no function.
-  // Guarded against the swapPickupDropoff case on purpose: that's the unrelated genuine-
-  // ROUND-TRIP Pause/Resume flow (_openResumeRideFromCurrent), which always passes home as
-  // endAddr regardless of what a driver picked here - saving it would silently overwrite a
-  // real chosen destination with "home" the next time a round trip happens to use this ride.
-  if(!swapPickupDropoff && endAddr && r.startRideReturnDest!==endAddr){
-    r.startRideReturnDest = endAddr;
-    // Same protection as the payment-related saves (_saveLogMiles, _dashSaveInvoicePaid,
-    // _saveMarkPaidCombined) - copied directly, not reinvented. Lower stakes here (a lost value
-    // just means re-picking a destination once, not a payment tracking failure) but the same
-    // exact class of gap, found by auditing every save from this session rather than assuming
-    // this one was safe because the consequence of missing it is smaller.
-    window._pendingUnsavedRideIds.add(r.id);
-    setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
-    saveRides().then(function(ok){ if(ok) window._pendingUnsavedRideIds.delete(r.id); }).catch(function(){});
-  }
   var _link=(r.linkedRide!=null)?rides.find(function(x){return x&&x.id===r.linkedRide;}):null;
   // For Resume on a paused ROUND TRIP: the client's being picked up from where they were
   // dropped off, and taken back to where they originally started - same two addresses, roles
@@ -15312,38 +15272,29 @@ function rideActionBarHtml(rid){
   // saw an identical, untouched "Start Ride" button, with nothing anywhere saying it had already
   // happened. Reported exactly that way.
   //
-  // The button is NOT removed. Start Ride is purely a navigation-app launcher (v674), so tapping
-  // it again to re-open directions is a legitimate thing to want mid-trip — removing it would
-  // strand a driver who closed their maps app. What changes is that it stops CLAIMING the ride
-  // has not started: it becomes a secondary "Resume navigation" next to a plain statement of when
-  // the ride began.
-  // Excludes awaitingInvoice for the same reason as the dashboard card: an invoiced ride is
-  // finished, so offering to resume navigation to it is noise at best and confusing at worst.
+  // UPDATE, per direct instruction: "Resume navigation" (the button this originally added here)
+  // was removed entirely - it rebuilt the ride's full, original route rather than genuinely
+  // resuming from wherever the driver currently was, which broke down for any ride with more
+  // than one stop. What remains is just the status statement below - "ride started at [time]" -
+  // with no action button attached to it.
   var _startedAt = (r.rideStartedAt && !r.rideStoppedAt && !r.awaitingInvoice) ? r.rideStartedAt : 0;
   if(_startedAt){
     var _t='';
     try{
       _t = new Date(_startedAt).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
     }catch(_e){}
-    // UPDATE: Resume navigation used to just re-run the entire Start Ride flow (confirm dialog,
-    // odometer prompt, "where to" question, all of it) every single tap - reported directly as
-    // serving no real function, and as leaving no way to fix a wrongly-picked return
-    // destination short of that whole redo. Both fixed together: the destination now persists
-    // (see _openStartRideWithHome), so Resume is a genuine one-tap relaunch, and the small
-    // pencil button next to it opens just the destination picker on its own - no odometer, no
-    // confirm - so a wrong pick is a two-tap fix, not a full restart.
+    // Direct instruction: "Resume navigation" and the destination-adjust button next to it were
+    // removed entirely - Resume rebuilt the ride's full, original route (every original stop,
+    // including ones already completed, like an airport pickup already finished) rather than
+    // genuinely resuming from wherever the driver currently was. Reported directly as
+    // functionally broken for any ride with more than one stop. The status banner below stays,
+    // since "ride started at [time]" is accurate, useful information on its own, independent of
+    // the removed navigation-relaunch mechanism.
     return '<div id="mt-bar" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem;">'
       +'<div style="width:100%;display:flex;align-items:center;gap:.5rem;background:#f0fdf4;border:1.5px solid #86efac;'
       +'border-radius:8px;padding:.55rem .8rem;font-size:.78rem;font-weight:700;color:#15803d;">'
       +'\u2713 Ride started'+(_t?' at '+_t:'')+'</div>'
-      +'<div style="display:flex;gap:5px;flex-wrap:wrap;width:100%;">'
-      +'<button onclick="openStartRide('+rid+')" style="flex:1;padding:.6rem .9rem;border-radius:8px;font-family:inherit;'
-      +'font-size:.78rem;font-weight:700;cursor:pointer;border:1.5px solid var(--light);background:none;color:var(--black);">'
-      +'\uD83E\uDDED Resume navigation</button>'
-      +'<button onclick="_changeReturnDest('+rid+')" title="Change return destination" style="padding:.6rem .7rem;border-radius:8px;'
-      +'font-family:inherit;font-size:.85rem;cursor:pointer;border:1.5px solid var(--light);background:none;color:var(--mid);">'
-      +'\u270E</button>'
-      +'</div></div>';
+      +'</div>';
   }
 
   return '<div id="mt-bar" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem;">'
@@ -19700,34 +19651,11 @@ function refreshDash(){
           // action, same reasoning the AP RUN branch above already uses once it's started.
           _btns.push('<button onclick="event.stopPropagation();_dashRideCompletedPrompt('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\u2705 Ride Completed</button>');
         }
-        // Resume navigation. Deliberately not conditioned on ride type or on whether Track/
-        // Arrived/Mark Paid are also showing: it solves a different problem (maps got closed,
-        // phone died) than any of those, and can be needed independently of them - explicitly
-        // including the case Chase raised directly: needing this WITHOUT needing to send the
-        // arrival text, which ruled out making the two mutually exclusive.
-        //
-        // Whether it joins row 1 or gets a row of its own depends on how many buttons are
-        // already there - checked directly against the else-if chain above, not assumed: once
-        // arrivalSentAt is actually set (the arrival text genuinely sent), that chain's FIRST
-        // branch fires and skips the Track/Arrived branch entirely, so row 1 drops straight
-        // from 2 buttons to 1 (Mark Paid alone) - real room for a second button on the same
-        // line at that point, reported directly and confirmed against the code before changing
-        // it. Only the 2-button Track+Arrived state still needs Resume Navigation pushed to
-        // its own full-width row below, to avoid a cramped 3-across row on a narrow phone.
-        var _resumeNavBtn = (_started && !_stopped)
-          ? '<button onclick="event.stopPropagation();openStartRide('+r.id+')" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;border:1.5px solid var(--light);background:#fff;color:var(--black);">\ud83e\udded Resume navigation</button>'
-          : '';
-        var _resumeNavRow = '';
-        if(_resumeNavBtn){
-          if(_btns.length<=1){ _btns.push(_resumeNavBtn); }
-          else { _resumeNavRow = '<div style="display:flex;width:100%;margin-top:.4rem;">'+_resumeNavBtn+'</div>'; }
-        }
         // Client Invoiced used to be a separate, always-visible link here, disconnected from
         // the button it was actually an alternative to (reported directly as looking "slapped
         // in"). That choice now lives inside the Ride Completed prompt itself instead of being
         // pre-decided by a standalone link sitting underneath everything else.
-        return '<div style="display:flex;gap:.4rem;width:100%;">'+_btns.join('')+'</div>'
-          +_resumeNavRow;
+        return '<div style="display:flex;gap:.4rem;width:100%;">'+_btns.join('')+'</div>';
       })()}
     </div>`;
   }).join(''):'<div style="text-align:center;padding:2rem 1rem;color:var(--mid);"><div style="font-size:2rem;margin-bottom:.4rem;">\uD83D\uDE97</div><div style="font-weight:600;color:var(--black);margin-bottom:.2rem;">No rides yet</div><div style="font-size:.85rem;line-height:1.5;">Nothing\u2019s broken \u2014 you just don\u2019t have any upcoming rides right now. New rides you\u2019re driving will show up here automatically.</div></div>';
