@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191126">
+<meta name="version" content="202608191127">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -22283,9 +22283,9 @@ const HARDCODED_MSG_DEFAULTS = {
   quote: _defaultQuoteTpl(),
   comparison: _defaultComparisonTpl(),
 };
-// Keys with NO genuine hardcoded default to copy from - the placeholder text for these is
-// purely an explanatory note (e.g. "no built-in default exists"), not real usable content,
-// so "Start from this default" must not offer to copy it in as if it were a message.
+// Keys with NO genuine hardcoded default at all - these fields correctly stay blank rather
+// than being pre-filled with an explanatory note (e.g. "no built-in default exists") as if it
+// were real, usable message content.
 // 'pickup' used to be one of these (no built-in home/hotel pickup wording existed at all) -
 // removed now that HARDCODED_MSG_DEFAULTS.pickup holds Chase's real current wording instead
 // of just an explanatory note. Empty on purpose - nothing currently has no real default.
@@ -22401,7 +22401,14 @@ function renderMessageTemplates(){
     const statusColor = isSet ? '#15803d' : 'var(--mid)';
     const statusBg = isSet ? '#e8f5ee' : 'var(--surface)';
     const statusText = isSet ? 'Custom set' : 'Using default';
-    const placeholderText = escAttr((HARDCODED_MSG_DEFAULTS[key]||'').replace(/\n/g,' '));
+    // Direct instruction: no more placeholder-only default text requiring a separate "Start
+    // from this default" tap before it's actually usable. The textarea's real, directly-
+    // editable value is now always the current custom text if one exists, or the actual
+    // effective default itself - the exact same thing a person would have had to tap a button
+    // to copy in before. NO_REAL_DEFAULT_KEYS fields (genuinely nothing built-in to show) still
+    // start blank, since there's nothing real to pre-fill.
+    const _liveValue = _valTrim || (NO_REAL_DEFAULT_KEYS[key] ? '' : _effectiveDefault);
+    const saveBtnId = id+'-savebtn';
     return '<div style="border:1.5px solid var(--light);border-radius:10px;margin-bottom:.6rem;overflow:hidden;">'
       +'<button type="button" onclick="toggleMsgTplField(\''+id+'\')" style="width:100%;text-align:left;background:var(--surface);border:none;padding:.65rem .8rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-family:\'DM Sans\',sans-serif;">'
       +'<span style="font-size:.82rem;font-weight:700;color:var(--black);">'+label+'</span>'
@@ -22410,14 +22417,16 @@ function renderMessageTemplates(){
       +'<span id="'+arrowId+'" style="font-size:.7rem;color:var(--mid);">\u25be</span>'
       +'</span></button>'
       +'<div id="'+bodyId+'" style="display:none;padding:.75rem .8rem;">'
-      +'<div style="display:flex;align-items:center;justify-content:'+(isSet?'flex-end':'space-between')+';margin-bottom:.2rem;gap:.5rem;">'
-      +(isSet?'<button onclick="clearTemplateField(\''+scope+'\',\''+key+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Clear (use default)</button>':(NO_REAL_DEFAULT_KEYS[key]?'':'<button onclick="startFromDefault(\''+id+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Start from this default</button>'))
+      +'<div style="display:flex;align-items:center;justify-content:'+(isSet?'flex-end':'flex-end')+';margin-bottom:.2rem;gap:.5rem;">'
+      +(isSet?'<button onclick="clearTemplateField(\''+scope+'\',\''+key+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Clear (use default)</button>':'')
       +'<button onclick="openConfImporter(\''+id+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">\u2728 Import</button>'
-      +'<button onclick="saveTemplateField(\''+scope+'\',\''+key+'\').then(renderMessageTemplates)" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Save</button>'
       +'</div>'
       +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">'+hint+'</div>'
-      +'<textarea id="'+id+'" rows="'+(rows||4)+'" placeholder="'+placeholderText+'" data-default="'+escAttr(HARDCODED_MSG_DEFAULTS[key]||'')+'" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(value||'')+'</textarea>'
-      +'<div style="font-size:.66rem;color:var(--mid);margin-top:.35rem;line-height:1.4;">'+(isSet?'This is your current wording, live and editable above. "Clear (use default)" empties this field and saves, switching back to whatever the app-wide default or built-in message provides.':(NO_REAL_DEFAULT_KEYS[key]?'The note shown above (grayed out, in the box) is not usable text \u2014 there is genuinely no built-in message for this. Leave blank and nothing gets sent for this part, or type your own.':'Shown above (grayed out, in the box) is the app\'s current built-in default \u2014 leave blank to keep using it, or tap "Start from this default" to copy it in and edit from there.'))+'</div>'
+      +'<textarea id="'+id+'" rows="'+(rows||4)+'" data-original="'+escAttr(_liveValue)+'" oninput="_msgTplToggleSave(\''+id+'\')" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(_liveValue)+'</textarea>'
+      +'<div style="display:flex;justify-content:flex-end;margin-top:.4rem;">'
+      +'<button id="'+saveBtnId+'" onclick="saveTemplateField(\''+scope+'\',\''+key+'\').then(renderMessageTemplates)" style="display:none;font-size:.72rem;padding:5px 14px;background:var(--accent);color:#fff;border:none;border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Save</button>'
+      +'</div>'
+      +'<div style="font-size:.66rem;color:var(--mid);margin-top:.2rem;line-height:1.4;">'+(NO_REAL_DEFAULT_KEYS[key]?'There is genuinely no built-in message for this \u2014 leave blank and nothing gets sent for this part, or type your own.':'This is always live and editable above \u2014 edit it directly and a Save button appears. "Clear (use default)" resets it back to whatever the app-wide default or built-in message currently provides.')+'</div>'
       +(extraHtml||'')
       +'</div>'
       +'</div>';
@@ -22475,7 +22484,7 @@ function renderMessageTemplates(){
     const statusColor = isSet ? '#15803d' : 'var(--mid)';
     const statusBg = isSet ? '#e8f5ee' : 'var(--surface)';
     const statusText = isSet ? 'Custom set' : 'Using built-in default';
-    const placeholderText = escAttr(defaultText.replace(/\n/g,' '));
+    const liveValue = value.trim() || defaultText;
     return '<div style="border:1.5px solid var(--light);border-radius:10px;margin-bottom:.6rem;overflow:hidden;">'
       +'<button type="button" onclick="toggleMsgTplField(\''+id+'\')" style="width:100%;text-align:left;background:var(--surface);border:none;padding:.65rem .8rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-family:\'DM Sans\',sans-serif;">'
       +'<span style="font-size:.82rem;font-weight:700;color:var(--black);">'+label+'</span>'
@@ -22484,13 +22493,15 @@ function renderMessageTemplates(){
       +'<span id="'+arrowId+'" style="font-size:.7rem;color:var(--mid);">\u25be</span>'
       +'</span></button>'
       +'<div id="'+bodyId+'" style="display:none;padding:.75rem .8rem;">'
-      +'<div style="display:flex;align-items:center;justify-content:'+(isSet?'flex-end':'space-between')+';margin-bottom:.2rem;gap:.5rem;">'
-      +(isSet?'<button onclick="clearConfirmTypeField(\''+type+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Clear (use default)</button>':'<button onclick="startFromDefault(\''+id+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Start from this default</button>')
-      +'<button onclick="saveConfirmTypeField(\''+type+'\').then(renderMessageTemplates)" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Save</button>'
+      +'<div style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:.2rem;gap:.5rem;">'
+      +(isSet?'<button onclick="clearConfirmTypeField(\''+type+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Clear (use default)</button>':'')
       +'</div>'
       +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">This is the real message '+label.replace(' confirmation text','')+' rides send today, shown exactly as it would go out (with example client/address/time filled in). Placeholders: {client} {date} {when} {time} {pickup} {dropoff} {driver} {me} {vehicle} {amount} {flight} {terminal} {phone}</div>'
-      +'<textarea id="'+id+'" rows="8" placeholder="'+placeholderText+'" data-default="'+escAttr(defaultText)+'" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(value||'')+'</textarea>'
-      +'<div style="font-size:.66rem;color:var(--mid);margin-top:.35rem;line-height:1.4;">'+(isSet?'This is your current wording for this ride type, live and editable above. "Clear (use default)" empties this field and saves, switching back to the built-in text.':'Shown above (grayed out, in the box) is the actual current built-in text \u2014 leave blank to keep using it exactly as shown, or tap "Start from this default" to copy it in and edit from there.')+'</div>'
+      +'<textarea id="'+id+'" rows="8" data-original="'+escAttr(liveValue)+'" oninput="_msgTplToggleSave(\''+id+'\')" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(liveValue)+'</textarea>'
+      +'<div style="display:flex;justify-content:flex-end;margin-top:.4rem;">'
+      +'<button id="'+id+'-savebtn" onclick="saveConfirmTypeField(\''+type+'\').then(renderMessageTemplates)" style="display:none;font-size:.72rem;padding:5px 14px;background:var(--accent);color:#fff;border:none;border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Save</button>'
+      +'</div>'
+      +'<div style="font-size:.66rem;color:var(--mid);margin-top:.2rem;line-height:1.4;">This is always live and editable above for this ride type \u2014 edit it directly and a Save button appears. "Clear (use default)" resets it back to the built-in text.</div>'
       +'</div>'
       +'</div>';
   }
@@ -22542,9 +22553,9 @@ function renderMessageTemplates(){
           const _termBg = _termIsSet ? '#e8f5ee' : 'var(--surface)';
           const _termStatus = _termIsSet ? 'Custom set' : 'Using default';
           const _termEffDefault = function(k){ return (_gByTermForCompare[k] || HARDCODED_PICKUP_BY_TERMINAL[k] || ''); };
-          const _termEffNorth = _termEffDefault('North Domestic');
-          const _termEffSouth = _termEffDefault('South Domestic');
-          const _termEffIntl = _termEffDefault('International');
+          const _termLiveNorth = _byTerm['North Domestic'] || _termEffDefault('North Domestic');
+          const _termLiveSouth = _byTerm['South Domestic'] || _termEffDefault('South Domestic');
+          const _termLiveIntl  = _byTerm['International']  || _termEffDefault('International');
           return '<div style="border:1.5px solid var(--light);border-radius:10px;margin-bottom:.6rem;overflow:hidden;">'
           +'<button type="button" onclick="toggleMsgTplField(\'msgtpl-pickup-terminal\')" style="width:100%;text-align:left;background:var(--surface);border:none;padding:.65rem .8rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-family:\'DM Sans\',sans-serif;">'
           +'<span style="font-size:.82rem;font-weight:700;color:var(--black);">AP Pick Up \u2014 per-terminal instructions</span>'
@@ -22554,11 +22565,10 @@ function renderMessageTemplates(){
           +'</span></button>'
           +'<div id="msgtpl-pickup-terminal-body" style="display:none;padding:.75rem .8rem;">'
           +'<div style="font-size:.66rem;color:var(--mid);margin-bottom:.6rem;line-height:1.4;">AP Pick Up rides use ONLY these terminal-specific instructions, never the general pickup instructions above \u2014 that field is for rides that start at the client\'s location instead of the airport. Leave a terminal blank to use the app\'s built-in walkthrough for it.</div>'
-          +'<div style="margin-bottom:.5rem;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);">North Domestic</div>'+(_termDiffers('North Domestic')?'':'<button onclick="startFromDefault(\'msgtpl-pickup-term-north\')" style="font-size:.64rem;padding:2px 8px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:12px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Start from this default</button>')+'</div><textarea id="msgtpl-pickup-term-north" rows="2" placeholder="'+escAttr(_termEffNorth.replace(/\n/g,' '))+'" data-default="'+escAttr(_termEffNorth)+'" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byTerm['North Domestic']||'')+'</textarea></div>'
-          +'<div style="margin-bottom:.5rem;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);">South Domestic</div>'+(_termDiffers('South Domestic')?'':'<button onclick="startFromDefault(\'msgtpl-pickup-term-south\')" style="font-size:.64rem;padding:2px 8px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:12px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Start from this default</button>')+'</div><textarea id="msgtpl-pickup-term-south" rows="2" placeholder="'+escAttr(_termEffSouth.replace(/\n/g,' '))+'" data-default="'+escAttr(_termEffSouth)+'" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byTerm['South Domestic']||'')+'</textarea></div>'
-          +'<div style="margin-bottom:.5rem;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);">International</div>'+(_termDiffers('International')?'':'<button onclick="startFromDefault(\'msgtpl-pickup-term-intl\')" style="font-size:.64rem;padding:2px 8px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:12px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Start from this default</button>')+'</div><textarea id="msgtpl-pickup-term-intl" rows="2" placeholder="'+escAttr(_termEffIntl.replace(/\n/g,' '))+'" data-default="'+escAttr(_termEffIntl)+'" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_byTerm['International']||'')+'</textarea></div>'
-          +(_termIsSet?'<button onclick="clearPerTerminalPickupInstructions()" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;margin-right:.4rem;">Clear all (use default)</button>':'')
-          +'<button onclick="savePerTerminalPickupInstructions()" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Save</button>'
+          +'<div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">North Domestic</div><textarea id="msgtpl-pickup-term-north" rows="2" data-original="'+escAttr(_termLiveNorth)+'" oninput="_msgTplToggleSave(\'msgtpl-pickup-term-north\')" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_termLiveNorth)+'</textarea><div style="display:flex;justify-content:flex-end;margin-top:.3rem;"><button id="msgtpl-pickup-term-north-savebtn" onclick="savePerTerminalPickupInstructions()" style="display:none;font-size:.68rem;padding:4px 12px;background:var(--accent);color:#fff;border:none;border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Save</button></div></div>'
+          +'<div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">South Domestic</div><textarea id="msgtpl-pickup-term-south" rows="2" data-original="'+escAttr(_termLiveSouth)+'" oninput="_msgTplToggleSave(\'msgtpl-pickup-term-south\')" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_termLiveSouth)+'</textarea><div style="display:flex;justify-content:flex-end;margin-top:.3rem;"><button id="msgtpl-pickup-term-south-savebtn" onclick="savePerTerminalPickupInstructions()" style="display:none;font-size:.68rem;padding:4px 12px;background:var(--accent);color:#fff;border:none;border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Save</button></div></div>'
+          +'<div style="margin-bottom:.6rem;"><div style="font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:2px;">International</div><textarea id="msgtpl-pickup-term-intl" rows="2" data-original="'+escAttr(_termLiveIntl)+'" oninput="_msgTplToggleSave(\'msgtpl-pickup-term-intl\')" style="width:100%;padding:.4rem .6rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;box-sizing:border-box;resize:vertical;">'+escHtml(_termLiveIntl)+'</textarea><div style="display:flex;justify-content:flex-end;margin-top:.3rem;"><button id="msgtpl-pickup-term-intl-savebtn" onclick="savePerTerminalPickupInstructions()" style="display:none;font-size:.68rem;padding:4px 12px;background:var(--accent);color:#fff;border:none;border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Save</button></div></div>'
+          +(_termIsSet?'<button onclick="clearPerTerminalPickupInstructions()" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Clear all (use default)</button>':'')
           +'</div>'
           +'</div>';
         })()
@@ -22588,7 +22598,7 @@ function renderMessageTemplates(){
           const _polColor = _polSet ? '#15803d' : 'var(--mid)';
           const _polBg = _polSet ? '#e8f5ee' : 'var(--surface)';
           const _polStatus = _polSet ? 'Custom set' : 'Using default';
-          const _polPlaceholder = escAttr(HARDCODED_MSG_DEFAULTS.scheduling.replace(/\n/g,' '));
+          const _polLiveValue = _polTrim || _polEffectiveDefault;
           return '<div style="border:1.5px solid var(--light);border-radius:10px;margin-bottom:.6rem;overflow:hidden;">'
           +'<button type="button" onclick="toggleMsgTplField(\''+_polId+'\')" style="width:100%;text-align:left;background:var(--surface);border:none;padding:.65rem .8rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-family:\'DM Sans\',sans-serif;">'
           +'<span style="font-size:.82rem;font-weight:700;color:var(--black);">My scheduling message</span>'
@@ -22597,13 +22607,15 @@ function renderMessageTemplates(){
           +'<span id="'+_polId+'-arrow" style="font-size:.7rem;color:var(--mid);">\u25be</span>'
           +'</span></button>'
           +'<div id="'+_polId+'-body" style="display:none;padding:.75rem .8rem;">'
-          +'<div style="display:flex;align-items:center;justify-content:'+(_polSet?'flex-end':'space-between')+';margin-bottom:.2rem;gap:.5rem;">'
-          +(_polSet?'<button onclick="_clearSchedulingField()" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Clear (use default)</button>':'<button onclick="startFromDefault(\''+_polId+'\')" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Start from this default</button>')
-          +'<button onclick="_saveSchedulingField().then(renderMessageTemplates)" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Save</button>'
+          +'<div style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:.2rem;gap:.5rem;">'
+          +(_polSet?'<button onclick="_clearSchedulingField()" style="font-size:.68rem;padding:3px 10px;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;flex-shrink:0;">Clear (use default)</button>':'')
           +'</div>'
           +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">Sent the moment a ride is booked \u2014 includes trip details and your change &amp; cancellation policy. {tripDetails} fills in the date, time, addresses and total, and its shape adjusts automatically for round trips. Placeholders: {name} {date} {time} {amount} {changeFee} {cancelFee} {driver} {phone} {tripDetails}</div>'
-          +'<textarea id="'+_polId+'" rows="6" placeholder="'+_polPlaceholder+'" data-default="'+escAttr(HARDCODED_MSG_DEFAULTS.scheduling)+'" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(_polCurrent||'')+'</textarea>'
-          +'<div style="font-size:.66rem;color:var(--mid);margin-top:.35rem;line-height:1.4;">'+(_polSet?'This is your current wording, live and editable above. "Clear (use default)" empties this field and saves, switching back to whatever the app-wide default or built-in message provides.':'Shown above (grayed out, in the box) is the app\'s current built-in default \u2014 leave blank to keep using it, or tap "Start from this default" to copy it in and edit from there.')+'</div>'
+          +'<textarea id="'+_polId+'" rows="6" data-original="'+escAttr(_polLiveValue)+'" oninput="_msgTplToggleSave(\''+_polId+'\')" style="width:100%;padding:.6rem .75rem;border:1.5px solid var(--light);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.85rem;box-sizing:border-box;resize:vertical;line-height:1.5;">'+escHtml(_polLiveValue)+'</textarea>'
+          +'<div style="display:flex;justify-content:flex-end;margin-top:.4rem;">'
+          +'<button id="'+_polId+'-savebtn" onclick="_saveSchedulingField().then(renderMessageTemplates)" style="display:none;font-size:.72rem;padding:5px 14px;background:var(--accent);color:#fff;border:none;border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Save</button>'
+          +'</div>'
+          +'<div style="font-size:.66rem;color:var(--mid);margin-top:.2rem;line-height:1.4;">This is always live and editable above \u2014 edit it directly and a Save button appears. "Clear (use default)" resets it back to whatever the app-wide default or built-in message currently provides.</div>'
           +'</div>'
           +'</div>';
         })()
@@ -22621,10 +22633,15 @@ function renderMessageTemplates(){
   // this one decides where a driver is physically sent, so it leads.
   panel.innerHTML = _terminalCoordCardHtml + html;
 }
-function startFromDefault(id){
-  const el = document.getElementById(id); if(!el) return;
-  el.value = el.dataset.default || '';
-  el.focus();
+// Direct instruction: the shared listener behind "type to reveal Save" - compares the live
+// value against its own original snapshot and shows/hides that field's own Save button
+// accordingly. Correctly hides it again if someone edits something and then types it back to
+// exactly what it originally was, since there's genuinely nothing left to save at that point.
+function _msgTplToggleSave(id){
+  var el = document.getElementById(id); if(!el) return;
+  var btn = document.getElementById(id+'-savebtn'); if(!btn) return;
+  var dirty = el.value !== (el.dataset.original||'');
+  btn.style.display = dirty ? 'inline-block' : 'none';
 }
 async function clearTemplateField(scope, key){
   const id = 'msgtpl-'+scope+'-'+key;
