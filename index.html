@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191127">
+<meta name="version" content="202608191128">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -32708,10 +32708,43 @@ function viewDocImage(docId, index){
   const doc = sharedDocs.find(d=>d.id===docId);
   if(!doc || !doc.images || !doc.images[index]) return;
   const m = document.createElement('div');
-  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:600;display:flex;align-items:center;justify-content:center;';
-  m.onclick = ()=>m.remove();
-  m.innerHTML = `<img src="${doc.images[index]}" alt="Document page, enlarged" style="max-width:95vw;max-height:90vh;border-radius:8px;object-fit:contain;" />`;
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:600;display:flex;flex-direction:column;align-items:center;justify-content:center;';
+  m.onclick = (e)=>{ if(e.target===m) m.remove(); };
+  m.innerHTML = `<img src="${doc.images[index]}" alt="Document page, enlarged" style="max-width:95vw;max-height:80vh;border-radius:8px;object-fit:contain;" />`
+    +`<button onclick="event.stopPropagation();shareDocImage('${docId}',${index})" style="margin-top:1rem;padding:.65rem 1.4rem;background:#fff;color:#1a0d2e;border:none;border-radius:24px;font-family:'DM Sans',sans-serif;font-size:.9rem;font-weight:700;cursor:pointer;">\u2197\uFE0F Share</button>`;
   document.body.appendChild(m);
+}
+// Direct request: a real Share button in the document image viewer, rather than relying on a
+// long-press to reach the phone's own share sheet indirectly. Same navigator.share pattern
+// already used for receipts, dispatch invoices, and driver cards elsewhere in this app - not a
+// new mechanism. Converts the stored data-URL into a real file via the existing
+// dataURLtoBlob() helper first, since navigator.share needs an actual File, not a data-URL
+// string. Falls back to a straightforward download on browsers without file-sharing support
+// (mainly desktop), matching the same fallback pattern the receipt/invoice sharing already uses.
+async function shareDocImage(docId, index){
+  const doc = sharedDocs.find(d=>d.id===docId);
+  if(!doc || !doc.images || !doc.images[index]) return;
+  const dataUrl = doc.images[index];
+  const blob = dataURLtoBlob(dataUrl);
+  if(!blob){ showToast('Couldn\u2019t prepare that image to share','error'); return; }
+  const fname = (doc.title||'Document').replace(/[^a-z0-9]+/gi,'_').replace(/^_+|_+$/g,'')+'_'+(index+1)+'.jpg';
+  try{
+    const file = new File([blob], fname, {type: blob.type||'image/jpeg'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      await navigator.share({ files:[file], title: doc.title||'Document photo' });
+      return;
+    }
+  }catch(e){ if(e && e.name==='AbortError') return; }
+  // Fallback: download the image instead (desktop browsers, or share unsupported)
+  try{
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fname;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+    showToast('\uD83D\uDCF7 Photo downloaded');
+  }catch(e){ console.error(e); showToast('Share failed','error'); }
 }
 
 // ── PDF EXPORT ──
