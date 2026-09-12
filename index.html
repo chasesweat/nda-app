@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191128">
+<meta name="version" content="202608191129">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2996,6 +2996,7 @@ async function _loadAppData() {
   try{ await _promoteChaseTemplatesToGlobalDefault(); }catch(e){ console.warn('Chase default promotion', e); }
   try{ await _clearChasePersonalDuplicates(); }catch(e){ console.warn('Chase personal duplicate cleanup', e); }
   try{ await _healBrokenConfirmTemplate(); }catch(e){ console.warn('broken confirm template heal', e); }
+  try{ await _reconcileKatMorganTemplatesOnce(); }catch(e){ console.warn('Kat/Morgan template reconciliation', e); }
   try{ await _backfillSchedulingTextSentForExistingRides(); }catch(e){ console.warn('scheduling-text backfill', e); }
   // The two pickup-instructions seed migrations that used to run here (v793-era) were removed
   // in v807 - both only ever populated globalSettings fields (defaultPickupInstructions,
@@ -19136,7 +19137,14 @@ async function _savePolicyEditor(){
   if(!driverSettings[currentUser.name]) driverSettings[currentUser.name]={};
   if(custom){ var t=((document.getElementById('pol-tpl')||{}).value||'').trim(); if(!t){ showToast('Add your message or choose Default','error'); return; } driverSettings[currentUser.name].policyTemplate=t; }
   else { delete driverSettings[currentUser.name].policyTemplate; }
-  try{ await saveDriverSettings(currentUser.name); }catch(e){}
+  try{
+    await saveDriverSettings(currentUser.name);
+    // Kat/Morgan mirror, short-name key space (policyTemplate's own key space - see
+    // _katMorganMirrorPartner's comment). This is the second of two save paths for the same
+    // field (see _saveSchedulingField below); both need this call independently since neither
+    // one calls the other.
+    await _mirrorKatMorganField(currentUser.name, 'policyTemplate');
+  }catch(e){}
   var b=document.getElementById('policy-editor-back'); if(b) b.remove();
   showToast(custom?'\u2713 Custom scheduling message saved':'Using the default scheduling message');
 }
@@ -19155,6 +19163,9 @@ async function _saveSchedulingField(){
   var _promotedToDefault = false;
   try{
     await saveDriverSettings(currentUser.name);
+    // Kat/Morgan mirror, short-name key space - see _savePolicyEditor's identical call for why
+    // this needs its own copy rather than one shared call site.
+    await _mirrorKatMorganField(currentUser.name, 'policyTemplate');
     if(val && currentUser.name==='Chase'){
       globalSettings = globalSettings || {};
       globalSettings.defaultPolicyTemplate = val;
@@ -22261,6 +22272,59 @@ const _TEMPLATE_FIELD_MAP = {
   quote:        { global: 'defaultQuoteTemplate',         personal: 'quoteTemplate' },
   comparison:   { global: 'defaultComparisonTemplate',     personal: 'comparisonTemplate' },
 };
+// Kat and Morgan run one shared business - a message-template edit by either of them is meant
+// to reach clients identically no matter which of the two actually made it, per direct
+// instruction (the report that surfaced this: Morgan corrected a per-terminal pickup
+// instruction and it never reached Kat's clients, because pickup instructions resolve strictly
+// off client ownership - see buildConfirmationText's own "represents the CLIENT OWNER's
+// relationship" comment - and nothing anywhere mirrored one of their saves into the other's
+// settings). So every SHARED template field below is now mirrored, in both directions, at the
+// moment either of them saves it.
+//
+// Deliberately scoped to exactly these 13 fields, NOT every driverSettings field these two
+// have - Morgan's separate "own"-client template set (ownConfTemplate, ownConfTemplateByType,
+// ownPickupInstructions, and the never-written ownPickupInstructionsByTerminal - see the read-
+// side comment at buildConfirmationText for that last one) is a genuinely different concept
+// (Morgan's OWN clients, not Kat's) established when the proxy-dispatcher system was built, and
+// stays exactly as separate as it's always been. Mirroring those would silently blend two
+// client relationships that were kept apart on purpose.
+//
+// Twelve of these thirteen live under the two drivers' FULL names (driverSettings['Kathleen
+// Herringdine'] / driverSettings['Morgan Newton']), matching getMyDriverName(). The scheduling
+// message (policyTemplate) is the one exception - it's saved under driverSettings[currentUser
+// .name], i.e. the SHORT login name ('Kat' / 'Morgan'), by explicit, commented design (see
+// _saveSchedulingField's own comment) - so it mirrors in that same short-name key space
+// instead. _katMorganMirrorPartner below handles both spaces; nobody outside this exact pair
+// is ever touched by either.
+const KAT_MORGAN_MIRROR_FIELDS_FULLNAME = [
+  'confTemplate','pickupInstructions','arrivalTemplate','driverChangeTemplate',
+  'receiptShareTemplate','receiptClosingLine','quoteTemplate','comparisonTemplate',
+  'confTemplateByType','pickupInstructionsByType','useTypeInstructions',
+  'pickupInstructionsByTerminal'
+];
+function _katMorganMirrorPartner(name){
+  const KAT_FULL='Kathleen Herringdine', MORGAN_FULL='Morgan Newton';
+  if(name===KAT_FULL) return MORGAN_FULL;
+  if(name===MORGAN_FULL) return KAT_FULL;
+  if(name==='Kat') return 'Morgan';       // policyTemplate's short-name key space only
+  if(name==='Morgan') return 'Kat';
+  return null; // scoped to exactly this pair - every other driver saves independently
+}
+// Copies ONE field's current value from whoever just saved (editorKey) onto their mirror
+// partner. Always re-reads driverSettings[editorKey][field] rather than taking a value
+// parameter, so a caller can never accidentally mirror a stale or half-applied value. A
+// targeted per-driver write (saveDriverSettings(partner)), never a whole-collection save -
+// same reasoning as every other save in this file since v862-874: never risk clobbering
+// someone else's already-saved data with a stale in-memory copy of THEIRS.
+async function _mirrorKatMorganField(editorKey, field){
+  if(KAT_MORGAN_MIRROR_FIELDS_FULLNAME.indexOf(field)===-1 && field!=='policyTemplate') return;
+  const partner = _katMorganMirrorPartner(editorKey); if(!partner) return;
+  const src = (driverSettings && driverSettings[editorKey]) || {};
+  driverSettings[partner] = driverSettings[partner] || {};
+  driverSettings[partner][field] = src[field];
+  try{ await saveDriverSettings(partner); }
+  catch(e){ console.warn('_mirrorKatMorganField failed for', field, e); }
+}
 // The actual hardcoded text each message falls back to when neither a driver's own
 // customization nor an admin default is set - pulled directly from the functions that
 // build these messages (buildConfirmationText, buildArrivalText, _driverChangeClientMessage,
@@ -22954,6 +23018,7 @@ async function saveConfirmTypeField(type){
     // loaded. No reason to introduce a new instance of a bug class that was just spent a full
     // session eliminating everywhere else.
     await saveDriverSettings(myName);
+    await _mirrorKatMorganField(myName, 'confTemplateByType');
     showToast('\u2713 Saved');
   }catch(e){ console.warn('saveConfirmTypeField failed', e); const err=document.getElementById('msgtpl-personal-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
 }
@@ -23005,6 +23070,9 @@ async function saveTemplateField(scope, key){
     // exact bug class closed everywhere else in v862-874, just missed here). Fixed the same
     // way: write only this driver's own key, never touch anyone else's saved data.
     await saveDriverSettings(myName);
+    // Kat/Morgan mirror (see KAT_MORGAN_MIRROR_FIELDS_FULLNAME's own comment) - a no-op for
+    // anyone else, including Chase, whose edits take the separate global-promotion path below.
+    await _mirrorKatMorganField(myName, map.personal);
     // Chase's own edits to his personal confirm/pickup/arrival text also become the
     // app-wide default automatically, so he only has to edit one place - the same
     // relationship the v619 promotion and v622 Chase-only restriction already established,
@@ -23056,7 +23124,12 @@ async function savePerTypePickupInstructions(silent){
   const ow = gv('msgtpl-pickup-oneway');    if(ow) byType['ONE WAY'] = ow;
   const rt = gv('msgtpl-pickup-roundtrip'); if(rt) byType['ROUND TRIP'] = rt;
   driverSettings[myName].pickupInstructionsByType = byType;
-  try{ await saveDriverSettings(myName); if(!silent) showToast('\u2713 Saved'); }
+  try{
+    await saveDriverSettings(myName);
+    await _mirrorKatMorganField(myName, 'useTypeInstructions');
+    await _mirrorKatMorganField(myName, 'pickupInstructionsByType');
+    if(!silent) showToast('\u2713 Saved');
+  }
   catch(e){ console.warn('savePerTypePickupInstructions failed', e); const err=document.getElementById('msgtpl-personal-error'); if(err) err.textContent='Save failed — check your connection and try again.'; }
 }
 // AP Pick Up's per-terminal instructions (North/South/International) - the ONLY pickup
@@ -23076,6 +23149,13 @@ async function savePerTerminalPickupInstructions(silent){
   driverSettings[myName].pickupInstructionsByTerminal = byTerm;
   try{
     await saveDriverSettings(myName);
+    // Kat/Morgan mirror - THIS is the exact field that surfaced the whole gap: Morgan corrected
+    // a terminal's wording and it never reached Kat's clients, since pickup instructions
+    // resolve off client ownership (Kat, for Kat's clients), never off who's logged in editing
+    // their own copy. See KAT_MORGAN_MIRROR_FIELDS_FULLNAME's own comment for the full picture.
+    // A no-op for anyone else, including Chase, who takes the separate global-promotion path
+    // immediately below.
+    await _mirrorKatMorganField(myName, 'pickupInstructionsByTerminal');
     // Same auto-promote-to-shared-default mechanism saveTemplateField already uses for
     // confirm/pickup/arrival (v808) - this function is a separate save path (per-terminal
     // instructions were never routed through the generic field()/_TEMPLATE_FIELD_MAP system),
@@ -27872,6 +27952,35 @@ async function _backfillSchedulingTextSentForExistingRides(){
     await storageSet('kat:globalSettings', globalSettings);
     if(touched) await saveRides();
   }catch(e){ console.warn('scheduling-text backfill failed', e); }
+}
+// ONE-TIME: Kat and Morgan's message templates mirror each other going forward (see
+// KAT_MORGAN_MIRROR_FIELDS_FULLNAME / _mirrorKatMorganField), but their EXISTING saved wording
+// had already diverged in at least one confirmed case before that existed - the per-terminal
+// pickup instruction that surfaced this whole gap. Direct instruction: Morgan's current
+// wording is the correct version, across the board - so this copies all 13 mirrored fields
+// FROM Morgan ONTO Kat, once, in whichever of the two key spaces each field actually lives in.
+// Gated exactly like _healBrokenConfirmTemplate() so this can never re-run and can never
+// overwrite a genuinely new divergence created after today by the mirroring itself.
+async function _reconcileKatMorganTemplatesOnce(){
+  globalSettings = globalSettings || {};
+  if(globalSettings._katMorganTplReconciled) return;
+  const KAT_FULL='Kathleen Herringdine', MORGAN_FULL='Morgan Newton';
+  driverSettings[KAT_FULL] = driverSettings[KAT_FULL] || {};
+  const mSrc = driverSettings[MORGAN_FULL] || {};
+  var fullChanged = false;
+  KAT_MORGAN_MIRROR_FIELDS_FULLNAME.forEach(function(f){
+    if(f in mSrc){ driverSettings[KAT_FULL][f] = mSrc[f]; fullChanged = true; }
+  });
+  driverSettings['Kat'] = driverSettings['Kat'] || {};
+  const mSrcShort = driverSettings['Morgan'] || {};
+  var shortChanged = false;
+  if('policyTemplate' in mSrcShort){ driverSettings['Kat'].policyTemplate = mSrcShort.policyTemplate; shortChanged = true; }
+  globalSettings._katMorganTplReconciled = true;
+  try{
+    await storageSet('kat:globalSettings', globalSettings);
+    if(fullChanged) await saveDriverSettings(KAT_FULL);
+    if(shortChanged) await saveDriverSettings('Kat');
+  }catch(e){ console.warn('Kat/Morgan template reconciliation failed', e); }
 }
 async function _healBrokenConfirmTemplate(){
   globalSettings = globalSettings || {};
