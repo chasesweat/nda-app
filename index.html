@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191129">
+<meta name="version" content="202608191138">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2035,6 +2035,54 @@ function _dismissAdminPromo(){
   var ov=document.getElementById('admin-promo-overlay'); if(ov) ov.remove();
 }
 function isAdmin(){ return currentUser?.role==='admin'; }
+
+// ── WHO IS WHO ──────────────────────────────────────────────────────────────
+// One place to answer "is this person an admin / the owner / a reviewer". These used to be
+// typed out by hand in 18 separate spots: the admin roster written as a literal
+// ['Kat','Chase','Morgan'] four times, and 'Chase' compared directly in fourteen more checks.
+// All 18 agreed, so nothing was broken - but adding an admin or renaming a login meant finding
+// and editing every one, and missing a single spot would silently disable one feature for one
+// person with no error anywhere.
+//
+// adminNames() is DERIVED from USERS rather than being a fifth hardcoded list. USERS' role
+// field is already the real source of truth - isAdmin() reads it, and the approval-counting
+// code already filters USERS by role==='admin'. Deriving from it means adding an admin is a
+// single edit (add them to USERS with role:'admin') and every admin-notification site picks
+// them up automatically, with nothing else to remember.
+//
+// Disabled accounts are excluded: someone who can't log in can't action an approval request, so
+// notifying them just strands the request. No behavior change today (all three current admins
+// are enabled) - it only matters the day someone is disabled, and skipping them is correct then.
+function adminNames(){
+  try{
+    return (USERS||[])
+      .filter(function(u){ return u && u.role==='admin' && !u.disabled; })
+      .map(function(u){ return u.name; });
+  }catch(e){ return []; }
+}
+// The account that controls billing/subscription access. Deliberately its OWN constant rather
+// than reusing "an admin": these checks protect the app from being locked out of its own
+// subscription (this account can't be de-admined, can't be disabled, and only it can change its
+// own password), and it's also exempt from admin-change auditing since it's the one being
+// notified. Adding a new admin must NOT grant any of that - which is exactly why this can't
+// just be folded into adminNames().
+const OWNER_NAME = 'Chase';
+function isOwnerAccount(name){ return name===OWNER_NAME; }
+function isCurrentUserOwner(){ return !!(currentUser && currentUser.name===OWNER_NAME); }
+
+// Whose personal message templates get promoted to the app-wide shared default. Separate from
+// OWNER_NAME on purpose even though both are 'Chase' today: "who pays the bill" and "whose
+// wording everyone else inherits" are genuinely different jobs that could land on different
+// people, and collapsing them would make that impossible to change later without untangling
+// this all over again.
+const TEMPLATE_AUTHORITY_NAME = 'Chase';
+function isTemplateAuthority(){ return !!(currentUser && currentUser.name===TEMPLATE_AUTHORITY_NAME); }
+
+// Data-cleanup / migration review tools (FamilyWall export + review, mispriced-quote review).
+// A deliberately narrow pair, not the admin roster - these surface half-finished migration data
+// and shouldn't auto-appear for a newly added admin who has no context for them.
+const DATA_REVIEW_NAMES = ['Chase','Morgan'];
+function canReviewData(){ return !!(currentUser && DATA_REVIEW_NAMES.indexOf(currentUser.name)>=0); }
 function canDeleteRide(ride){ return isAdmin() || ride?.createdBy === currentUser?.name; }
 function canAssignOnRide(ride){
   if(isAdmin() || ride?.createdBy === currentUser?.name) return true;
@@ -2358,7 +2406,7 @@ async function toggleOwnerOverride(){
   showToast(next?'\uD83D\uDD11 Owner override ON \u2014 your changes apply immediately':'Owner override off \u2014 second approval required again');
   _updateOwnerOverrideBtn();
 }
-function _updateAdminAuditBtn(){ try{ var b=document.getElementById('admin-audit-btn'); if(!b) return; if(currentUser && currentUser.name==='Chase'){ b.style.display='block'; b.innerHTML='&#128276; Admin change alerts &middot; <b style="color:'+(chaseAuditOn?'var(--green)':'var(--mid)')+';">'+(chaseAuditOn?'On':'Off')+'</b>'; } else { b.style.display='none'; } }catch(e){} }
+function _updateAdminAuditBtn(){ try{ var b=document.getElementById('admin-audit-btn'); if(!b) return; if(isCurrentUserOwner()){ b.style.display='block'; b.innerHTML='&#128276; Admin change alerts &middot; <b style="color:'+(chaseAuditOn?'var(--green)':'var(--mid)')+';">'+(chaseAuditOn?'On':'Off')+'</b>'; } else { b.style.display='none'; } }catch(e){} }
 function toggleChaseAudit(){ if(!currentUser || currentUser.name!=='Chase') return; chaseAuditOn=!chaseAuditOn; saveChaseAudit(); if(typeof showToast==='function') showToast(chaseAuditOn?'\u2713 Admin change alerts ON':'Admin change alerts OFF'); try{ if(typeof _updateAdminAuditBtn==='function') _updateAdminAuditBtn(); }catch(e){} }
 const _AUDIT_SKIP = ['kat:rides','kat:ridesArchive','kat:outsideRides','kat:feePayments','kat:receipts',
   'kat:notifications','kat:chatLastRead','kat:comments','kat:biometricCreds','kat:pendingAdminTutorial',
@@ -2390,7 +2438,7 @@ function _auditKeyLabel(key){
 function _auditAdminChange(key){
   try{
     if(!CHASE_AUDIT_ENABLED || !chaseAuditOn) return;
-    if(!currentUser || typeof isAdmin!=='function' || !isAdmin() || currentUser.name==='Chase') return;
+    if(!currentUser || typeof isAdmin!=='function' || !isAdmin() || isCurrentUserOwner()) return;
     if(_AUDIT_PERSONAL.indexOf(key)>=0){ var _me=(typeof getMyDriverName==='function'?getMyDriverName():(currentUser&&currentUser.name)); var _tgt=window._auditTarget||(typeof profileDriver==='function'?profileDriver():_me); window._auditTarget=null; if(!_tgt || _tgt===_me) return; }
     var label=_auditKeyLabel(key); if(!label) return;
     _auditPending[label]=true;
@@ -3237,7 +3285,7 @@ async function confirmSOS(message){
   const msgText='\uD83D\uDE98 SOS from '+senderFirst+(message?' \u2014 '+message:'')+'! They need immediate help.';
   allRecips.forEach(function(d){ if(d!==myDriver) addNotification(d,{sosId:sosId},'sos',msgText); });
   // Also notify by login name for admins
-  ['Kat','Chase','Morgan'].forEach(function(a){ if(a!==currentUser?.name) addNotification(USER_DRIVER_MAP[a]||PROXY_MAP[a]||a,{sosId:sosId},'sos',msgText); });
+  adminNames().forEach(function(a){ if(a!==currentUser?.name) addNotification(USER_DRIVER_MAP[a]||PROXY_MAP[a]||a,{sosId:sosId},'sos',msgText); });
   await saveNotifs(); updateNotifBadge();
   showSOSActivePopup();
   showToast('\uD83D\uDE98 SOS sent to the whole team!');
@@ -3486,7 +3534,7 @@ async function submitMergeRequest(){
   if(!clientRequests) clientRequests={};
   clientRequests[reqId]={id:reqId,type:'profile_merge',fromDriver:myDriver,toDriver:partner,reason:reason,submittedBy:currentUser?.name||'',approvals:[],status:'pending',ts:Date.now()};
   await saveClientRequests();
-  const ADMINS_LIST=['Kat','Chase','Morgan'];
+  const ADMINS_LIST=adminNames();
   ADMINS_LIST.forEach(function(a){
     addNotification(USER_DRIVER_MAP[a]||PROXY_MAP[a]||a,{id:reqId},'profile_merge',
       (myDriver.split(' ')[0])+' and '+(partner.split(' ')[0])+' want to link their profiles. Approve to share client lists and ride data.');
@@ -5422,6 +5470,13 @@ const TERMINAL_PLACE_IDS = {
 // Live view: saved overrides win over the built-ins, per terminal. Anything malformed in saved
 // data is ignored rather than trusted - a bad coordinate sends a driver somewhere wrong, so the
 // built-in is the safer answer if an override doesn't parse.
+// How far a saved override is allowed to sit from its built-in before it's rejected outright.
+// All three ATL terminal curbs are within ~1.7 miles of each other, and a legitimate correction
+// is someone standing at the right curb fixing a pin by a few hundred feet - never miles. Set
+// deliberately tight: 3 miles is already far more slack than any real curb correction needs,
+// while still comfortably catching the failure this exists for (a coordinate copied somewhere
+// else entirely in metro Atlanta - downtown is ~10 miles out).
+var TERMINAL_OVERRIDE_MAX_MILES = 3;
 function _resolvedTerminalCoords(){
   var out = {
     'North Domestic':  TERMINAL_COORDS_BUILTIN['North Domestic'],
@@ -5432,10 +5487,51 @@ function _resolvedTerminalCoords(){
     var ov = (typeof globalSettings!=='undefined' && globalSettings && globalSettings.terminalCoordOverrides) || {};
     Object.keys(out).forEach(function(k){
       var v = (ov[k]||'').trim();
-      if(v && _isValidLatLng(v)) out[k] = v;
+      if(!v || !_isValidLatLng(v)) return;
+      // BUG FIX, reported directly: navigation intermittently routed to a point in downtown
+      // Atlanta instead of the terminal - same ride, same taps, correct some launches and wrong
+      // others. Cause: this function validated an override's FORMAT and nothing else, so a
+      // well-formed but wrong coordinate silently replaced the correct built-in for everyone.
+      // A 25-mile sanity check did exist, but only in _saveTerminalCoord() at save time, only as
+      // a click-through confirm(), and - critically - would never have fired for this case
+      // anyway, since downtown sits about 10 miles from the airport, well under that threshold.
+      //
+      // The intermittency came from WHEN globalSettings is present. It loads asynchronously at
+      // boot and is re-fetched mid-session (opening Message Templates calls loadGlobalSettings()
+      // again, replacing the whole object). Navigate before it lands and this falls through to
+      // the correct built-in; navigate after and the bad override wins. Nothing visibly
+      // different to the driver either time - purely a timing race against a background load.
+      //
+      // Enforced HERE, at the point of use, because this is the one function every navigation
+      // path funnels through - terminalToAddress(), _terminalCoordFromAddressText(), and
+      // _placeIdForStopValue() all read from it. A guard at save time can only protect values
+      // saved after the guard ships; this also neutralizes anything already stored and synced.
+      var builtin = TERMINAL_COORDS_BUILTIN[k] || '';
+      if(builtin && _latLngMilesApart(v, builtin) > TERMINAL_OVERRIDE_MAX_MILES){
+        try{ console.warn('[terminal] Ignoring override for '+k+' ('+v+') - '
+          + Math.round(_latLngMilesApart(v, builtin)) + ' mi from the built-in point. Using '+builtin+' instead.'); }catch(_e){}
+        return; // keep the built-in
+      }
+      out[k] = v;
     });
   }catch(e){}
   return out;
+}
+// True when a saved override exists but is being ignored as implausible - drives the visible
+// warning on the Airport pickup points card so a bad saved value can't sit there silently
+// "set" while navigation quietly uses something else.
+function _rejectedTerminalOverrides(){
+  var bad = [];
+  try{
+    var ov = (typeof globalSettings!=='undefined' && globalSettings && globalSettings.terminalCoordOverrides) || {};
+    Object.keys(TERMINAL_COORDS_BUILTIN).forEach(function(k){
+      var v = (ov[k]||'').trim(); if(!v) return;
+      if(!_isValidLatLng(v)){ bad.push({term:k, val:v, miles:null}); return; }
+      var m = _latLngMilesApart(v, TERMINAL_COORDS_BUILTIN[k]||'');
+      if(m > TERMINAL_OVERRIDE_MAX_MILES) bad.push({term:k, val:v, miles:m});
+    });
+  }catch(e){}
+  return bad;
 }
 // Strict on purpose. "33.64, -84.44" with a space, a transposed pair, or a stray character all
 // resolve to somewhere real and wrong, which is worse than obviously broken.
@@ -5467,6 +5563,40 @@ function _latLngMilesApart(a, b){
 // If a terminal has no verified coordinate here, this now returns '' - the caller falls back to
 // whatever's already on the ride record instead of this function silently supplying a street
 // address that turned out not to be trustworthy for navigation at all.
+// Classifies free-text terminal wording into the canonical key used by both terminal-coordinate
+// and terminal-place-ID lookups below. Prefix match (position 0), not "contains anywhere" -
+// preserved exactly as it was when this lived separately in terminalToAddress() and
+// terminalPlaceId(); this is a mechanical extraction, not a behavior change.
+function _classifyTerminalKey(low){
+  if(low.indexOf('north')===0) return 'North Domestic';
+  if(low.indexOf('south')===0) return 'South Domestic';
+  if(low.indexOf('int')===0)   return 'International';
+  return '';
+}
+// Shared fuzzy terminal match: true if two terminal strings refer to the same terminal,
+// tolerant of the different formats terminal names have been stored in across old and new
+// rides ("North Domestic", "NORTH TERMINAL", "north", etc.). This exact boolean used to be
+// copy-pasted across 4 separate places (the confirm-picker's preselect, and all three tiers of
+// buildConfirmationText's resolution) - already the root cause of three separate bugs (v951,
+// v952, v967), each one a fix applied to one copy that didn't reach the others. One function
+// now; a future fix here reaches every caller at once.
+function _terminalsMatch(a, b){
+  var al=(a||'').toLowerCase(), bl=(b||'').toLowerCase();
+  return (al.indexOf('north')>-1 && bl.indexOf('north')>-1)
+      || (al.indexOf('south')>-1 && bl.indexOf('south')>-1)
+      || (((al.indexOf('international')>-1) || (al.indexOf('intl')>-1))
+          && ((bl.indexOf('international')>-1) || (bl.indexOf('intl')>-1)));
+}
+// Exact-key lookup first, then a fuzzy fallback scan via _terminalsMatch() above - the same
+// "try exact, then loosen" shape that was independently copy-pasted for the personal-override,
+// shared-default, and hardcoded tiers in buildConfirmationText. Returns '' (never null/
+// undefined) so every caller's existing `|| ''`-style fallback chains keep working unchanged.
+function _lookupByFuzzyTerminal(map, term){
+  if(!map || !term) return '';
+  if(map[term]) return map[term];
+  for(var k in map){ if(_terminalsMatch(term, k)) return map[k]; }
+  return '';
+}
 // Tolerant of both the full form ('North Domestic') and legacy short form
 // ('North'); returns '' if there's no terminal set or no match.
 function terminalToAddress(term){
@@ -5474,11 +5604,8 @@ function terminalToAddress(term){
   var key=String(term).trim();
   var _TC=_resolvedTerminalCoords();
   if(!_TC[key]){
-    var low=key.toLowerCase();
-    if(low.indexOf('north')===0)      key='North Domestic';
-    else if(low.indexOf('south')===0) key='South Domestic';
-    else if(low.indexOf('int')===0)   key='International';
-    else return '';
+    key=_classifyTerminalKey(key.toLowerCase());
+    if(!key) return '';
   }
   return (_TC[key]||'').trim();
 }
@@ -5490,11 +5617,8 @@ function terminalPlaceId(term){
   if(!term) return '';
   var key=String(term).trim();
   if(!TERMINAL_PLACE_IDS[key]){
-    var low=key.toLowerCase();
-    if(low.indexOf('north')===0)      key='North Domestic';
-    else if(low.indexOf('south')===0) key='South Domestic';
-    else if(low.indexOf('int')===0)   key='International';
-    else return '';
+    key=_classifyTerminalKey(key.toLowerCase());
+    if(!key) return '';
   }
   return TERMINAL_PLACE_IDS[key]||'';
 }
@@ -6215,7 +6339,7 @@ function addRideToCalendar(rideId){
 // Deliberately duplicates addRideToCalendar()'s small ICS-building logic just above instead of
 // factoring out a shared helper, so removing this block can never risk touching that function.
 function canExportToFamilyWall(){
-  return !!(currentUser && (currentUser.name==='Chase' || currentUser.name==='Morgan'));
+  return canReviewData();
 }
 // BUG (reported, first real use): a ride scheduled for the early morning imported into
 // FamilyWall showing 1 AM. Root cause: DTSTART/DTEND below were built as a bare "floating" ICS
@@ -9256,9 +9380,9 @@ function renderConfirmations(){
         (function(){
           var t=(r.terminal||r.rtTerminal||'').trim(); if(!t) return;
           if(_byT0[t]&&(_byT0[t]||'').trim()){ _preKey0=t; return; }
-          var tl=t.toLowerCase();
-          for(var i0=0;i0<_termKeys0.length;i0++){ var kl=_termKeys0[i0].toLowerCase();
-            if((tl.indexOf('north')>-1&&kl.indexOf('north')>-1)||(tl.indexOf('south')>-1&&kl.indexOf('south')>-1)||(((tl.indexOf('international')>-1)||(tl.indexOf('intl')>-1))&&((kl.indexOf('international')>-1)||(kl.indexOf('intl')>-1)))){ _preKey0=_termKeys0[i0]; return; } }
+          for(var i0=0;i0<_termKeys0.length;i0++){
+            if(_terminalsMatch(t,_termKeys0[i0])){ _preKey0=_termKeys0[i0]; return; }
+          }
         })();
       }
       const _instOpts0=(_defInstr0?'<option value="__default"'+(_preKey0==='__default'?' selected':'')+'>Pickup instructions (Default)</option>':'')
@@ -9740,18 +9864,7 @@ function buildConfirmationText(r){
   // same entry — old rides stored terminals in different formats.
   var _termInstr = '';
   if(_rideTerm){
-    _termInstr = _byTerm[_rideTerm] || '';
-    if(!_termInstr){
-      var _tl=_rideTerm.toLowerCase();
-      for(var _tk in _byTerm){
-        var _kl=_tk.toLowerCase();
-        if((_tl.indexOf('north')>-1&&_kl.indexOf('north')>-1)
-         ||(_tl.indexOf('south')>-1&&_kl.indexOf('south')>-1)
-         ||(((_tl.indexOf('international')>-1)||(_tl.indexOf('intl')>-1))&&((_kl.indexOf('international')>-1)||(_kl.indexOf('intl')>-1)))){
-          _termInstr=_byTerm[_tk]; break;
-        }
-      }
-    }
+    _termInstr = _lookupByFuzzyTerminal(_byTerm, _rideTerm);
     // No personal override from the owner - fall back to the app-wide default per-terminal
     // instructions. Restored in v808 - v807 had removed this, reasoning the hardcoded default
     // was enough on its own; Chase's follow-up clarified he wants HIS OWN edits (via the
@@ -9762,18 +9875,7 @@ function buildConfirmationText(r){
     // shared default is set. Same fuzzy terminal matching as the personal-override check above.
     if(!_termInstr){
       var _gByTerm = (globalSettings && globalSettings.defaultPickupInstructionsByTerminal) || {};
-      _termInstr = _gByTerm[_rideTerm] || '';
-      if(!_termInstr){
-        var _gtl=_rideTerm.toLowerCase();
-        for(var _gtk in _gByTerm){
-          var _gkl=_gtk.toLowerCase();
-          if((_gtl.indexOf('north')>-1&&_gkl.indexOf('north')>-1)
-           ||(_gtl.indexOf('south')>-1&&_gkl.indexOf('south')>-1)
-           ||(((_gtl.indexOf('international')>-1)||(_gtl.indexOf('intl')>-1))&&((_gkl.indexOf('international')>-1)||(_gkl.indexOf('intl')>-1)))){
-            _termInstr=_gByTerm[_gtk]; break;
-          }
-        }
-      }
+      _termInstr = _lookupByFuzzyTerminal(_gByTerm, _rideTerm);
     }
     // BUG FIX: this third tier - the actual hardcoded, always-available terminal walkthrough
     // (HARDCODED_PICKUP_BY_TERMINAL) - was never consulted here at all before now, despite a
@@ -9787,18 +9889,7 @@ function buildConfirmationText(r){
     // one format across older and newer rides.
     if(!_termInstr){
       var _hByTerm = (typeof HARDCODED_PICKUP_BY_TERMINAL!=='undefined') ? HARDCODED_PICKUP_BY_TERMINAL : {};
-      _termInstr = _hByTerm[_rideTerm] || '';
-      if(!_termInstr){
-        var _htl=_rideTerm.toLowerCase();
-        for(var _htk in _hByTerm){
-          var _hkl=_htk.toLowerCase();
-          if((_htl.indexOf('north')>-1&&_hkl.indexOf('north')>-1)
-           ||(_htl.indexOf('south')>-1&&_hkl.indexOf('south')>-1)
-           ||(((_htl.indexOf('international')>-1)||(_htl.indexOf('intl')>-1))&&((_hkl.indexOf('international')>-1)||(_hkl.indexOf('intl')>-1)))){
-            _termInstr=_hByTerm[_htk]; break;
-          }
-        }
-      }
+      _termInstr = _lookupByFuzzyTerminal(_hByTerm, _rideTerm);
     }
   }
   // AP PICK UP meets the client AT the airport — only terminal-specific instructions may
@@ -10864,6 +10955,7 @@ function renderRideView(r){
       <div style="display:flex;align-items:center;gap:.75rem;">
         <i class="ti ti-phone" style="font-size:18px;color:var(--mid);" aria-hidden="true"></i>
         <a href="tel:${r.phone}" style="font-size:.92rem;color:#4285f4;font-weight:600;">${r.phone}</a>
+        ${r.client ? `<button onclick="event.stopPropagation();saveClientContactCard('${r.id}')" style="margin-left:auto;font-size:.72rem;font-weight:700;color:var(--accent);background:none;border:1.5px solid var(--accent);border-radius:20px;padding:.25rem .65rem;cursor:pointer;font-family:inherit;white-space:nowrap;">\uD83D\uDCC7 Save contact</button>` : ''}
       </div>
     </div>` : ''}
 
@@ -11376,10 +11468,12 @@ async function _saveMarkPaidCombined(rideId){
     var wantReceipt = !!document.getElementById('mp-send-receipt')?.checked;
 
     r.drivenMiles=mi;
+    _stampRideCostBasis(r);   // lock in today's gas/maintenance rate for THIS ride, once
     if(tip>0) r.tip=tip;
     if(method){ r.payment=method; touchRide(r,'set payment method'); }
     if(tipSplitChecked && tipMethod){ r.tipPayment=tipMethod; } else { delete r.tipPayment; }
     r.status='paid'; r.paidAt=Date.now(); r.paidBy=currentUser?.name||'';
+    _stampRideCostBasis(r);   // lock in today's gas/maintenance rate for THIS ride, once
     // Clears the active "still waiting on this" flag now that it's genuinely paid - invoicedAt/
     // invoicedBy stay put as a historical record of when this went out for billing, same as
     // confirmSentAt/By staying after a ride moves past the Confirmed stage.
@@ -11536,6 +11630,7 @@ async function _dashSaveInvoicePaid(rideId){
   // Same fields the full Mark Paid flow sets when genuinely closing a ride out - same
   // meaning, just reached through this lighter path instead.
   r.status='paid'; r.paidAt=Date.now(); r.paidBy=currentUser?.name||'';
+  _stampRideCostBasis(r);   // lock in today's gas/maintenance rate for THIS ride, once
   if(!r.payment) r.payment='Invoice';
   delete r.awaitingInvoice;
   touchRide(r,'invoice marked paid');
@@ -12657,7 +12752,7 @@ async function markRideUnpaid(id){
       }
     }
   }catch(e){}
-  try{ refreshDash(); }catch(e){} try{ if(typeof renderDashFees==='function') renderDashFees(); }catch(e){} try{ if(typeof renderIncome==='function') renderIncome(); }catch(e){}
+  try{ refreshDash(); }catch(e){} _refreshAfterFeeChange();
   try{ openRideModal(r.id); }catch(e){}
   showToast('Marked unpaid \u2014 fare and 15% fee reopened');
 }
@@ -13338,27 +13433,51 @@ async function _mtSaveGasPrice(val){
 function _gmapsDirUrl(stops){
   var list = (stops||[]).map(function(s){ return String(s||'').trim(); }).filter(Boolean);
   if(!list.length) return '';
-  // Looked up here, on the already-filtered list itself - not a separately-tracked array passed
-  // in - so this can never drift out of alignment with what actually gets encoded below. Empty
-  // string for any stop that isn't a known terminal, matching Google's own documented format
-  // for a partial waypoint_place_ids list (see the reasoning where TERMINAL_PLACE_IDS is
-  // defined for the full explanation of why this exists at all).
-  var placeIds = list.map(_placeIdForStopValue);
+  // PLACE IDs ARE NO LONGER SENT. Read this before reintroducing them.
+  //
+  // Reported directly: rides to South Domestic intermittently navigated to a downtown business
+  // called "Atlanta Business Chronicle" instead of the terminal - sometimes correct, sometimes
+  // not, same ride, nothing different to the driver's eye.
+  //
+  // The business NAME is the whole diagnosis. Google does not invent a business name out of a
+  // raw coordinate: in this ?api=1 form a lat,lng destination is taken as an exact point and is
+  // NOT re-resolved to a nearby named place (that property is exactly why this function was
+  // moved off the older /dir/A/B/C path form in the first place - see the history below). A
+  // named business can therefore only have come from a PLACE ID. And a place ID takes
+  // PRECEDENCE over the coordinate sitting next to it in the same URL - so one wrong ID
+  // silently overrode a coordinate that was correct the entire time.
+  //
+  // TERMINAL_PLACE_IDS['South Domestic'] resolves to that downtown business, not the terminal.
+  // It was verified when added, which is the trap: Google documents that place IDs can change
+  // or expire (they recommend refreshing anything older than ~12 months). A verified-once ID
+  // rots silently, and nothing in this app could ever notice.
+  //
+  // Why it was INTERMITTENT rather than always wrong: on most routes the terminal is a
+  // WAYPOINT, not the destination (AP RUN = current location -> client -> terminal -> home), so
+  // the ID rode along in waypoint_place_ids as a partial list with empty entries for the
+  // non-terminal stops. Google's handling of a partial/empty-entry waypoint_place_ids list is
+  // not guaranteed - honor it and you detour downtown, drop the malformed parameter and you fall
+  // back to the exact coordinate and arrive correctly. Same URL, different Maps builds and
+  // handoff paths, different outcome. Choosing "End at the drop-off" instead puts the terminal
+  // in destination_place_id, which IS unambiguously honored - wrong every time.
+  //
+  // The fix is to stop sending place IDs at all. The coordinates are verified by Chase, are
+  // exact in this URL form, and are correctable in-app from Settings. A place ID's only benefit
+  // was pinning a waypoint against road-snapping; its cost is silently overriding a correct
+  // coordinate and driving someone ten miles the wrong way. Snapping to the nearest road at the
+  // airport is a far better worst case than a downtown misroute, and is not what was happening
+  // here anyway. TERMINAL_PLACE_IDS is left defined but deliberately unused by navigation - do
+  // not wire it back in without a way to continuously verify each ID still resolves to the
+  // terminal it claims.
   if(list.length===1){
-    var single = 'https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(list[0])+'&travelmode=driving';
-    if(placeIds[0]) single += '&destination_place_id='+encodeURIComponent(placeIds[0]);
-    return single;
+    return 'https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(list[0])+'&travelmode=driving';
   }
   var origin = list[0], dest = list[list.length-1], mid = list.slice(1,-1);
-  var midIds = placeIds.slice(1,-1);
-  var anyMidPlaceIds = midIds.some(Boolean);
   var url = 'https://www.google.com/maps/dir/?api=1&origin='+encodeURIComponent(origin)
           + '&destination='+encodeURIComponent(dest);
-  if(placeIds[placeIds.length-1]) url += '&destination_place_id='+encodeURIComponent(placeIds[placeIds.length-1]);
   // Maps URLs API takes waypoints as a single pipe-separated parameter.
   if(mid.length){
     url += '&waypoints='+mid.map(encodeURIComponent).join('%7C');
-    if(anyMidPlaceIds) url += '&waypoint_place_ids='+midIds.map(encodeURIComponent).join('%7C');
   }
   return url + '&travelmode=driving';
 }
@@ -13463,6 +13582,11 @@ function _closeNavModal(){ var o=document.getElementById('nav-modal-overlay'); i
 // after the final stops array is built, not threaded through each transformation step
 // separately, so the resulting placeIds stay guaranteed-aligned with stops - derived from the
 // same final array, not tracked in parallel through filtering/deduping/splicing.
+// DELIBERATELY UNUSED as of the Atlanta Business Chronicle misroute fix - see _gmapsDirUrl's
+// own comment for the full reasoning. Navigation no longer sends place IDs at all, because a
+// stale or wrong ID silently overrides the correct coordinate and can route a driver miles off.
+// Kept only so the reason is discoverable from the function that used to be the entry point.
+// Do not reconnect this without a mechanism to continuously re-verify each ID.
 function _placeIdForStopValue(val){
   if(!val) return '';
   var coords = _resolvedTerminalCoords();
@@ -13707,6 +13831,7 @@ function _applyOdometerEnd(r, endingReading){
     ? parseFloat(((r.odoPause - r.odoStart) + (endingReading - r.odoResume)).toFixed(2))
     : parseFloat((endingReading - r.odoStart).toFixed(2));
   r.drivenMiles = total;
+  _stampRideCostBasis(r);   // lock in today's gas/maintenance rate for THIS ride, once
   r.odoEnd = endingReading;
   r.odoEndAt = Date.now();
   return { total: total, mine: total, count: 1 };
@@ -14552,6 +14677,7 @@ async function _saveLogMiles(rideId, billLater){
     // for their gas/maintenance cost and profit. It does NOT change the client's
     // fare, which is based on the originally quoted r.miles.
     r.drivenMiles=mi;
+    _stampRideCostBasis(r);   // lock in today's gas/maintenance rate for THIS ride, once
     if(tip>0) r.tip=tip;
     if(lmTipMethod){ r.tipPayment=lmTipMethod; } else { delete r.tipPayment; }
     if(gas>0) await _mtSaveGasPrice(gas);
@@ -15119,6 +15245,7 @@ async function _rtSave(){
     var miEl=document.getElementById('rt-mi-'+id);
     var tipEl=document.getElementById('rt-tip-'+id);
     r.drivenMiles=parseFloat(miEl?miEl.value:0)||0;
+    _stampRideCostBasis(r);   // lock in today's gas/maintenance rate for THIS ride, once
     var tipVal=parseFloat(tipEl?tipEl.value:0)||0;
     if(tipVal>0) r.tip=tipVal;
     saved.push((r.client||'Ride')+': '+r.miles+' mi'+(tipVal?', $'+tipVal+' tip':''));
@@ -15932,7 +16059,7 @@ async function submitReleaseModal(isOwnerRelease){
   } else {
     // Admin-initiated: needs one more admin approval
     await saveClientRequests();
-    const ADMINS = ['Kat','Chase','Morgan'];
+    const ADMINS = adminNames();
     ADMINS.forEach(function(a){
       if(a!==(currentUser?.name||'')){
         addNotification(USER_DRIVER_MAP[a]||PROXY_MAP[a]||a,{id:reqId,client:_releaseClientName},'admin_release',
@@ -16200,7 +16327,7 @@ async function requestAdminRemoval(targetName){
   if(targetName === currentUser.name){
     showToast('You cannot remove yourself', 'error'); return;
   }
-  if(targetName==='Chase'){ showToast("Chase's admin role can't be removed — it controls subscription access",'error'); return; }
+  if(isOwnerAccount(targetName)){ showToast(OWNER_NAME+"'s admin role can't be removed — it controls subscription access",'error'); return; }
   const target = USERS.find(u=>u.name===targetName);
   if(!target || target.role !== 'admin'){
     showToast(targetName + ' is not an admin', 'error'); return;
@@ -17579,7 +17706,7 @@ async function requestClientFromWarning(clientName){
   await saveClientRequests();
   addNotification(owner,{id:reqId,client:clientName},'transfer_request',
     '🔗 '+myDriver.split(' ')[0]+' wants to take over '+clientName+'. Tap bell to approve or deny.');
-  const ADMINS=['Kat','Chase','Morgan'];
+  const ADMINS=adminNames();
   ADMINS.forEach(function(a){const d=USER_DRIVER_MAP[a]||a;if(d!==owner&&d!==myDriver)addNotification(d,{id:reqId,client:clientName},'transfer_request',req.msg);});
   await saveNotifs();
   updateNotifBadge();
@@ -19166,7 +19293,7 @@ async function _saveSchedulingField(){
     // Kat/Morgan mirror, short-name key space - see _savePolicyEditor's identical call for why
     // this needs its own copy rather than one shared call site.
     await _mirrorKatMorganField(currentUser.name, 'policyTemplate');
-    if(val && currentUser.name==='Chase'){
+    if(val && isTemplateAuthority()){
       globalSettings = globalSettings || {};
       globalSettings.defaultPolicyTemplate = val;
       await storageSet('kat:globalSettings', globalSettings);
@@ -20045,7 +20172,7 @@ async function _confirmRequestFeeWaive(owner, driver, rideId, client, date){
   await saveFeeWaiveRequests();
   try{ addNotification(owner, {id:rideId,client:client,date:date}, 'fee_waive_requested', (driver.split(' ')[0])+' is asking you to waive the 15% fee for '+(client||'a')+'\u2019s ride on '+(typeof fmtDateShort==='function'?fmtDateShort(date):date)); await saveNotifs(); }catch(e){}
   showToast('\u2713 Asked '+owner.split(' ')[0]+' to waive this fee');
-  try{ renderDashFees(); }catch(e){}
+  _refreshAfterFeeChange();
 }
 async function approveFeeWaive(rideId){
   var req=feeWaiveRequests[rideId]||feeWaiveRequests[String(rideId)]; if(!req) return;
@@ -20057,7 +20184,7 @@ async function approveFeeWaive(rideId){
   try{ await saveFeePayments(); }catch(e){} await saveFeeWaiveRequests();
   try{ addNotification(driver, {id:req.rideId,client:req.client,date:req.date}, 'fee_waive_approved', (owner.split(' ')[0])+' waived the 15% fee for '+(req.client||'the')+'\u2019s ride on '+(typeof fmtDateShort==='function'?fmtDateShort(req.date):req.date)+' \u2713'); await saveNotifs(); }catch(e){}
   showToast('\u2713 Fee waived for '+(req.client||'that ride'));
-  try{ renderDashFees(); }catch(e){}
+  _refreshAfterFeeChange();
 }
 async function denyFeeWaive(rideId){
   var req=feeWaiveRequests[rideId]||feeWaiveRequests[String(rideId)]; if(!req) return;
@@ -20065,7 +20192,7 @@ async function denyFeeWaive(rideId){
   await saveFeeWaiveRequests();
   try{ addNotification(req.driver, {id:req.rideId,client:req.client,date:req.date}, 'fee_waive_denied', (req.owner.split(' ')[0])+' kept the 15% fee for '+(req.client||'the')+'\u2019s ride on '+(typeof fmtDateShort==='function'?fmtDateShort(req.date):req.date)); await saveNotifs(); }catch(e){}
   showToast('Waiver declined');
-  try{ renderDashFees(); }catch(e){}
+  _refreshAfterFeeChange();
 }
 // Pending waiver requests addressed to the current user (the owner), as HTML rows for the dash.
 function _renderFeeWaiveRequestsHTML(dName){
@@ -20107,7 +20234,7 @@ async function markFeeRidePaid(owner, driver, rideId, method){
   feePayments[key].paid=true;
   feePayments[key].paidAt=nowET().toISOString();
   await saveFeePayments(key);
-  renderDashFees();
+  _refreshAfterFeeChange();
   showToast('\u2713 That ride\u2019s fee is marked paid');
 }
 // Small modal asking which method actually settled a fee, for any path other than Venmo
@@ -20178,6 +20305,25 @@ function _feeRidePending(fp, rideId){ return !!(fp && fp.pendingRides && fp.pend
 // sent-but-not-yet-confirmed Venmo payment already does, without touching feeSettledForRide()'s
 // own, correct behavior of only treating an APPROVED waiver as actually settled.
 function _feeWaivePending(rideId){ var q=feeWaiveRequests[rideId]||feeWaiveRequests[String(rideId)]; return !!(q && q.status==='pending'); }
+// Every fee state change - paid, unpaid, waived, unwaived, pending, undone - changes whether
+// that fee is counted as a cost, which changes Net take-home on BOTH the Income page and the
+// Dashboard's income box. Reported directly: marking a fee paid by mistake and then removing it
+// left income showing the old number. Confirmed by survey rather than assumed - of the eight
+// functions that mutate feePayments and save, exactly one (_feeCorrectPaidToWaived) refreshed
+// renderIncome(), and NONE refreshed renderDashIncome(). The fee list itself always refreshed,
+// which is why the stale total was easy to miss: the fee visibly disappeared from the list while
+// the income figures quietly kept counting it until the next full reload.
+//
+// One helper instead of three calls repeated at eight call sites, so a future fee action added
+// here can't silently forget one of the three views again. Each render is individually guarded
+// AND each already no-ops when its own page isn't currently displayed (renderIncome bails on a
+// missing #income-summary-cards, renderDashIncome on a missing #dash-income-overview), so this
+// is always safe to call regardless of which screen the person is actually on.
+function _refreshAfterFeeChange(){
+  try{ renderDashFees(); }catch(e){}
+  try{ renderIncome(); }catch(e){}
+  try{ renderDashIncome(); }catch(e){}
+}
 async function _feeUndoRide(owner, driver, rideId){
   await _ensureFresh();
   const key=owner+':recv:'+driver; const fp=feePayments[key]; if(!fp) return;
@@ -20191,7 +20337,7 @@ async function _feeUndoRide(owner, driver, rideId){
   // paidRides entry should never touch it - doing so could silently un-settle every other,
   // unrelated ride that marker was covering, all at once.
   if((!fp.paidRides||!fp.paidRides.length)){ delete fp.paid; delete fp.paidAt; }
-  await saveFeePayments(key); try{ renderDashFees(); }catch(e){}
+  await saveFeePayments(key); _refreshAfterFeeChange();
   showToast('\u21a9 Undone \u2014 that fee is owed again');
 }
 // Direct follow-up: corrects a fee that already, mistakenly went all the way through to paid -
@@ -20216,7 +20362,7 @@ async function _feeCorrectPaidToWaived(owner, driver, rideId){
       (owner.split(' ')[0])+' corrected a mistake \u2014 the fee for '+(rr&&rr.client||'that')+'\u2019s ride is now waived, not charged');
     await saveNotifs();
   }catch(e){}
-  try{ renderDashFees(); }catch(e){}
+  _refreshAfterFeeChange();
   try{ renderIncome(); }catch(e){}
   showToast('\u2713 Corrected \u2014 that fee is now waived, not charged');
 }
@@ -20253,7 +20399,7 @@ async function venmoAutoMarkRide(owner, payer, rideId){
   const pendAt=feePayments[key].pendingRidesAt=(feePayments[key].pendingRidesAt||{});
   pendAt[rid]=Date.now();
   await saveFeePayments(key);
-  try{ renderDashFees(); }catch(e){}
+  _refreshAfterFeeChange();
   showToast('\u23F3 Payment sent \u2014 it stays here until the recipient taps \u2713 Received');
 }
 // Embed a ride id safely in an inline onclick (ids may be numbers or strings)
@@ -20328,7 +20474,7 @@ async function unwaiveDashFee(owner, driver){
   delete feePayments[key].waiveUntil;
   delete feePayments[key].waiveFrom;
   await saveFeePayments(key);
-  renderDashFees();
+  _refreshAfterFeeChange();
   showToast('Fee restored \u2014 showing in Owed to you again');
 }
 // Ask the driver how long to waive this person's fees, then apply.
@@ -20385,7 +20531,7 @@ async function waiveOneRideFee(owner, driver, rideId, clientName){
     await saveNotifs();
   }catch(e){}
   showToast('\u2713 Fee waived for '+(clientName||'that ride'));
-  try{ renderDashFees(); }catch(e){}
+  _refreshAfterFeeChange();
 }
 
 async function applyWaiveScope(scope){
@@ -20409,7 +20555,7 @@ async function applyWaiveScope(scope){
     msg='\u2713 Fees waived '+label+' (through '+fmtDateShort(feePayments[key].waiveUntil)+')';
   }
   await saveFeePayments();
-  renderDashFees();
+  _refreshAfterFeeChange();
   showToast(msg);
 }
 
@@ -20466,7 +20612,7 @@ async function profileWaiveMonth(){
   feePayments[key].waiveFrom=yr+'-'+mo+'-01';
   feePayments[key].waiveUntil=yr+'-'+mo+'-'+String(last).padStart(2,'0');
   try{ await saveFeePayments(key); }catch(e){}
-  if(typeof renderDashFees==='function') renderDashFees();
+  _refreshAfterFeeChange();
   renderProfileWaive();
   var mn=['','January','February','March','April','May','June','July','August','September','October','November','December'][parseInt(mo,10)]||'';
   showToast('\u2713 '+driver.split(' ')[0]+"'s fees waived for "+mn+' '+yr);
@@ -20505,13 +20651,13 @@ async function markAllPastRidesPaidAdmin(){
     window._pendingUnsavedRideIds.add(r.id);
     setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
   });
-  list.forEach(function(r){ r.status='paid'; });
+  list.forEach(function(r){ r.status='paid'; _stampRideCostBasis(r); });
   try{
     var _mapOk = await saveRides();
     if(_mapOk) list.forEach(function(r){ window._pendingUnsavedRideIds.delete(r.id); });
   }catch(e){}
   showToast('\u2713 Marked '+list.length+' ride'+(list.length>1?'s':'')+' paid across the team');
-  try{ renderDashFees(); }catch(e){}
+  _refreshAfterFeeChange();
   try{ if(typeof renderDashIncome==='function') renderDashIncome(); }catch(e){}
   try{ if(typeof renderDashNeedsAttention==='function') renderDashNeedsAttention(); }catch(e){}
   try{ if(typeof renderDashAwaitingInvoicePast==='function') renderDashAwaitingInvoicePast(); }catch(e){}
@@ -20534,7 +20680,7 @@ async function markAllPrevPaid(){
     window._pendingUnsavedRideIds.add(r.id);
     setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
   });
-  list.forEach(function(r){ r.status='paid'; });
+  list.forEach(function(r){ r.status='paid'; _stampRideCostBasis(r); });
   try{
     var _mppOk = await saveRides();
     if(_mppOk) list.forEach(function(r){ window._pendingUnsavedRideIds.delete(r.id); });
@@ -20784,57 +20930,11 @@ function renderDashIncome(){
   if(!box) return;
   if(!hasIncomeAccess()){ box.innerHTML=''; return; }
   const now=nowET();
-  const start=new Date(now.getFullYear(),now.getMonth(),1);
-  const end=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59);
   const dName=getMyDriverName();
-  const todayStr=toDateStr(now);
-  const inMonth=r=>{ if(!r.date) return false; const d=new Date(r.date+'T12:00:00'); return d>=start&&d<=end; };
-  // Only count PAID rides (plus logged outside cash) — income reflects money actually received.
-  const isCompleted=r=> r.status!=='cancelled' && (r.status==='paid' || r._outside);
-  // The dashboard income reflects money earned DRIVING.
-  let monthRides=rides.filter(r=>inMonth(r)&&parseFloat(r.price||0)>0&&isMyDrivingRide(r)&&isCompleted(r));
-  // include this user's own completed outside rides
-  {
-    const outside=getMyOutsideRidesAsRides().filter(r=>inMonth(r)&&parseFloat(r.price||0)>0&&isCompleted(r));
-    monthRides=monthRides.concat(outside);
-  }
-  const gross=monthRides.reduce((s,r)=>s+parseFloat(r.price||0),0);
-  const count=monthRides.length;
-  // NET mirrors the Income page: gross minus per-ride vehicle cost (driven miles
-  // x cost/mile) and the 15% finder's fee where it applies, then minus any
-  // manually-entered monthly expenses.
-  const costPerMile = calcCostPerMile(dName);
-  let vehicleCost = 0, feeCost = 0;
-  monthRides.forEach(r=>{
-    // Vehicle cost covers every mile driven, including outside rides (matches the Income page).
-    const miles = parseFloat(r.drivenMiles||r.miles||0);
-    vehicleCost += miles * costPerMile;
-    // Outside rides owe no 15% finder fee.
-    if(r._outside) return;
-    // 15% owed only when driving someone else's client, and never when the
-    // client is themselves a driver in the group.
-    const fare = parseFloat(r.price||0);
-    const owner = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
-    // Round each fee to whole cents the SAME way the Venmo-payment prompt does (Math.round
-    // *100/100), so the income summary's accrued total and the amounts actually charged can't
-    // drift apart by fractions of a cent across many rides.
-    //
-    // BUG FIX, reported directly with a screenshot: this never checked whether the fee had
-    // actually been settled or waived - it charged it unconditionally whenever the ride
-    // belonged to another owner's client. A waived fee still reduced this "net take-home"
-    // total exactly as if it had genuinely been charged. Now checked the same way the main
-    // Client Fees section and the pending-approval lists already correctly do.
-    if(owner && owner!==dName){
-      var _fpInc = feePayments[owner+':recv:'+dName]||{};
-      if(!_feeWaivedForRide(_fpInc, r)){
-        feeCost += Math.round(fare*clientFeeRate()*100)/100;
-      }
-    }
-  });
-  const monthlyExp=getMonthlyExpenseTotal();
-  const tips=monthRides.reduce((_s,r)=>_s+parseFloat(r.tip||0),0);
-  // Net take-home mirrors the Income page: gross + tips − vehicle cost − 15% finder fees − monthly expenses.
-  const net=gross + tips - vehicleCost - feeCost - monthlyExp;
+  // Gross/Net/Total Rides all come from the one shared calcNetTakeHomeForMonth() now — see its
+  // own comment for why this used to be a second, independently-written formula here that could
+  // (and did) silently disagree with the Income page's number for the same month.
+  const { gross, net, count } = calcNetTakeHomeForMonth(dName);
   const monthName=now.toLocaleDateString('en-US',{month:'long',year:'numeric'});
   const card=(label,val,color)=>`<div style="background:var(--surface);border-radius:10px;padding:.9rem;text-align:center;border:1.5px solid var(--light);">
       <div style="font-size:.66rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.3rem;">${label}</div>
@@ -22390,8 +22490,25 @@ function _buildTerminalCoordCardHtml(){
         +(canEdit&&custom?'<button onclick="_resetTerminalCoord(\''+k+'\')" style="flex-shrink:0;padding:.4rem .6rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">Reset</button>':'')
       +'</div></div>';
   }).join('');
+  // A saved-but-ignored override is the single most dangerous state this card can be in: it
+  // reads "Custom" while navigation is actually using something else entirely. Surfaced loudly
+  // rather than left to a console warning nobody driving a car is going to see.
+  var _rejected = (typeof _rejectedTerminalOverrides==='function') ? _rejectedTerminalOverrides() : [];
+  var _rejectedHtml = _rejected.length
+    ? '<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:.7rem .8rem;margin-bottom:.8rem;">'
+      +'<div style="font-size:.78rem;font-weight:800;color:#b91c1c;margin-bottom:.3rem;">\u26a0\ufe0f Ignored \u2014 navigation is NOT using '+(_rejected.length>1?'these':'this')+'</div>'
+      +_rejected.map(function(b){
+        return '<div style="font-size:.72rem;color:#7f1d1d;line-height:1.5;">'
+          +escHtml(b.term)+': <code>'+escHtml(b.val)+'</code>'
+          +(b.miles!=null ? ' \u2014 about '+Math.round(b.miles)+' miles from the real terminal' : ' \u2014 not valid coordinates')
+          +'</div>';
+      }).join('')
+      +'<div style="font-size:.72rem;color:#7f1d1d;margin-top:.35rem;line-height:1.5;">Drivers are being routed to the built-in point instead. Press Reset on the affected terminal to clear this, or paste the correct curb coordinates.</div>'
+      +'</div>'
+    : '';
   return '<div style="background:var(--surface);border-radius:12px;padding:1.1rem;border:1.5px solid var(--light);margin-bottom:1.25rem;">'
     +'<div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.25rem;">Airport pickup points</div>'
+    +_rejectedHtml
     +'<div style="font-size:.72rem;color:var(--mid);margin-bottom:.8rem;line-height:1.5;">Exactly where Start Ride sends a driver for each terminal. If navigation is dropping you in a parking deck or anywhere other than the right curb, stand at the correct spot, long-press it in Google Maps to copy the coordinates, and paste them here. Applies to everyone.</div>'
     +rows
     +(canEdit?'':'<div style="font-size:.68rem;color:var(--mid);margin-top:.2rem;">Only an admin can change these.</div>')
@@ -22405,10 +22522,19 @@ async function _saveTerminalCoord(term, inputId){
     return;
   }
   // Catches a transposed or mistyped pair before it ever routes a driver somewhere absurd.
+  // Threshold and behavior both tightened after the downtown-Atlanta misroute (see
+  // _resolvedTerminalCoords' own comment): this was 25 miles behind a click-through confirm(),
+  // which let a ~10-mile-off coordinate through without even asking. It's now the same
+  // TERMINAL_OVERRIDE_MAX_MILES the navigation path itself enforces, and it's a hard stop
+  // rather than a prompt - saving a value that navigation is guaranteed to ignore would just
+  // leave the card reading "Custom" while drivers quietly got routed somewhere else.
   var builtin = TERMINAL_COORDS_BUILTIN[term]||'';
   if(builtin){
     var miles = _latLngMilesApart(v, builtin);
-    if(miles > 25 && !confirm('That point is about '+Math.round(miles)+' miles from where '+term+' normally is. That usually means a typo or a swapped lat/long. Save it anyway?')) return;
+    if(miles > TERMINAL_OVERRIDE_MAX_MILES){
+      showToast('That point is about '+Math.round(miles)+' miles from '+term+' \u2014 too far to be a curb correction. Check for a typo or a swapped lat/long.','error');
+      return;
+    }
   }
   globalSettings = globalSettings || {};
   globalSettings.terminalCoordOverrides = globalSettings.terminalCoordOverrides || {};
@@ -23079,7 +23205,7 @@ async function saveTemplateField(scope, key){
     // just kept live instead of one-time. Only a genuinely non-empty edit propagates -
     // clearing his personal field (val==='') must never cascade into wiping the shared
     // default as a side effect.
-    if(val && map.global && currentUser && currentUser.name==='Chase'){
+    if(val && map.global && isTemplateAuthority()){
       globalSettings = globalSettings || {};
       globalSettings[map.global] = val;
       await storageSet('kat:globalSettings', globalSettings);
@@ -23164,7 +23290,7 @@ async function savePerTerminalPickupInstructions(silent){
     // filled in - never touches another driver's personal customization, and clearing his own
     // field (byTerm empty) never cascades into wiping the shared default as a side effect.
     var _promotedToDefault = false;
-    if(Object.keys(byTerm).length && currentUser && currentUser.name==='Chase'){
+    if(Object.keys(byTerm).length && isTemplateAuthority()){
       globalSettings = globalSettings || {};
       globalSettings.defaultPickupInstructionsByTerminal = byTerm;
       await storageSet('kat:globalSettings', globalSettings);
@@ -23335,7 +23461,7 @@ function renderAccessControl(){
 
 async function toggleUserAccess(userName, el){
   if(!requireAdmin('change user access')) return;
-  if(userName==='Chase'){ if(el) el.checked=true; showToast("Chase's account can't be disabled — it controls subscription access",'error'); return; }
+  if(isOwnerAccount(userName)){ if(el) el.checked=true; showToast(OWNER_NAME+"'s account can't be disabled — it controls subscription access",'error'); return; }
   const u = USERS.find(x=>x.name===userName);
   if(!u) return;
   const want = !el.checked;                 // desired "disabled" state
@@ -25071,12 +25197,160 @@ function calcCostPerMile(driverName, veh){
   return (gasPrice / mpg) + maintRate;
 }
 
+// ONE authoritative "net take-home for this calendar month" calculation — used by the
+// Dashboard's income box. Reported directly, with two screenshots: the Dashboard and the
+// Income page showed genuinely different NET numbers for the identical month ($-74.65 vs
+// $-85.90), because they were two independently-written formulas. Traced the gap: the OLD
+// Dashboard formula only ever knew about fares, tips, vehicle cost, 15% fees OWED, and monthly
+// expenses — it never accounted for 15% fees RECEIVED (money owed TO this driver when someone
+// else drives one of their clients) or Kat/Morgan dispatch pay, both of which the Income page's
+// fuller formula already correctly included. This function assembles the same complete set of
+// categories the Income page uses, from the same shared primitives (clientFeeRate,
+// _feeWaivedForRide, getClientOwner, feeOwnerFor, kmScheduledPayForRange, getMonthlyExpenseTotal,
+// calcCostPerMile) rather than re-deriving any of that math independently — so there's exactly
+// one net formula in the app now, not two that can silently drift apart the way they already had.
+// Scoped deliberately to "this calendar month, personal view, no pay-method filter" — the exact
+// scope the Dashboard box has always shown; the Income page's own weekly/yearly/custom-range
+// tabs and pay-filter chips are a display feature for that page specifically and intentionally
+// stay out of this shared function.
+function calcNetTakeHomeForMonth(dName){
+  if(!dName) return { gross:0, tips:0, net:0, count:0 };
+  const now = nowET();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const end   = new Date(now.getFullYear(), now.getMonth()+1, 0, 23,59,59);
+  const inMonth = r => { if(!r.date) return false; const d=new Date(r.date+'T12:00:00'); return d>=start && d<=end; };
+  // Only count PAID rides (plus logged outside cash) — kept identical, by hand, to the Income
+  // page's own _incEarned; a one-line boolean isn't worth its own shared-function indirection.
+  const isCompleted = r => r.status!=='cancelled' && (r.status==='paid' || r._outside);
+
+  let monthRides = rides.filter(r => inMonth(r) && parseFloat(r.price||0)>0 && r.driver===dName && isCompleted(r));
+  const outsideRidesThisMonth = getMyOutsideRidesAsRides().filter(r => inMonth(r) && parseFloat(r.price||0)>0 && isCompleted(r));
+  monthRides = monthRides.concat(outsideRidesThisMonth);
+
+  const gross = monthRides.reduce((s,r)=>s+parseFloat(r.price||0),0);
+  const tips  = monthRides.reduce((s,r)=>s+parseFloat(r.tip||0),0);
+  const count = monthRides.length;
+
+  // Vehicle cost over every mile driven, including outside rides (the outside-ride entry form
+  // promises gas & maintenance are deducted from those miles too — same reasoning the Income
+  // page's own comment gives). One combined rate via calcCostPerMile() — mathematically
+  // identical to the Income page's separately-tracked gas + maintenance totals (same
+  // gasPrice/mpg + maintRate formula), just composed once instead of split into two running
+  // sums that have to be kept in sync by hand.
+  // Vehicle cost is summed PER RIDE from each ride's own stamped cost basis, not one live rate
+  // applied to every mile. Changing the gas price must not re-price rides already recorded -
+  // see _rideCostBasis/_stampRideCostBasis. Rides predating the stamp fall back to the live
+  // rate inside _rideCostBasis, which is exactly the previous behavior for that older data.
+  const totalMiles = monthRides.reduce((s,r)=>s+(parseFloat(r.drivenMiles||r.miles||0)),0);
+  const vehicleCost = monthRides.reduce(function(s,r){
+    var mi = parseFloat(r.drivenMiles||r.miles||0)||0;
+    return s + mi * _rideCostBasis(r).cpm;
+  },0);
+
+  // 15% finder fees OWED BY this driver — driving another owner's client, fee not waived.
+  let feeCost = 0;
+  monthRides.forEach(r=>{
+    if(r._outside) return;
+    const fare = parseFloat(r.price||0);
+    const owner = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
+    if(owner && owner!==dName){
+      const fp = feePayments[owner+':recv:'+dName]||{};
+      if(!_feeWaivedForRide(fp, r)) feeCost += Math.round(fare*clientFeeRate()*100)/100;
+    }
+  });
+
+  // 15% finder fees OWED TO this driver — someone else drove one of THIS driver's clients this
+  // month. This is the category the old Dashboard formula omitted entirely.
+  let feesReceived = 0;
+  rides.forEach(r=>{
+    if(r.driver===dName) return;
+    if(!r.date || parseFloat(r.price||0)===0) return;
+    if(!isCompleted(r) || !inMonth(r)) return;
+    const fare = parseFloat(r.price||0);
+    const owner = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
+    if(owner===dName){
+      const fp = feePayments[dName+':recv:'+r.driver]||{};
+      if(!_feeWaivedForRide(fp, r)) feesReceived += fare*clientFeeRate();
+    }
+  });
+
+  // Kat/Morgan dispatch (scheduling) pay for this calendar month — the other category the old
+  // Dashboard formula omitted entirely.
+  const dispatchPay     = (typeof kmVisible==='function' && kmVisible() && !kmIsKat()) ? kmScheduledPayForRange(start,end) : 0;
+  const dispatchPayOwed = (typeof kmVisible==='function' && kmVisible() && kmIsKat())  ? kmScheduledPayForRange(start,end) : 0;
+
+  const monthlyExp = getMonthlyExpenseTotal();
+  const net = gross + tips + feesReceived + dispatchPay - dispatchPayOwed - vehicleCost - feeCost - monthlyExp;
+  return { gross, tips, net, count };
+}
+
+// ── COST BASIS SNAPSHOT ──────────────────────────────────────────────────────
+// Requested directly: changing the gas price must NOT recalculate rides that are already
+// entered and saved - only rides going forward. Before this, every vehicle-cost figure in the
+// app was computed LIVE from DRIVER_PROFILES[...].gasPrice at render time, so editing the gas
+// price silently rewrote the vehicle cost - and therefore the Net take-home - of every ride
+// ever recorded, retroactively, across every past month. Nothing was stored per ride.
+//
+// A ride's cost basis is now STAMPED ONCE, the first time that ride reaches a point where its
+// cost is real (miles logged, or marked paid), and never overwritten after that. Later gas
+// price edits apply only to rides stamped after the change.
+//
+// The components are stored alongside the combined rate, not just the final number, so a past
+// ride can always be explained ("$3.39/gal at 23.5 mpg") rather than just asserted - and so the
+// Income page can still break gas and maintenance into separate cards for historical rides.
+function _rideCostBasis(ride){
+  var b = ride && ride.cpmBasis;
+  if(b && isFinite(parseFloat(b.cpm))){
+    return {
+      cpm:      parseFloat(b.cpm)||0,
+      gasCpm:   parseFloat(b.gasCpm)||0,
+      maintCpm: parseFloat(b.maintCpm)||0,
+      stamped:  true
+    };
+  }
+  // No stamp: an older ride recorded before this existed. Fall back to the live rate, which is
+  // exactly the old behavior - so nothing changes for historical data until it gets stamped.
+  var dName = ride && ride.driver;
+  var veh   = (typeof rideVehicle==='function' && ride) ? rideVehicle(ride) : null;
+  var prof  = (typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[dName]) || {};
+  var src   = veh || {};
+  var _pick = function(a,b){ return (a!=null && a!=='') ? a : b; };
+  var mpg       = parseFloat(_pick(src.mpg, prof.mpg))||0;
+  var gasPrice  = parseFloat(_pick(src.gasPrice, prof.gasPrice))||3.50;
+  var maintRate = parseFloat(_pick(src.maintRate, prof.maintRate))||IRS_MAINTENANCE_RATE;
+  var gasCpm    = mpg ? (gasPrice/mpg) : 0;
+  return { cpm: gasCpm + maintRate, gasCpm: gasCpm, maintCpm: maintRate, stamped:false };
+}
+// Stamps the CURRENT rate onto a ride, once. Deliberately never overwrites an existing stamp:
+// re-logging miles or re-marking a ride paid must not silently re-price it at today's rate,
+// which would reintroduce exactly the retroactive drift this exists to prevent.
+function _stampRideCostBasis(ride){
+  try{
+    if(!ride || ride.cpmBasis) return;            // already stamped - leave it alone
+    var dName = ride.driver; if(!dName) return;   // no driver yet: nothing to price against
+    var veh   = (typeof rideVehicle==='function') ? rideVehicle(ride) : null;
+    var prof  = (typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[dName]) || {};
+    var src   = veh || {};
+    var _pick = function(a,b){ return (a!=null && a!=='') ? a : b; };
+    var mpg       = parseFloat(_pick(src.mpg, prof.mpg))||0;
+    var gasPrice  = parseFloat(_pick(src.gasPrice, prof.gasPrice))||3.50;
+    var maintRate = parseFloat(_pick(src.maintRate, prof.maintRate))||IRS_MAINTENANCE_RATE;
+    var gasCpm    = mpg ? (gasPrice/mpg) : 0;
+    ride.cpmBasis = {
+      cpm: gasCpm + maintRate, gasCpm: gasCpm, maintCpm: maintRate,
+      gasPrice: gasPrice, mpg: mpg, maintRate: maintRate,
+      vehicle: (src.label||prof.vehicle||''), at: Date.now()
+    };
+  }catch(e){ console.warn('_stampRideCostBasis failed (non-fatal)', e); }
+}
 function getRideVehicleCost(ride){
   const dName = ride.driver;
   if(!dName) return 0;
   const miles = parseFloat(ride.miles)||0;
   if(!miles) return 0;
-  return miles * calcCostPerMile(dName, rideVehicle(ride)); // use the ride's chosen vehicle
+  // Uses the rate STAMPED on this ride when it was completed - not today's gas price - so an
+  // edit to the gas price can never retroactively re-price a ride that's already recorded.
+  return miles * _rideCostBasis(ride).cpm;
 }
 
 // ── SHAREABLE DRIVER CARDS (available to everyone) ──
@@ -25232,7 +25506,7 @@ function getMyDriverName(){
 let pwModalTarget = null; // null = self, or a username string (admin changing someone else)
 
 function openPwModal(targetName){
-  if(targetName==='Chase' && currentUser?.name!=='Chase'){ showToast("Only Chase can change Chase's password",'error'); return; }
+  if(isOwnerAccount(targetName) && !isCurrentUserOwner()){ showToast('Only '+OWNER_NAME+' can change '+OWNER_NAME+"'s password",'error'); return; }
   pwModalTarget = targetName; // null = changing own password
   const targetUser = targetName ? USERS.find(u=>u.name===targetName) : currentUser;
   const isSelf = !targetName || targetName===currentUser.name;
@@ -25249,7 +25523,7 @@ function closePwModal(){
   pwModalTarget=null;
 }
 async function submitPasswordChange(){
-  if(pwModalTarget==='Chase' && currentUser?.name!=='Chase'){ const _e=document.getElementById('pw-error'); if(_e) _e.textContent="Only Chase can change Chase's password."; return; }
+  if(isOwnerAccount(pwModalTarget) && !isCurrentUserOwner()){ const _e=document.getElementById('pw-error'); if(_e) _e.textContent='Only '+OWNER_NAME+' can change '+OWNER_NAME+"'s password."; return; }
   const isSelf = !pwModalTarget || pwModalTarget===currentUser.name;
   const targetUser = pwModalTarget ? USERS.find(u=>u.name===pwModalTarget) : currentUser;
   const currentPw = document.getElementById('pw-current').value;
@@ -25575,7 +25849,7 @@ const BETA_HIDE_BILLING_STATUS_UI = true;
 const FREE_ACCESS_USERS = ['Kat','Chase','Morgan'];
 
 // Only Chase may grant or revoke complimentary billing status (display only — see above).
-function canGrantFreeAccess(){ return !!(currentUser && currentUser.name === 'Chase'); }
+function canGrantFreeAccess(){ return isCurrentUserOwner(); }
 
 function hasIncomeAccessFor(name){ return !!name; }
 function hasIncomeAccess(){ return !!currentUser; }
@@ -25970,10 +26244,21 @@ function renderIncome(){
   const driverProf     = (personalView && dName) ? (DRIVER_PROFILES[dName]||{}) : {};
   const driverMpg      = parseFloat(driverProf.mpg)||0;
   const driverGasPrice = parseFloat(driverProf.gasPrice)||3.50;
-  const gasCpm         = driverMpg ? driverGasPrice/driverMpg : 0;
-  const maintCpm       = parseFloat(driverProf.maintRate)||IRS_MAINTENANCE_RATE;
-  const totalGasCost   = personalView ? totalMiles * gasCpm   : 0;
-  const totalMaintCost = personalView ? totalMiles * maintCpm : 0;
+  // Gas and maintenance are summed PER RIDE from each ride's own stamped cost basis rather than
+  // one live rate times total miles - so editing the gas price never re-prices rides already
+  // recorded (see _rideCostBasis/_stampRideCostBasis). Rides stamped at different gas prices
+  // therefore contribute at their own rates, which is the whole point.
+  const totalGasCost   = personalView ? myMilesRides.reduce(function(s,r){
+    return s + (parseFloat(r.drivenMiles||r.miles||0)||0) * _rideCostBasis(r).gasCpm;
+  },0) : 0;
+  const totalMaintCost = personalView ? myMilesRides.reduce(function(s,r){
+    return s + (parseFloat(r.drivenMiles||r.miles||0)||0) * _rideCostBasis(r).maintCpm;
+  },0) : 0;
+  // The rate shown on each card is now the EFFECTIVE rate actually charged across this period
+  // (cost divided by miles), not the current setting - otherwise a period spanning a gas-price
+  // change would display a rate that doesn't reconcile with the dollar figure beside it.
+  const gasCpm         = totalMiles ? (totalGasCost/totalMiles)   : (driverMpg ? driverGasPrice/driverMpg : 0);
+  const maintCpm       = totalMiles ? (totalMaintCost/totalMiles) : (parseFloat(driverProf.maintRate)||IRS_MAINTENANCE_RATE);
   const totalVehicleCost = totalGasCost + totalMaintCost;
   // 15% finder fees the driver owes on OTHER people's clients — computed the same way as the
   // My Fares table, so every "Net Take-Home" on this page agrees.
@@ -25989,6 +26274,14 @@ function renderIncome(){
         // matching the accrual behavior every other total on this page already has.
         const fp = feePayments[owner+':recv:'+dName]||{};
         if(incPayFilter.length && !incPayFilter.includes(_feePaymentMethodForRide(fp, r.id))) return;
+        // BUG FIX, reported directly: Dashboard's Net and this page's Net disagreed by exactly
+        // one waived fee's amount, because this loop charged a fee unconditionally whenever the
+        // ride belonged to another owner's client - it never checked whether that specific fee
+        // had actually been waived or already settled, the same class of bug the Dashboard's
+        // own feeCost calculation was fixed for earlier (see that function's own comment). A
+        // waived fee still reduced this page's "Net Take-Home" exactly as if it had genuinely
+        // been charged. Now checked the same way, with the same shared function.
+        if(_feeWaivedForRide(fp, r)) return;
         totalFinderFees += fare*clientFeeRate();
       }
     });
@@ -26023,6 +26316,9 @@ function renderIncome(){
       if(owner===dName){
         const fp = feePayments[dName+':recv:'+r.driver]||{};
         if(incPayFilter.length && !incPayFilter.includes(_feePaymentMethodForRide(fp, r.id))) return;
+        // Same fix as totalFinderFees just above, mirrored: a fee owed TO this driver can be
+        // waived too, and must be excluded the same way.
+        if(_feeWaivedForRide(fp, r)) return;
         totalFeesReceived += fare*clientFeeRate();
       }
     });
@@ -27417,7 +27713,7 @@ async function approveRelease(reqId){
     req.status='pending';
     await saveClientRequests();
     // Notify remaining admins
-    const ADMINS_LIST=['Kat','Chase','Morgan'];
+    const ADMINS_LIST=adminNames();
     ADMINS_LIST.forEach(function(a){
       if(!req.approvals.includes(a)){
         addNotification(USER_DRIVER_MAP[a]||PROXY_MAP[a]||a,{id:reqId,client:req.clientName},'admin_release',
@@ -28719,6 +29015,22 @@ async function sendClientVCardToDriver(id){
   showToast('Could not prepare contact','error'); return false;
 }
 
+// Lets ANYONE viewing this ride's detail card download the client's contact straight from
+// the phone row — deliberately NOT the same function as sendClientVCardToDriver above, which
+// is scoped to the assigned driver specifically and behaves differently for everyone else
+// (share-sheet instead of a direct download). This is a plain "save this client's info" action
+// available to whoever can see the phone number at all (same canSeeContact gate the phone row
+// itself already uses). Reuses buildClientVCard() unchanged, so the saved contact name is
+// always "Client (Scheduler)" — e.g. "Natalie Coleman (Kat)" — identically to every other vCard
+// this app produces, and reuses _downloadVCardFile() unchanged, the same real-return-value
+// download helper already proven out by sendClientVCardToDriver/sendClientPhone above.
+function saveClientContactCard(id){
+  const r=_rideById(id); if(!r||!r.client) return;
+  const vcf=(window._confFilesMap&&window._confFilesMap[id]&&window._confFilesMap[id].vcard) || buildClientVCard(r);
+  if(_downloadVCardFile(vcf)) showToast('\uD83D\uDCC7 '+(r.client||'Client')+'\u2019s contact saved');
+  else showToast('Could not save contact','error');
+}
+
 // Send client's phone number to the assigned driver(s), for a specific ride's context
 // (e.g. "For your AP RUN on 2026-07-19 at 6:00 AM") — genuinely separate from
 // sendClientVCardToDriver above: that one is pure contact info with no ride-specific
@@ -28844,21 +29156,35 @@ async function toggleAutoSurcharge(driverName, type){
   var human={premium:'Premium hours',traffic:'Traffic',holiday:'Holiday',christmas:'Christmas',fuel:'Fuel'}[type]||type;
   showToast(ds.autoOff[type]?(human+' auto-add OFF \u2014 you can still add it manually'):(human+' auto-add ON'));
 }
-function togglePaymentMethod(driverName, method){
+async function togglePaymentMethod(driverName, method){
   if(!driverSettings[driverName]) driverSettings[driverName]={};
   if(!Array.isArray(driverSettings[driverName].paymentMethods))
     driverSettings[driverName].paymentMethods=[];
   const arr=driverSettings[driverName].paymentMethods;
   const idx=arr.indexOf(method);
   if(idx>=0) arr.splice(idx,1); else arr.push(method);
-  saveDriverSettings();
-  // Update the button UI without full re-render
+  // Update the button UI right away so the tap feels instant...
   const btn=document.getElementById('pay-'+driverName.replace(/ /g,'_')+'-'+method.replace(/ /g,'_'));
-  if(btn){
+  function _paintBtn(){
+    if(!btn) return;
     const on=arr.includes(method);
     btn.style.background=on?'#7c3aed':'var(--white)';
     btn.style.color=on?'#fff':'var(--black)';
     btn.style.borderColor=on?'#7c3aed':'var(--light)';
+  }
+  _paintBtn();
+  // ...but the UI update above is optimistic, so the save itself must be trustworthy: targeted
+  // to THIS driver only (never the whole-collection saveDriverSettings() this used to call,
+  // which would silently overwrite every other driver's in-memory data too - the same clobber
+  // shape the v862-874 fixes closed everywhere else), and on failure the toggle is reverted and
+  // the person is told, instead of the button lying about what actually got saved.
+  try{
+    await saveDriverSettings(driverName);
+  }catch(e){
+    console.warn('togglePaymentMethod save failed, reverting', e);
+    if(idx>=0) arr.splice(idx,0,method); else { const revertIdx=arr.indexOf(method); if(revertIdx>=0) arr.splice(revertIdx,1); }
+    _paintBtn();
+    if(typeof showToast==='function') showToast('Could not save — check your connection and try again','error');
   }
 }
 
@@ -29113,6 +29439,12 @@ async function handleFeePaidChange(cb){
   const dName=row.dataset.dname;
   const {start,end}=getIncomeDateRange();
   renderFinderFees(dName,start,end);
+  // Marking a fee paid/unpaid changes Net take-home, so income has to recalculate too - the
+  // same gap fixed across every other fee mutator. The "avoids focus flicker" note above refers
+  // to the inline strike-through, but renderFinderFees() on the line above already rebuilds this
+  // entire section (including the row holding the checkbox) via innerHTML, so that concern
+  // doesn't argue against a full refresh here - the re-render happens either way.
+  _refreshAfterFeeChange();
 }
 async function handleFeeMethodChange(sel){
   const row=sel.closest('[data-dname]'); if(!row) return;
@@ -29120,6 +29452,12 @@ async function handleFeeMethodChange(sel){
   if(!feePayments[key]) feePayments[key]={};
   feePayments[key].method=sel.value;
   await saveFeePayments(key);
+  // Changing only the METHOD (Venmo vs Zelle vs cash) doesn't change whether a fee is owed, so
+  // this looks like it shouldn't affect income - but the Income page's totals are filterable BY
+  // payment method (totalFinderFees/totalFeesReceived both skip rides whose method isn't in
+  // incPayFilter). With a filter active, re-labelling a fee's method genuinely moves it in or
+  // out of the totals, so this has to refresh alongside every other fee mutator.
+  _refreshAfterFeeChange();
 }
 
 // Shows who owes you (clients you own, driven by others) and who you owe (others' clients you drove).
@@ -29147,8 +29485,13 @@ function renderFinderFees(dName, start, end){
     if(!owner || !driver || owner===driver) return;
     const fare = parseFloat(r.price)||0;
     const fee  = fare*clientFeeRate();
-    if(owner===dName){ const _sk=dName+':recv:'+driver; const _sf=feePayments[_sk]||{}; if(_sf.paid||_sf.waived) return; const k=driver; (owedToMe[k]=owedToMe[k]||{fare:0,fee:0,count:0}); owedToMe[k].fare+=fare; owedToMe[k].fee+=fee; owedToMe[k].count++; }
-    if(driver===dName){ const _sk=dName+':owe:'+owner; const _sf=feePayments[_sk]||{}; if(_sf.paid||_sf.waived) return; const k=owner; (iOwe[k]=iOwe[k]||{fare:0,fee:0,count:0}); iOwe[k].fare+=fare; iOwe[k].fee+=fee; iOwe[k].count++; }
+    // Upgraded from a flat fp.waived/fp.paid check to the real shared _feeWaivedForRide() -
+    // that flat check only ever caught a blanket waiver, missing both date-ranged waivers
+    // (fp.waiveFrom/waiveUntil) and per-ride waivers (fp.waivedRides), the same gap just fixed
+    // on the Income page's own fee totals just above. A ride waived only individually (not
+    // blanket) would have still shown up here as owed.
+    if(owner===dName){ const _sk=dName+':recv:'+driver; const _sf=feePayments[_sk]||{}; if(_sf.paid||_feeWaivedForRide(_sf, r)) return; const k=driver; (owedToMe[k]=owedToMe[k]||{fare:0,fee:0,count:0}); owedToMe[k].fare+=fare; owedToMe[k].fee+=fee; owedToMe[k].count++; }
+    if(driver===dName){ const _sk=dName+':owe:'+owner; const _sf=feePayments[_sk]||{}; if(_sf.paid||_feeWaivedForRide(_sf, r)) return; const k=owner; (iOwe[k]=iOwe[k]||{fare:0,fee:0,count:0}); iOwe[k].fare+=fare; iOwe[k].fee+=fee; iOwe[k].count++; }
   });
 
   const totOwedToMe = Object.values(owedToMe).reduce((s,v)=>s+v.fee,0);
@@ -30131,7 +30474,6 @@ async function generateYearEndPL(){
   // money they actually kept (already net of any Uber/Lyft/other-provider fees),
   // so no 15% fee applies. Gas & maintenance are auto-deducted from the driver's
   // profile per-mile rates in both cases.
-  const cpm = calcCostPerMile(dName);   // gas $/mi + maintenance $/mi from profile
   // CASH BASIS: income is money actually RECEIVED. A past ride nobody has paid is a
   // receivable, not income — it's reported separately below so nothing is hidden.
   // This matches the Income page exactly, so the two can never disagree.
@@ -30158,8 +30500,11 @@ async function generateYearEndPL(){
     // paid should never reduce it, the same fix applied to renderDashIncome for the same reason.
     const _fpYepl = (owner && owner!==dName) ? (feePayments[owner+':recv:'+dName]||{}) : null;
     const fee = (owner && owner!==dName && !_feeWaivedForRide(_fpYepl, r)) ? fare*clientFeeRate() : 0;
-    const gas   = mi * (parseFloat((DRIVER_PROFILES[dName]||{}).mpg)? (parseFloat((DRIVER_PROFILES[dName]||{}).gasPrice||3.50)/parseFloat((DRIVER_PROFILES[dName]||{}).mpg)) : 0);
-    const maint = mi * (parseFloat((DRIVER_PROFILES[dName]||{}).maintRate)||IRS_MAINTENANCE_RATE);
+    // Year-end P&L must reflect what a ride ACTUALLY cost when it happened, not today's gas
+    // price - otherwise editing the gas price silently restates an already-filed tax year.
+    const _cb   = _rideCostBasis(r);
+    const gas   = mi * _cb.gasCpm;
+    const maint = mi * _cb.maintCpm;
     const profit = fare + tip - fee - gas - maint;
     allTrips.push({date:r.date, client:r.client||'', purpose:(r.type||'Passenger transport'), payment:r.payment||'', tipPayment:(r.tipPayment||r.payment||''), owner:owner||'', miles:mi, fare, tip, fee, maint, gas, profit, _src:'app'});
   });
@@ -30173,8 +30518,11 @@ async function generateYearEndPL(){
     const pfee  = parseFloat(o.providerFee)||0;
     const fare  = gross>0 ? gross : Math.max(0, kept - tip);
     const mi   = parseFloat(o.miles||0)||0;
-    const gas   = mi * (parseFloat((DRIVER_PROFILES[dName]||{}).mpg)? (parseFloat((DRIVER_PROFILES[dName]||{}).gasPrice||3.50)/parseFloat((DRIVER_PROFILES[dName]||{}).mpg)) : 0);
-    const maint = mi * (parseFloat((DRIVER_PROFILES[dName]||{}).maintRate)||IRS_MAINTENANCE_RATE);
+    // Same stamped-basis rule as app rides above: an outside ride keeps the rate it was
+    // recorded at, so a later gas-price edit can't restate a closed tax year.
+    const _cbo  = _rideCostBasis(Object.assign({driver:dName}, o));
+    const gas   = mi * _cbo.gasCpm;
+    const maint = mi * _cbo.maintCpm;
     const profit = fare + tip - pfee - gas - maint;   // no 15% client fee on outside rides
     allTrips.push({date:o.date, client:(o.client||'Outside ride')+' (outside)', purpose:(o.type||'Outside ride'), payment:(o.payment||o.type||'OUTSIDE'), tipPayment:(o.payment||o.type||'OUTSIDE'), providerFee:pfee, owner:'', miles:mi, fare, tip, fee:0, maint, gas, profit, _src:'outside'});
   });
@@ -30961,9 +31309,9 @@ function enterApp(){
   // the quote price-review tool, not isAdmin() (which also covers Kat). Deliberate: this
   // deletes data immediately with no approval and no undo, scoped tighter than the rest of the
   // admin surface on purpose.
-  if(fwReviewBtn) fwReviewBtn.style.display = (currentUser && (currentUser.name==='Chase' || currentUser.name==='Morgan') && typeof _findSuspiciousFamilyWallRides==='function' && typeof _findDuplicateRideGroups==='function' && (_findSuspiciousFamilyWallRides().length>0 || _findDuplicateRideGroups().length>0)) ? 'inline-block' : 'none';
+  if(fwReviewBtn) fwReviewBtn.style.display = (canReviewData() && typeof _findSuspiciousFamilyWallRides==='function' && typeof _findDuplicateRideGroups==='function' && (_findSuspiciousFamilyWallRides().length>0 || _findDuplicateRideGroups().length>0)) ? 'inline-block' : 'none';
   const quotePriceReviewBtn = document.getElementById('quote-price-review-btn');
-  if(quotePriceReviewBtn) quotePriceReviewBtn.style.display = (currentUser && (currentUser.name==='Chase' || currentUser.name==='Morgan') && typeof _findMispricedSavedQuotes==='function' && _findMispricedSavedQuotes().length>0) ? 'inline-block' : 'none';
+  if(quotePriceReviewBtn) quotePriceReviewBtn.style.display = (canReviewData() && typeof _findMispricedSavedQuotes==='function' && _findMispricedSavedQuotes().length>0) ? 'inline-block' : 'none';
   const archivedTab2=document.getElementById('mptab-archived'); if(archivedTab2) archivedTab2.style.display=admin?'inline-block':'none';
   const pricingTab2=document.getElementById('mptab-pricing'); if(pricingTab2) pricingTab2.style.display=admin?'inline-block':'none';
   const templatesTab=document.getElementById('mptab-templates');
@@ -30971,7 +31319,7 @@ function enterApp(){
     const _myN=getMyDriverName();
     const _myC=(driverSettings && driverSettings[_myN])||{};
     const _hasCustom=!!(_myC.confTemplate || _myC.pickupInstructions || _myC.arrivalTemplate);
-    const _isChase=!!(currentUser && currentUser.name==='Chase');
+    const _isChase=isTemplateAuthority();
     templatesTab.style.display=(_isChase||_hasCustom)?'inline-block':'none';
   }
 
@@ -33881,7 +34229,7 @@ function _escalateTransfers(){
       if(!t) return;
       if(now-t >= 24*60*60*1000){
         // Original driver never responded in 24h — now alert the admins.
-        ['Kat','Chase','Morgan'].forEach(function(adminName){
+        adminNames().forEach(function(adminName){
           addNotification(adminName, {id:req.id, client:req.clientName}, 'transfer_request',
             '\u23f0 Needs review: '+((req.toDriver||'A driver').split(' ')[0])+' asked to take over '+req.clientName+
             ' from '+((req.fromDriver||'').split(', ').map(function(d){return d.split(' ')[0];}).join(', '))+
