@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191138">
+<meta name="version" content="202608191140">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -7838,10 +7838,31 @@ function addNotification(driverName, ride, action, customMsg, forceNow){
   // a ride already underway) still notify immediately - there's no "later today" to wait for.
   // forceNow=true bypasses this specifically for notifyMyAssignedDrivers()'s own release
   // step below, reusing this exact same message/push logic rather than a second copy of it.
+  // Direct request: a driver is now told the MOMENT they're assigned, for any date - the
+  // Notify Drivers release step no longer gates this (its banner is hidden; see
+  // _renderFinalizeTomorrowInto). What follows is deliberately NOT simply deleting the old
+  // hold-back, because the hold-back was doing two jobs at once and only one of them is
+  // unwanted.
+  //
+  // Job 1 (removed): delaying the actual notification. Gone - the push fires immediately below.
+  // Job 2 (KEPT, and this is the important one): delaying the start of the accept/reject
+  // clock. driverNotifiedAt starts a ONE HOUR window after which _checkAutoAcceptRides()
+  // treats silence as acceptance. Starting that at assignment time for a ride two weeks out is
+  // precisely the bug the hold-back was originally built to fix - assign at 11pm, driver is
+  // asleep, ride auto-accepts before they ever see it. Notifying early is good; auto-accepting
+  // early is not, and they are not the same thing.
+  //
+  // So: the notification goes out now, and the accept window is armed only once the ride is
+  // actually near (today or tomorrow). For anything further out, driverNotifiedAt is left
+  // UNSET, which _checkAutoAcceptRides() already requires before it will auto-accept anything -
+  // so no extra guard is needed there. _armAcceptWindowForNearRides() below starts the clock
+  // when the ride comes into range.
   var _todayStr = _todayDateStr();
-  if(!forceNow && action==='assigned' && ride && ride.date>_todayStr){
+  var _isNear = !ride || !ride.date || ride.date<=_tomorrowDateStr();
+  if(action==='assigned' && ride && !_isNear){
+    // Still recorded so the owner-side "not yet released" tracking and any future reinstatement
+    // of Notify Drivers keep working unchanged - this flag is read, not required, by the rest.
     ride.assignNotifyPending = true;
-    return;
   }
   if(!notifications[driverName]) notifications[driverName]=[];
   const msg = customMsg || (action==='assigned'
@@ -7851,12 +7872,14 @@ function addNotification(driverName, ride, action, customMsg, forceNow){
   notifications[driverName].unshift({ rideId:ride.id, type:action, channel:(ride&&ride.channel)||null, read:false, msg, ts:Date.now(), createdBy:currentUser?.name||'' });
   // Fire push notification to driver's phone
   if(action==='assigned'){
-    // Starts the accept/reject window right here - the one true moment the driver actually
-    // gets told, whether that's immediately (same-day) or only now, after a delayed future
-    // assignment was finally released via Notify Drivers. A reassignment (this firing again
-    // for the same ride) correctly restarts the clock, since it's a genuinely new ask.
-    ride.driverNotifiedAt = Date.now();
+    // The push goes out NOW regardless of how far out the ride is - that's the point of the
+    // change. The accept/reject CLOCK is what's conditional: armed only when the ride is today
+    // or tomorrow, left unset otherwise so _checkAutoAcceptRides() (which requires
+    // driverNotifiedAt) can't auto-accept a ride the driver has had no fair chance to answer.
+    // _armAcceptWindowForNearRides() starts it later, when the ride comes into range.
     ride.driverResponse = 'pending';
+    if(_isNear) ride.driverNotifiedAt = Date.now();
+    else delete ride.driverNotifiedAt;   // a reassignment pushed further out must not keep an old clock
     sendPushToDriver(driverName, '🚗 New ride assigned — NWDA', `${ride.client} · ${fmtDateShort(ride.date)} ${ride.time||''}`, {rideId: ride.id});
   } else if(action==='transfer_request'){
     sendPushToDriver(driverName, '⇄ Client transfer request — NWDA', msg);
@@ -7965,6 +7988,33 @@ const ACCEPT_WINDOW_MS = 60*60*1000; // 1 hour
 // refresh, since there's no server-side timer in this app's architecture. This means the
 // auto-accept lands the next time anyone's device happens to check, not at the exact minute
 // the hour elapses - an accepted assumption of "good enough," not a live countdown.
+// Arms the accept/reject window for rides that were assigned well in advance. Those drivers
+// were already told at assignment time (the push fires immediately now), but their one-hour
+// clock was deliberately left unstarted so a ride two weeks out couldn't auto-accept overnight.
+// This starts that clock once the ride is actually today or tomorrow, and sends a short
+// reminder push at the same time so the hour doesn't begin silently.
+//
+// Runs alongside _checkAutoAcceptRides() on the same load/refresh sweeps - same "good enough,
+// lands next time a device checks" model, since this app has no server-side timer.
+function _armAcceptWindowForNearRides(){
+  var changed = false;
+  var tomorrow = _tomorrowDateStr();
+  (rides||[]).forEach(function(r){
+    if(!r || r.status==='cancelled') return;
+    if(r.driverResponse!=='pending') return;     // already answered, or never assigned
+    if(r.driverNotifiedAt) return;               // clock already running
+    if(!r.driver || !r.date) return;
+    if(r.date > tomorrow) return;                // still too far out - leave it unarmed
+    r.driverNotifiedAt = Date.now();
+    r.assignNotifyPending = false;
+    changed = true;
+    try{
+      sendPushToDriver(r.driver, '\u23f0 Ride coming up \u2014 confirm? \u2014 NWDA',
+        (r.client||'A client')+' \u00b7 '+(fmtDateShort(r.date)||'')+' '+(r.time||''), {rideId: r.id});
+    }catch(e){}
+  });
+  if(changed){ try{ saveRides(); }catch(e){} }
+}
 function _checkAutoAcceptRides(){
   var now = Date.now();
   var changed = false;
@@ -19643,7 +19693,8 @@ function refreshDash(){
 
   // No server-side timer in this architecture - this is the closest thing to one: catches
   // up any ride whose hour has quietly elapsed since the last time anything checked.
-  try{ _checkAutoAcceptRides(); }catch(e){}
+  try{ _armAcceptWindowForNearRides(); }catch(e){}   // start the clock for rides that just came into range...
+  try{ _checkAutoAcceptRides(); }catch(e){}          // ...then apply the hour to anything already running
   try{ renderDashPendingAccept(); }catch(e){}
 
   // Morgan dispatch counter
@@ -19842,8 +19893,20 @@ function refreshDash(){
 // actively reviewing the calendar, so the same reminder needed to be somewhere more likely to
 // actually be seen). Same _renderKmInto(boxId) pattern already used for the Kat-Morgan card,
 // which has the identical two-pages-one-render shape - not a second copy of the banner HTML.
+// DISABLED ON PURPOSE - direct request: the Notify Drivers button is hidden because drivers are
+// now told the moment they're assigned (see addNotification's 'assigned' branch), which is what
+// this button used to be the manual trigger for. There is nothing left for it to release, so
+// leaving it visible would offer an action that does nothing.
+//
+// Everything behind it is deliberately LEFT WIRED AND WORKING - notifyMyAssignedDrivers(),
+// myPendingNotifyCount(), the assignNotifyPending flag, and this banner's own markup - because
+// it may be brought back. To re-enable: flip NOTIFY_DRIVERS_BUTTON_ENABLED to true, and
+// re-introduce the assignment hold-back in addNotification (its original logic is described in
+// full in the comment there). Nothing else needs changing.
+var NOTIFY_DRIVERS_BUTTON_ENABLED = false;
 function _renderFinalizeTomorrowInto(boxId){
   var box=document.getElementById(boxId); if(!box) return;
+  if(!NOTIFY_DRIVERS_BUTTON_ENABLED){ box.innerHTML=''; return; }
   var count = myPendingNotifyCount();
   if(!count){ box.innerHTML=''; return; }
   box.innerHTML='<div style="background:#eef2ff;border:1.5px solid #c7d2fe;border-radius:12px;padding:1rem;margin-bottom:.75rem;">'
@@ -19863,8 +19926,13 @@ function _renderFinalizeTomorrowInto(boxId){
 function renderCalNotFinalBanner(){
   var box=document.getElementById('cal-not-final-banner'); if(!box) return;
   if(isUiDismissed('cal-not-final')){ box.innerHTML=''; return; }
+  // Reworded on request, final wording confirmed by Chase. The old text ("not final until you
+  // are notified that a ride has been assigned to you") described the Notify Drivers release
+  // step, which no longer exists - assignment notifications are immediate now, so that sentence
+  // would point at a gate that isn't there. The real remaining uncertainty is confirmation of
+  // the ride itself, which is what this warns about.
   box.innerHTML='<div id="cal-not-final-inner" style="background:#dc2626;border:1.5px solid #b91c1c;border-radius:12px;padding:1rem 1.1rem;margin-bottom:.75rem;display:flex;align-items:flex-start;gap:.7rem;justify-content:space-between;">'
-    +'<div style="font-size:1rem;font-weight:800;color:#fff;line-height:1.4;">\u26a0\ufe0f Calendar is not final until you are notified that a ride has been assigned to you.</div>'
+    +'<div style="font-size:1rem;font-weight:800;color:#fff;line-height:1.4;">\u26a0\ufe0f The calendar is not final until the ride is confirmed.<div style="font-size:.8rem;font-weight:600;opacity:.92;margin-top:.3rem;">Times, drivers and pickups can still change. You\u2019ll get a notification the moment a ride is assigned to you.</div></div>'
     +'<button onclick="setUiDismissed(\'cal-not-final\');document.getElementById(\'cal-not-final-banner\').innerHTML=\'\';" style="flex-shrink:0;background:#fff;border:none;color:#dc2626;border-radius:7px;padding:.35rem .7rem;font-family:inherit;font-size:.74rem;font-weight:800;cursor:pointer;white-space:nowrap;">Dismiss</button>'
     +'</div>';
 }
