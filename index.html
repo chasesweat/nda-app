@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191144">
+<meta name="version" content="202608191145">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -3044,6 +3044,7 @@ async function _loadAppData() {
   try{ await _promoteChaseTemplatesToGlobalDefault(); }catch(e){ console.warn('Chase default promotion', e); }
   try{ await _clearChasePersonalDuplicates(); }catch(e){ console.warn('Chase personal duplicate cleanup', e); }
   try{ await _healBrokenConfirmTemplate(); }catch(e){ console.warn('broken confirm template heal', e); }
+  try{ await _publishUserDriverMap(); }catch(e){ console.warn('publish userDriverMap', e); }
   try{ await _reconcileKatMorganTemplatesOnce(); }catch(e){ console.warn('Kat/Morgan template reconciliation', e); }
   try{ await _backfillSchedulingTextSentForExistingRides(); }catch(e){ console.warn('scheduling-text backfill', e); }
   // The two pickup-instructions seed migrations that used to run here (v793-era) were removed
@@ -25586,6 +25587,28 @@ const USER_DRIVER_MAP = {
 function getMyDriverName(){
   if(!currentUser) return null;
   return USER_DRIVER_MAP[currentUser.name] || null;
+}
+
+// Publishes the login -> driver-name map to the database so SERVER-SIDE code can read it.
+// The booking-link push Cloud Function needs this mapping (a client request carries the
+// driver's LOGIN name, but FCM tokens are stored under the DRIVER name), and USER_DRIVER_MAP
+// otherwise lives only in this bundle - which would have meant maintaining a second hardcoded
+// copy inside the function and remembering to update it by hand every time a driver was added.
+// Chase asked whether a driver could just be picked up automatically; this is that. Add someone
+// to USER_DRIVER_MAP above and deploy index.html, and the function sees them on the very next
+// request - no function redeploy, no second list to remember.
+//
+// Writes only when the stored copy actually differs, so this is not a write on every app load
+// from every device - normally it reads once and returns. Fully best-effort: if it fails, the
+// function still has its own fallbacks and simply keeps using those.
+async function _publishUserDriverMap(){
+  try{
+    if(!fbDB) return;
+    var cur = null;
+    try{ cur = await storageGet('kat:userDriverMap'); }catch(e){}
+    if(cur && JSON.stringify(cur)===JSON.stringify(USER_DRIVER_MAP)) return;  // already current
+    await storageSet('kat:userDriverMap', USER_DRIVER_MAP);
+  }catch(e){ console.warn('publish userDriverMap failed (non-fatal):', e); }
 }
 
 // ═══════════════════════════════════════════
