@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191143">
+<meta name="version" content="202608191144">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -3458,7 +3458,10 @@ async function processClientRequests(){
       };
       _markNotifDirty(myDriverName);
       notifications[myDriverName].unshift({ rideId:null, type:'client_request', channel:null, read:false, msg:msg, ts:Date.now(), createdBy:'', clientRequestId:id, req:_reqPayload });
-      if(typeof sendPushToDriver==='function') sendPushToDriver(myDriverName, '\ud83d\udccb New request via your booking link', kind+' from '+(r.clientName||'a client'));
+      // allowSelf=true: this is an EXTERNAL event (a client submitted the form) that merely got
+      // noticed by this driver's own polling loop. Without it, sendPushToDriver's anti-self-push
+      // guard matched and dropped this silently - bell notification appeared, phone never buzzed.
+      if(typeof sendPushToDriver==='function') sendPushToDriver(myDriverName, '\ud83d\udccb New request via your booking link', kind+' from '+(r.clientName||'a client'), {type:'client_request', clientRequestId:id}, true);
       _applyClientBookingRequestSideEffects(r);
       reqs[id].status = 'processed';
       changed = true;
@@ -33924,16 +33927,28 @@ async function runPushDiagnostic(){
   document.body.appendChild(ov);
 }
 
-async function sendPushToDriver(driverName, title, body, navData){
+async function sendPushToDriver(driverName, title, body, navData, allowSelf){
   if(!fbDB || !driverName) return;
   // Never push to the person who triggered the action.
   // Match the SAME name space the FCM token is stored under (driver name via USER_DRIVER_MAP).
-  var _meDriver=getMyDriverName();
-  var _tgtDriver=USER_DRIVER_MAP[driverName]||driverName;
-  if(_meDriver && _tgtDriver && _meDriver===_tgtDriver) return;
-  // Also skip if same person via Kat↔Morgan proxy
-  var _mp=PROXY_MAP[currentUser&&currentUser.name], _tp=PROXY_MAP[driverName];
-  if(_mp && (_mp===_tgtDriver || _mp===driverName)) return;
+  //
+  // allowSelf OVERRIDES this. The guard exists to stop pushing someone a notification about
+  // something THEY just did (assigning themselves a ride, marking their own fee paid) - genuinely
+  // noise. But some events are external and merely NOTICED by this device: a client submitting a
+  // booking-link request is the case this was added for. processClientRequests() polls on the
+  // driver's own device and then calls this with their own name, so "trigger" and "recipient"
+  // are the same person purely as an artifact of where the polling runs - not because the driver
+  // did anything. Without the override the guard matched and the push was silently dropped every
+  // single time, which is exactly what it did before this fix: the bell notification appeared,
+  // the phone never buzzed, and nothing logged an error.
+  if(!allowSelf){
+    var _meDriver=getMyDriverName();
+    var _tgtDriver=USER_DRIVER_MAP[driverName]||driverName;
+    if(_meDriver && _tgtDriver && _meDriver===_tgtDriver) return;
+    // Also skip if same person via Kat↔Morgan proxy
+    var _mp=PROXY_MAP[currentUser&&currentUser.name], _tp=PROXY_MAP[driverName];
+    if(_mp && (_mp===_tgtDriver || _mp===driverName)) return;
+  }
   try {
     const id = Date.now()+'_'+Math.random().toString(36).slice(2,7);
     const entry = { to: driverName, title, body, ts: Date.now() };
