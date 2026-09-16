@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191145">
+<meta name="version" content="202608191149">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -642,6 +642,7 @@ input,select,textarea{font-size:16px;}
     <div id="dash-fees" style="margin-bottom:1.5rem;"></div>
     <!-- Action blocks: confirmations to send, then rides to wrap up, then upcoming -->
     <div id="dash-save-failed" style="margin-bottom:1.5rem;"></div>
+    <div id="dash-expiring" style="margin-bottom:1.5rem;"></div>
     <div id="dash-rides-load-failed" style="margin-bottom:1.5rem;"></div>
     <div id="dash-fees-awaiting-your-approval" style="margin-bottom:1.5rem;"></div>
     <div id="dash-pending-accept" style="margin-bottom:1.5rem;"></div>
@@ -685,7 +686,7 @@ input,select,textarea{font-size:16px;}
         <div class="form-group"><label>Additional numbers on confirmation <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(comma-separated)</span></label><input type="text" id="q-extra-phones" placeholder="404-555-0102 (spouse), 770-555-0188 (assistant)" /></div>
         <div class="form-group"><label>Email</label><input type="email" id="q-email" placeholder="client@email.com" /></div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;"><div class="form-group"><label>Passengers</label><input type="number" id="q-pax" aria-label="Number of passengers" value="1" min="1" max="14" oninput="calcQuote()" /></div><div class="form-group"><label>Checked Bags</label><input type="number" id="q-checked-bags" aria-label="Checked bags" value="0" min="0" /></div><div class="form-group"><label>Carry-on Bags</label><input type="number" id="q-carryon-bags" aria-label="Carry-on bags" value="0" min="0" /></div></div>
-        <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--gold-text,#7c3aed);margin:.75rem 0 .4rem;">Leg 1 &mdash; Trip Details</div>
+        <div id="q-leg1-lbl" style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--gold-text,#7c3aed);margin:.75rem 0 .4rem;">Trip Details</div>
         <div class="form-group">
           <label>Travel type<span class="mtip-dot" id="mtd-q-type" onclick="toggleMtip('q-type')" title="What&#8217;s this?">i</span><div class="mtip-pop" id="mtp-q-type">Picking this first decides which way the trip runs — the app fills Pickup &amp; Destination for you (home on one side, airport terminal on the other) and shows a <b>Flow</b> line so you can see the direction at a glance.</div></label>
           <div class="toggle-group" id="q-type-group">
@@ -1696,7 +1697,7 @@ input,select,textarea{font-size:16px;}
       <div class="form-group" style="grid-column:1/-1;"><label id="qa-addons-label">Surcharges</label>
         <div class="addon-grid" id="qa-addons"></div>
       </div>
-      <div style="grid-column:1/-1;font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--gold-text,#7c3aed);margin:.5rem 0 .2rem;" id="qa-leg1-lbl">Leg 1 &mdash; Trip Details</div>
+      <div style="grid-column:1/-1;font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--gold-text,#7c3aed);margin:.5rem 0 .2rem;" id="qa-leg1-lbl">Trip Details</div>
       <!-- Type-aware: home applies to PICKUP for AP RUN/ONE WAY/ROUND TRIP (client starts from
            home), but to DESTINATION for AP PICK UP (client is dropped off at home after
            landing). qaHomeAddrCheckboxChanged() resolves which field to fill based on the
@@ -2192,6 +2193,173 @@ window.addEventListener('unhandledrejection', function(ev){
 });
 
 // Direct report: someone was entering info and the app closed, losing everything typed.
+// ── SYNCED QUOTE DRAFTS ──────────────────────────────────────────────────────
+// Requested after an in-progress quote was lost to a dead phone: "if something is opened in the
+// quote form it should be saved and updated if things are changed."
+//
+// The pre-existing _draft* system below is a crash safety net, not a record: ONE slot per form
+// in localStorage, device-only, offered back once and then wiped. A draft typed on the phone was
+// invisible on the desktop, and a second started quote silently replaced the first.
+//
+// This layer sits ON TOP of that, deliberately rather than replacing it:
+//   * localStorage keeps working untouched as the instant, offline-safe copy. If Firebase is
+//     unreachable (the exact moment you most need a draft to survive) nothing is lost.
+//   * Firebase adds durability and cross-device recovery, per user, under
+//     nda/kat/quoteDrafts/<user>/<draftId>.
+//   * MANY drafts, not one. Each editing session gets its own id, so starting a second quote
+//     can never overwrite the first - the single-slot clobbering that caused the original
+//     report.
+//   * Drafts are their OWN store, deliberately NOT rows in savedQuotes. An abandoned two-field
+//     quote must never appear in the real quote list; that list is a business record, this is
+//     scratch space.
+var _qdActiveId = null;          // id of the draft this editing session owns
+var _qdSaveTimer = null;
+function _qdUserKey(){
+  var n = (currentUser && currentUser.name) || '';
+  // Firebase keys can't contain . # $ [ ] /
+  return String(n).replace(/[.#$\[\]\/]/g, '_') || 'unknown';
+}
+function _qdNewId(){ return 'qd_' + Date.now() + '_' + Math.random().toString(36).slice(2,7); }
+// A short human label so the restore list is choosable at a glance rather than a wall of ids.
+function _qdLabel(fields){
+  var f = fields || {};
+  var client = String(f['q-client']||'').trim();
+  var date   = String(f['q-date']||'').trim();
+  var type   = String(f['q-type']||'').trim();
+  var bits = [];
+  if(type) bits.push(type);
+  if(date) bits.push(date);
+  return { who: client || '(no client name yet)', detail: bits.join(' \u00b7 ') };
+}
+// Saves the CURRENT state of the quote form as this session's draft. Debounced, and a no-op for
+// an untouched form so simply visiting the Quote page never creates a draft - only real typing
+// does. Best-effort throughout: a Firebase failure leaves the localStorage copy in place and is
+// never surfaced as an error, because failing to save scratch work must not interrupt real work.
+function _qdSaveNow(){
+  try{
+    var fields = _draftCapture('page-quote');
+    if(!_draftHasContent(fields)) return;
+    // Require a client name before persisting to the shared store. Without it the restore list
+    // fills with anonymous fragments created by merely tabbing through the form.
+    var who = String((fields||{})['q-client']||'').trim();
+    if(!who) return;
+    if(!_qdActiveId) _qdActiveId = _qdNewId();
+    var rec = { id:_qdActiveId, ts:Date.now(), by:(currentUser&&currentUser.name)||'', fields:fields };
+    storageSet('kat:quoteDrafts/'+_qdUserKey()+'/'+_qdActiveId, rec).catch(function(){});
+  }catch(e){}
+}
+function _qdSaveDebounced(){
+  clearTimeout(_qdSaveTimer);
+  _qdSaveTimer = setTimeout(_qdSaveNow, 1500);
+}
+// Called once the work is genuinely committed (scheduled, saved as a quote, or texted/PDF'd).
+// Removes this session's draft and releases the id so the next quote starts a fresh one.
+function _qdClearActive(){
+  clearTimeout(_qdSaveTimer);
+  var id = _qdActiveId; _qdActiveId = null;
+  if(!id) return;
+  try{ storageSet('kat:quoteDrafts/'+_qdUserKey()+'/'+id, null).catch(function(){}); }catch(e){}
+}
+async function _qdList(){
+  try{
+    var all = await storageGet('kat:quoteDrafts/'+_qdUserKey());
+    if(!all || typeof all!=='object') return [];
+    var out = Object.keys(all).map(function(k){ return all[k]; })
+      .filter(function(r){ return r && r.fields && r.ts; });
+    // Oldest first out of storage; newest first is what a person wants to see.
+    out.sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
+    return out;
+  }catch(e){ return []; }
+}
+// Drops drafts past the shared retention window so this store can't grow without bound. Uses
+// RETENTION_DAYS rather than its own number, so drafts and saved quotes can never drift onto
+// different clocks - and deletion is warned about beforehand by renderDashExpiring().
+async function _qdPrune(){
+  try{
+    var all = await storageGet('kat:quoteDrafts/'+_qdUserKey());
+    if(!all || typeof all!=='object') return;
+    var cutoff = (typeof _retentionCutoff==='function') ? _retentionCutoff() : (Date.now() - 30*24*60*60*1000);
+    await Promise.all(Object.keys(all).filter(function(k){
+      var r = all[k]; return !r || !r.ts || r.ts < cutoff;
+    }).map(function(k){
+      return storageSet('kat:quoteDrafts/'+_qdUserKey()+'/'+k, null).catch(function(){});
+    }));
+  }catch(e){}
+}
+function _qdApply(rec){
+  if(!rec || !rec.fields) return;
+  var container = document.getElementById('page-quote');
+  Object.keys(rec.fields).forEach(function(id){
+    var el = document.getElementById(id);
+    if(!el || !container || !container.contains(el)) return;
+    if(el.type==='checkbox' || el.type==='radio') el.checked = !!rec.fields[id];
+    else el.value = rec.fields[id];
+    el.dispatchEvent(new Event('input', {bubbles:true}));
+    el.dispatchEvent(new Event('change', {bubbles:true}));
+  });
+  // This session now OWNS the restored draft rather than creating a second copy of it - so
+  // continuing to type updates the same record instead of spawning a duplicate.
+  _qdActiveId = rec.id || _qdNewId();
+}
+function _qdWhenTxt(ts){
+  var mins = Math.max(1, Math.round((Date.now()-(ts||0))/60000));
+  if(mins < 60) return mins+' minute'+(mins===1?'':'s')+' ago';
+  var hrs = Math.round(mins/60);
+  if(hrs < 24) return hrs+' hour'+(hrs===1?'':'s')+' ago';
+  var days = Math.round(hrs/24);
+  return days+' day'+(days===1?'':'s')+' ago';
+}
+// Offers any unfinished quotes when the Quote page opens. Shows a LIST rather than a single
+// yes/no, because there can legitimately be more than one now, and because the original bug was
+// precisely that a one-slot prompt offered the wrong quote with no way to see what it was.
+async function _qdMaybeOffer(){
+  try{
+    if(!document.getElementById('page-quote')) return;
+    // Never interrupt work already in progress.
+    var cur = _draftCapture('page-quote');
+    if(String((cur||{})['q-client']||'').trim()) return;
+    _qdPrune();
+    var list = await _qdList();
+    if(!list.length) return;
+    var rows = list.slice(0,6).map(function(r){
+      var L = _qdLabel(r.fields);
+      return '<button data-qd="'+escHtml(r.id)+'" style="display:block;width:100%;text-align:left;background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.6rem .7rem;margin-bottom:.5rem;cursor:pointer;font-family:inherit;">'
+        +'<div style="font-weight:800;font-size:.9rem;color:var(--black);">'+escHtml(L.who)+'</div>'
+        +(L.detail?'<div style="font-size:.76rem;color:var(--mid);font-weight:600;">'+escHtml(L.detail)+'</div>':'')
+        +'<div style="font-size:.72rem;color:var(--mid);">'+escHtml(_qdWhenTxt(r.ts))+'</div>'
+        +'</button>';
+    }).join('');
+    var ov = document.createElement('div');
+    ov.id = 'qd-restore-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100000;display:flex;align-items:center;justify-content:center;padding:1rem;';
+    ov.innerHTML = '<div style="background:var(--white);border-radius:14px;max-width:420px;width:100%;padding:1.1rem;max-height:80vh;overflow:auto;">'
+      +'<div style="font-size:1rem;font-weight:800;margin-bottom:.2rem;">\uD83D\uDCBE Unfinished quote'+(list.length>1?'s':'')+'</div>'
+      +'<div style="font-size:.8rem;color:var(--mid);font-weight:600;margin-bottom:.7rem;">Pick one to carry on with, or start fresh.</div>'
+      + rows
+      +'<div style="display:flex;gap:.5rem;margin-top:.6rem;">'
+      +'<button id="qd-dismiss" style="flex:1;background:var(--surface);border:1.5px solid var(--light);border-radius:8px;padding:.55rem;font-family:inherit;font-weight:700;font-size:.8rem;cursor:pointer;">Start fresh</button>'
+      +'<button id="qd-delete-all" style="flex:1;background:none;border:1.5px solid #fca5a5;color:#b91c1c;border-radius:8px;padding:.55rem;font-family:inherit;font-weight:700;font-size:.8rem;cursor:pointer;">Delete all</button>'
+      +'</div></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click', function(e){
+      var btn = e.target.closest('[data-qd]');
+      if(btn){
+        var id = btn.getAttribute('data-qd');
+        var rec = list.find(function(r){ return r.id===id; });
+        ov.remove(); _qdApply(rec);
+        return;
+      }
+      if(e.target.id==='qd-dismiss'){ ov.remove(); return; }   // left in place on purpose - not discarded
+      if(e.target.id==='qd-delete-all'){
+        ov.remove();
+        list.forEach(function(r){ try{ storageSet('kat:quoteDrafts/'+_qdUserKey()+'/'+r.id, null).catch(function(){}); }catch(e){} });
+        return;
+      }
+      if(e.target===ov) ov.remove();
+    });
+  }catch(e){ console.warn('quote draft offer failed (non-fatal)', e); }
+}
+
 // Generic, reusable draft auto-save/restore for a form container - built once, not once per
 // form, so any form can opt in by wrapping its fields in an element with a known id and calling
 // the three functions below at the right moments (see their use on the Quote page and Quick Add
@@ -2282,8 +2450,8 @@ async function _draftMaybeOffer(containerId, clientFieldId){
 ['page-quote','quick-add-modal'].forEach(function(cid){
   var c = document.getElementById(cid);
   if(!c) return;
-  c.addEventListener('input', function(){ _draftSave(cid); });
-  c.addEventListener('change', function(){ _draftSave(cid); });
+  c.addEventListener('input', function(){ _draftSave(cid); if(cid==='page-quote') _qdSaveDebounced(); });
+  c.addEventListener('change', function(){ _draftSave(cid); if(cid==='page-quote') _qdSaveDebounced(); });
 });
 
 // ═══════════════════════════════════════════
@@ -3349,6 +3517,89 @@ async function checkForActiveSOSOnLogin(){
   setTimeout(function(){ showSOSActivePopup(); }, 1800);
 }
 
+// ── RETENTION ────────────────────────────────────────────────────────────────
+// One place for both, because they are now the same promise to the driver: nothing you made is
+// deleted before 30 days, and nothing is deleted without warning you first.
+//
+// Quote drafts were 7 days when introduced in v1147 (rationale then: "abandoned Friday, still
+// wanted Monday"). Raised to 30 to match saved quotes on direct request - two different
+// disappearing-acts on two different clocks is exactly the kind of thing that makes an app feel
+// untrustworthy, and there is no real cost to keeping scratch records the same length as real
+// ones.
+var RETENTION_DAYS = 30;
+var EXPIRY_WARN_DAYS = 5;   // how far ahead to warn before something is purged
+function _retentionCutoff(){ return Date.now() - RETENTION_DAYS*24*60*60*1000; }
+function _daysLeft(ts){
+  var ms = (ts||0) + RETENTION_DAYS*24*60*60*1000 - Date.now();
+  return Math.max(0, Math.ceil(ms / (24*60*60*1000)));
+}
+// The date a quote's retention clock actually runs from. SENT quotes age from sentAt, not
+// savedAt - raised by Chase and it's a real flaw in the old rule: a quote saved 25 days ago and
+// sent to a client yesterday had 5 days left, even though it's the most active thing in the
+// list and the client might still book it. A quote sitting with a client is the LAST thing that
+// should quietly vanish. Sending it restarts the clock; an unsent quote still ages from when it
+// was saved, so the list can't fill up with things nobody ever did anything with.
+function _quoteAgeFrom(q){
+  if(!q) return 0;
+  var sent = parseFloat(q.sentAt)||0;
+  var saved = parseFloat(q.savedAt)||0;
+  return Math.max(sent, saved);   // max() so a re-send always extends, never shortens
+}
+
+// Collects saved quotes AND synced drafts that are inside the warning window. Deliberately
+// gathers both into one list: from the driver's point of view they're all "work I made that's
+// about to vanish," and two separate warnings for the same underlying rule would be noise.
+async function _expiringSoon(){
+  var out = [];
+  try{
+    var warnAt = Date.now() - (RETENTION_DAYS-EXPIRY_WARN_DAYS)*24*60*60*1000;
+    (savedQuotes||[]).forEach(function(q){
+      if(!q) return;
+      var from = _quoteAgeFrom(q);
+      if(!from) return;
+      if(from <= warnAt) out.push({ kind:(q.sentAt?'sent':'quote'), who:(q.client||'(no name)'), ts:from, days:_daysLeft(from) });
+    });
+  }catch(e){}
+  try{
+    var drafts = (typeof _qdList==='function') ? await _qdList() : [];
+    drafts.forEach(function(d){
+      if(!d || !d.ts) return;
+      var warnAt2 = Date.now() - (RETENTION_DAYS-EXPIRY_WARN_DAYS)*24*60*60*1000;
+      if(d.ts <= warnAt2){
+        var L = (typeof _qdLabel==='function') ? _qdLabel(d.fields) : {who:'(draft)'};
+        out.push({ kind:'draft', who:L.who, ts:d.ts, days:_daysLeft(d.ts) });
+      }
+    });
+  }catch(e){}
+  out.sort(function(a,b){ return a.days - b.days; });   // soonest to go, first
+  return out;
+}
+
+// Dashboard warning. Shown only when something is actually within the window, so it is silent
+// almost always and therefore worth reading when it does appear.
+async function renderDashExpiring(){
+  var box = document.getElementById('dash-expiring');
+  if(!box) return;
+  try{
+    var list = await _expiringSoon();
+    if(!list.length){ box.innerHTML=''; return; }
+    var soonest = list[0].days;
+    var rows = list.slice(0,8).map(function(it){
+      return '<div style="display:flex;justify-content:space-between;gap:.6rem;font-size:.8rem;font-weight:600;color:#7c2d12;padding:.2rem 0;">'
+        +'<span>'+escHtml(it.who)+' <span style="font-weight:600;opacity:.75;">\u00b7 '+(it.kind==='draft'?'unfinished draft':(it.kind==='sent'?'quote sent to client':'saved quote'))+'</span></span>'
+        +'<span style="white-space:nowrap;font-weight:800;">'+(it.days===0?'today':it.days+'d')+'</span></div>';
+    }).join('');
+    var more = list.length>8 ? '<div style="font-size:.76rem;color:#7c2d12;font-weight:700;margin-top:.3rem;">+'+(list.length-8)+' more</div>' : '';
+    box.innerHTML = '<div style="background:#fff7ed;border:1.5px solid #fdba74;border-radius:12px;padding:1rem 1.1rem;">'
+      +'<div style="font-size:.9rem;font-weight:800;color:#9a3412;margin-bottom:.15rem;">\u23f3 '+list.length+' item'+(list.length===1?'':'s')+' will be deleted soon</div>'
+      +'<div style="font-size:.78rem;color:#7c2d12;font-weight:600;margin-bottom:.6rem;">Quotes and drafts are kept for '+RETENTION_DAYS+' days. '
+      +(soonest===0?'The first goes today.':'The first goes in '+soonest+' day'+(soonest===1?'':'s')+'.')
+      +' Schedule it or save the details somewhere to keep it.</div>'
+      + rows + more
+      +'</div>';
+  }catch(e){ console.warn('renderDashExpiring failed', e); box.innerHTML=''; }
+}
+
 // Reported directly: no way to keep the saved-quotes list from growing forever with quotes
 // nobody ever scheduled. Runs once per app open (unlike the 60-second client-request poll
 // above - this isn't time-critical the way a fresh notification is, so once per open is
@@ -3356,11 +3607,17 @@ async function checkForActiveSOSOnLogin(){
 // timestamp - never touches anything that's already been scheduled into a real ride, since
 // scheduleSavedQuote() removes it from savedQuotes entirely at that point anyway, so there's
 // nothing here left to accidentally purge.
+//
+// Retention now comes from the shared RETENTION_DAYS above rather than a number written here,
+// so quotes and drafts can't drift onto different clocks. Deletion is also no longer silent -
+// renderDashExpiring() warns for EXPIRY_WARN_DAYS beforehand.
 async function _purgeOldSavedQuotes(){
   try{
-    var cutoff = Date.now() - 30*24*60*60*1000;
+    var cutoff = _retentionCutoff();
     var before = (savedQuotes||[]).length;
-    savedQuotes = (savedQuotes||[]).filter(function(q){ return q && q.savedAt && q.savedAt >= cutoff; });
+    // Ages from sentAt when the quote has been sent - see _quoteAgeFrom(). A quote with neither
+    // timestamp can't be aged at all and is dropped, same as before.
+    savedQuotes = (savedQuotes||[]).filter(function(q){ var from=_quoteAgeFrom(q); return from && from >= cutoff; });
     if(savedQuotes.length !== before){
       await saveSavedQuotes();
       if(typeof renderSavedQuotes==='function') renderSavedQuotes();
@@ -5859,6 +6116,14 @@ function updateTripFields(){
   show('q-addons-leg2-group', isAPRT);
   var _addonsLbl = document.getElementById('q-addons-label');
   if(_addonsLbl) _addonsLbl.textContent = isAPRT ? 'Surcharges \u2014 Leg 1 (outbound)' : 'Surcharges';
+  // Reported directly: an AP RUN showed "Leg 1 — Trip Details" at the top of the form. A ride
+  // with one leg has no "Leg 1" - the wording only means anything on a round trip. Worse on the
+  // quote form specifically, where this header sits ABOVE the Travel type selector, so it
+  // announced "Leg 1" before a type had even been chosen. Defaults to plain "Trip Details" in
+  // the markup now and only becomes "Leg 1" for a genuine round trip - same conditional shape
+  // as the surcharge label directly above, which already had this right.
+  var _leg1Lbl = document.getElementById('q-leg1-lbl');
+  if(_leg1Lbl) _leg1Lbl.textContent = (isAPRT||isRT) ? 'Leg 1 \u2014 Trip Details' : 'Trip Details';
   // Both legs get their auto-surcharges re-evaluated here, not just the return leg.
   //
   // This previously called applyReturnLegAutoAddons() alone. Leg 1's fuel default only ever
@@ -6757,6 +7022,16 @@ function textQuoteToClient(){
       // original identity (_quoteId, savedAt) rather than treating it as immutable once created.
       if(_ex){ var _fresh=_gatherQuoteRide(); Object.assign(_ex, _fresh); _ex.sentAt=Date.now(); }
       else { var _q=_gatherQuoteRide(); _q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); _q.savedAt=Date.now(); _q.sentAt=Date.now(); savedQuotes.push(_q); }
+      // The in-progress DRAFT must be cleared once this quote is safely saved. Reported
+      // directly: the "Restore unsaved info?" prompt came back offering a quote that had
+      // already been saved, instead of the one actually being worked on when the phone died.
+      // Cause: _draftClear('page-quote') was called in exactly ONE place - saveQuote(), the
+      // SCHEDULE-the-ride path - so saving or sending a quote left that quote's data sitting in
+      // the single draft slot. The next session then offered that stale, already-saved quote.
+      // There is only one draft slot per form (key 'nda-draft-page-quote'), so whatever is left
+      // in it wins until something clears or overwrites it.
+      try{ _draftClear('page-quote'); }catch(e){}
+      try{ _qdClearActive(); }catch(e){}
       if(typeof saveSavedQuotes==='function') saveSavedQuotes();
       if(typeof renderSavedQuotes==='function') renderSavedQuotes();
       if(typeof _markBookingRequestHandled==='function') _markBookingRequestHandled();
@@ -6854,6 +7129,7 @@ async function saveQuote(){
   refreshDash(); updateNotifBadge(); renderCal();
   try{ await _markBookingRequestHandled(); }catch(e){}
   _draftClear('page-quote');
+  try{ _qdClearActive(); }catch(e){}   // work is committed - drop the recovery copy too
   _afterRideScheduled(ride);
 }
 
@@ -7239,6 +7515,16 @@ async function quoteAsPdfFromForm(){
       // this is the document/email-send path, which had the identical gap.
       if(_ex){ var _fresh2=_gatherQuoteRide(); Object.assign(_ex, _fresh2); _ex.sentAt=Date.now(); }
       else { var _q=_gatherQuoteRide(); _q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); _q.savedAt=Date.now(); _q.sentAt=Date.now(); savedQuotes.push(_q); }
+      // The in-progress DRAFT must be cleared once this quote is safely saved. Reported
+      // directly: the "Restore unsaved info?" prompt came back offering a quote that had
+      // already been saved, instead of the one actually being worked on when the phone died.
+      // Cause: _draftClear('page-quote') was called in exactly ONE place - saveQuote(), the
+      // SCHEDULE-the-ride path - so saving or sending a quote left that quote's data sitting in
+      // the single draft slot. The next session then offered that stale, already-saved quote.
+      // There is only one draft slot per form (key 'nda-draft-page-quote'), so whatever is left
+      // in it wins until something clears or overwrites it.
+      try{ _draftClear('page-quote'); }catch(e){}
+      try{ _qdClearActive(); }catch(e){}
       if(typeof saveSavedQuotes==='function') await saveSavedQuotes();
       if(typeof renderSavedQuotes==='function') renderSavedQuotes();
       try{ await _markBookingRequestHandled(); }catch(e){}
@@ -19713,6 +19999,10 @@ function refreshDash(){
   // Confirmations due for tomorrow's rides
   renderDashConfirmations();
   try{ renderDashGateCodes(); }catch(e){}
+
+  // Quotes and drafts approaching the retention cutoff - sits high on the page because it is
+  // time-sensitive and silent almost always.
+  try{ renderDashExpiring(); }catch(e){}
 
   // 15% finder fees owed / to be paid
   renderDashFees();
@@ -32319,7 +32609,7 @@ function showPage(id, el){
   window.scrollTo(0,0);
   // Page-specific render
   if(id==='dashboard') refreshDash();
-  if(id==='quote'){ populateDriverFilter(); renderAddons(); updateTripFields(); calcQuote(); populateClientDatalist(); if(gmapsLoaded) setTimeout(initAddressAutocomplete, 100); _draftMaybeOffer('page-quote', 'q-client'); }
+  if(id==='quote'){ populateDriverFilter(); renderAddons(); updateTripFields(); calcQuote(); populateClientDatalist(); if(gmapsLoaded) setTimeout(initAddressAutocomplete, 100); _draftMaybeOffer('page-quote', 'q-client'); setTimeout(function(){ try{ _qdMaybeOffer(); }catch(e){} }, 400); }
   if(id==='calendar') renderCal();
   if(id==='clients') renderClients();
   if(id==='documents') renderDocuments();
@@ -34278,6 +34568,12 @@ function qaTypeChanged(){
   if(secFirst) secFirst.style.display=(t==='AP ROUND TRIP')?'block':'none';
   try{ qaUpdateHomeAddrCbLabel(); }catch(e){}
   try{ qaUpdateDateTimeLabels(); }catch(e){}
+  // Same fix as the Quote form's updateTripFields(): "Leg 1" is meaningless on a single-leg
+  // ride. The markup defaults to plain "Trip Details" and this promotes it only for a genuine
+  // round trip. qaRtFirstLegChanged() (called in the AP ROUND TRIP branch below) rewrites the
+  // OTHER leg labels but never touched this one, which is why it read "Leg 1" on an AP RUN.
+  var _qaLeg1Lbl = document.getElementById('qa-leg1-lbl');
+  if(_qaLeg1Lbl) _qaLeg1Lbl.textContent = (t==='AP ROUND TRIP'||t==='ROUND TRIP') ? 'Leg 1 \u2014 Trip Details' : 'Trip Details';
   if(t!=='AP ROUND TRIP'){
     ['qa-leg-run','qa-leg-pickup'].forEach(id=>{ const el=document.getElementById(id); if(el) el.checked=false; });
   }
