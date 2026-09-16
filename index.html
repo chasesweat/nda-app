@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191156">
+<meta name="version" content="202608191159">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2578,7 +2578,12 @@ function _updateAdminAuditBtn(){ try{ var b=document.getElementById('admin-audit
 function toggleChaseAudit(){ if(!currentUser || currentUser.name!=='Chase') return; chaseAuditOn=!chaseAuditOn; saveChaseAudit(); if(typeof showToast==='function') showToast(chaseAuditOn?'\u2713 Admin change alerts ON':'Admin change alerts OFF'); try{ if(typeof _updateAdminAuditBtn==='function') _updateAdminAuditBtn(); }catch(e){} }
 const _AUDIT_SKIP = ['kat:rides','kat:ridesArchive','kat:outsideRides','kat:feePayments','kat:receipts',
   'kat:notifications','kat:chatLastRead','kat:comments','kat:biometricCreds','kat:pendingAdminTutorial',
-  'kat:sos','kat:presence','kat:chaseAuditOn','kat:uiPrefs','kat:driverExpenses','kat:fcmTokens','kat:fwApprovedDuplicates'];
+  'kat:sos','kat:presence','kat:chaseAuditOn','kat:uiPrefs','kat:driverExpenses','kat:fcmTokens','kat:fwApprovedDuplicates',
+  // Added after v1147 introduced synced quote drafts. Without this, EVERY debounced auto-save
+  // while someone types a quote fires an admin change alert - a notification every 1.5 seconds
+  // of typing. Drafts are private scratch space per user, never a business record, so they are
+  // never an administrative change worth alerting on.
+  'kat:quoteDrafts'];
 // Profile keys: notify ONLY when editing someone else's profile, never your own (even for admins).
 const _AUDIT_PERSONAL = ['kat:driverProfiles','kat:driverSettings','kat:driverVenmo','kat:driverPhotoOverrides'];
 const _AUDIT_LABELS = {
@@ -6229,6 +6234,23 @@ function updateTripFields(){
 }
 
 // ── QUOTE FORM WRAPPERS (wire the toggle buttons/fields to the calc engine) ──
+// Moves the Quote form's trip-type highlight to match a type that was set PROGRAMMATICALLY.
+// The trip type is a hidden input driven by a row of toggle buttons, and the markup ships with
+// AP ROUND TRIP as the default for BOTH - so any code that writes the hidden value without
+// touching the buttons leaves the highlight lying about what the form will actually price.
+// Matches on the onclick's type string, not the button's visible text ("AP Round Trip" vs
+// "AP ROUND TRIP" differ in case and would never compare equal).
+function _syncTripTypeTog(type){
+  try{
+    if(!type) return;
+    var togs = document.querySelectorAll('#page-quote .tog');
+    for(var i=0;i<togs.length;i++){
+      var oc = togs[i].getAttribute('onclick')||'';
+      var m = oc.match(/setTripType\('([^']+)'/);
+      if(m && m[1]===type){ setActiveTog(togs[i]); return; }
+    }
+  }catch(e){ console.warn('trip-type highlight sync failed', e); }
+}
 function setActiveTog(btn){
   if(!btn||!btn.parentElement) return;
   btn.parentElement.querySelectorAll('.tog').forEach(b=>b.classList.remove('active'));
@@ -7062,7 +7084,7 @@ function textQuoteToClient(){
       // a brand-new quote; this refreshes an existing one with it too now, keeping only its
       // original identity (_quoteId, savedAt) rather than treating it as immutable once created.
       if(_ex){ var _fresh=_gatherQuoteRide(); Object.assign(_ex, _fresh); _ex.sentAt=Date.now(); }
-      else { var _q=_gatherQuoteRide(); _q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); _q.savedAt=Date.now(); _q.sentAt=Date.now(); savedQuotes.push(_q); }
+      else { var _q=_gatherQuoteRide(); _q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); _q.savedAt=Date.now(); _q.sentAt=Date.now(); _quoteReplaceOnSave(_q); savedQuotes.push(_q); }
       // The in-progress DRAFT must be cleared once this quote is safely saved. Reported
       // directly: the "Restore unsaved info?" prompt came back offering a quote that had
       // already been saved, instead of the one actually being worked on when the phone died.
@@ -7555,7 +7577,7 @@ async function quoteAsPdfFromForm(){
       // Same fix as the sibling text-send flow (see that one's comment for the full reasoning) -
       // this is the document/email-send path, which had the identical gap.
       if(_ex){ var _fresh2=_gatherQuoteRide(); Object.assign(_ex, _fresh2); _ex.sentAt=Date.now(); }
-      else { var _q=_gatherQuoteRide(); _q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); _q.savedAt=Date.now(); _q.sentAt=Date.now(); savedQuotes.push(_q); }
+      else { var _q=_gatherQuoteRide(); _q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); _q.savedAt=Date.now(); _q.sentAt=Date.now(); _quoteReplaceOnSave(_q); savedQuotes.push(_q); }
       // The in-progress DRAFT must be cleared once this quote is safely saved. Reported
       // directly: the "Restore unsaved info?" prompt came back offering a quote that had
       // already been saved, instead of the one actually being worked on when the phone died.
@@ -7888,6 +7910,9 @@ function editSavedQuote(qid){
     set('q-date', q.date||'');
     set('q-time', q.time||'');
     set('q-type', q.type||'AP RUN');
+    // Same highlight desync as the booking-request prefill: without this, editing a saved AP RUN
+    // quote leaves the default "AP Round Trip" button lit while the form prices a one-way.
+    try{ _syncTripTypeTog(q.type||'AP RUN'); }catch(e){}
     set('q-flight', q.flight||'');
     set('q-terminal', q.terminal||'');
     set('q-rt-date', q.rtDateAP||'');
@@ -7916,13 +7941,41 @@ function editSavedQuote(qid){
     if(typeof restoreStopRows==='function') restoreStopRows('q', q.xstop||0, q.xstopAddr||'');
     if(typeof updateTripFields==='function') updateTripFields();
     if(typeof calcQuote==='function') calcQuote();
-    // Remove the old saved-quote entry - re-saving now creates a fresh one with the edits
-    // rather than leaving a stale duplicate sitting alongside it.
-    const idx=(savedQuotes||[]).findIndex(function(x){return x._quoteId===qid;});
-    if(idx>=0){ savedQuotes.splice(idx,1); try{ saveSavedQuotes(); }catch(e){} renderSavedQuotes(); }
-    showToast('\u270f\uFE0F Editing quote \u2014 make your changes and save again');
+    // DATA-LOSS FIX, reported directly: this used to DELETE the saved quote right here, the
+    // moment it was opened for editing - a cut, not a copy. The intent was to avoid leaving a
+    // stale duplicate once the edited version was re-saved, but it deleted the original BEFORE
+    // any replacement existed. Anyone who opened a quote to edit it and then didn't re-save -
+    // phone died, navigated away, got interrupted - lost it permanently, with no warning and
+    // nothing in the saved list to go back to.
+    //
+    // Worse, the v1147 draft safety net did NOT cover this: editSavedQuote fills the form with
+    // `.value =`, which never fires input/change, so no draft was ever captured either. The one
+    // path that destroyed data was also the one path the recovery system couldn't see.
+    //
+    // Now the original is LEFT IN PLACE and simply marked as being edited. Re-saving replaces it
+    // (see _quoteReplaceOnSave below); not re-saving leaves it exactly where it was.
+    window._editingQuoteId = qid;
+    showToast('\u270f\uFE0F Editing quote \u2014 save again to update it');
     const qc=document.getElementById('q-client'); if(qc) qc.scrollIntoView({behavior:'smooth',block:'center'});
   }, 150);
+}
+// Called by every path that saves a quote from the Quote form. If this save is the re-save of a
+// quote opened via editSavedQuote(), the original is removed HERE - after the replacement has
+// been built and is about to be stored - rather than when it was opened. The original's savedAt
+// is carried across so an edit doesn't silently reset its 60-day retention clock and make it
+// look newly created.
+function _quoteReplaceOnSave(newQuote){
+  try{
+    var qid = window._editingQuoteId;
+    if(!qid) return;
+    var idx = (savedQuotes||[]).findIndex(function(x){ return x && x._quoteId===qid; });
+    if(idx>=0){
+      var old = savedQuotes[idx];
+      if(old && old.savedAt && newQuote) newQuote.savedAt = old.savedAt;
+      savedQuotes.splice(idx,1);
+    }
+    window._editingQuoteId = null;
+  }catch(e){ console.warn('_quoteReplaceOnSave failed', e); }
 }
 function _closeSqModal(){ const h=document.getElementById('sq-modal-host'); if(h) h.remove(); }
 function openSavedQuoteDetail(qid){
@@ -8549,6 +8602,19 @@ function _prefillFromClientRequest(req){
     var typeEl = document.getElementById(P+'-type');
     if(typeEl && req.type){
       typeEl.value = req.type;
+      // BUG, reported directly: the Quote form's trip type is a HIDDEN input driven by a row of
+      // toggle buttons, and the markup ships with AP ROUND TRIP as the default - both as the
+      // hidden value AND as the button carrying class="tog active". Setting the hidden value
+      // here changed the type but never moved the highlight, so a booking request that came in
+      // as (say) AP RUN left the "AP Round Trip" button still lit while the form actually
+      // priced a one-way. The UI said round trip; the price box showed a single leg; and
+      // clicking that button off and back on was the only way to resolve it, because
+      // setTripType() is what syncs the two.
+      //
+      // Highlight is now moved to match the real value. Matched on the onclick's type string
+      // rather than the button's visible text ("AP Round Trip" vs "AP ROUND TRIP" differ in
+      // case and would never compare equal).
+      if(isQuote){ try{ _syncTripTypeTog(req.type); }catch(e){} }
       try{ isQuote ? updateTripFields() : qaTypeChanged(); }catch(e){}
     }
     set('client', req.clientName);
@@ -32900,7 +32966,14 @@ function showPage(id, el){
   window.scrollTo(0,0);
   // Page-specific render
   if(id==='dashboard') refreshDash();
-  if(id==='quote'){ populateDriverFilter(); renderAddons(); updateTripFields(); calcQuote(); populateClientDatalist(); if(gmapsLoaded) setTimeout(initAddressAutocomplete, 100); _draftMaybeOffer('page-quote', 'q-client'); setTimeout(function(){ try{ _qdMaybeOffer(); }catch(e){} }, 400); }
+  if(id==='quote'){
+    // Clear any stale "I am editing quote X" marker on every fresh visit to the Quote page.
+    // Without this, editing quote A, abandoning it, then later building an unrelated quote B and
+    // sending it would delete A - the marker would still be set and _quoteReplaceOnSave() would
+    // dutifully remove it. editSavedQuote() calls nav('quote') and then sets the marker inside a
+    // 150ms setTimeout, so it is always set AFTER this clear, never wiped by it.
+    window._editingQuoteId = null;
+    populateDriverFilter(); renderAddons(); updateTripFields(); calcQuote(); populateClientDatalist(); if(gmapsLoaded) setTimeout(initAddressAutocomplete, 100); _draftMaybeOffer('page-quote', 'q-client'); setTimeout(function(){ try{ _qdMaybeOffer(); }catch(e){} }, 400); }
   if(id==='calendar') renderCal();
   if(id==='clients') renderClients();
   if(id==='documents') renderDocuments();
