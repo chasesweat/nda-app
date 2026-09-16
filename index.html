@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191149">
+<meta name="version" content="202608191156">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -3526,8 +3526,17 @@ async function checkForActiveSOSOnLogin(){
 // disappearing-acts on two different clocks is exactly the kind of thing that makes an app feel
 // untrustworthy, and there is no real cost to keeping scratch records the same length as real
 // ones.
-var RETENTION_DAYS = 30;
+var RETENTION_DAYS = 60;
 var EXPIRY_WARN_DAYS = 5;   // how far ahead to warn before something is purged
+// Booking-link submissions are kept on a SHORTER, separate clock on direct instruction. They
+// are the client's raw submission rather than the driver's own work, and the in-app Booking
+// requests list has always only shown the last 30 days anyway - so the store now matches what
+// the list displays instead of silently accumulating years of records nobody can see.
+//
+// NOTE, and this is a real trade-off Chase was told about: until now clientRequests was the ONE
+// store with no retention rule at all, and that permanence is exactly what made a lost quote
+// recoverable from the console. After this, a request older than 30 days is genuinely gone.
+var BOOKING_REQUEST_RETENTION_DAYS = 30;
 function _retentionCutoff(){ return Date.now() - RETENTION_DAYS*24*60*60*1000; }
 function _daysLeft(ts){
   var ms = (ts||0) + RETENTION_DAYS*24*60*60*1000 - Date.now();
@@ -3611,6 +3620,38 @@ async function renderDashExpiring(){
 // Retention now comes from the shared RETENTION_DAYS above rather than a number written here,
 // so quotes and drafts can't drift onto different clocks. Deletion is also no longer silent -
 // renderDashExpiring() warns for EXPIRY_WARN_DAYS beforehand.
+// Deletes booking-link submissions past BOOKING_REQUEST_RETENTION_DAYS. NEW - this store
+// previously had no retention rule at all and grew forever. Added on direct instruction, with
+// the deliberate asymmetry that requests go at 30 days while the driver's own quotes and drafts
+// now last 60: a client's raw submission is reference material, a quote is work.
+//
+// Matches the 30-day window _findRecentBookingRequests() already uses for the in-app list, so
+// the store and the list finally agree - previously the list hid things that still existed.
+//
+// Only removes a record it can actually age. A request with no submittedAt is LEFT ALONE rather
+// than deleted, the opposite of the saved-quote rule: a quote with no timestamp is a broken
+// record, but a request is the client's own submission and the cost of wrongly deleting one is
+// far higher than letting a stray linger.
+async function _purgeOldClientRequests(){
+  try{
+    if(!clientRequests || typeof clientRequests!=='object') return;
+    var cutoff = Date.now() - BOOKING_REQUEST_RETENTION_DAYS*24*60*60*1000;
+    var ids = Object.keys(clientRequests);
+    var kept = {}, removed = 0;
+    ids.forEach(function(id){
+      var r = clientRequests[id];
+      var ts = r && parseFloat(r.submittedAt);
+      if(!r || !isFinite(ts) || ts >= cutoff){ kept[id] = r; return; }   // keep anything unageable
+      removed++;
+    });
+    if(removed){
+      clientRequests = kept;
+      await storageSet('kat:clientRequests', clientRequests);
+      console.log('[retention] removed '+removed+' booking request(s) older than '+BOOKING_REQUEST_RETENTION_DAYS+' days');
+    }
+  }catch(e){ console.warn('_purgeOldClientRequests failed', e); }
+}
+
 async function _purgeOldSavedQuotes(){
   try{
     var cutoff = _retentionCutoff();
@@ -8455,6 +8496,39 @@ var _NOTIF_PAGE_ROUTES = {
 // setting .value directly does not fire onchange, so without this the surcharge auto-detection,
 // mileage lookup, and price calculation would all sit stale on a form that LOOKS filled in -
 // which is worse than an empty form, because it looks finished.
+// True when an address field holds a vague airport reference rather than something Google can
+// route to. Reported directly with a screenshot: clients overwhelmingly type "atl" or "atl
+// airport" in the airport address box while correctly PICKING their terminal from the dropdown
+// right below it. The driver's form then carries "atl" as the destination, Google can't resolve
+// it to a routable point, mileage never calculates, and the quote prices off base rate alone -
+// which is exactly how a 62-mile run priced as though it were ~53 (the reported $113).
+//
+// Deliberately narrow. Only matches strings that are ENTIRELY a vague airport reference - never
+// a real address that happens to contain the word "airport" (e.g. "123 Airport Rd"), which
+// would be a routable address worth keeping. If in doubt it leaves the value alone: filling in
+// the wrong airport would be far worse than leaving one that has to be corrected by hand.
+function _isVagueAirportAddr(s){
+  var v = String(s||'').trim().toLowerCase().replace(/[.,]/g,'').replace(/\s+/g,' ');
+  if(!v) return false;
+  return [
+    'atl','atl airport','atl international','atlanta airport','atlanta international',
+    'airport','the airport','hartsfield','hartsfield jackson','hartsfield-jackson',
+    'hartsfield jackson airport','hartsfield jackson international','atl intl','atl int'
+  ].indexOf(v) >= 0;
+}
+// Which address field holds the AIRPORT for a given ride type. An arriving leg collects FROM
+// the airport; everything else goes TO it. Mirrors the same type test already used elsewhere in
+// this function for the home address, rather than inventing a second rule.
+// Which address field holds the AIRPORT, per form. Takes the form prefix because the two forms
+// name their second address field DIFFERENTLY: the Quote form uses q-dropoff, but Quick Add
+// uses qa-home (there is no qa-dropoff at all). An earlier version of this returned 'dropoff'
+// unconditionally, so on Quick Add it targeted a non-existent element and silently did nothing -
+// the airport address was resolved on one form and not the other, with no error either way.
+function _airportSideSuffix(type, prefix){
+  if(type==='AP PICK UP') return 'pickup';
+  return (prefix==='qa') ? 'home' : 'dropoff';
+}
+
 function _prefillFromClientRequest(req){
   if(!req) return;
   // Tracks which booking-request record (if any) this prefill came from, so whichever save/
@@ -8490,6 +8564,24 @@ function _prefillFromClientRequest(req){
     set('date', req.date);
     set('time', req.time);
     set('flight', req.flight);
+    // Booking-link flight departure time. Previously the client's FLIGHT time arrived as
+    // req.time and was set straight into the pickup-time field above - so a ride booked through
+    // the link was scheduled to collect the client at the exact moment their plane departed,
+    // and q-flight-dep-time stayed empty so the suggested-pickup box never appeared at all.
+    // book.html now sends the two separately; this wires the flight time to the field that
+    // actually feeds _renderSuggestedPickup(). Older requests submitted before that change have
+    // no flightDepTime, so nothing is set and they behave exactly as they did.
+    if(req.flightDepTime){
+      set('flight-dep-time', req.flightDepTime);
+      // .value= never fires oninput - the third time this exact gap has been closed in this
+      // function (maybeAutofillClient, the mileage recalculation, qaHomeAddressChanged). Without
+      // this the flight time sits in the field while the suggested-pickup box stays hidden, so
+      // the whole point of capturing it is lost. Each form has its own renderer.
+      try{
+        if(isQuote){ if(typeof updateSuggestedPickupTime==='function') updateSuggestedPickupTime(); }
+        else       { if(typeof updateQaSuggestedPickupTime==='function') updateQaSuggestedPickupTime(); }
+      }catch(e){}
+    }
     set('terminal', req.terminal);
     set('rt-date', req.rtDate);
     set('rt-time', req.rtTime);
@@ -8526,6 +8618,32 @@ function _prefillFromClientRequest(req){
       // if a person had typed this address in by hand.
       if(_haEl && _homeAddrVal){ try{ qaHomeAddressChanged(); }catch(e){} }
     }
+    // Replace a vague airport reference with the real terminal address, so mileage can actually
+    // calculate. Placement is load-bearing: it MUST run after the address fields are populated
+    // just above and before the recalculation chain is triggered below. An earlier version sat
+    // above the address assignment, so it filled the empty field and then set('dropoff', ...)
+    // promptly overwrote it with the client's "atl" again - it only appeared to work because a
+    // request from the NEW booking form sends an empty airport address, which set() skips.
+    // Requests already submitted under the old form were left broken.
+    //
+    // Only ever fires when the client actually PICKED a terminal - without one there is nothing
+    // to resolve to and guessing between three airports' addresses would be worse than leaving
+    // the text for the driver to fix. Also fills a completely EMPTY airport field for the same
+    // reason: the terminal answer is unambiguous, so leaving the field blank helps nobody.
+    try{
+      if(req.terminal && TERMINAL_ADDRESSES[req.terminal]){
+        var _apSuffix = _airportSideSuffix(req.type, P);
+        var _apEl = document.getElementById(P+'-'+_apSuffix);
+        if(_apEl){
+          var _cur = (_apEl.value||'').trim();
+          if(!_cur || _isVagueAirportAddr(_cur)){
+            _apEl.value = TERMINAL_ADDRESSES[req.terminal];
+            _apEl.dispatchEvent(new Event('input', {bubbles:true}));
+            _apEl.dispatchEvent(new Event('change', {bubbles:true}));
+          }
+        }
+      }
+    }catch(e){ console.warn('terminal address resolve failed (non-fatal)', e); }
     // Notes: qa-notes exists; a q-notes element is referenced elsewhere in the file but isn't
     // actually in the Quote markup, so set() safely no-ops there. Rather than silently drop
     // what the client wrote, surface it in the toast below when there's nowhere to put it.
@@ -11291,6 +11409,15 @@ function renderRideView(r){
       </div>
     </div>
 
+    ${(r.odoStart!=null||r.odoEnd!=null||r.drivenMiles!=null) ? `<div class="detail-row" style="grid-column:1/-1;">
+      <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;">
+        <i class="ti ti-gauge" style="font-size:18px;color:var(--mid);" aria-hidden="true"></i>
+        <span style="font-size:.88rem;color:var(--black);font-weight:600;">${r.drivenMiles!=null ? r.drivenMiles+' mi' : 'Odometer'}</span>
+        <span style="font-size:.76rem;color:var(--mid);">${[r.odoStart!=null?('start '+r.odoStart):'', r.odoEnd!=null?('end '+r.odoEnd):''].filter(Boolean).join(' \u00b7 ')}</span>
+        <button onclick="event.stopPropagation();openOdometerEditor('${r.id}')" style="margin-left:auto;font-size:.72rem;font-weight:700;color:var(--accent);background:none;border:1.5px solid var(--accent);border-radius:20px;padding:.25rem .65rem;cursor:pointer;font-family:inherit;white-space:nowrap;">\u270f\ufe0f Fix readings</button>
+      </div>
+    </div>` : ''}
+
     ${canSeeContact && r.phone ? `<div class="detail-row" style="grid-column:1/-1;">
       <div style="display:flex;align-items:center;gap:.75rem;">
         <i class="ti ti-phone" style="font-size:18px;color:var(--mid);" aria-hidden="true"></i>
@@ -14014,6 +14141,155 @@ async function _maybeSaveDontAskAgain(){
   try{ await storageSetOne('kat:driverSettings', dn, driverSettings[dn], driverSettings); }catch(e){}
 }
 
+// ── ODOMETER CORRECTION ──────────────────────────────────────────────────────
+// Reported directly: there was NO way to fix a wrong odometer reading. Each of odoStart,
+// odoPause, odoResume and odoEnd was written exactly once by its own one-time prompt and could
+// never be reopened. The end-of-ride mismatch check ("must be higher than your starting reading
+// of X") correctly blocked the bad entry but gave no route back to the number that was actually
+// wrong - so a typo in the starting reading left the ride permanently unfinishable without
+// editing data by hand.
+//
+// Deliberately edits the READINGS, never drivenMiles directly. Miles are recomputed from the
+// corrected readings using _applyOdometerEnd()'s exact two-segment logic, so a corrected ride
+// can never end up with a mileage total that doesn't match its own numbers.
+function _odoFieldsFor(r){
+  var out = [
+    { key:'odoStart',  label:'Starting odometer',        hint:'When the ride began' }
+  ];
+  if(r.odoPause!=null || r.odoResume!=null){
+    out.push({ key:'odoPause',  label:'Odometer at pause',  hint:'End of the first leg' });
+    out.push({ key:'odoResume', label:'Odometer at resume', hint:'Start of the second leg' });
+  }
+  out.push({ key:'odoEnd', label:'Ending odometer', hint:'When the ride finished' });
+  return out;
+}
+// Validates a full set of corrected readings together rather than one at a time - the readings
+// only make sense relative to each other, and checking them in isolation is what let a bad
+// start sit there unflagged until the very end of the ride.
+function _validateOdoSet(vals, twoSegment){
+  var seq = twoSegment
+    ? [['odoStart','Starting'],['odoPause','Pause'],['odoResume','Resume'],['odoEnd','Ending']]
+    : [['odoStart','Starting'],['odoEnd','Ending']];
+  var prevKey=null, prevLabel=null;
+  for(var i=0;i<seq.length;i++){
+    var k=seq[i][0], lbl=seq[i][1];
+    var v=vals[k];
+    if(v==null || v==='') continue;              // blank = leave that reading unset
+    if(!isFinite(v) || v<0) return lbl+' odometer must be a number.';
+    if(prevKey!=null && vals[prevKey]!=null && vals[prevKey]!=='' && v < vals[prevKey]){
+      // Resume may legitimately EQUAL pause (nothing driven while paused); everything else
+      // must genuinely increase.
+      var allowEqual = (prevKey==='odoPause' && k==='odoResume');
+      if(!(allowEqual && v===vals[prevKey])) return lbl+' ('+v+') can\u2019t be lower than '+prevLabel+' ('+vals[prevKey]+').';
+    }
+    prevKey=k; prevLabel=lbl;
+  }
+  return null;
+}
+function openOdometerEditor(rideId){
+  var r=_rideById(rideId); if(!r) return;
+  var fields=_odoFieldsFor(r);
+  var rows=fields.map(function(f){
+    var cur = (r[f.key]==null) ? '' : r[f.key];
+    return '<div style="margin-bottom:.7rem;">'
+      +'<label style="display:block;font-size:.76rem;font-weight:700;color:#334155;margin-bottom:.15rem;">'+escHtml(f.label)+'</label>'
+      +'<input id="odoedit-'+f.key+'" type="number" inputmode="decimal" value="'+escHtml(String(cur))+'" placeholder="\u2014" '
+      +'style="width:100%;padding:.55rem .7rem;border:1.5px solid #e2d9f3;border-radius:9px;font-family:inherit;font-size:.92rem;box-sizing:border-box;">'
+      +'<div style="font-size:.7rem;color:#94a3b8;margin-top:.1rem;">'+escHtml(f.hint)+'</div>'
+      +'</div>';
+  }).join('');
+  var ov=document.createElement('div');
+  ov.id='odo-edit-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:14600;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:360px;width:100%;padding:1.25rem;box-shadow:0 24px 60px rgba(0,0,0,.35);box-sizing:border-box;max-height:85vh;overflow:auto;">'
+    +'<div style="font-size:1rem;font-weight:800;color:#0f172a;margin-bottom:.25rem;">Correct odometer readings</div>'
+    +'<div style="font-size:.76rem;color:#64748b;margin-bottom:.9rem;line-height:1.5;">Fix any reading that was entered wrong. Miles are recalculated from these numbers. Leave one blank to clear it.</div>'
+    + rows
+    +'<div id="odoedit-err" style="display:none;background:#fef2f2;border:1.5px solid #fca5a5;color:#b91c1c;border-radius:9px;padding:.5rem .65rem;font-size:.76rem;font-weight:700;margin-bottom:.6rem;line-height:1.45;"></div>'
+    +'<div id="odoedit-preview" style="font-size:.8rem;font-weight:700;color:#166534;background:#f0fdf4;border:1.5px solid #86efac;border-radius:9px;padding:.5rem .65rem;margin-bottom:.7rem;"></div>'
+    +'<button onclick="_saveOdometerEdits('+rideId+')" style="width:100%;padding:.7rem;background:#7c3aed;color:#fff;border:none;border-radius:10px;font-family:inherit;font-weight:700;font-size:.86rem;cursor:pointer;margin-bottom:.4rem;">Save corrections</button>'
+    +'<button onclick="document.getElementById(\'odo-edit-overlay\').remove()" style="width:100%;padding:.55rem;background:none;color:#64748b;border:none;font-family:inherit;font-size:.8rem;cursor:pointer;">Cancel</button>'
+    +'</div>';
+  document.body.appendChild(ov);
+  fields.forEach(function(f){
+    var el=document.getElementById('odoedit-'+f.key);
+    if(el) el.addEventListener('input', function(){ _odoEditPreview(rideId); });
+  });
+  _odoEditPreview(rideId);
+}
+function _readOdoEdits(r){
+  var vals={};
+  _odoFieldsFor(r).forEach(function(f){
+    var el=document.getElementById('odoedit-'+f.key);
+    if(!el) return;
+    var raw=(el.value||'').trim();
+    vals[f.key] = raw==='' ? '' : parseFloat(raw);
+  });
+  return vals;
+}
+// Live preview of the resulting mileage, so a correction can be checked before it's committed
+// rather than saved and then re-opened to see what it did.
+function _odoEditPreview(rideId){
+  var r=_rideById(rideId); if(!r) return;
+  var errBox=document.getElementById('odoedit-err');
+  var prevBox=document.getElementById('odoedit-preview');
+  var vals=_readOdoEdits(r);
+  var twoSegment = (vals.odoPause!=null && vals.odoPause!=='') && (vals.odoResume!=null && vals.odoResume!=='');
+  var err=_validateOdoSet(vals, twoSegment);
+  if(err){
+    if(errBox){ errBox.textContent=err; errBox.style.display='block'; }
+    if(prevBox) prevBox.style.display='none';
+    return;
+  }
+  if(errBox) errBox.style.display='none';
+  if(vals.odoStart==='' || vals.odoEnd===''){
+    if(prevBox){ prevBox.textContent='Miles will be cleared until both a start and end reading are entered.'; prevBox.style.display='block'; }
+    return;
+  }
+  var total = twoSegment
+    ? parseFloat(((vals.odoPause - vals.odoStart) + (vals.odoEnd - vals.odoResume)).toFixed(2))
+    : parseFloat((vals.odoEnd - vals.odoStart).toFixed(2));
+  if(prevBox){
+    prevBox.textContent = 'Miles: ' + total + (twoSegment ? ' (two legs, excluding the pause)' : '');
+    prevBox.style.display='block';
+  }
+}
+async function _saveOdometerEdits(rideId){
+  var r=_rideById(rideId); if(!r) return;
+  var vals=_readOdoEdits(r);
+  var twoSegment = (vals.odoPause!=null && vals.odoPause!=='') && (vals.odoResume!=null && vals.odoResume!=='');
+  var err=_validateOdoSet(vals, twoSegment);
+  if(err){
+    var errBox=document.getElementById('odoedit-err');
+    if(errBox){ errBox.textContent=err; errBox.style.display='block'; }
+    return;
+  }
+  Object.keys(vals).forEach(function(k){
+    if(vals[k]==='') delete r[k];
+    else r[k]=vals[k];
+  });
+  // Recompute from the corrected readings rather than preserving the old drivenMiles - the
+  // whole point is that miles and readings stay consistent with each other.
+  if(r.odoStart!=null && r.odoEnd!=null){
+    r.drivenMiles = twoSegment
+      ? parseFloat(((r.odoPause - r.odoStart) + (r.odoEnd - r.odoResume)).toFixed(2))
+      : parseFloat((r.odoEnd - r.odoStart).toFixed(2));
+  } else {
+    delete r.drivenMiles;   // can't derive miles from an incomplete pair
+  }
+  r.odoEditedAt = Date.now();
+  r.odoEditedBy = (currentUser && currentUser.name) || '';
+  try{ await saveRides(); }catch(e){ console.warn('odometer edit save failed', e); }
+  var ov=document.getElementById('odo-edit-overlay'); if(ov) ov.remove();
+  showToast('\u2713 Odometer readings updated');
+  // Mileage feeds price and income, so repaint everything that shows either.
+  try{ renderRideView(r); }catch(e){}
+  try{ refreshDash(); }catch(e){}
+  try{ renderIncome(); }catch(e){}
+  try{ renderDashIncome(); }catch(e){}
+}
+
 async function _saveOdometerStart(rideId){
   var r=rides.find(function(x){return x.id===rideId;});
   var input = document.getElementById('odo-start-input');
@@ -14166,8 +14442,22 @@ function _applyOdometerEnd(r, endingReading){
     // its own still leaves you hunting for what that number was.
     var _msg='Ending odometer must be higher than your '+(twoSegment?'resume':'starting')+' reading of '+compareFloor+'. Nothing was saved.';
     showToast(_msg,'error');
-    // The toast sits behind the modal - this is the part the driver actually sees.
-    ['lm-odo-end','mp-odo-end'].forEach(function(id){ if(document.getElementById(id)) _showFieldError(id,_msg); });
+    // Offer the way out right where the problem is hit. This check is exactly the moment a
+    // driver discovers an earlier reading was wrong, and until now it named the number to beat
+    // without giving any means to correct it - so a typo in the starting reading left the ride
+    // permanently unfinishable.
+    var _fixMsg = _msg + ' If that earlier reading is the wrong one, tap Fix readings below.';
+    ['lm-odo-end','mp-odo-end'].forEach(function(id){ if(document.getElementById(id)) _showFieldError(id,_fixMsg); });
+    try{
+      ['lm-odo-end','mp-odo-end'].forEach(function(id){
+        var fld=document.getElementById(id); if(!fld || document.getElementById(id+'-odofix')) return;
+        var b=document.createElement('button');
+        b.id=id+'-odofix'; b.type='button'; b.textContent='\u270f\ufe0f Fix readings';
+        b.style.cssText='margin-top:.4rem;font-size:.74rem;font-weight:700;padding:.35rem .7rem;background:none;border:1.5px solid #7c3aed;color:#7c3aed;border-radius:14px;cursor:pointer;font-family:inherit;';
+        b.onclick=function(){ openOdometerEditor(r.id); };
+        fld.parentNode.insertBefore(b, fld.nextSibling);
+      });
+    }catch(e){}
     return null;
   }
   var total = twoSegment
@@ -31678,6 +31968,7 @@ function enterApp(){
   (async function(){
     try{ if(window._dataFreshPromise) await window._dataFreshPromise; }catch(e){}
     try{ if(typeof _purgeOldSavedQuotes==='function') await _purgeOldSavedQuotes(); }catch(e){}
+    try{ if(typeof _purgeOldClientRequests==='function') await _purgeOldClientRequests(); }catch(e){}
   })();
   setTimeout(maybShowTutorialBanner, 1200);
   // Combine income state comes from driverSettings (Firebase), not localStorage

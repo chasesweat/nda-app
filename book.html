@@ -275,13 +275,29 @@
       <div id="leg-out-block">
         <div class="section-lbl" id="leg-out-lbl">Leaving</div>
         <div class="field" id="date-field"><label id="date-lbl">Date leaving</label><input id="f-date" type="date"></div>
+        <!-- PICKUP TIME - the primary time on a departing leg, and the one the ride is actually
+             scheduled for. Added after a direct report that "departure time" was impossible to
+             read: a client could never tell whether it meant their flight or their pickup.
+             That was not only confusing, it was WIRED WRONG - the single old time field was
+             submitted as the ride's `time`, so a 3pm flight created a 3pm PICKUP. The client
+             would have been collected as their plane left. Flight time now travels separately
+             as flightDepTime (below) and feeds the app's suggested-pickup calculator instead. -->
+        <div class="field" id="pickup-time-field">
+          <label id="pickup-time-lbl">What time do you need to be picked up?</label>
+          <input id="f-pickup-time" type="time" onfocus="_showPickupTimeHelp()">
+          <div class="hint" id="pickup-time-hint">Time to be picked up from your pickup location \u2014 not your flight time.</div>
+          <div id="pickup-time-help" style="display:none;background:#eff6ff;border:1.5px solid #93c5fd;border-radius:10px;padding:.6rem .7rem;margin-top:.45rem;font-size:.8rem;line-height:1.5;color:#1e3a8a;">
+            <strong>This is the time you\u2019ll be picked up from your address</strong> \u2014 not your flight time.
+            <div style="margin-top:.35rem;">Not sure what time to choose? Leave your best guess and add your <strong>flight departure time</strong> below. We\u2019ll work out the right pickup time for you and confirm it shortly after you submit.</div>
+          </div>
+        </div>
         <!-- The flight's OWN departure time, not a pickup time - this is the number the app's
              suggested-pickup calculation works backward from. Optional: a client who doesn't
              have it to hand can still submit, the driver just confirms it later. -->
         <div class="field" id="dep-time-field"><label>What time does your flight leave? <span style="font-weight:600;color:var(--mid);font-size:.78rem;">(optional)</span></label><input id="f-time" type="time">
-          <div class="hint">Your driver works out your pickup time from this — you don't need to.</div>
+          <div class="hint">Helps your driver double-check your pickup time is early enough.</div>
         </div>
-        <div class="field">
+        <div class="field" id="pickup-field">
           <label id="pickup-lbl">Pickup</label>
           <!-- Populated only when this link resolves to an established client with saved
                addresses (see the "t" token param in init()) - hidden entirely otherwise, so a
@@ -310,12 +326,12 @@
         <div class="field" id="terminal-field" style="display:none;">
           <label id="terminal-lbl">Which airline / terminal?</label>
           <select id="f-terminal">
-            <option value="">Not sure</option>
+            <option value="">Choose one…</option>
             <option value="South Domestic">Delta — domestic</option>
             <option value="North Domestic">Other airline — domestic</option>
             <option value="International">International</option>
           </select>
-          <div class="hint">If you're not sure, leave this and your driver will confirm.</div>
+          <div class="hint">This is how we get your exact airport address — please pick the one you’re flying.</div>
         </div>
       </div>
 
@@ -422,6 +438,19 @@ function applyTypeVisibility(){
   const termLbl = document.getElementById('terminal-lbl');
   const depTimeLbl = document.querySelector('#dep-time-field label');
   const depTimeHint = document.querySelector('#dep-time-field .hint');
+  const puTimeField = document.getElementById('pickup-time-field');
+  const puTimeLbl   = document.getElementById('pickup-time-lbl');
+  const puTimeHint  = document.getElementById('pickup-time-hint');
+
+  // The pickup-time field applies to every leg the client is LEAVING from - airport runs and
+  // ordinary trips alike. It is deliberately hidden for an ARRIVING leg (AP PICK UP), where the
+  // landing time genuinely IS the pickup time and asking for both would be asking the same
+  // question twice.
+  const showPickupTime = !isPickup;
+  if(puTimeField) puTimeField.style.display = showPickupTime ? '' : 'none';
+  // Flight-time field only means anything on an airport trip.
+  const depField = document.getElementById('dep-time-field');
+  if(depField) depField.style.display = (AIRPORT_TYPES.indexOf(tripType) >= 0) ? '' : 'none';
 
   if(isPickup){
     // A single arriving leg. The time that matters is when the plane LANDS - the one piece of
@@ -435,21 +464,28 @@ function applyTypeVisibility(){
     if(legLbl)  legLbl.textContent  = 'Leaving';
     if(dateLbl) dateLbl.textContent = 'Date leaving';
     if(depTimeLbl) depTimeLbl.innerHTML = 'What time does your flight leave? <span style="font-weight:600;color:var(--mid);font-size:.78rem;">(optional)</span>';
-    if(depTimeHint) depTimeHint.textContent = 'Your driver works out your pickup time from this — you don\u2019t need to.';
+    if(depTimeHint) depTimeHint.textContent = 'Helps your driver double-check your pickup time is early enough.';
+    if(puTimeLbl)  puTimeLbl.textContent  = 'What time do you need to be picked up?';
+    if(puTimeHint) puTimeHint.textContent = 'Time to be picked up from your pickup location \u2014 not your flight time.';
     if(termLbl) termLbl.textContent = 'Which airline / terminal?';
   } else if(tripType === 'AP ROUND TRIP'){
     if(legLbl)  legLbl.textContent  = 'Flying out';
     if(dateLbl) dateLbl.textContent = 'Date leaving';
     if(depTimeLbl) depTimeLbl.innerHTML = 'What time does your flight leave? <span style="font-weight:600;color:var(--mid);font-size:.78rem;">(optional)</span>';
-    if(depTimeHint) depTimeHint.textContent = 'Your driver works out your pickup time from this — you don\u2019t need to.';
+    if(depTimeHint) depTimeHint.textContent = 'Helps your driver double-check your pickup time is early enough.';
+    if(puTimeLbl)  puTimeLbl.textContent  = 'What time do you need to be picked up?';
+    if(puTimeHint) puTimeHint.textContent = 'Time to be picked up from your home \u2014 not your flight time.';
     if(termLbl) termLbl.textContent = 'Which airline / terminal flying out?';
   } else {
     // Non-airport types: plain wording, and the time IS the pickup time since there's no flight
     // to work backward from.
     if(legLbl)  legLbl.textContent  = 'When';
     if(dateLbl) dateLbl.textContent = 'Date';
-    if(depTimeLbl) depTimeLbl.innerHTML = 'Pickup time';
-    if(depTimeHint) depTimeHint.textContent = '';
+    // f-time (the flight field) is hidden entirely for non-airport types now - it used to
+    // double as the pickup time here, which is exactly what made one field mean two different
+    // things depending on trip type. The dedicated pickup-time field covers this case.
+    if(puTimeLbl)  puTimeLbl.textContent  = 'What time do you need to be picked up?';
+    if(puTimeHint) puTimeHint.textContent = 'Time to be picked up from your pickup location.';
     if(termLbl) termLbl.textContent = 'Which airline / terminal?';
   }
 
@@ -461,6 +497,39 @@ function applyTypeVisibility(){
   else if(tripType === 'AP PICK UP'){ pu.textContent = 'Which airport';   de.textContent = 'Drop-off address'; }
   else if(tripType === 'AP ROUND TRIP'){ pu.textContent = 'Home address'; de.textContent = 'Which airport'; }
   else {                            pu.textContent = 'Pickup';            de.textContent = 'Where to'; }
+
+  // On an airport trip the client no longer types the airport address at all - the terminal
+  // picker below IS the airport address, and submitRequest() fills the real one in.
+  //
+  // This removes a whole bug class rather than patching it. Clients were typing "atl" / "atl
+  // airport" into this box while correctly picking their terminal right beneath it; Google
+  // couldn't route to that, mileage never calculated, and the quote priced off base rate alone
+  // (the reported $113 on a 62-mile run). v1152 added a repair for 14 spellings of that - but
+  // the 15th would always have slipped through. A field that doesn't exist can't be filled in
+  // wrong.
+  //
+  // It also retires the other confusion this pair caused: the two fields had to be relabelled
+  // per trip type because clients routinely put the airport in the wrong one. With only one
+  // address field on airport trips that is no longer possible.
+  //
+  // Deliberately confined to THIS page. The driver's Quote and Quick Add forms keep their
+  // editable airport address (auto-filled from the terminal) - a driver legitimately needs to
+  // override for an unusual pickup point or a detour. Clients need guardrails; the driver needs
+  // control. This is a considered exception to the usual "reflect it in all three forms" rule.
+  var isAirportTrip = AIRPORT_TYPES.indexOf(tripType) >= 0;
+  var puField = document.getElementById('pickup-field');
+  var deField = document.getElementById('dest-field');
+  if(deField) deField.style.display = (isAirportTrip && tripType !== 'AP PICK UP') ? 'none' : '';
+  if(puField) puField.style.display = (tripType === 'AP PICK UP') ? 'none' : '';
+}
+
+// Shows the pickup-time explainer the first time the field is focused, then leaves it visible.
+// A hint that stays on screen beats a popup here: the client is choosing a time in this exact
+// moment, and a dismissed popup is read once and forgotten while a visible note is still there
+// while they decide.
+function _showPickupTimeHelp(){
+  var b = document.getElementById('pickup-time-help');
+  if(b) b.style.display = 'block';
 }
 
 // The "same as when I left" shortcut on the return terminal (v848). Checked by default because
@@ -968,11 +1037,46 @@ function _isNewAddress(addr){
 async function submitRequest(){
   const name = document.getElementById('f-name').value.trim();
   const phone = document.getElementById('f-phone').value.trim();
-  const pickup = document.getElementById('f-pickup').value.trim();
-  const dest = document.getElementById('f-dest').value.trim();
+  let pickup = document.getElementById('f-pickup').value.trim();
+  let dest = document.getElementById('f-dest').value.trim();
   const gateCode = document.getElementById('f-gate-code').value.trim();
   const date = document.getElementById('f-date').value;
-  const time = document.getElementById('f-time').value;
+  // THE FIX. These were one value. `time` is the ride's actual PICKUP time; flightDepTime is
+  // the flight's own departure, which the driver's app feeds into its suggested-pickup
+  // calculator (q-flight-dep-time). Sending the flight time as `time` scheduled the pickup for
+  // the moment the plane left.
+  //
+  // For an ARRIVING leg (AP PICK UP) the landing time genuinely IS the pickup time, so f-time
+  // still supplies `time` there - the pickup-time field is hidden for that type and would be
+  // empty. Falls back to f-time for any other type where the pickup field is somehow blank, so
+  // a request can never be submitted with no time at all.
+  const _isArriving = (tripType === 'AP PICK UP');
+  // Upstream half of the vague-airport fix. Clients type "atl" or "atl airport" in the airport
+  // address box while correctly picking their terminal right below it - so the request arrived
+  // with an address Google can't route to, mileage never calculated, and the quote priced off
+  // base rate alone. The driver's app also repairs this on prefill, but fixing it HERE means the
+  // stored request is correct from the start rather than only looking right once opened.
+  //
+  // Narrow on purpose: only replaces a value that is ENTIRELY a vague airport reference, never a
+  // real address that merely contains the word (e.g. "123 Airport Rd"). Only when a terminal was
+  // actually chosen - with none there is nothing to resolve to.
+  const TERMINAL_ADDR = {
+    'North Domestic': '6000 N Terminal Pkwy, Atlanta, GA 30320',
+    'South Domestic': '6000 S Terminal Pkwy, Atlanta, GA 30337',
+    'International':  '2600 Maynard H Jackson Jr Blvd, Atlanta, GA 30337'
+  };
+  function _vagueAirport(s){
+    var v = String(s||'').trim().toLowerCase().replace(/[.,]/g,'').replace(/\s+/g,' ');
+    if(!v) return false;
+    return ['atl','atl airport','atl international','atlanta airport','atlanta international',
+            'airport','the airport','hartsfield','hartsfield jackson','hartsfield-jackson',
+            'hartsfield jackson airport','hartsfield jackson international','atl intl','atl int'
+           ].indexOf(v) >= 0;
+  }
+  const _puTimeEl = document.getElementById('f-pickup-time');
+  const _flightTime = document.getElementById('f-time').value;
+  const time = _isArriving ? _flightTime : ((_puTimeEl && _puTimeEl.value) || _flightTime);
+  const flightDepTime = _isArriving ? '' : _flightTime;
   const notes = document.getElementById('f-notes').value.trim();
   const email = document.getElementById('f-email').value.trim();
   const vehicle = document.getElementById('f-vehicle').value;
@@ -982,6 +1086,12 @@ async function submitRequest(){
   // downstream that reads it.
   const flight = '';
   const terminal = document.getElementById('f-terminal').value;
+  // Substitute the real terminal address for a vague one, on whichever side the airport is.
+  // An arriving leg collects FROM the airport; everything else goes TO it.
+  if(terminal && TERMINAL_ADDR[terminal]){
+    if(_isArriving){ if(!pickup || _vagueAirport(pickup)) pickup = TERMINAL_ADDR[terminal]; }
+    else           { if(!dest   || _vagueAirport(dest))   dest   = TERMINAL_ADDR[terminal]; }
+  }
   const rtFlight = document.getElementById('f-rt-flight').value.trim();
   const rtDate = document.getElementById('f-rt-date').value;
   const rtTime = document.getElementById('f-rt-time').value;
@@ -1004,6 +1114,13 @@ async function submitRequest(){
   // (airport + round trip, matching the exact same isAir/isRet condition already used just
   // below to decide whether rtFlight even gets sent at all).
   if(isAir && isRet && !rtFlight){ showFormError('Please enter your return flight number so your driver can track it for delays.'); return; }
+  // The terminal is now REQUIRED on airport trips, and this guard is not optional. The airport
+  // address field is hidden on those trips, so the terminal is the ONLY source of the airport
+  // address - a blank one would submit a request with no airport information whatsoever, which
+  // is strictly worse than the "atl" it replaced. "Not sure" was dropped from the dropdown for
+  // the same reason.
+  if(isAir && !terminal){ showFormError('Please choose which airline / terminal you\u2019re flying \u2014 this is how your driver gets the right airport address.'); return; }
+  if(isAir && isRet && !rtTerminal){ showFormError('Please choose the terminal you\u2019re arriving back into.'); return; }
   document.getElementById('form-error').style.display = 'none';
 
   // Established client (has a token) typed something that doesn't match any of their saved
@@ -1044,6 +1161,7 @@ async function submitRequest(){
     gateCode: gateCode,
     date: date,
     time: time,
+    flightDepTime: flightDepTime,   // separate from `time` - see the comment where it's read
     rtDate: isRet ? rtDate : '',
     rtTime: isRet ? rtTime : '',
     flight: isAir ? flight : '',
