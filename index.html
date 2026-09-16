@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191159">
+<meta name="version" content="202608191160">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -827,7 +827,7 @@ input,select,textarea{font-size:16px;}
           <span id="quote-total" style="font-size:1.75rem;font-weight:700;color:var(--gold);">$0.00</span>
         </div>
       </div>
-        <div class="form-group" style="margin-top:1rem;"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;background:#f3eeff;border:1px solid #d9c9f5;border-radius:8px;padding:.6rem .75rem;"><input type="checkbox" id="q-add-client" checked style="width:17px;height:17px;accent-color:var(--accent);"><span style="font-size:.82rem;font-weight:600;color:var(--black);">Add this client to my client list</span></label><div style="font-size:.68rem;color:var(--mid);margin-top:3px;padding-left:.2rem;">Uncheck for one-time or guest rides you don’t want saved.</div></div><button onclick="saveQuote()" class="btn-primary" style="width:100%;margin-top:1rem;padding:.85rem;">Save as ride</button>
+        <div class="form-group" style="margin-top:1rem;"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;background:#f3eeff;border:1px solid #d9c9f5;border-radius:8px;padding:.6rem .75rem;"><input type="checkbox" id="q-add-client" checked style="width:17px;height:17px;accent-color:var(--accent);"><span style="font-size:.82rem;font-weight:600;color:var(--black);">Add this client to my client list</span></label><div style="font-size:.68rem;color:var(--mid);margin-top:3px;padding-left:.2rem;">Uncheck for one-time or guest rides you don’t want saved.</div></div><button onclick="saveQuoteOnly()" style="width:100%;margin-top:1rem;padding:.8rem;background:none;border:2px solid var(--accent);color:var(--accent);border-radius:10px;font-family:inherit;font-weight:700;font-size:.9rem;cursor:pointer;">💾 Save as quote</button><div style="font-size:.68rem;color:var(--mid);margin-top:4px;padding-left:.2rem;">Keeps it in Saved Quotes without texting the client or booking it.</div><button onclick="saveQuote()" class="btn-primary" style="width:100%;margin-top:1rem;padding:.85rem;">Save as ride</button>
         <div class="mtip-btn-wrap" style="margin-top:.5rem;"><button onclick="textQuoteToClient()" style="width:100%;padding:.7rem;background:none;border:1.5px solid var(--accent);border-radius:8px;color:var(--accent);font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">💬 Text quote to client</button><span class="mtip-dot mtip-dot-btn" id="mtd-q-text" onclick="toggleMtip('q-text')" title="What&#8217;s this?">i</span></div><div class="mtip-pop" id="mtp-q-text">Sends it as a message — and saves it automatically under Saved Quotes below, so there's no separate save step to forget.</div>
         <div class="mtip-btn-wrap" style="margin-top:.5rem;"><button onclick="quoteAsPdfFromForm()" style="width:100%;padding:.7rem;background:none;border:1.5px solid var(--accent);border-radius:8px;color:var(--accent);font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">📄 Quote as PDF</button><span class="mtip-dot mtip-dot-btn" id="mtd-q-pdf" onclick="toggleMtip('q-pdf')" title="What&#8217;s this?">i</span></div><div class="mtip-pop" id="mtp-q-pdf">A branded copy — your logo, business name, full price breakdown — to save and email or hand over. Says plainly it isn't a booking yet, and shows no driver, since none is assigned.</div>
         <div class="mtip-btn-wrap" style="margin-top:.5rem;"><button onclick="emailQuoteFromForm()" style="width:100%;padding:.7rem;background:none;border:1.5px solid var(--accent);border-radius:8px;color:var(--accent);font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">✉️ Email Quote</button><span class="mtip-dot mtip-dot-btn" id="mtd-q-email" onclick="toggleMtip('q-email-tip')" title="What&#8217;s this?">i</span></div><div class="mtip-pop" id="mtp-q-email-tip">Opens your email app with the client's address (if entered above) and the full quote already written in the body. Also opens the branded PDF view so you can save and attach it manually if you want a true attachment — email links can't attach files automatically.</div>
@@ -2265,7 +2265,7 @@ async function _qdList(){
     var all = await storageGet('kat:quoteDrafts/'+_qdUserKey());
     if(!all || typeof all!=='object') return [];
     var out = Object.keys(all).map(function(k){ return all[k]; })
-      .filter(function(r){ return r && r.fields && r.ts; });
+      .filter(function(r){ return r && r.fields && r.ts && !r.dismissed; });
     // Oldest first out of storage; newest first is what a person wants to see.
     out.sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
     return out;
@@ -2349,7 +2349,22 @@ async function _qdMaybeOffer(){
         ov.remove(); _qdApply(rec);
         return;
       }
-      if(e.target.id==='qd-dismiss'){ ov.remove(); return; }   // left in place on purpose - not discarded
+      if(e.target.id==='qd-dismiss'){
+        ov.remove();
+        // Reported directly: "it just keeps asking me if I want to start fresh." Dismissing used
+        // to leave the drafts completely untouched, so the same panel reappeared on every single
+        // visit to the Quote page - the feature nagged instead of helping. Now each offered
+        // draft is MARKED dismissed rather than deleted: it stops being offered, but it is still
+        // stored and still recoverable until its retention expires, so saying "start fresh"
+        // never destroys work.
+        list.forEach(function(rec){
+          try{
+            rec.dismissed = true;
+            storageSet('kat:quoteDrafts/'+_qdUserKey()+'/'+rec.id, rec).catch(function(){});
+          }catch(_e){}
+        });
+        return;
+      }
       if(e.target.id==='qd-delete-all'){
         ov.remove();
         list.forEach(function(r){ try{ storageSet('kat:quoteDrafts/'+_qdUserKey()+'/'+r.id, null).catch(function(){}); }catch(e){} });
@@ -7964,6 +7979,46 @@ function editSavedQuote(qid){
 // been built and is about to be stored - rather than when it was opened. The original's savedAt
 // is carried across so an edit doesn't silently reset its 60-day retention clock and make it
 // look newly created.
+// Saves the Quote form to Saved Quotes WITHOUT texting, PDF-ing or booking it.
+//
+// Reported directly: "there is no save quote button anymore." Correct - it was removed when
+// saving became automatic on send ("replaces the old Save as quote button"), which left no way
+// at all to park a quote you are not ready to send. Combined with editSavedQuote() deleting the
+// original on open (fixed in v1158), that is how a quote could vanish with no user error.
+//
+// Deliberately does NOT set sentAt: this quote has not been sent, so it must not claim to have
+// been, and its 60-day retention correctly runs from savedAt (see _quoteAgeFrom).
+async function saveQuoteOnly(){
+  var client=(document.getElementById('q-client').value||'').trim();
+  var errEl=document.getElementById('q-error');
+  if(!client){ if(errEl) errEl.textContent='Client name is required to save a quote.'; showToast('Client name is required','error'); return; }
+  if(errEl) errEl.textContent='';
+  var type=(document.getElementById('q-type').value||'');
+  // Same readiness gate the send paths use - AP ROUND TRIP has no single total, so check that a
+  // real leg subtotal actually rendered instead of reading the total slot.
+  if(type==='AP ROUND TRIP'){
+    if(!document.querySelector('#quote-lines [data-leg-subtotal]')){ showToast('Fill in the trip details first so there\u2019s a quote to save','error'); return; }
+  } else {
+    var total=(document.getElementById('quote-total').textContent||'').trim();
+    if(!total || total==='$0.00'){ showToast('Fill in the trip details first so there\u2019s a quote to save','error'); return; }
+  }
+  try{
+    var q=_gatherQuoteRide();
+    q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000);
+    q.savedAt=Date.now();
+    _quoteReplaceOnSave(q);      // replaces the original if this is a re-save of an edited quote
+    savedQuotes.push(q);
+    await saveSavedQuotes();
+    try{ renderSavedQuotes(); }catch(e){}
+    // The work is committed, so the recovery draft for it is no longer needed.
+    try{ _draftClear('page-quote'); }catch(e){}
+    try{ _qdClearActive(); }catch(e){}
+    showToast('\u2713 Saved to Saved Quotes');
+  }catch(e){
+    console.warn('saveQuoteOnly failed', e);
+    showToast('\u26a0\ufe0f Quote did not save \u2014 check your connection and try again','error');
+  }
+}
 function _quoteReplaceOnSave(newQuote){
   try{
     var qid = window._editingQuoteId;
