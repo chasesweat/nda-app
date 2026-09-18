@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191168">
+<meta name="version" content="202608191170">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -6710,23 +6710,32 @@ function _icsEventTitle(r){
   var owner = _icsOwnerTag(r);
   return (r.type?r.type+' \u2014 ':'') + (r.client||'Ride') + (owner?' ('+owner+')':'');
 }
-// Compact price line: "$153 ($105 Sedan Base + Premium Hours + Fuel)". Reuses
-// buildRideBreakdown() - the same reconstruction receipts use - rather than re-deriving pricing,
-// so a calendar entry can never quote a figure the receipt disagrees with. Only the LABELS are
-// condensed here; every number comes from the breakdown as-is.
+// Compact price line: "$121 ($105 Sedan Base + Mileage + Fuel)".
+//
+// Uses _computeFeeRebuild() - THE SAME function that draws the Fee Breakdown card inside the
+// app - so the calendar can never show a breakdown the app itself disagrees with.
+//
+// It originally used buildRideBreakdown(), which was wrong in a way worth recording. That is the
+// RECEIPT reconstruction, and it differs in two ways that both showed up immediately: it
+// multiplies the base by a leg count (producing "$210 Sedan" on a ride the app showed as $105),
+// and when its reconstruction does not reconcile to the ride's stored price it appends a
+// balancing "Discount" / "Additional charges" row. Chase saw exactly that - a Discount line in
+// the calendar entry that appears nowhere in the app. Those rows are an internal reconciliation
+// device for receipts, not a real charge, and must never reach a client-visible calendar.
 function _icsPriceSummary(r){
   try{
-    if(typeof buildRideBreakdown!=='function') return '';
-    var bd = buildRideBreakdown(r) || {};
-    var lines = bd.lines || [];
-    if(!lines.length) return '';
+    if(typeof _computeFeeRebuild!=='function') return '';
+    var bd = _computeFeeRebuild(r) || {};
+    var rows = bd.rows || [];
+    if(!rows.length) return '';
     var total = (r.price!=null && r.price!=='') ? r.price : bd.total;
-    var parts = lines.map(function(l){
+    var parts = rows.map(function(l){
       var lbl = String(l.label||'');
-      var m = lbl.match(/^Base rate \(([^)]+)\)/);          // -> "$105 Sedan Base"
-      if(m) return '$'+Math.round(parseFloat(l.val)||0)+' '+m[1]+' Base';
-      lbl = lbl.replace(/\s*\u2014.*$/,'').replace(/\s*\([^)]*\)\s*$/,'').replace(/\s+surcharge$/i,'').trim();
-      if(/^Mileage overage/i.test(lbl)) return 'Mileage';
+      // "Base rate (Sedan, incl. 50 mi)" -> "$105 Sedan Base" (vehicle only, drop the mileage note)
+      var m = lbl.match(/^Base rate \(([^,)]+)/);
+      if(m) return '$'+Math.round(parseFloat(l.val)||0)+' '+m[1].trim()+' Base';
+      // "Mileage (3 mi over 50 x $2.50)" -> "Mileage"; "Fuel surcharge (8%)" -> "Fuel"
+      lbl = lbl.replace(/\s*\([^)]*\)\s*$/,'').replace(/\s+surcharge$/i,'').trim();
       return lbl.replace(/\b\w/g, function(c){ return c.toUpperCase(); });
     }).filter(Boolean);
     if(!parts.length) return '';
@@ -7291,7 +7300,11 @@ async function saveQuote(){
   // Reset the repeat control back to a single ride so it never carries over to the next booking
   const rp=document.getElementById('q-repeat'); if(rp) rp.value='none';
   const rpo=document.getElementById('q-repeat-opts'); if(rpo) rpo.style.display='none';
-  const qnc=document.getElementById('q-new-client'); if(qnc) qnc.checked=false;
+  // Clearing userTouched matters as much as clearing the checkbox: that flag is what tells
+  // maybeAutofillClient() to stop auto-deciding. editSavedQuote() sets it when restoring a saved
+  // value, so without this reset the auto-check would stay disabled for the rest of the session
+  // and the NEXT genuinely-new client would quietly not get flagged.
+  const qnc=document.getElementById('q-new-client'); if(qnc){ qnc.checked=false; delete qnc.dataset.userTouched; }
   refreshDash(); updateNotifBadge(); renderCal();
   try{ await _markBookingRequestHandled(); }catch(e){}
   _draftClear('page-quote');
@@ -8043,6 +8056,15 @@ function editSavedQuote(qid){
     set('q-email', q.email||'');
     set('q-wait', q.wait||0);
     set('q-sprinter-hours', q.medHours||'');
+    // BUG, reported directly: the New Client badge vanished from a ride built via booking link
+    // -> saved quote -> scheduled. editSavedQuote() restored 23 fields but NOT this checkbox, so
+    // opening a saved quote to edit it silently dropped the flag, and re-saving lost it for good.
+    // Restored here, and marked userTouched so maybeAutofillClient()'s auto-check can't
+    // immediately overwrite the value we just put back with its own guess.
+    try{
+      var _nc=document.getElementById('q-new-client');
+      if(_nc){ _nc.checked = !!q.newClient; _nc.dataset.userTouched='1'; }
+    }catch(e){}
     set('q-driver', q.driver||'');
     // Vehicle - find and click the matching toggle button so its active state stays in sync
     // A saved quote is always for one vehicle, so restoring selects exactly that one. Matching
@@ -11602,6 +11624,7 @@ function renderRideView(r){
   })();
 
   document.getElementById('rm-detail-grid-top').innerHTML=`${rideReqDriverTag(r)}
+    ${r.newClient?`<div style="grid-column:1/-1;background:#fffbeb;border:1.5px solid #fcd34d;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#92400e;font-weight:700;font-size:.84rem;">\u2605 New Client \u2014 first time with NWDA</div>`:''}
     ${r.status==='cancelled'?`<div style="grid-column:1/-1;background:#fdecea;border:1.5px solid #e6a8a0;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#b03a2e;font-weight:700;font-size:.9rem;">🚫 CANCELLED${r.cancelledBy?' · by '+escHtml(String(r.cancelledBy)):''} — tap “Reactivate Ride” below to restore.</div>`:''}
     ${r.status==='paid'?`<div style="grid-column:1/-1;background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:.6rem .85rem;margin-bottom:.5rem;color:#15803d;font-weight:700;font-size:.9rem;">✅ CLIENT PAID${r.paidBy?' · marked by '+escHtml(String(r.paidBy)):''}${r.payment?' · <span style="font-weight:600;">'+escHtml(String(r.payment))+'</span>':''}<div style="margin-top:.4rem;font-weight:600;font-size:.78rem;"><button onclick="openPaymentModal(${r.id})" style="background:none;border:none;color:#15803d;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;margin-right:.8rem;">Edit payment</button><button onclick="markRideUnpaid(${r.id})" style="background:none;border:none;color:#dc2626;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;margin-right:.8rem;">Mark unpaid</button>${`<button onclick="shareReceiptDocument(${r.id})" style="background:none;border:none;color:#15803d;text-decoration:underline;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:0;">🧾 Send receipt (PDF)</button>`}</div></div>`:''}
     ${(()=>{
@@ -33174,6 +33197,9 @@ function showPage(id, el){
     // dutifully remove it. editSavedQuote() calls nav('quote') and then sets the marker inside a
     // 150ms setTimeout, so it is always set AFTER this clear, never wiped by it.
     window._editingQuoteId = null;
+    // Same reason as the reset in saveQuote() - a fresh visit to the Quote page must restore the
+    // auto-decide behaviour, otherwise an earlier edit leaves it switched off.
+    try{ var _ncq=document.getElementById('q-new-client'); if(_ncq) delete _ncq.dataset.userTouched; }catch(e){}
     populateDriverFilter(); renderAddons(); updateTripFields(); calcQuote(); populateClientDatalist(); if(gmapsLoaded) setTimeout(initAddressAutocomplete, 100); _draftMaybeOffer('page-quote', 'q-client'); setTimeout(function(){ try{ _qdMaybeOffer(); }catch(e){} }, 400); }
   if(id==='calendar') renderCal();
   if(id==='clients') renderClients();
