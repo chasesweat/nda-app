@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191160">
+<meta name="version" content="202608191166">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -752,6 +752,7 @@ input,select,textarea{font-size:16px;}
             <input type="date" id="q-date" aria-label="Ride date" onchange="onDateChange();checkPriceShopping('q');updateSuggestedPickupTime()" style="flex:1;min-width:0;" />
             <input type="time" id="q-time" aria-label="Pickup time" onchange="onTimeChange()" style="flex:1;min-width:0;" />
           </div>
+          <div id="q-time-suggest-note" style="display:none;font-size:.74rem;font-weight:600;color:#5b21b6;background:#f3eeff;border:1px solid #d9c9f5;border-radius:7px;padding:.35rem .55rem;margin-top:.35rem;line-height:1.45;"></div>
         </div>
         <!-- AP Run only (v820) - dropping a client off for a departing flight, not picking one
              up, so there's a real flight departure time to plan backward from. AP Pick Up has
@@ -1624,7 +1625,7 @@ input,select,textarea{font-size:16px;}
            selector into half a row, which is also why its label carries a "(check AM/PM)"
            warning: an easy thing to get wrong at a glance. -->
       <div class="form-group" style="grid-column:1/-1;"><label id="qa-date-lbl">Date</label><input type="date" id="qa-date" onchange="onQaDateTimeChange();checkPriceShopping('qa');updateQaSuggestedPickupTime();qaCheckLegs()" /></div>
-      <div class="form-group" style="grid-column:1/-1;"><label id="qa-time-lbl">Time <span style="font-weight:600;color:var(--mid);font-size:.72rem;">(check AM/PM)</span></label><input type="time" id="qa-time" onchange="onQaDateTimeChange()" /></div>
+      <div class="form-group" style="grid-column:1/-1;"><label id="qa-time-lbl">Time <span style="font-weight:600;color:var(--mid);font-size:.72rem;">(check AM/PM)</span></label><input type="time" id="qa-time" onchange="onQaDateTimeChange()" /><div id="qa-time-suggest-note" style="display:none;font-size:.74rem;font-weight:600;color:#5b21b6;background:#f3eeff;border:1px solid #d9c9f5;border-radius:7px;padding:.35rem .55rem;margin-top:.35rem;line-height:1.45;"></div></div>
       <div class="form-group"><label>Travel Type</label>
         <select id="qa-type" onchange="qaTypeChanged()">
           <option>AP ROUND TRIP</option>
@@ -5591,7 +5592,8 @@ function updateSuggestedPickupTime(){
   const box = document.getElementById('q-suggested-pickup-box');
   if(!box) return;
   const type = document.getElementById('q-type')?.value;
-  if(type !== 'AP RUN'){ box.style.display='none'; return; }
+  // AP ROUND TRIP's outbound leg is a departing flight - same calculation, same usefulness.
+  if(type !== 'AP RUN' && type !== 'AP ROUND TRIP'){ box.style.display='none'; _setTimeSuggestNote('q',''); return; }
   const depTimeVal = document.getElementById('q-flight-dep-time')?.value;
   const dateVal     = document.getElementById('q-date')?.value;
   const terminal    = document.getElementById('q-terminal')?.value;
@@ -5626,8 +5628,37 @@ function updateSuggestedPickupTime(){
     + '<div style="font-size:.72rem;color:var(--mid);margin-top:.15rem;">'+bufferHrs+'hr '+(terminal==='International'?'international':'domestic')+' buffer + '+driveMin+'min drive to '+escHtml(terminal)+(rushHour?' + 20min rush-hour buffer':'')+'</div>'
     + '<button type="button" onclick="applySuggestedPickupTime()" style="margin-top:.4rem;font-size:.72rem;padding:.3rem .7rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Use this time</button>';
   box.style.display='block';
+  var _filled = _applySuggestedIfEmpty('q', box, timeStr);
+  _setTimeSuggestNote('q', _filled
+    ? '\ud83d\udd52 Auto-filled from the flight time \u2014 <strong>edit it if you need to</strong>.'
+    : '\ud83d\udd52 Suggested: <strong>'+timeStr+'</strong>'+(dayNote?' (the day before)':'')+' \u00b7 <button type="button" onclick="applySuggestedPickupTime()" style="background:none;border:none;padding:0;color:var(--accent);font-family:inherit;font-size:inherit;font-weight:800;text-decoration:underline;cursor:pointer;">use it</button>');
 }
 
+// Writes the small helper line that sits directly UNDER the pickup-time field. Requested
+// because the suggestion box lives next to the Flight Departure Time field, which on a long form
+// can be well away from the time input it is actually about - so it was easy to miss entirely.
+// Putting a short note where the person is looking when they set the time is the fix; the full
+// box (with its buffer/drive breakdown and Use-this-time button) stays where it is.
+function _setTimeSuggestNote(prefix, html){
+  var el = document.getElementById(prefix+'-time-suggest-note');
+  if(!el) return;
+  el.innerHTML = html || '';
+  el.style.display = html ? 'block' : 'none';
+}
+// Auto-fills the pickup time from the suggestion, but ONLY when the field is empty. Never
+// overwrites a time that is already there: a person who typed one deliberately must not have it
+// silently replaced, and on an edited ride the existing time is real data. When the field is
+// already filled the note simply offers the suggestion instead, leaving the choice with them.
+function _applySuggestedIfEmpty(prefix, box, timeStr){
+  var timeEl = document.getElementById(prefix+'-time');
+  if(!timeEl) return false;
+  if((timeEl.value||'').trim()) return false;
+  var dateEl = document.getElementById(prefix+'-date');
+  if(dateEl && box.dataset.suggestedDate) dateEl.value = box.dataset.suggestedDate;
+  timeEl.value = box.dataset.suggestedTime;
+  try{ timeEl.dispatchEvent(new Event('change', {bubbles:true})); }catch(e){}
+  return true;
+}
 // Applies exactly what the box above already computed and displayed - reads the stored result
 // rather than recalculating, so the ride's actual pickup time can never end up different from
 // the suggestion the driver just looked at and chose to accept.
@@ -5652,7 +5683,7 @@ function updateQaSuggestedPickupTime(){
   const box = document.getElementById('qa-suggested-pickup-box');
   if(!box) return;
   const type = document.getElementById('qa-type')?.value;
-  if(type !== 'AP RUN'){ box.style.display='none'; return; }
+  if(type !== 'AP RUN' && type !== 'AP ROUND TRIP'){ box.style.display='none'; _setTimeSuggestNote('qa',''); return; }
   const depTimeVal = document.getElementById('qa-flight-dep-time')?.value;
   const dateVal     = document.getElementById('qa-date')?.value;
   const terminal    = document.getElementById('qa-terminal')?.value;
@@ -5681,6 +5712,10 @@ function updateQaSuggestedPickupTime(){
     + '<div style="font-size:.72rem;color:var(--mid);margin-top:.15rem;">'+bufferHrs+'hr '+(terminal==='International'?'international':'domestic')+' buffer + '+driveMin+'min drive to '+escHtml(terminal)+(rushHour?' + 20min rush-hour buffer':'')+'</div>'
     + '<button type="button" onclick="applyQaSuggestedPickupTime()" style="margin-top:.4rem;font-size:.72rem;padding:.3rem .7rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:14px;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:700;">Use this time</button>';
   box.style.display='block';
+  var _qaFilled = _applySuggestedIfEmpty('qa', box, timeStr);
+  _setTimeSuggestNote('qa', _qaFilled
+    ? '\\ud83d\\udd52 Auto-filled from the flight time \\u2014 <strong>edit it if you need to</strong>.'
+    : '\\ud83d\\udd52 Suggested: <strong>'+timeStr+'</strong>'+(dayNote?' (the day before)':'')+' \\u00b7 <button type="button" onclick="applyQaSuggestedPickupTime()" style="background:none;border:none;padding:0;color:var(--accent);font-family:inherit;font-size:inherit;font-weight:800;text-decoration:underline;cursor:pointer;">use it</button>');
 }
 
 function applyQaSuggestedPickupTime(){
@@ -6149,7 +6184,11 @@ function applyAirportFieldVisibility(prefix){
   // AP Run only (v820) - a departing flight to plan the pickup backward from, distinct from
   // AP Pick Up's Flight # above (an arriving flight to track). Field only exists on the Quote
   // form for now (prefix 'q') - set() already no-ops safely on prefixes that don't have it.
-  var wantsFlightDep = (type==='AP RUN');
+  // AP ROUND TRIP added on request: its leg 1 IS a departing flight, so a suggested pickup is
+  // exactly as useful there as on an AP Run. The original "AP Run only" restriction read as an
+  // oversight rather than a decision - the reasoning above it concerns ARRIVING flights, which
+  // is a different field entirely.
+  var wantsFlightDep = (type==='AP RUN' || type==='AP ROUND TRIP');
   set(prefix+'-flight-dep-group', wantsFlightDep);
   if(!wantsFlightDep){
     var fdt=document.getElementById(prefix+'-flight-dep-time'); if(fdt) fdt.value='';
@@ -7099,7 +7138,7 @@ function textQuoteToClient(){
       // a brand-new quote; this refreshes an existing one with it too now, keeping only its
       // original identity (_quoteId, savedAt) rather than treating it as immutable once created.
       if(_ex){ var _fresh=_gatherQuoteRide(); Object.assign(_ex, _fresh); _ex.sentAt=Date.now(); }
-      else { var _q=_gatherQuoteRide(); _q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); _q.savedAt=Date.now(); _q.sentAt=Date.now(); _quoteReplaceOnSave(_q); savedQuotes.push(_q); }
+      else { var _q=_gatherQuoteRide(); _q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); _q.savedAt=Date.now(); _q.sentAt=Date.now(); _quoteReplaceOnSave(_q); savedQuotes.push(_q); window._editingQuoteId=_q._quoteId; }
       // The in-progress DRAFT must be cleared once this quote is safely saved. Reported
       // directly: the "Restore unsaved info?" prompt came back offering a quote that had
       // already been saved, instead of the one actually being worked on when the phone died.
@@ -7208,6 +7247,19 @@ async function saveQuote(){
   try{ await _markBookingRequestHandled(); }catch(e){}
   _draftClear('page-quote');
   try{ _qdClearActive(); }catch(e){}   // work is committed - drop the recovery copy too
+  // Reported directly: a scheduled ride was still sitting in Saved Quotes. Once a quote is
+  // booked it is a RIDE, not an outstanding quote, and leaving it in the list invites
+  // double-booking it later. scheduleSavedQuote() already does this when booking FROM a saved
+  // quote card; booking from the Quote form itself never did, so a quote saved here and then
+  // booked here stayed behind forever.
+  try{
+    var _bookedQid = window._editingQuoteId;
+    if(_bookedQid){
+      var _bi = (savedQuotes||[]).findIndex(function(x){ return x && x._quoteId===_bookedQid; });
+      if(_bi>=0){ savedQuotes.splice(_bi,1); await saveSavedQuotes(); try{ renderSavedQuotes(); }catch(e){} }
+      window._editingQuoteId = null;
+    }
+  }catch(e){ console.warn('clearing booked quote from Saved Quotes failed', e); }
   _afterRideScheduled(ride);
 }
 
@@ -7592,7 +7644,7 @@ async function quoteAsPdfFromForm(){
       // Same fix as the sibling text-send flow (see that one's comment for the full reasoning) -
       // this is the document/email-send path, which had the identical gap.
       if(_ex){ var _fresh2=_gatherQuoteRide(); Object.assign(_ex, _fresh2); _ex.sentAt=Date.now(); }
-      else { var _q=_gatherQuoteRide(); _q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); _q.savedAt=Date.now(); _q.sentAt=Date.now(); _quoteReplaceOnSave(_q); savedQuotes.push(_q); }
+      else { var _q=_gatherQuoteRide(); _q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); _q.savedAt=Date.now(); _q.sentAt=Date.now(); _quoteReplaceOnSave(_q); savedQuotes.push(_q); window._editingQuoteId=_q._quoteId; }
       // The in-progress DRAFT must be cleared once this quote is safely saved. Reported
       // directly: the "Restore unsaved info?" prompt came back offering a quote that had
       // already been saved, instead of the one actually being worked on when the phone died.
@@ -8008,6 +8060,11 @@ async function saveQuoteOnly(){
     q.savedAt=Date.now();
     _quoteReplaceOnSave(q);      // replaces the original if this is a re-save of an edited quote
     savedQuotes.push(q);
+    // The form now OWNS this saved quote. Without this, pressing Save as quote and then Text /
+    // PDF / Email created a SECOND entry for the same quote (reported: the same client saved
+    // twice, identical date and price), because each save path pushed independently with no
+    // link between them.
+    window._editingQuoteId = q._quoteId;
     await saveSavedQuotes();
     try{ renderSavedQuotes(); }catch(e){}
     // The work is committed, so the recovery draft for it is no longer needed.
@@ -8307,6 +8364,35 @@ function addNotification(driverName, ride, action, customMsg, forceNow){
   const msg = customMsg || (action==='assigned'
     ? `New ride assigned: ${ride.client} on ${fmtDateShort(ride.date)} at ${ride.time||'—'} ($${ride.price})`
     : `Ride updated: ${ride.client}`);
+  // Reported directly with a screenshot: two identical "New ride assigned" entries for the same
+  // ride, same date, same price - and accepting one accepted both, which is the tell that they
+  // pointed at the SAME rideId rather than being two genuine assignments.
+  //
+  // Several paths can legitimately notify for one ride (saveQuote, scheduleSavedQuote, a
+  // reassignment, the Notify Drivers release step), and a ride saved twice - or a double-tap on
+  // Save as ride - runs one of them twice. Rather than chase which one fired in this instance,
+  // the list itself now refuses to hold two undismissed notifications of the SAME type for the
+  // SAME ride: a second one carries no information the first didn't, and two entries that both
+  // resolve on one tap look broken.
+  //
+  // Scoped to ride-linked types only (rideId present) and to UNREAD entries, so a genuine
+  // re-notification after the driver has already read and cleared the first still comes through.
+  // Chat messages and anything without a rideId are untouched.
+  try{
+    if(ride && ride.id!=null){
+      var _dupe = (notifications[driverName]||[]).some(function(n){
+        return n && !n.read && n.type===action && n.rideId===ride.id;
+      });
+      if(_dupe){
+        // Still refresh the badge/clock side-effects below for 'assigned' - the duplicate is
+        // suppressed from the LIST, not treated as if the assignment never happened.
+        if(action!=='assigned') return;
+        _markNotifDirty(driverName);
+        if(ride) ride.driverResponse = ride.driverResponse || 'pending';
+        return;
+      }
+    }
+  }catch(e){}
   _markNotifDirty(driverName);
   notifications[driverName].unshift({ rideId:ride.id, type:action, channel:(ride&&ride.channel)||null, read:false, msg, ts:Date.now(), createdBy:currentUser?.name||'' });
   // Fire push notification to driver's phone
@@ -21724,7 +21810,18 @@ function renderDashIncome(){
   // Gross/Net/Total Rides all come from the one shared calcNetTakeHomeForMonth() now — see its
   // own comment for why this used to be a second, independently-written formula here that could
   // (and did) silently disagree with the Income page's number for the same month.
-  const { gross, net, count } = calcNetTakeHomeForMonth(dName);
+  const { gross, tips, net, count } = calcNetTakeHomeForMonth(dName);
+  // GROSS here means every dollar taken in - fares AND tips - on direct instruction. It
+  // deliberately differs from the Income page's "Gross Fares" card, which is fares only and sits
+  // beside its own separate Tips card; there, the split is the point. On the Dashboard there is
+  // one headline number and no Tips card next to it, so showing fares only was under-reporting
+  // what was actually earned.
+  //
+  // This also makes the three tiles reconcile for the first time: Net is
+  // gross + tips + fees received + dispatch pay - costs, so with tips now inside Gross, the gap
+  // between Gross and Net is costs and adjustments rather than costs, adjustments AND a hidden
+  // tips figure that appeared in one number but not the other.
+  const grossAll = gross + tips;
   const monthName=now.toLocaleDateString('en-US',{month:'long',year:'numeric'});
   const card=(label,val,color)=>`<div style="background:var(--surface);border-radius:10px;padding:.9rem;text-align:center;border:1.5px solid var(--light);">
       <div style="font-size:.66rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.3rem;">${label}</div>
@@ -21736,7 +21833,7 @@ function renderDashIncome(){
       <span onclick="nav('income')" style="font-size:.78rem;color:var(--gold);font-weight:600;cursor:pointer;">View details →</span>
     </div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;">
-      ${card('Gross','$'+gross.toFixed(2),'var(--green)')}
+      ${card('Gross','$'+grossAll.toFixed(2),'var(--green)')}
       ${card('Net','$'+net.toFixed(2), net>=0?'var(--green)':'#dc2626')}
       ${card('Total Rides',count,'var(--gold)')}
     </div>`;
