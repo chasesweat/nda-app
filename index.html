@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191166">
+<meta name="version" content="202608191168">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -6688,6 +6688,68 @@ function _icsStampUtc(dt){
   var pad=function(n){return String(n).padStart(2,'0');};
   return dt.getUTCFullYear()+pad(dt.getUTCMonth()+1)+pad(dt.getUTCDate())+'T'+pad(dt.getUTCHours())+pad(dt.getUTCMinutes())+pad(dt.getUTCSeconds())+'Z';
 }
+// Calendar event title + description, shared by the single-ride .ics export and the FamilyWall
+// export. Built to the exact layout Chase specified with a screenshot.
+//
+// TITLE: "AP RUN - Cindy Webb Hansard (Kat)". Type leads because month-view titles truncate
+// hard, so the first characters should say what KIND of ride it is rather than repeating a name.
+//
+// OWNER TAG: whoever the CLIENT belongs to, not whoever typed the booking. Morgan schedules on
+// Kat's behalf, so a ride Morgan creates must read "(Kat)" - reported directly. feeOwnerFor()
+// already encodes exactly that rule (Morgan -> Kathleen Herringdine) and is the same function
+// the fee ledger and pickup instructions use, so this can never disagree with them. Converted
+// back to the short login name for display, matching the form used everywhere else.
+function _icsOwnerTag(r){
+  try{
+    var ownerFull = (typeof feeOwnerFor==='function' ? feeOwnerFor(r.createdBy) : '') || '';
+    var shortName = (typeof _loginForDriver==='function' ? _loginForDriver(ownerFull) : '') || '';
+    return (shortName || (r.createdBy||'')).trim();
+  }catch(e){ return (r.createdBy||'').trim(); }
+}
+function _icsEventTitle(r){
+  var owner = _icsOwnerTag(r);
+  return (r.type?r.type+' \u2014 ':'') + (r.client||'Ride') + (owner?' ('+owner+')':'');
+}
+// Compact price line: "$153 ($105 Sedan Base + Premium Hours + Fuel)". Reuses
+// buildRideBreakdown() - the same reconstruction receipts use - rather than re-deriving pricing,
+// so a calendar entry can never quote a figure the receipt disagrees with. Only the LABELS are
+// condensed here; every number comes from the breakdown as-is.
+function _icsPriceSummary(r){
+  try{
+    if(typeof buildRideBreakdown!=='function') return '';
+    var bd = buildRideBreakdown(r) || {};
+    var lines = bd.lines || [];
+    if(!lines.length) return '';
+    var total = (r.price!=null && r.price!=='') ? r.price : bd.total;
+    var parts = lines.map(function(l){
+      var lbl = String(l.label||'');
+      var m = lbl.match(/^Base rate \(([^)]+)\)/);          // -> "$105 Sedan Base"
+      if(m) return '$'+Math.round(parseFloat(l.val)||0)+' '+m[1]+' Base';
+      lbl = lbl.replace(/\s*\u2014.*$/,'').replace(/\s*\([^)]*\)\s*$/,'').replace(/\s+surcharge$/i,'').trim();
+      if(/^Mileage overage/i.test(lbl)) return 'Mileage';
+      return lbl.replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+    }).filter(Boolean);
+    if(!parts.length) return '';
+    return '$'+Math.round(parseFloat(total)||0)+' ('+parts.join(' + ')+')';
+  }catch(e){ console.warn('_icsPriceSummary failed', e); return ''; }
+}
+// DESCRIPTION: deliberately UNLABELLED, per spec - no "Pickup:", "Drop-off:", "Phone:" or
+// "Price:" prefixes. The client's address is omitted because it is already the event LOCATION,
+// so repeating it is noise; and the airport is shown as a terminal NAME ("South Terminal")
+// rather than its street address, which is what a driver actually needs at a glance.
+function _icsEventDesc(r){
+  var out = [];
+  var term = (r.terminal||r.rtTerminal||'').trim();
+  if(term && typeof _terminalPhrase==='function'){
+    var phrase = _terminalPhrase(term);
+    if(phrase && phrase!=='terminal') out.push(phrase);
+  }
+  if(r.flight) out.push(r.flight);
+  if(r.phone)  out.push(r.phone);
+  var price = _icsPriceSummary(r);
+  if(price) out.push(price);
+  return out.join('\n');
+}
 function addRideToCalendar(rideId){
   var r=_rideById(rideId);
   if(!r){ showToast('Ride not found','error'); return; }
@@ -6700,14 +6762,8 @@ function addRideToCalendar(rideId){
   var end=_icsStampUtc(endDt);
   var now=nowET();
   var stamp=now.getUTCFullYear()+pad(now.getUTCMonth()+1)+pad(now.getUTCDate())+'T'+pad(now.getUTCHours())+pad(now.getUTCMinutes())+pad(now.getUTCSeconds())+'Z';
-  var summary=icsEscape((r.client||'Ride')+(r.type?' \u2014 '+r.type:''));
-  var descParts=[];
-  if(r.driver) descParts.push('Driver: '+r.driver);
-  if(r.pickup) descParts.push('Pickup: '+r.pickup);
-  if(r.home) descParts.push('Drop-off: '+r.home);
-  if(r.flight) descParts.push('Flight: '+r.flight);
-  if(r.phone) descParts.push('Phone: '+r.phone);
-  var desc=icsEscape(descParts.join('\n'));
+  var summary=icsEscape(_icsEventTitle(r));
+  var desc=icsEscape(_icsEventDesc(r));
   var loc=icsEscape(r.pickup||r.home||'');
   var ics='BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//NWDA Transportation//EN\r\nCALSCALE:GREGORIAN\r\n'
     +'BEGIN:VEVENT\r\nUID:nda-'+r.id+'@nda\r\nDTSTAMP:'+stamp+'\r\nDTSTART:'+start+'\r\nDTEND:'+end+'\r\n'
@@ -6771,15 +6827,8 @@ function exportRideToFamilyWall(rideId){
   var end=icsStampUtc(endDt);
   var now=nowET();
   var stamp=now.getUTCFullYear()+pad(now.getUTCMonth()+1)+pad(now.getUTCDate())+'T'+pad(now.getUTCHours())+pad(now.getUTCMinutes())+pad(now.getUTCSeconds())+'Z';
-  var summary=icsEscape((r.client||'Ride')+(r.type?' \u2014 '+r.type:''));
-  var descParts=[];
-  if(r.driver) descParts.push('Driver: '+r.driver);
-  if(r.pickup) descParts.push('Pickup: '+r.pickup);
-  if(r.home) descParts.push('Drop-off: '+r.home);
-  if(r.flight) descParts.push('Flight: '+r.flight);
-  if(r.phone) descParts.push('Phone: '+r.phone);
-  if(r.price!==undefined && r.price!==null && r.price!=='') descParts.push('Price: $'+r.price);
-  var desc=icsEscape(descParts.join('\n'));
+  var summary=icsEscape(_icsEventTitle(r));
+  var desc=icsEscape(_icsEventDesc(r));
   var loc=icsEscape(r.pickup||r.home||'');
   // UID prefixed nda-fw- (not nda-, which addRideToCalendar uses) so the two exports can never
   // collide as "the same event" if both are ever imported into the same calendar.
