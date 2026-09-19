@@ -190,6 +190,10 @@
           <div class="action-icon">&#128260;</div>
           <div><div class="action-title">Airport round trip</div><div class="action-desc">Drop-off and pick-up, same trip</div></div>
         </div>
+        <div style="background:#eff6ff;border:1.5px solid #93c5fd;border-radius:10px;padding:.65rem .8rem;margin:.15rem 0 .55rem;font-size:.79rem;line-height:1.5;color:#1e3a8a;">
+          <strong>Staying at a hotel AT the airport?</strong> Pick one of the three airport options above — not “One way” — and choose <strong>“A hotel at the airport”</strong> when we ask about your terminal.
+          <div style="margin-top:.3rem;">Going to a hotel <em>anywhere else</em> — a wedding, a reception, a conference downtown — use <strong>One way</strong> or <strong>Round trip</strong> below. Those are priced differently.</div>
+        </div>
         <div class="action-card" onclick="pickTripType('ONE WAY')">
           <div class="action-icon">&#128205;</div>
           <div><div class="action-title">One way</div><div class="action-desc">A single ride to a specific address</div></div>
@@ -285,10 +289,10 @@
         <div class="field" id="pickup-time-field">
           <label id="pickup-time-lbl">What time do you need to be picked up?</label>
           <input id="f-pickup-time" type="time" onfocus="_showPickupTimeHelp()">
-          <div class="hint" id="pickup-time-hint">Time to be picked up from your pickup location \u2014 not your flight time.</div>
+          <div class="hint" id="pickup-time-hint">Time to be picked up from your pickup location — not your flight time.</div>
           <div id="pickup-time-help" style="display:none;background:#eff6ff;border:1.5px solid #93c5fd;border-radius:10px;padding:.6rem .7rem;margin-top:.45rem;font-size:.8rem;line-height:1.5;color:#1e3a8a;">
-            <strong>This is the time you\u2019ll be picked up from your address</strong> \u2014 not your flight time.
-            <div style="margin-top:.35rem;">Not sure what time to choose? Leave your best guess and add your <strong>flight departure time</strong> below. We\u2019ll work out the right pickup time for you and confirm it shortly after you submit.</div>
+            <strong>This is the time you’ll be picked up from your address</strong> — not your flight time.
+            <div style="margin-top:.35rem;">Not sure what time to choose? Leave your best guess and add your <strong>flight departure time</strong> below. We’ll work out the right pickup time for you and confirm it shortly after you submit.</div>
           </div>
         </div>
         <!-- The flight's OWN departure time, not a pickup time - this is the number the app's
@@ -325,11 +329,12 @@
              only what the client reads. -->
         <div class="field" id="terminal-field" style="display:none;">
           <label id="terminal-lbl">Which airline / terminal?</label>
-          <select id="f-terminal">
+          <select id="f-terminal" onchange="applyTypeVisibility()">
             <option value="">Choose one…</option>
             <option value="South Domestic">Delta — domestic</option>
             <option value="North Domestic">Other airline — domestic</option>
             <option value="International">International</option>
+            <option value="Airport Hotel">🏨 A hotel at the airport (not a terminal)</option>
           </select>
           <div class="hint">This is how we get your exact airport address — please pick the one you’re flying.</div>
         </div>
@@ -356,7 +361,7 @@
             Same as when I left
           </label>
           <select id="f-rt-terminal" style="display:none;">
-            <option value="">Not sure</option>
+            <option value="">Choose one…</option>
             <option value="South Domestic">Delta — domestic</option>
             <option value="North Domestic">Other airline — domestic</option>
             <option value="International">International</option>
@@ -516,11 +521,21 @@ function applyTypeVisibility(){
   // editable airport address (auto-filled from the terminal) - a driver legitimately needs to
   // override for an unusual pickup point or a detour. Clients need guardrails; the driver needs
   // control. This is a considered exception to the usual "reflect it in all three forms" rule.
-  var isAirportTrip = AIRPORT_TYPES.indexOf(tripType) >= 0;
+  // "Airport hotel" is a terminal choice that means the trip does NOT end at a terminal, so the
+  // address field has to come BACK - it is the only place the hotel address can be given, and
+  // hiding it would leave the client no way to say where they are actually going.
+  var _termSel = document.getElementById('f-terminal');
+  var _isHotel = _termSel && _termSel.value === 'Airport Hotel';
+  var isAirportTrip = (AIRPORT_TYPES.indexOf(tripType) >= 0) && !_isHotel;
   var puField = document.getElementById('pickup-field');
   var deField = document.getElementById('dest-field');
   if(deField) deField.style.display = (isAirportTrip && tripType !== 'AP PICK UP') ? 'none' : '';
-  if(puField) puField.style.display = (tripType === 'AP PICK UP') ? 'none' : '';
+  if(puField) puField.style.display = (tripType === 'AP PICK UP' && !_isHotel) ? 'none' : '';
+  // Name the reappeared field for what it actually is, so it doesn't read as "which airport".
+  if(_isHotel){
+    if(tripType === 'AP PICK UP'){ if(pu) pu.textContent = 'Which hotel are we collecting you from?'; }
+    else { if(de) de.textContent = 'Which hotel are we taking you to?'; }
+  }
 }
 
 // Shows the pickup-time explainer the first time the field is focused, then leaves it visible.
@@ -1098,9 +1113,12 @@ async function submitRequest(){
   // Return terminal: the "same as when I left" box means literally that - reuse the outbound
   // value rather than sending blank, so the driver gets a real answer either way.
   const _rtSameEl = document.getElementById('f-rt-terminal-same');
-  const rtTerminal = (_rtSameEl && _rtSameEl.checked)
-    ? terminal
-    : (document.getElementById('f-rt-terminal') || {}).value || '';
+  // "Same as when I left" must NOT copy an "Airport Hotel" outbound onto the return leg. If the
+  // client stays at an airport hotel the night before, they still FLY BACK IN to a terminal -
+  // the driver collects them there, not at the hotel. Copying it would send the driver to a
+  // hotel to meet an arriving flight. Left blank instead, so the driver confirms the terminal.
+  const _rtSameRaw = (_rtSameEl && _rtSameEl.checked) ? terminal : ((document.getElementById('f-rt-terminal') || {}).value || '');
+  const rtTerminal = (_rtSameRaw === 'Airport Hotel') ? '' : _rtSameRaw;
   const pax = parseInt(document.getElementById('f-pax').value) || 1;
   const checkedBags = parseInt(document.getElementById('f-checked').value) || 0;
   const carryOnBags = parseInt(document.getElementById('f-carryon').value) || 0;
