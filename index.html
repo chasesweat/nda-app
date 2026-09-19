@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191175">
+<meta name="version" content="202608191183">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -131,7 +131,15 @@ input:disabled+.slider{opacity:.45;cursor:not-allowed;}
    from its natural size to keep the row together, but never below something readable. Below
    that the parent's flex-wrap:wrap takes over and moves the price down, which is the correct
    outcome on a genuinely narrow screen rather than mangling the text. */
-.ride-info{flex:1;min-width:150px;}
+.ride-info{flex:1 1 150px;min-width:0;}
+/* min-width was 150px, which meant this column could never shrink below it - so on a narrow
+   phone the price and type badge were pushed onto a new line, at a different point on each row
+   depending on how long that ride's client name happened to be. Reported twice in 24 hours as
+   "the price is all over the place" and as wrapped phone numbers. `flex:1 1 150px` keeps 150px
+   as the PREFERRED width while `min-width:0` lets it give way when there isn't room, so the
+   price and badge stay on the row. .ride-price and .badge already carry white-space:nowrap, so
+   neither can break mid-value once they have space. One line here fixes every list built from
+   these classes. */
 .ride-client{font-weight:600;font-size:.92rem;}
 .ride-detail{font-size:.78rem;color:var(--mid);margin-top:2px;}
 .ride-price{font-size:1rem;font-weight:600;color:var(--green);white-space:nowrap;}
@@ -714,7 +722,7 @@ input,select,textarea{font-size:16px;}
             <option value="">Not sure</option>
             <option value="South Domestic">Delta — domestic</option>
             <option value="North Domestic">Other airline — domestic</option>
-            <option value="International">International</option>
+            <option value="International">International</option><option value="Airport Hotel">🏨 AP Hotel — use the address below</option>
           </select>
         </div>
 
@@ -1184,7 +1192,7 @@ input,select,textarea{font-size:16px;}
         <div class="form-group"><label>Carry-on Bags</label><input type="number" id="edit-carryon-bags" min="0" /></div>
         <div class="form-group" id="edit-flight-group"><label>Flight #</label><input type="text" id="edit-flight" /></div>
         <div class="form-group" id="edit-terminal-group"><label>Terminal</label>
-          <select id="edit-terminal" onchange="editAutoFillTerminalAddress()"><option value="">—</option><option>North Domestic</option><option>South Domestic</option><option>International</option></select>
+          <select id="edit-terminal" onchange="editAutoFillTerminalAddress()"><option value="">—</option><option>North Domestic</option><option>South Domestic</option><option>International</option><option value="Airport Hotel">🏨 AP Hotel — use the address below</option></select>
         </div>
         <div class="form-group" style="grid-column:1/-1;"><label>Vehicle</label>
           <select id="edit-vehicle" onchange="editVehicleChanged()">
@@ -1733,7 +1741,7 @@ input,select,textarea{font-size:16px;}
           <option value="">Not sure</option>
           <option value="South Domestic">Delta — domestic</option>
           <option value="North Domestic">Other airline — domestic</option>
-          <option value="International">International</option>
+          <option value="International">International</option><option value="Airport Hotel">🏨 AP Hotel — use the address below</option>
         </select>
       </div>
       <div class="form-group" style="grid-column:1/-1;">
@@ -5765,6 +5773,18 @@ function openGoogleMaps(){
 // ── TERMINAL AUTO-FILL ──
 // AP RUN = client going TO airport → terminal fills PICKUP
 // AP PICK UP = client arriving FROM airport → terminal fills DROPOFF
+// A terminal selection that means "this airport ride does NOT end at a terminal" - an airport
+// hotel, an FBO, a cargo building. Deliberately a TERMINAL value rather than a new ride type:
+// pricing, mileage and every type-based rule key off r.type, and an airport hotel run is still
+// priced exactly as an AP run. Making it a type would have meant touching all of that.
+//
+// It works with no special-casing in three places, which is why this shape was chosen:
+//   * terminalToAddress() returns '' for it (it doesn't classify), so navigation falls through
+//     to the ride's own address - which is the whole point.
+//   * _applyTerminalAutoFill() bails on `if(!addr) return;` since there is no entry for it in
+//     TERMINAL_ADDRESSES, so choosing it never overwrites the address the driver typed.
+//   * rideDisplayType() reads it to title the ride "AP Hotel Run" without a new type string.
+const AIRPORT_HOTEL_TERMINAL = 'Airport Hotel';
 const TERMINAL_ADDRESSES = {
   // Shared by autoFillTerminalAddress()/qaAutoFillTerminalAddress()/
   // editAutoFillTerminalAddress() below - clears a pickup/dropoff field ONLY if its current
@@ -6077,7 +6097,12 @@ function autoFillTerminalAddress(){
       resetMileage(); debounceMileage();
       if(type==='AP ROUND TRIP'){
         var rtTerm = document.getElementById('q-rt-terminal');
-        if(rtTerm && !rtTerm.value) rtTerm.value = terminal;
+        // Never copy AP Hotel onto the RETURN leg. On an airport round trip where the client
+        // stays at an airport hotel the night before, the outbound leg ends at the hotel but
+        // the return leg collects them AT THE TERMINAL - they have flown back in. Copying the
+        // outbound choice would send the driver to the hotel to meet an arriving flight.
+        // Left blank instead so the return terminal is answered deliberately.
+        if(rtTerm && !rtTerm.value && terminal !== AIRPORT_HOTEL_TERMINAL) rtTerm.value = terminal;
       }
     }
   });
@@ -9471,9 +9496,13 @@ function apVehSuffix(r){ const ap=(r.type==='AP RUN'||r.type==='AP PICK UP'||r.t
 function rideDisplayType(r){
   const t=r.type||''; const v=vehTag(r.vehicle);
   const mod = v==='Sedan'?'':(' '+v);
-  if(t==='AP RUN')        return 'AP'+mod+' Run';
-  if(t==='AP PICK UP')    return 'AP'+mod+' Pick Up';
-  if(t==='AP ROUND TRIP') return 'AP'+mod+' Round Trip';
+  // "Hotel" is injected from the TERMINAL, not from a separate ride type - so an airport hotel
+  // run reads "AP Hotel Run" while still being an AP RUN everywhere that matters (pricing,
+  // mileage, the fee breakdown, the income sheet).
+  const hot = ((r.terminal||'')===AIRPORT_HOTEL_TERMINAL) ? ' Hotel' : '';
+  if(t==='AP RUN')        return 'AP'+mod+hot+' Run';
+  if(t==='AP PICK UP')    return 'AP'+mod+hot+' Pick Up';
+  if(t==='AP ROUND TRIP') return 'AP'+mod+hot+' Round Trip';
   if(t==='ROUND TRIP')    return 'Round Trip'+(mod?' ('+v+')':'');
   if(t==='ONE WAY')       return 'One Way'+(mod?' ('+v+')':'');
   if(t==='LOCAL')         return 'Local'+(mod?' ('+v+')':'');
@@ -9767,9 +9796,21 @@ function calSearch(){
       return '<div onclick="openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.85rem;padding:.7rem .85rem;border-radius:10px;margin-bottom:.5rem;background:'+c+'66;border:2px solid '+c+';cursor:pointer;flex-wrap:wrap;">'
         +'<div style="width:6px;align-self:stretch;min-height:34px;border-radius:3px;background:'+c+';"></div>'
         +'<div style="min-width:58px;"><strong style="font-size:.82rem;color:'+tc+';">'+fmtDateShort(r.date)+'</strong><br><span style="font-size:.72rem;color:'+tc+';opacity:.78;">'+(fmtTime12(r.time)||'')+'</span></div>'
-        +'<div style="flex:1;min-width:120px;"><div style="font-weight:600;font-size:.9rem;color:'+tc+';">'+check+escHtml(r.client||'—')+'</div><div style="font-size:.74rem;color:'+tc+';opacity:.78;">'+escHtml(driverShortName(r.driver))+(r.phone&&(currentUser&&(PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name)===(r.createdBy?(PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy):null)||(getMyDriverName()&&getMyDriverName()===r.driver))?' · '+escHtml(r.phone):'')+'</div></div>'
-        +'<span class="badge '+typeCls+'">'+escHtml((r.type||'')+apVehSuffix(r))+'</span>'+_xxlPairChipHtml(r)
-        +'<div style="font-weight:600;color:'+(tc==='#fff'?'#fff':'var(--green)')+';">$'+r.price+'</div>'
+        // Reported: "why is the price all over the place" - it landed in a different spot on almost
+        // every row. The row is a WRAPPING flex and the badge and price were loose siblings, so
+        // where they broke depended entirely on how long that ride's client name and phone were.
+        // Nothing was wrong with the prices; the layout just re-flowed per row.
+        //
+        // Fixed by making the name column shrinkable (flex:1 1 120px; min-width:0 - it could not
+        // shrink below 120px before, which is what pushed the badge and price onto new lines at
+        // different points) and binding the badge and price into ONE group pinned right with
+        // margin-left:auto. They now wrap together or not at all, and the price is always the
+        // last thing on the row.
+        +'<div style="flex:1 1 120px;min-width:0;"><div style="font-weight:600;font-size:.9rem;color:'+tc+';">'+check+escHtml(r.client||'—')+'</div><div style="font-size:.74rem;color:'+tc+';opacity:.78;">'+escHtml(driverShortName(r.driver))+(r.phone&&(currentUser&&(PROXY_MAP[currentUser.name]||USER_DRIVER_MAP[currentUser.name]||currentUser.name)===(r.createdBy?(PROXY_MAP[r.createdBy]||USER_DRIVER_MAP[r.createdBy]||r.createdBy):null)||(getMyDriverName()&&getMyDriverName()===r.driver))?' · <span style="white-space:nowrap;">'+escHtml(r.phone)+'</span>':'')+'</div></div>'
+        +'<div style="display:flex;align-items:center;gap:.5rem;margin-left:auto;flex-shrink:0;">'
+          +'<span class="badge '+typeCls+'" style="white-space:nowrap;">'+escHtml((r.type||'')+apVehSuffix(r))+'</span>'+_xxlPairChipHtml(r)
+          +'<div style="font-weight:600;white-space:nowrap;color:'+(tc==='#fff'?'#fff':'var(--green)')+';">$'+r.price+'</div>'
+        +'</div>'
       +'</div>';
     }).join('');
 }
@@ -14341,6 +14382,17 @@ function _buildRouteUrlsFrom(r, startAddr, endAddr, linkRide){
       routeWarning = 'This ride\u2019s terminal ("'+r.terminal+'") isn\u2019t recognized, and there\u2019s no backup address saved \u2014 the airport stop is missing from this route. Add an address to the ride before driving, or navigate there separately.';
     }
   }
+  // A resolved terminal ALWAYS wins. v1176 briefly made this conditional - inferring from the
+  // address text whether the driver "really meant" the terminal - and Chase rightly pushed back:
+  // that quietly removed the terminal's authority, which is the one thing the whole
+  // coordinate system depends on. An airport address the matcher failed to recognise would have
+  // been navigated to as literal text, which is exactly the class of failure that work existed
+  // to eliminate. Reverted.
+  //
+  // The hotel case is handled by INTENT instead of inference: selecting the "Airport hotel"
+  // terminal makes terminalToAddress() return '' (it isn't one of the three ATL terminals), so
+  // nothing is substituted and the ride's own typed address is used. Stated, not deduced - and
+  // only the three real Hartsfield-Jackson terminals ever override an address.
   if(termAddr){
     if(t==='AP PICK UP') pickup = termAddr;
     else if(t==='AP RUN' || t==='AP ROUND TRIP') dropoff = termAddr;
@@ -30610,8 +30662,8 @@ function renderFinderFees(dName, start, end){
     const k=dName+':owe:'+name; const fp=feePayments[k]||{};
     if(fp.paid && fp.method){ methodTotals.owe[fp.method]=(methodTotals.owe[fp.method]||0)+iOwe[name].fee; }
   });
-  const recvSummary = Object.keys(methodTotals.recv).map(m=>`<span style="font-size:.72rem;padding:2px 7px;background:#f0fdf4;color:#15803d;border-radius:5px;">${m} $${methodTotals.recv[m].toFixed(2)}</span>`).join(' ');
-  const oweSummary  = Object.keys(methodTotals.owe).map(m=>`<span style="font-size:.72rem;padding:2px 7px;background:#fff5f5;color:#dc2626;border-radius:5px;">${m} $${methodTotals.owe[m].toFixed(2)}</span>`).join(' ');
+  const recvSummary = Object.keys(methodTotals.recv).map(m=>`<span style="font-size:.72rem;padding:2px 7px;background:#f0fdf4;color:#15803d;border-radius:5px;display:inline-block;white-space:nowrap;">${m} $${methodTotals.recv[m].toFixed(2)}</span>`).join(' ');
+  const oweSummary  = Object.keys(methodTotals.owe).map(m=>`<span style="font-size:.72rem;padding:2px 7px;background:#fff5f5;color:#dc2626;border-radius:5px;display:inline-block;white-space:nowrap;">${m} $${methodTotals.owe[m].toFixed(2)}</span>`).join(' ');
 
   let html = `<div style="background:var(--white);border:1.5px solid var(--light);border-radius:12px;padding:1rem;margin-bottom:1.25rem;">
     <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.6rem;">${clientFeePct()}% Client Fee (of fare)</div>`;
@@ -33154,8 +33206,11 @@ function renderClients(){
     } else if(admin){
       badges=c.drivers.map(function(d){return '<span style="font-size:.72rem;padding:2px 7px;border-radius:10px;background:'+driverColor(d)+'22;color:'+driverColor(d)+';border:1px solid '+driverColor(d)+'55;">'+d.split(' ')[0]+'</span>';}).join(' ');
     }
-    var pmBadge=hasIncomeAccess()&&c.paymentMethod?'<span style="font-size:.68rem;padding:1px 6px;border-radius:4px;background:#f3eeff;color:#6d28d9;">'+c.paymentMethod+'</span>':'';
-    var imp=c.source==='imported'&&!c.rides.length?'<span style="font-size:.68rem;padding:1px 5px;border-radius:4px;background:#e0e7ff;color:#3730a3;">imported</span>':'';
+    // white-space:nowrap + inline-block so a multi-word method ("Pays with Credit Card") wraps
+    // as a whole badge onto the next line instead of splitting across three lines mid-phrase,
+    // which is what it did on a narrow phone. Same reasoning as the phone number in v1180.
+    var pmBadge=hasIncomeAccess()&&c.paymentMethod?'<span style="font-size:.68rem;padding:1px 6px;border-radius:4px;background:#f3eeff;color:#6d28d9;display:inline-block;white-space:nowrap;">'+c.paymentMethod+'</span>':'';
+    var imp=c.source==='imported'&&!c.rides.length?'<span style="font-size:.68rem;padding:1px 5px;border-radius:4px;background:#e0e7ff;color:#3730a3;display:inline-block;white-space:nowrap;">imported</span>':'';
     var total=c.rides.reduce(function(s,r){return s+(parseFloat(r.price)||0);},0);
     var sel=clientSelectMode, chk=selectedClients.has(c.name);
     var cbg=chk?'var(--gold-pale)':multi?'#fff5f5':'var(--white)';
@@ -33175,7 +33230,7 @@ function renderClients(){
       +'<div style="width:36px;height:36px;border-radius:50%;background:'+bg+';display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:.82rem;flex-shrink:0;">'+ini+'</div>'
       +'<div style="flex:1;min-width:0;">'
       +'<div style="font-weight:600;font-size:.92rem;color:var(--black);">'+escHtml(c.name)+(_deceased?' <span style="font-size:.66rem;color:#6d28d9;font-weight:700;background:#f3eeff;border:1px solid #c4b5fd;border-radius:6px;padding:1px 6px;">DECEASED</span>':'')+(multi?' <span style="font-size:.68rem;color:#dc2626;font-weight:700;">⚠️ MULTIPLE DRIVERS</span>':'')+' '+imp+'</div>'
-      +'<div style="font-size:.78rem;color:var(--mid);">'+(c.phone||'No phone')+' · '+c.rides.length+' ride'+(c.rides.length!==1?'s':'')+'</div>'+(viewAs?('<div onclick="event.stopPropagation()" style="margin-top:5px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;"><span style="font-size:.7rem;color:var(--mid);">Requested driver:</span><select data-cn="'+safeName+'" onchange="setClientReqDriver(this.dataset.cn,this.value)" style="font-size:.72rem;padding:1px 5px;border:1px solid '+(reqD?'var(--gold)':'var(--light)')+';border-radius:5px;font-family:inherit;color:'+(reqD?'var(--gold)':'var(--mid)')+';font-weight:'+(reqD?'600':'400')+';background:#fff;cursor:pointer;"><option value="">— none —</option>'+DRIVERS.map(function(d){return '<option value="'+escAttr(d)+'"'+(reqD===d?' selected':'')+'>'+escHtml(d)+'</option>';}).join('')+'</select></div>'):'')
+      +'<div style="font-size:.78rem;color:var(--mid);display:flex;flex-wrap:wrap;gap:0 .3rem;">'+'<span style="white-space:nowrap;">'+(c.phone||'No phone')+'</span>'+'<span style="white-space:nowrap;" title="Total rides since they became a client">· '+c.rides.length+' ride'+(c.rides.length!==1?'s':'')+' total</span>'+'</div>'+(viewAs?('<div onclick="event.stopPropagation()" style="margin-top:5px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;"><span style="font-size:.7rem;color:var(--mid);white-space:nowrap;">Requested driver:</span><select data-cn="'+safeName+'" onchange="setClientReqDriver(this.dataset.cn,this.value)" style="font-size:.72rem;padding:1px 5px;max-width:100%;min-width:0;flex:1 1 auto;border:1px solid '+(reqD?'var(--gold)':'var(--light)')+';border-radius:5px;font-family:inherit;color:'+(reqD?'var(--gold)':'var(--mid)')+';font-weight:'+(reqD?'600':'400')+';background:#fff;cursor:pointer;"><option value="">— none —</option>'+DRIVERS.map(function(d){return '<option value="'+escAttr(d)+'"'+(reqD===d?' selected':'')+'>'+escHtml(d)+'</option>';}).join('')+'</select></div>'):'')
       +(viewAs==='Kathleen Herringdine'?(function(){
           var mCnt=c.rides.filter(function(r){return r.createdBy==='Morgan';}).length;
           var kCnt=c.rides.length-mCnt;
@@ -33723,7 +33778,7 @@ function renderReceipts(){
           <div style="flex:1;padding:.75rem .75rem .75rem 0;">
             <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.3rem;margin-bottom:.35rem;">
               <div style="display:flex;align-items:center;gap:.5rem;">
-                <span style="font-size:.72rem;padding:2px 8px;border-radius:10px;background:${catColors[r.category]||'#6b6b6b'}22;color:${catColors[r.category]||'#6b6b6b'};font-weight:600;">${r.category}</span>
+                <span style="font-size:.72rem;padding:2px 8px;border-radius:10px;background:${catColors[r.category]||'#6b6b6b'}22;color:${catColors[r.category]||'#6b6b6b'};font-weight:600;display:inline-block;white-space:nowrap;">${r.category}</span>
                 <span style="font-size:.82rem;color:var(--mid);">${r.date}</span>
               </div>
               <span style="font-size:1rem;font-weight:700;color:var(--black);">$${parseFloat(r.amount||0).toFixed(2)}</span>
