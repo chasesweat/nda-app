@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191183">
+<meta name="version" content="202608191189">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -888,6 +888,10 @@ input,select,textarea{font-size:16px;}
         <button onclick="calNext()" class="btn-secondary" style="padding:.35rem .75rem;">→</button>
       </div>
       <button onclick="calToday()" class="btn-secondary" style="padding:.35rem .75rem;font-size:.8rem;">Today</button>
+      <!-- FAMILYWALL EXPORT BUTTON (bulk) - part of the temporary FamilyWall block; remove with it.
+           Hidden by default and revealed in renderCal() only for users who can export, so the
+           control never appears for a driver who has no use for it. -->
+      <button id="cal-fw-export" onclick="exportAllRidesToFamilyWall()" class="btn-secondary" style="display:none;padding:.35rem .75rem;font-size:.8rem;" title="Download every ride from today forward as one file to import into FamilyWall">🗂️ All to FamilyWall</button>
       <div class="view-toggle" style="margin-left:auto;">
         <button id="cal-view-week" class="view-btn active" onclick="setCalView('week')">Week</button>
         <button id="cal-view-month" class="view-btn" onclick="setCalView('month')">Month</button>
@@ -1110,6 +1114,8 @@ input,select,textarea{font-size:16px;}
       </div>
     </div>
     <div id="income-km-pay"></div>
+        <!-- Income tracking opt-out switch. Rendered by renderIncome(). -->
+        <div id="income-tracking-toggle"></div>
         <div id="income-summary-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,200px));gap:.75rem;margin-bottom:1.25rem;width:100%;justify-content:center;"></div>
     <div id="income-my-fares"></div>
     <div id="income-my-scheduled-paid"></div>
@@ -1457,6 +1463,15 @@ input,select,textarea{font-size:16px;}
           <input type="number" id="onb-gasprice" placeholder="e.g. 3.49" inputmode="decimal" /></div>
       </div>
       <div style="font-size:.7rem;color:var(--mid);margin:-.3rem 0 .5rem;line-height:1.4;">MPG &amp; gas price are only used to calculate your fuel cost on the income page. Skip them if you&rsquo;re not tracking profit.</div>
+
+      <!-- Income tracking opt-out. Sits directly under the MPG/gas hint, which already tells the
+           driver those fields are only for profit tracking - so the natural next question is
+           whether they want that at all. Also changeable any time on the Income page. -->
+      <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;background:var(--surface);border:1.5px solid var(--light);border-radius:9px;padding:.55rem .7rem;margin:0 0 .6rem;">
+        <input type="checkbox" id="onb-income-tracking" checked style="width:17px;height:17px;accent-color:var(--accent);flex-shrink:0;">
+        <span style="font-size:.82rem;font-weight:600;color:var(--black);">Track my income in the app</span>
+      </label>
+      <div style="font-size:.7rem;color:var(--mid);margin:-.35rem 0 .6rem;line-height:1.4;">Uncheck if you do your books elsewhere. Your rides and fees are still recorded either way, so you can turn this on later and nothing will be missing.</div>
 
       <!-- OPTIONAL SECOND VEHICLE -->
       <div id="onb-veh2-toggle" onclick="_onbToggleVeh2()" style="cursor:pointer;font-size:.82rem;font-weight:600;color:var(--accent);margin:.2rem 0 .6rem;">+ Add a second vehicle</div>
@@ -4575,9 +4590,71 @@ function trafficAm(){ var w=globalSettings.trafficAm||{}; return {start:w.start|
 function trafficPm(){ var w=globalSettings.trafficPm||{}; return {start:w.start||'14:30', end:w.end||'19:00'}; }
 function isTrafficTime(dow,mins){ if(trafficDaysList().indexOf(dow)===-1) return false; var a=trafficAm(),p=trafficPm(); var as=_hm(a.start),ae=_hm(a.end),ps=_hm(p.start),pe=_hm(p.end); var inAM=(as!=null&&ae!=null&&mins>=as&&mins<ae); var inPM=(ps!=null&&pe!=null&&mins>=ps&&mins<pe); return inAM||inPM; }
 function christmasDatesList(){ var a=globalSettings.christmasDates; return Array.isArray(a)?a:CHRISTMAS_DATES; }
-function holidayDatesList(){ var a=globalSettings.holidayDates; return Array.isArray(a)?a:HOLIDAY_DATES; }
+// ── FLOATING HOLIDAYS ────────────────────────────────────────────────────────
+// HOLIDAY_DATES is a list of fixed MM-DD strings, which is correct for New Year's, July 4th and
+// Christmas - and WRONG for everything that moves. Easter, Mother's Day, Father's Day, Memorial
+// Day, Labor Day and the whole Thanksgiving block fall on different dates every year, so the
+// hardcoded list was only ever right for 2026. On 1 January 2027 the app would have started
+// charging a $30 holiday fee on six ordinary days while missing the six real holidays - Easter
+// alone is off by more than a week (04-05 vs 03-28). Nothing in the app would have looked wrong;
+// it just quietly becomes incorrect at midnight.
+//
+// These compute from the RIDE'S year instead of storing dates, so they cannot drift.
+function _mmdd(d){ return String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+// nth occurrence of a weekday in a month. wd: 0=Sun .. 6=Sat
+function _nthWeekday(y, month1, wd, n){
+  var d=new Date(y, month1-1, 1), c=0;
+  while(d.getMonth()===month1-1){
+    if(d.getDay()===wd){ c++; if(c===n) return new Date(d); }
+    d.setDate(d.getDate()+1);
+  }
+  return null;
+}
+function _lastWeekday(y, month1, wd){
+  var d=new Date(y, month1, 0);                 // last day of month1
+  while(d.getDay()!==wd) d.setDate(d.getDate()-1);
+  return d;
+}
+// Anonymous Gregorian computus - the standard Easter algorithm.
+function _easterDate(y){
+  var a=y%19, b=Math.floor(y/100), c=y%100, d=Math.floor(b/4), e=b%4,
+      f=Math.floor((b+8)/25), g=Math.floor((b-f+1)/3),
+      h=(19*a+b-d-g+15)%30, i=Math.floor(c/4), k=c%4,
+      l=(32+2*e+2*i-h-k)%7, m=Math.floor((a+11*h+22*l)/451),
+      mo=Math.floor((h+l-7*m+114)/31), da=((h+l-7*m+114)%31)+1;
+  return new Date(y, mo-1, da);
+}
+// The built-in holiday set for a given year. Thanksgiving is stated as Chase's rule - the
+// Wednesday before through the SUNDAY AFTER - rather than five dates typed out, so it is right
+// every year without anyone maintaining it.
+function holidayDatesForYear(y){
+  y = parseInt(y,10); if(!isFinite(y)) y = nowET().getFullYear();
+  var out = ['01-01','12-31','07-04'];                       // fixed dates
+  out.push(_mmdd(_easterDate(y)));                           // Easter
+  out.push(_mmdd(_nthWeekday(y,5,0,2)));                     // Mother's Day - 2nd Sunday of May
+  out.push(_mmdd(_lastWeekday(y,5,1)));                      // Memorial Day - last Monday of May
+  out.push(_mmdd(_nthWeekday(y,6,0,3)));                     // Father's Day - 3rd Sunday of June
+  out.push(_mmdd(_nthWeekday(y,9,1,1)));                     // Labor Day - 1st Monday of September
+  var thanks=_nthWeekday(y,11,4,4);                          // 4th Thursday of November
+  if(thanks){
+    for(var off=-1; off<=3; off++){                          // Wednesday before -> Sunday after
+      var d=new Date(thanks); d.setDate(d.getDate()+off); out.push(_mmdd(d));
+    }
+  }
+  return out;
+}
+// An explicit override in settings still wins and is left exactly as stored - someone who has
+// curated their own list must not have it silently recomputed underneath them.
+function holidayDatesList(y){ var a=globalSettings.holidayDates; return Array.isArray(a)?a:holidayDatesForYear(y); }
 function isChristmasDate(mmdd){ return christmasDatesList().indexOf(mmdd)!==-1; }
-function isHolidayDate(mmdd){ return holidayDatesList().indexOf(mmdd)!==-1; }
+// Accepts 'YYYY-MM-DD' (preferred - the year is what makes floating holidays correct) or a bare
+// 'MM-DD', which falls back to the current year. Every caller inside the app passes the full
+// date; the bare form is kept only so older callers and tests don't break.
+function isHolidayDate(d){
+  var s=String(d||''); var mmdd=s.length>5?s.slice(5):s;
+  var y=s.length>5?parseInt(s.slice(0,4),10):nowET().getFullYear();
+  return holidayDatesList(y).indexOf(mmdd)!==-1;
+}
 // Per-driver opt-out: skip auto-suggesting surcharges for rides THIS user quotes/schedules.
 function driverAutoOffFor(nm,type){ try{ var ds=(typeof driverSettings!=='undefined')?driverSettings[nm]:null; if(!ds) return false; if(ds.autoSurchargesOff===true) return true; return !!(ds.autoOff && ds.autoOff[type]===true); }catch(e){ return false; } }
 function driverAutoOff(type){ try{ var nm=(typeof getMyDriverName==='function')?getMyDriverName():''; return nm?driverAutoOffFor(nm,type):false; }catch(e){ return false; } }
@@ -5549,8 +5626,13 @@ function _isAtlantaRushHour(d){
   var day = d.getDay(); // 0=Sun ... 6=Sat
   if(day===0 || day===6) return false;
   var mins = d.getHours()*60 + d.getMinutes();
-  var morningStart = 7*60, morningEnd = 9*60;             // 7:00–9:00 AM
-  var eveningStart = 16*60, eveningEnd = 18*60+30;         // 4:00–6:30 PM
+  // Windows match the PUBLISHED rate card (etbykat.com): Mon-Fri 6:30-9:00 AM and 2:30-7:00 PM.
+  // They previously read 7:00-9:00 and 4:00-6:30, so the app's evening window was 3.5 hours
+  // narrower than what clients are quoted. Reported via a real case: a 6:33 PM suggested pickup
+  // got no rush-hour buffer because it fell 3 minutes outside the app's window - while sitting
+  // comfortably inside the published one.
+  var morningStart = 6*60+30, morningEnd = 9*60;          // 6:30–9:00 AM — published rate card
+  var eveningStart = 14*60+30, eveningEnd = 19*60;         // 2:30–7:00 PM — published rate card
   return (mins>=morningStart && mins<morningEnd) || (mins>=eveningStart && mins<eveningEnd);
 }
 // Direct request: for a Sprinter Van Local/Round Trip, estimate the hours needed rather than
@@ -6501,7 +6583,7 @@ function applyQuoteAutoAddons(){
   // Holiday / Christmas — needs DATE only. Christmas wins over the plain holiday rate.
   if(dv){
     const mmdd=dv.slice(5); // 'MM-DD'
-    const xmas=isChristmasDate(mmdd), hol=isHolidayDate(mmdd);
+    const xmas=isChristmasDate(mmdd), hol=isHolidayDate(dv);   // full date -> correct year
     if(!_addonTouched.christmas && !driverAutoOff('christmas')) addonState.christmas = xmas;
     if(!_addonTouched.holiday   && !driverAutoOff('holiday'))   addonState.holiday   = hol && !xmas;
   }
@@ -6523,7 +6605,7 @@ function applyReturnLegAutoAddons(){
   }
   if(dv){
     const mmdd=dv.slice(5);
-    const xmas=isChristmasDate(mmdd), hol=isHolidayDate(mmdd);
+    const xmas=isChristmasDate(mmdd), hol=isHolidayDate(dv);   // full date -> correct year
     if(!_addonTouchedLeg2.christmas && !driverAutoOff('christmas')) addonStateLeg2.christmas = xmas;
     if(!_addonTouchedLeg2.holiday   && !driverAutoOff('holiday'))   addonStateLeg2.holiday   = hol && !xmas;
   }
@@ -6783,8 +6865,29 @@ function _icsPriceSummary(r){
 // "Price:" prefixes. The client's address is omitted because it is already the event LOCATION,
 // so repeating it is noise; and the airport is shown as a terminal NAME ("South Terminal")
 // rather than its street address, which is what a driver actually needs at a glance.
-function _icsEventDesc(r){
+// opts.includeDriver adds the assigned driver as the FIRST line. Off by default so the
+// single-ride export keeps the exact layout Chase specified with a screenshot; the BULK export
+// turns it on, because a whole-calendar import covers every driver and "who is on this ride" is
+// the first thing you need from it. Unlabelled, like everything else in this description.
+function _icsEventDesc(r, opts){
+  opts = opts || {};
   var out = [];
+  if(opts.includeDriver){
+    // A ride is never genuinely unassigned - it starts on the CLIENT OWNER and only moves from
+    // there. So a blank r.driver means "still with the owner", not "nobody", and printing
+    // UNASSIGNED (as the first version of this did) would have been actively misleading on a
+    // calendar someone reads to know who is covering what.
+    //
+    // Falls back through the same chain used for fees and pickup instructions -
+    // getClientOwner() then feeOwnerFor(createdBy) - so this can never name a different person
+    // than the rest of the app considers responsible for that ride.
+    var _d = (r.driver||'').trim();
+    if(!_d){
+      try{ _d = (getClientOwner(r.client) || feeOwnerFor(r.createdBy) || (r.createdBy||'')).trim(); }catch(e){ _d=''; }
+    }
+    if(_d) out.push(_d);
+    if(r.driver2 && String(r.driver2).trim()) out.push('+ '+String(r.driver2).trim());
+  }
   var term = (r.terminal||r.rtTerminal||'').trim();
   if(term && typeof _terminalPhrase==='function'){
     var phrase = _terminalPhrase(term);
@@ -6884,6 +6987,56 @@ function exportRideToFamilyWall(rideId){
   var safeName2=((r.client||'ride').replace(/[^a-z0-9]+/gi,'-').toLowerCase())+'-'+(r.date||'');
   downloadTextFile(ics, 'familywall-'+safeName2+'.ics', 'text/calendar');
   showToast('\uD83D\uDCC5 Saved \u2014 in FamilyWall: Calendar \u2192 \u2699\uFE0F gear icon \u2192 Import event from ICS');
+}
+// BULK FAMILYWALL EXPORT. Same temporary block, same removal note as the single-ride export
+// above - delete both together when the FamilyWall migration is done.
+//
+// Deliberately reuses the single export's own helpers (_fwZonedTimeToUtc, _icsEventTitle,
+// _icsEventDesc) rather than re-deriving anything: the floating-time bug those fixed - an early
+// morning ride importing as 1 AM because FamilyWall reads a bare ICS time as UTC - would
+// otherwise reappear here, silently, across every event at once.
+//
+// Driver is included in every event body. On a single export the driver is obvious; on a whole
+// calendar covering every driver it is the first thing you need, and an unassigned ride says
+// UNASSIGNED rather than leaving a blank line that reads as an export fault.
+function exportAllRidesToFamilyWall(){
+  try{
+    var today = toDateStr(nowET());
+    var list = (Array.isArray(rides)?rides:[]).filter(function(r){
+      if(!r || !r.date) return false;
+      if(r.status==='cancelled') return false;
+      if(r.date < today) return false;                  // past rides are history, not a calendar
+      return canSeeRide ? canSeeRide(r) : true;         // never export what this user cannot see
+    }).sort(function(a,b){
+      return (a.date+(a.time||'')).localeCompare(b.date+(b.time||''));
+    });
+    if(!list.length){ showToast('No upcoming rides to export','error'); return; }
+
+    var pad=function(n){return String(n).padStart(2,'0');};
+    var icsStampUtc=function(dt){ return dt.getUTCFullYear()+pad(dt.getUTCMonth()+1)+pad(dt.getUTCDate())+'T'+pad(dt.getUTCHours())+pad(dt.getUTCMinutes())+pad(dt.getUTCSeconds())+'Z'; };
+    var now=nowET();
+    var stamp=now.getUTCFullYear()+pad(now.getUTCMonth()+1)+pad(now.getUTCDate())+'T'+pad(now.getUTCHours())+pad(now.getUTCMinutes())+pad(now.getUTCSeconds())+'Z';
+
+    var events = list.map(function(r){
+      var startDt=_fwZonedTimeToUtc(r.date, r.time||'09:00', 'America/New_York');
+      var endDt=new Date(startDt.getTime()+60*60000);
+      // Same nda-fw- UID prefix as the single export, and the same per-ride id - so re-importing
+      // after exporting one ride individually UPDATES that event rather than duplicating it.
+      return 'BEGIN:VEVENT\r\nUID:nda-fw-'+r.id+'@nda\r\nDTSTAMP:'+stamp
+        +'\r\nDTSTART:'+icsStampUtc(startDt)+'\r\nDTEND:'+icsStampUtc(endDt)
+        +'\r\nSUMMARY:'+icsEscape(_icsEventTitle(r))
+        +'\r\nDESCRIPTION:'+icsEscape(_icsEventDesc(r, {includeDriver:true}))
+        +'\r\nLOCATION:'+icsEscape(r.pickup||r.home||'')
+        +'\r\nEND:VEVENT\r\n';
+    }).join('');
+
+    var ics='BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//NWDA Transportation//EN\r\nCALSCALE:GREGORIAN\r\n'+events+'END:VCALENDAR';
+    downloadTextFile(ics, 'familywall-all-rides-'+today+'.ics', 'text/calendar');
+    showToast('\uD83D\uDCC5 '+list.length+' ride'+(list.length===1?'':'s')+' saved \u2014 in FamilyWall: Calendar \u2192 \u2699\uFE0F gear icon \u2192 Import event from ICS');
+  }catch(e){
+    console.warn('exportAllRidesToFamilyWall failed', e);
+    showToast('\u26a0\ufe0f Export failed \u2014 try again','error');
+  }
 }
 // FAMILYWALL EXPORT (single ride) — END
 // ============================================================================
@@ -9631,7 +9784,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
     const ds=toDateStr(day);
     const isToday=ds===today;
     const mmdd=ds.slice(5);
-    const isHoliday=isChristmasDate(mmdd)||isHolidayDate(mmdd);
+    const isHoliday=isChristmasDate(mmdd)||isHolidayDate(ds);   // full date -> correct year
     const holName=HOLIDAY_NAMES[mmdd]||'';
     const holFee=isChristmasDate(mmdd)?surcharge('christmas'):surcharge('holiday');
     let dayRides=rides.filter(r=>r.date===ds && r.status!=='cancelled' && canSeeRide(r));
@@ -9712,7 +9865,7 @@ function renderMonthView(containerId, monthDate, driverFilter, jumpFn){
     const inMonth=day.getMonth()===month;
     const isToday=ds===today;
     const mmdd=ds.slice(5);
-    const isHoliday=isChristmasDate(mmdd)||isHolidayDate(mmdd);
+    const isHoliday=isChristmasDate(mmdd)||isHolidayDate(ds);   // full date -> correct year
     let dayRides=rides.filter(r=>r.date===ds && r.status!=='cancelled' && canSeeRide(r));
     if(typeof driverFilter==='function') dayRides=dayRides.filter(driverFilter);
     else if(driverFilter&&driverFilter!=='group') dayRides=dayRides.filter(r=>r.driver===driverFilter);
@@ -9738,6 +9891,12 @@ function renderMonthView(containerId, monthDate, driverFilter, jumpFn){
 }
 
 function renderCal(){
+  // Reveal the bulk FamilyWall export only for users who can export at all - same gate as the
+  // per-ride button, so the two can never disagree about who sees this feature.
+  try{
+    var _fwBtn=document.getElementById('cal-fw-export');
+    if(_fwBtn) _fwBtn.style.display = (typeof canExportToFamilyWall==='function' && canExportToFamilyWall()) ? '' : 'none';
+  }catch(e){}
   if(!document.getElementById('cal-grid')) return;
   buildCalTabs();
   renderCalNotFinalBanner();
@@ -12641,7 +12800,7 @@ function buildRideBreakdown(r){
       if(isPremiumTime(mins) && surcharge('premium')) sl.push({label:flagLabels.premium+' surcharge', val:surcharge('premium')});
       if(isTrafficTime(dow,mins) && surcharge('traffic')) sl.push({label:flagLabels.traffic+' surcharge', val:surcharge('traffic')});
       if(isChristmasDate(mmdd) && surcharge('christmas')) sl.push({label:flagLabels.christmas+' surcharge', val:surcharge('christmas')});
-      else if(isHolidayDate(mmdd) && surcharge('holiday')) sl.push({label:flagLabels.holiday+' surcharge', val:surcharge('holiday')});
+      else if(isHolidayDate(dateVal) && surcharge('holiday')) sl.push({label:flagLabels.holiday+' surcharge', val:surcharge('holiday')});
       return sl;
     }
     // Rides saved with per-leg manual toggles carry rt_premium/rt_traffic/etc. directly -
@@ -17207,7 +17366,9 @@ async function approveTransfer(reqId){
   if(req.scope !== 'client_only'){
     rides.forEach(r=>{
       if(r.client?.toLowerCase()===(req.clientName||'').toLowerCase() && r.date>=today){
+        var _prevDrv2 = r.driver || 'unassigned';
         r.driver=req.toDriver; reassigned++;
+        try{ touchRide(r, 'client transferred \u2014 reassigned '+_prevDrv2+' \u2192 '+(req.toDriver||'unassigned')); }catch(e){}
       }
     });
   }
@@ -18820,7 +18981,7 @@ function applyReturnLegAutoAddonsQa(){
   }
   if(dv){
     const mmdd=dv.slice(5);
-    const xmas=isChristmasDate(mmdd), hol=isHolidayDate(mmdd);
+    const xmas=isChristmasDate(mmdd), hol=isHolidayDate(dv);   // full date -> correct year
     if(!_qaTouchedLeg2.christmas && !driverAutoOff('christmas')) qaAddonStateLeg2.christmas = xmas;
     if(!_qaTouchedLeg2.holiday   && !driverAutoOff('holiday'))   qaAddonStateLeg2.holiday   = hol && !xmas;
   }
@@ -18869,7 +19030,7 @@ function onQaDateTimeChange(){
     }
     if(dv){
       const mmdd=dv.slice(5);
-      const xmas=isChristmasDate(mmdd), hol=isHolidayDate(mmdd);
+      const xmas=isChristmasDate(mmdd), hol=isHolidayDate(dv);   // full date -> correct year
       // Assign rather than only switch on, so moving the ride off a holiday clears the fee.
       if(!_qaTouched.christmas && !driverAutoOff('christmas')) qaAddonState.christmas = xmas;
       if(!_qaTouched.holiday   && !driverAutoOff('holiday'))   qaAddonState.holiday   = hol && !xmas;
@@ -19341,6 +19502,12 @@ function openOnboarding(force){
   setV('onb-displayname', prof.displayName || '');
   setV('onb-address', prof.homeAddress || '');
   setV('onb-vehicle', prof.vehicle || '');
+  // Checked = tracking ON. Stored inverted (incomeTrackingOff) so the DEFAULT for every existing
+  // driver - no stored value at all - is tracking on, exactly as it behaved before this existed.
+  try{
+    var _itcb=document.getElementById('onb-income-tracking');
+    if(_itcb) _itcb.checked = !((driverSettings[dn]||{}).incomeTrackingOff);
+  }catch(e){}
   setV('onb-vehicleyear', prof.vehicleYear || '');
   setV('onb-mpg', prof.mpg || '');
   setV('onb-gasprice', prof.gasPrice || '');
@@ -19504,6 +19671,14 @@ async function saveOnboarding(){
   var p = DRIVER_PROFILES[dn];
   if(gv('onb-displayname')) p.displayName = gv('onb-displayname').trim();
   if(gv('onb-address'))     p.homeAddress = gv('onb-address');
+  try{
+    var _itcb2=document.getElementById('onb-income-tracking');
+    if(_itcb2){
+      if(!driverSettings[dn]) driverSettings[dn]={};
+      driverSettings[dn].incomeTrackingOff = !_itcb2.checked;
+      try{ await saveDriverSettings(dn); }catch(e){ console.warn('save income pref failed', e); }
+    }
+  }catch(e){}
   if(gv('onb-vehicle'))     p.vehicle     = gv('onb-vehicle');
   if(gv('onb-vehicleyear')) p.vehicleYear = gv('onb-vehicleyear');
   var mpg = parseFloat(gv('onb-mpg'));      if(!isNaN(mpg)) p.mpg = mpg;
@@ -20547,6 +20722,28 @@ async function assignDriver(){
     _driverNeedsOverride = true;
   }
   r.driver=newDriver;
+  // Clear the PREVIOUS driver's "new ride assigned" notification. Reported directly: a bell
+  // notification for a ride that, when opened, was assigned to someone else entirely - and the
+  // ride's own history showed it had never been the reader's. Nothing anywhere removed these,
+  // so a driver who was briefly assigned a ride kept the notification permanently, pointing at
+  // a ride that had since moved on.
+  //
+  // Scoped tightly: only UNREAD 'assigned' entries for THIS ride, and only from the driver it
+  // was actually taken from. A read one is left alone - it is part of their history, and
+  // deleting something a person has already seen is its own kind of confusing. Nothing else in
+  // their bell is touched.
+  if(oldDriver && oldDriver!==newDriver){
+    try{
+      var _prevList = notifications[oldDriver];
+      if(Array.isArray(_prevList)){
+        var _before=_prevList.length;
+        notifications[oldDriver]=_prevList.filter(function(n){
+          return !(n && !n.read && n.type==='assigned' && n.rideId===r.id);
+        });
+        if(notifications[oldDriver].length!==_before) _markNotifDirty(oldDriver);
+      }
+    }catch(e){ console.warn('clearing previous driver notification failed', e); }
+  }
   if(newDriver&&newDriver!==oldDriver) addNotification(newDriver, r, 'assigned');
   if(newDriver!==oldDriver) touchRide(r, newDriver ? 'assigned to '+newDriver.split(' ')[0] : 'unassigned');
   var _wasConfirmed=(r.confirmSent||r.status==='confirmed');
@@ -22009,6 +22206,9 @@ function renderDashIncome(){
   const box=document.getElementById('dash-income-overview');
   if(!box) return;
   if(!hasIncomeAccess()){ box.innerHTML=''; return; }
+  // Respect the driver's opt-out here too. Hiding it on the Income page but leaving the money on
+  // the Dashboard would defeat the point - the Dashboard is the screen they see first.
+  if(typeof incomeTrackingOff==='function' && incomeTrackingOff()){ box.innerHTML=''; return; }
   const now=nowET();
   const dName=getMyDriverName();
   // Gross/Net/Total Rides all come from the one shared calcNetTakeHomeForMonth() now — see its
@@ -22770,7 +22970,7 @@ function computeExpectedPrice(ride){
     const dow=dt?dt.getDay():-1;
     const mmdd=(dateStr||'').slice(5);
     const isChristmas=isChristmasDate(mmdd);
-    const isHoliday=!isChristmas&&isHolidayDate(mmdd);
+    const isHoliday=!isChristmas&&isHolidayDate(dateStr);
     const isPremium=isPremiumTime(mins);
     const isTraffic=dow>=0&&isTrafficTime(dow,mins);
     let s=0;
@@ -26964,6 +27164,34 @@ const FREE_ACCESS_USERS = ['Kat','Chase','Morgan'];
 // Only Chase may grant or revoke complimentary billing status (display only — see above).
 function canGrantFreeAccess(){ return isCurrentUserOwner(); }
 
+// ── INCOME TRACKING OPT-OUT ──────────────────────────────────────────────────
+// A driver can switch their own income tools off. Requested so someone who does their books
+// elsewhere isn't shown figures they don't use.
+//
+// It HIDES, it does not delete or stop recording. Every ride, fee and odometer reading is still
+// captured exactly as before, so switching it back on shows the full history rather than a gap -
+// which is the only version of this that is safe to offer. A driver who turns it off for six
+// months and changes their mind at tax time must not find six months missing.
+//
+// Stored per driver in driverSettings, so it follows the person across devices and never affects
+// anyone else's view.
+function incomeTrackingOff(){
+  try{
+    var me=getMyDriverName(); if(!me) return false;
+    return !!((driverSettings[me]||{}).incomeTrackingOff);
+  }catch(e){ return false; }
+}
+async function setIncomeTrackingOff(off){
+  var me=getMyDriverName(); if(!me) return;
+  if(!driverSettings[me]) driverSettings[me]={};
+  driverSettings[me].incomeTrackingOff = !!off;
+  try{ window._auditTarget = me; }catch(e){}
+  try{ await saveDriverSettings(me); }catch(e){ console.warn('save income pref failed', e); }
+  try{ renderIncome(); }catch(e){}
+  try{ refreshDash(); }catch(e){}
+  showToast(off ? 'Income tracking hidden \u2014 your data is still being recorded'
+                : '\u2713 Income tracking back on');
+}
 function hasIncomeAccessFor(name){ return !!name; }
 function hasIncomeAccess(){ return !!currentUser; }
 // For the payment modal: the tip belongs to the ride's DRIVER and the receipt uses the
@@ -27219,6 +27447,37 @@ function renderIncome(){
   }catch(e){}
   if(!document.getElementById('income-summary-cards')) return;
   if(!hasIncomeAccess()) return;
+  // Opt-out: replace the page body with the switch and a plain statement that nothing is being
+  // lost, then stop. Everything below this line is the income UI itself, so returning here is
+  // what actually hides it - no per-card checks to keep in sync.
+  try{
+    var _incOff = (typeof incomeTrackingOff==='function') && incomeTrackingOff();
+    var _tgHost = document.getElementById('income-tracking-toggle');
+    if(_tgHost){
+      _tgHost.innerHTML =
+        '<div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.6rem .8rem;margin-bottom:.9rem;">'
+        +'<label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin:0;">'
+        +'<input type="checkbox" id="income-tracking-cb" '+(_incOff?'':'checked')+' onchange="setIncomeTrackingOff(!this.checked)" style="width:17px;height:17px;accent-color:var(--accent);flex-shrink:0;">'
+        +'<span style="font-size:.85rem;font-weight:700;color:var(--black);white-space:nowrap;">Track my income</span></label>'
+        +'<span style="font-size:.72rem;color:var(--mid);">Turn off to hide these tools. Your rides and fees keep recording either way.</span>'
+        +'</div>';
+    }
+    if(_incOff){
+      var _body=document.getElementById('income-summary-cards');
+      if(_body) _body.innerHTML =
+        '<div style="background:var(--surface);border:1.5px dashed var(--light);border-radius:12px;padding:1.5rem 1.1rem;text-align:center;">'
+        +'<div style="font-size:.95rem;font-weight:700;color:var(--black);margin-bottom:.3rem;">Income tracking is off</div>'
+        +'<div style="font-size:.82rem;color:var(--mid);line-height:1.5;">Your rides, fees and mileage are still being recorded \u2014 nothing is being lost. Switch it back on above whenever you want the numbers.</div>'
+        +'</div>';
+      ['income-detail','income-charts','km-pay-card','irs-rate-box','income-type-filter-bar','pay-filter-bar'].forEach(function(id){
+        var el=document.getElementById(id); if(el) el.style.display='none';
+      });
+      return;
+    }
+    ['income-detail','income-charts','km-pay-card','irs-rate-box','income-type-filter-bar','pay-filter-bar'].forEach(function(id){
+      var el=document.getElementById(id); if(el) el.style.display='';
+    });
+  }catch(e){ console.warn('income toggle render failed', e); }
   try{ renderKmPayCard(); }catch(e){}
   var _rrBtn=document.getElementById('rides-report-btn');
   if(_rrBtn) _rrBtn.style.display=isAdmin()?'inline-block':'none';
@@ -28800,7 +29059,14 @@ async function _executeRelease(req){
   const today=toDateStr(nowET()); let moved=0;
   rides.forEach(function(r){
     if(r.client&&r.client.toLowerCase()===(req.clientName||'').toLowerCase()&&r.date>=today&&r.status!=='cancelled'){
+      // Log the reassignment. Reported directly: rides changed hands with the ride's own history
+      // showing nothing at all. This path moves EVERY future ride for a client at once and, until
+      // now, wrote no trail entry for any of them - so a driver could lose (or gain) a ride with
+      // no record of when, why, or who did it. `assignDriver()` and `assignVolunteer()` both log;
+      // these bulk paths were the exception, which is exactly why they were hard to trace.
+      var _prevDrv = r.driver || 'unassigned';
       r.driver=req.toDriver; moved++;
+      try{ touchRide(r, 'client released \u2014 reassigned '+_prevDrv+' \u2192 '+(req.toDriver||'unassigned')); }catch(e){}
     }
   });
   if(moved) await saveRides();
