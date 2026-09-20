@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191189">
+<meta name="version" content="202608191191">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -14513,7 +14513,15 @@ function _gmapsDirUrl(stops){
 function _navEnc(addr){ return encodeURIComponent((addr||'').trim()); }
 
 function _buildRouteUrlsFrom(r, startAddr, endAddr, linkRide){
-  var home    = (startAddr||_rtGetHome()).trim();
+  // The _rtGetHome() fallback stays for callers that genuinely mean "start from my home", but it
+  // is no longer SILENT. Substituting the driver's saved home address for a missing start point
+  // is exactly how a "return to where I am" route ended up miles away, so when it happens the
+  // driver is told rather than left to discover it from the windscreen.
+  var home    = (startAddr||'').trim();
+  if(!home){
+    home = (_rtGetHome()||'').trim();
+    if(home){ try{ showToast('Using your saved home address as the start point'); }catch(e){} }
+  }
   var endPt   = (endAddr!==undefined&&endAddr!==null ? String(endAddr) : home).trim();
   var pickup  = (r.pickup||'').trim();
   var dropoff = (r.home||'').trim();
@@ -14577,6 +14585,16 @@ function _buildRouteUrlsFrom(r, startAddr, endAddr, linkRide){
   }
   // Remove consecutive duplicates and empty strings
   stops = stops.filter(function(s,i){ return s && s!==stops[i-1]; });
+  // DEGENERATE LOOP. When the route starts AND ends at the same point - which is exactly what
+  // "return to where I am now" produces - the Maps URL carries an identical origin and
+  // destination. Reported: that route navigated to a business complex the driver had never been
+  // to, while "return home" (where the two ends genuinely differ) has never once misbehaved.
+  //
+  // The leading copy is redundant regardless: Google Maps starts from the device's live GPS when
+  // no origin is given, so dropping it loses nothing and removes the ambiguity entirely. The
+  // route becomes pickup -> drop-off -> back here, which is what the driver actually asked for.
+  // Only dropped when there are real stops in between, so a two-point route is never gutted.
+  if(stops.length>2 && stops[0]===stops[stops.length-1]) stops = stops.slice(1);
   if(stops.length<2) stops=[pickup,dropoff].filter(Boolean);
   // Combined trip: splice the linked ride's stops in just before the final destination.
   if(linkRide){
@@ -15266,7 +15284,7 @@ function _askReturnDest(rideId, locStr){
         +'</button>'
       : '')
     // Back to current location
-    +'<button onclick="_closeNavModal();_openStartRideWithHome(window._srtId,window._srtLoc,window._srtLoc)" '
+    +'<button onclick="_closeNavModal();_srtReturnToCurrentLocation()" '
     +'style="display:flex;align-items:center;gap:.75rem;width:100%;padding:.75rem .9rem;'
     +'background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;cursor:pointer;'
     +'font-family:inherit;text-align:left;margin-bottom:.5rem;">'
@@ -15389,6 +15407,31 @@ function _navOptimize(){
     _navRefreshStopsBox();
     showToast('\u2713 Route optimized \u2014 fine-tune with \u2191\u2193 if needed');
   }
+}
+// "Return to where I am now" takes a FRESH GPS fix at the moment it is pressed, and refuses to
+// build the route if it can't get one.
+//
+// Reported with a screenshot: this option routed the driver to an address miles from where he
+// actually was, on a ride whose card showed no extra stops and no linked ride. Two faults made
+// that possible and both are closed here:
+//   1. window._srtLoc is a global set once per Start Ride flow and never cleared, so a stale
+//      coordinate from an earlier trip could still be sitting there.
+//   2. _buildRouteUrlsFrom() falls back to _rtGetHome() - the driver's SAVED HOME ADDRESS -
+//      whenever the start address is empty. Silently. So a missing or blank location produced a
+//      confident route to somewhere the driver never asked for, with the button still reading
+//      "return to current location".
+// Failing loudly is the right behaviour here: a wrong destination on a live ride costs far more
+// than being told to try again.
+function _srtReturnToCurrentLocation(){
+  var rideId = window._srtId;
+  _getGpsForNav(function(locStr){
+    if(!locStr){
+      showToast('Couldn\u2019t get your location \u2014 pick a destination instead','error');
+      return;                                    // never silently substitute the saved home
+    }
+    window._srtLoc = locStr;                     // refresh the global so nothing stale survives
+    _openStartRideWithHome(rideId, locStr, locStr);
+  });
 }
 function _openStartRideWithHome(rideId, startAddr, endAddr, swapPickupDropoff){
   var r=rides.find(function(x){return x.id===rideId;});
