@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191191">
+<meta name="version" content="202608191195">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -7682,7 +7682,22 @@ function buildQuoteHTML(q, cmp, logoOverride){
   const logoHtml = _logoImgHtml(shownLogo, appLogo);
   const orgName = logoOverride ? (logoOverride.businessName||'Your Driver') : (((_ownerProf.businessName||'').trim()) || 'Your Driver');
   const ownerPhone = (_ownerProf.phone||'').trim();
-  const bd = buildRideBreakdown(q);
+  // Reported with a screenshot: a client quote showed "Late night surcharge x2 $40" and then a
+  // "Discount -$21.00" nobody applied. Both come from buildRideBreakdown() - the RECEIPT
+  // reconstruction - which multiplies per-leg surcharges by the leg count and, when its total
+  // then disagrees with the ride's real stored price, appends a balancing Discount/Additional
+  // charges row to force the two to match.
+  //
+  // That row is internal bookkeeping so receipts sum correctly. It must never appear on a
+  // document sent to a client: it invents a discount that was never given, and the doubled
+  // surcharge above it is equally wrong. The STORED PRICE was right the whole time ($216) -
+  // only the itemisation was fabricated around it.
+  //
+  // _computeFeeRebuild() is the same function that draws the Fee Breakdown card inside the app,
+  // so a quote can no longer show a breakdown the app itself disagrees with. Exactly the fix
+  // applied to the calendar export in v1169; this is the same fault on a client-facing surface.
+  var _fr = (typeof _computeFeeRebuild==='function') ? _computeFeeRebuild(q) : null;
+  const bd = _fr ? { lines: _fr.rows, total: _fr.total } : buildRideBreakdown(q);
   const amt = bd.total;
   const dateStr = q.date ? fmtDateShort(q.date) : 'Date to be confirmed';
   const timeStr = q.time ? ((typeof fmtTime12==='function'?fmtTime12(q.time):q.time)) : '';
@@ -11358,7 +11373,59 @@ async function textClient(id, opts){
     }
   }
 
+  // International arrivals: offer WhatsApp. A client landing at the International terminal very
+  // often has no working SMS - their home carrier doesn't roam, or they're on airport wifi - but
+  // almost always has WhatsApp. Defaulting to Messages there means the confirmation can simply
+  // never arrive, and nobody finds out until the driver is standing at arrivals.
+  //
+  // Scoped deliberately to AP PICK UP + International: that is the one case where the client is
+  // arriving FROM abroad. Every other ride keeps going straight to Messages exactly as before,
+  // with no extra tap.
+  if(_isIntlArrival(r)){
+    var _via = await showConfirmModal({
+      icon:'\uD83C\uDF0D', title:'International arrival',
+      message:'This client may not have text messaging on arrival. Send the confirmation by WhatsApp instead?',
+      buttons:[
+        {label:'WhatsApp', style:'primary', value:'wa'},
+        {label:'Messages', style:'secondary', value:'sms'},
+        {label:'Cancel', style:'secondary', value:null}
+      ]
+    });
+    if(!_via) return false;
+    if(_via==='wa') return await _sendViaWhatsApp(nums, _fullMsg, files);
+  }
   return await _sendTextWithFiles(nums, _fullMsg, files);
+}
+function _isIntlArrival(r){
+  return !!r && r.type==='AP PICK UP' && (r.terminal||'').trim()==='International';
+}
+// WhatsApp needs a bare international number: digits only, country code included, no '+' and no
+// leading zeros. A 10-digit number is treated as US and given the '1' prefix - which covers a US
+// client who happens to be flying in. Anything already carrying a country code is left alone.
+function _waPhone(raw){
+  var s=String(raw||'').trim(); if(!s) return '';
+  var d=s.replace(/[^0-9]/g,'');
+  if(!d) return '';
+  if(s.charAt(0)==='+') return d;                 // explicit country code given
+  if(d.length===10) return '1'+d;                 // US number without country code
+  if(d.length===11 && d.charAt(0)==='1') return d;// US number with country code
+  return d;                                       // assume it already carries a country code
+}
+async function _sendViaWhatsApp(nums, message, files){
+  var num=_waPhone(nums && nums[0]);
+  if(!num){ showToast('No phone number to send to','error'); return false; }
+  // wa.me carries text only - there is no URL parameter for an image. The driver card is copied
+  // to the clipboard first, exactly as the Messages path does, so it can be pasted straight into
+  // the chat. Said out loud in the toast, since otherwise the card would silently not arrive.
+  var cardFile=(files||[]).find(function(f){ return f && f.type==='image/png'; });
+  var copied=false;
+  if(cardFile && window.ClipboardItem && navigator.clipboard && navigator.clipboard.write){
+    try{ await navigator.clipboard.write([new ClipboardItem({'image/png':cardFile})]); copied=true; }catch(e){}
+  }
+  if(nums && nums.length>1) showToast('WhatsApp sends to one number \u2014 using the first');
+  if(copied) showToast('Driver card copied \u2014 paste it into the WhatsApp chat');
+  window.location.href='https://wa.me/'+num+'?text='+encodeURIComponent(message||'');
+  return true;
 }
 
 function closeDayModal(){document.getElementById('day-modal').classList.remove('show');}
@@ -12906,7 +12973,11 @@ function buildRideBreakdown(r){
 
   // Flat surcharges from the ride's Y/N flags
   const flat = (typeof ADDONS_FLAT!=='undefined') ? ADDONS_FLAT : {premium:30,holiday:30,christmas:35,late:20,traffic:15};
-  const flagLabels = {premium:'Premium hours',holiday:'Holiday',christmas:'Christmas',late:'Late night',traffic:'Traffic'};
+  // 'Late night' was wrong and reached a client: this is the LAST-MINUTE booking fee, not a
+  // time-of-day charge. Reported directly - "I think it is talking about a last minute
+  // surcharge." Every other copy in the app already said 'Late notice'; this one copy disagreed,
+  // and it happened to be the one a quote was rendered from.
+  const flagLabels = {premium:'Premium hours',holiday:'Holiday',christmas:'Christmas',late:'Late notice',traffic:'Traffic'};
   // A split leg (r.pairId set - this ride used to be one half of an AP ROUND TRIP) inherited
   // its raw premium/traffic/holiday/christmas flags from the PRE-split ride, which reflect
   // the OUTBOUND leg's own time - not necessarily this leg's own actual time. Re-derive these
@@ -14459,7 +14530,11 @@ async function _mtSaveGasPrice(val){
 // coordinate got used, and the coordinate was already right by the time it was handed over.
 // (mapsHref() at the AP-pickup link already used ?api=1 - which is exactly why that path never
 // produced this complaint.)
-function _gmapsDirUrl(stops){
+// omitOrigin: leave `origin` out entirely so Maps starts from the device's live GPS. Used when
+// the route would otherwise begin and end at the same coordinate - restating it at both ends is
+// what made Google resolve one of them to an unrelated place (v1191). Every other caller passes
+// nothing and behaves exactly as before.
+function _gmapsDirUrl(stops, omitOrigin){
   var list = (stops||[]).map(function(s){ return String(s||'').trim(); }).filter(Boolean);
   if(!list.length) return '';
   // PLACE IDs ARE NO LONGER SENT. Read this before reintroducing them.
@@ -14502,7 +14577,11 @@ function _gmapsDirUrl(stops){
     return 'https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(list[0])+'&travelmode=driving';
   }
   var origin = list[0], dest = list[list.length-1], mid = list.slice(1,-1);
-  var url = 'https://www.google.com/maps/dir/?api=1&origin='+encodeURIComponent(origin)
+  // With the origin omitted, the FIRST stop is not a start point - it is a real waypoint and
+  // must stay in the waypoint list, otherwise it silently vanishes from the route.
+  if(omitOrigin) mid = list.slice(0,-1);
+  var url = 'https://www.google.com/maps/dir/?api=1'
+          + (omitOrigin ? '' : '&origin='+encodeURIComponent(origin))
           + '&destination='+encodeURIComponent(dest);
   // Maps URLs API takes waypoints as a single pipe-separated parameter.
   if(mid.length){
@@ -14594,7 +14673,19 @@ function _buildRouteUrlsFrom(r, startAddr, endAddr, linkRide){
   // no origin is given, so dropping it loses nothing and removes the ambiguity entirely. The
   // route becomes pickup -> drop-off -> back here, which is what the driver actually asked for.
   // Only dropped when there are real stops in between, so a two-point route is never gutted.
-  if(stops.length>2 && stops[0]===stops[stops.length-1]) stops = stops.slice(1);
+  // v1191 dropped the leading copy here. That was WRONG and caused a regression: removing the
+  // first stop promotes whatever followed it - on an airport ride, the TERMINAL COORDINATE -
+  // into the URL's `origin`, and Maps plants a start pin on that exact point in the middle of
+  // the apron instead of routing to it as a waypoint. The comment in _gmapsDirUrl already warns
+  // that a bare lat,lng behaves differently as an endpoint than as a waypoint; this walked
+  // straight into it.
+  //
+  // The loop is still worth removing, but by omitting the ORIGIN PARAMETER rather than by
+  // reshaping the stop list. Google Maps starts from the device's live GPS when no origin is
+  // given, so the driver's location is still the start - it simply isn't restated as a
+  // coordinate at both ends. Every real stop keeps its original role.
+  var _omitOrigin = (stops.length>2 && stops[0]===stops[stops.length-1]);
+  if(_omitOrigin) stops = stops.slice(1);
   if(stops.length<2) stops=[pickup,dropoff].filter(Boolean);
   // Combined trip: splice the linked ride's stops in just before the final destination.
   if(linkRide){
@@ -14610,7 +14701,7 @@ function _buildRouteUrlsFrom(r, startAddr, endAddr, linkRide){
 
   // Google Maps multi-stop via the official Maps URLs API - see _gmapsDirUrl for why the
   // older /dir/A/B/C path form can't be used with coordinates.
-  var gmUrl   = _gmapsDirUrl(stops);
+  var gmUrl   = _gmapsDirUrl(stops, _omitOrigin);
 
   // Apple Maps: was using the legacy ?saddr=&daddr= scheme with a daddr repeated once per
   // stop, on the assumption (per the comment this replaces) that Apple Maps only supports a
