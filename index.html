@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191212">
+<meta name="version" content="202608191214">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -14817,13 +14817,26 @@ async function showConfirmModal(opts){
     var iconColor=opts.iconColor||'#f5a623';
     var iconBg=opts.iconBg||'#3a2a10';
     var btns=(opts.buttons||[{label:'OK',style:'primary',value:true}]);
+    // Buttons used to share ONE row, each allowed to shrink to any width - so six of them (the payment
+    // picker: Credit card, Venmo, Zelle, Cash, Other, Cancel) were squeezed until the labels were cut to
+    // "Credi card" and "Venm". The row could wrap, but nothing ever made it. Past three buttons they now
+    // go in a grid; two or three keep the familiar single row.
+    var _many = btns.length > 3;
+    var _hasCancel = _many && btns[btns.length-1] && btns[btns.length-1].value===null;
+    var _choiceCount = btns.length - (_hasCancel?1:0);
+    var _lastChoice = _choiceCount - 1;
     var btnHtml=btns.map(function(b,i){
       var bg,color,border;
       if(b.style==='danger'){bg='#c0392b';color='#fff';border='none';}
       else if(b.style==='primary'){bg='#f5a623';color='#150a25';border='none';}
       else if(b.style==='warn'){bg='#b45309';color='#fff';border='none';}
       else {bg='#2d1460';color='#e0d4ff';border='none';}
-      return '<button data-idx="'+i+'" style="flex:1;min-width:0;padding:.7rem .5rem;background:'+bg+';color:'+color+';border:'+border+';border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;line-height:1.2;">'+b.label+'</button>';
+      // Many choices (v1214): a two-column grid. A trailing Cancel (value null) gets its own full-width
+      // row so it's apart from the real choices, and an odd leftover choice spans the row. Labels never
+      // wrap mid-word.
+      var _span = _many && ((b.value===null && i===btns.length-1) || (i===_lastChoice && _choiceCount%2===1));
+      var _sz = _many ? ('min-width:0;white-space:nowrap;'+(_span?'grid-column:1/-1;':'')) : 'flex:1;min-width:0;';
+      return '<button data-idx="'+i+'" style="'+_sz+'padding:.7rem .5rem;background:'+bg+';color:'+color+';border:'+border+';border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;line-height:1.2;">'+b.label+'</button>';
     }).join('');
     ov.innerHTML='<div style="background:#1a0d2e;border:1.5px solid #4a2d6e;border-radius:16px;max-width:330px;width:100%;padding:1.25rem;box-shadow:0 24px 60px rgba(0,0,0,.5);">'
       +'<div style="display:flex;align-items:center;gap:11px;margin-bottom:'+(opts.message?'10px':'16px')+';">'
@@ -14831,7 +14844,8 @@ async function showConfirmModal(opts){
       +'<div style="font-size:1.02rem;font-weight:800;color:#fff;line-height:1.25;">'+(opts.title||'Are you sure?')+'</div>'
       +'</div>'
       +(opts.message?'<div style="font-size:.86rem;color:#c4b0e0;line-height:1.5;margin-bottom:16px;white-space:pre-wrap;">'+opts.message+'</div>':'')
-      +'<div style="display:flex;gap:8px;flex-wrap:wrap;">'+btnHtml+'</div>'
+      +(_many ? '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+btnHtml+'</div>'
+              : '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+btnHtml+'</div>')
       +'</div>';
     document.body.appendChild(ov);
     ov.querySelectorAll('button[data-idx]').forEach(function(btn){
@@ -27538,6 +27552,20 @@ async function syncPublicDriverDirectory(dName){
     logo: prof.logo || '',
     logoAccentColor: prof.logoAccentColor || ''
   };
+  // A driver who works ON BEHALF of another (PROXY_MAP - Morgan for Kat) brands their booking links
+  // as that owner (v1213). Reported: a link Morgan sent one of Kat's clients showed Morgan's logo and
+  // "Your driver: Morgan Newton". Morgan has no clients of her own; every client she books for is Kat's,
+  // so Kat's branding belongs on it. (The only thing that should carry Morgan's own logo is the dispatch
+  // invoice she sends Kat, which doesn't use this listing.)
+  //
+  // A POINTER to the owner's listing, not a copy of their logo: if Kat changes her logo, Morgan's links
+  // follow automatically, where a copy would go stale. displayName stays Morgan's - the booking page
+  // uses it to decide who is NOTIFIED of the request, and that must remain Morgan.
+  try{
+    var _ownerName = (typeof PROXY_MAP!=='undefined') && PROXY_MAP[login];
+    var _ownerLogin = _ownerName ? _loginForDriver(_ownerName) : '';
+    if(_ownerLogin) entry.brandAsLogin = _ownerLogin.toLowerCase();
+  }catch(e){}
   try{
     var dir = await storageGet('kat:publicDriverDirectory');
     if(!dir || typeof dir!=='object') dir = {};
