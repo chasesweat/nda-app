@@ -4,6 +4,42 @@ const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
 admin.initializeApp();
 
+// Builds the push's data block.
+//
+// Previously this sent ONLY title and body, and silently discarded everything else the app put on
+// the queue entry under `data` - the ride id, the notification type, and (from v1211) a copy of the
+// ride itself so a driver can see a new assignment with no signal. It also meant the service
+// worker's nightly silent update check ({type:'force-update'}) could never arrive through this
+// function: with no type, it would have shown as a blank "Northwest Drivers" notification instead.
+//
+// FCM's rules for the data block, each handled here:
+//   * every value must be a STRING - anything else fails the WHOLE send, so objects are
+//     JSON-encoded and numbers/booleans converted;
+//   * some names are reserved ("from", "notification", "message_type", and any starting with
+//     "google" or "gcm") and are skipped;
+//   * the whole payload is capped at 4KB. If it would exceed that, the ride copy is dropped first -
+//     a notification without the offline copy is far better than no notification at all.
+function buildData(req) {
+  const data = {
+    title: String(req.title || 'Northwest Drivers'),
+    body: String(req.body || '')
+  };
+  const extra = (req.data && typeof req.data === 'object') ? req.data : {};
+  Object.keys(extra).forEach((k) => {
+    if (k === 'title' || k === 'body') return;                       // the top-level ones win
+    if (k === 'from' || k === 'notification' || k === 'message_type') return;
+    if (/^(google|gcm)/i.test(k)) return;
+    const v = extra[k];
+    if (v === undefined || v === null) return;
+    data[k] = (typeof v === 'string') ? v : JSON.stringify(v);
+  });
+  if (Buffer.byteLength(JSON.stringify(data), 'utf8') > 3800 && data.ride) {
+    console.warn('sendPush: ride copy too large for one push, sending without it');
+    delete data.ride;
+  }
+  return data;
+}
+
 exports.sendPush = functions.database
   .ref('/nda/kat/pushQueue/{id}')
   .onCreate(async (snap) => {
@@ -46,10 +82,7 @@ exports.sendPush = functions.database
       // here would make FCM auto-display it as well, and Android would then show every alert
       // twice. If the service worker's push listener is ever removed, this must change too -
       // the two files are a matched pair.
-      data: {
-        title: String(req.title || 'Northwest Drivers'),
-        body: String(req.body || '')
-      },
+      data: buildData(req),
       // Urgency high tells Apple's push service to deliver promptly rather than batching for
       // power saving, which on iOS can otherwise delay a notification by minutes. TTL keeps an
       // undelivered message alive for a day (a phone that was off overnight still gets it)
