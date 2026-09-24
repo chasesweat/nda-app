@@ -86,17 +86,38 @@ self.addEventListener('push', function (event) {
   // every notification unique and so can never dedupe anything.
   const tag = 'nda-' + String(title + '|' + body).replace(/\s+/g, '-').slice(0, 60);
 
+  // A "new ride assigned" push now carries the ride itself (v1211). Store it so the app can show it
+  // on the next open even with no signal - the push is the one moment the phone is guaranteed to
+  // have one. The app reads this cache before its first paint and clears it once live data arrives.
+  //
+  // It can never block or break the notification: every failure is swallowed, and it runs ALONGSIDE
+  // showNotification rather than before it. That matters on iPhone, where the notification must be
+  // shown within this event or iOS treats the push as silent and eventually revokes permission.
+  const storeRide = (async function () {
+    try {
+      if (!data.ride) return;
+      const ride = (typeof data.ride === 'string') ? JSON.parse(data.ride) : data.ride;
+      if (!ride || ride.id == null) return;
+      const cache = await caches.open('nda-pushed-rides');
+      await cache.put('/__pushed-ride/' + ride.id, new Response(
+        JSON.stringify({ ride: ride, receivedAt: Date.now() }),
+        { headers: { 'Content-Type': 'application/json' } }
+      ));
+    } catch (err) { /* never let storing a ride cost the notification */ }
+  })();
+
   // waitUntil is the whole point: it tells iOS a notification is on its way, and keeps the
   // service worker alive until showNotification actually resolves.
-  event.waitUntil(
+  event.waitUntil(Promise.all([
     self.registration.showNotification(title, {
       body: body,
       icon: 'icon-192.png',
       badge: 'badge-monochrome.png',
       tag: tag,
       renotify: true
-    })
-  );
+    }),
+    storeRide
+  ]));
 });
 
 // Tapping the notification focuses (or opens) the app.

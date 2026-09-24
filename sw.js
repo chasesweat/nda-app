@@ -12,8 +12,8 @@
 // app build 202608191927.)
 // VERSIONING RULE: the visible build number (hamburger menu, last 3 digits of index.html's
 // <meta name="version"> tag) is always this cache number PLUS 409. Bump both by exactly 1
-// together on every single deploy — never skip, never jump. Current: cache v786 = build 1195.
-const CACHE = 'nwda-cache-v786';
+// together on every single deploy — never skip, never jump. Current: cache v803 = build 1212.
+const CACHE = 'nwda-cache-v803';
 
 // Take over immediately on install.
 self.addEventListener('install', function (e) {
@@ -47,7 +47,10 @@ self.addEventListener('activate', function (e) {
     caches.keys()
       .then(function (keys) {
         return Promise.all(
-          keys.filter(function (k) { return k !== CACHE; })
+          // 'nda-pushed-rides' is NOT a build cache (v1211): it holds rides delivered by push, written by
+          // firebase-messaging-sw.js so a driver can see a new assignment with no signal. Deleting it on
+          // every deploy would silently discard exactly those rides.
+          keys.filter(function (k) { return k !== CACHE && k !== 'nda-pushed-rides'; })
               .map(function (k) { return caches.delete(k); })
         );
       })
