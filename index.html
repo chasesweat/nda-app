@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191216">
+<meta name="version" content="202608191218">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -25481,7 +25481,10 @@ async function _approveDuplicateGroup(key){
 // currentUser is declared) has been capturing since that was added. Merges this device's own
 // local log with the shared, cross-device one so a crash on someone else's phone shows up here
 // too, not just the one currently being held.
-async function _showCrashLogModal(){
+// Every crash this app knows about: this phone's own plus the shared log from every device, with
+// duplicates removed, newest first. Shared by the crash log window and the export (v1217), so the two
+// can never disagree about what was logged.
+async function _collectCrashLog(){
   var local = [];
   try{ local = JSON.parse(localStorage.getItem('nda-crashlog')||'[]'); }catch(e){}
   var shared = [];
@@ -25490,11 +25493,61 @@ async function _showCrashLogModal(){
     if(d && typeof d==='object') shared = Object.values(d);
   }catch(e){}
   var seen = new Set();
-  var all = local.concat(shared).filter(function(e){
+  return local.concat(shared).filter(function(e){
+    if(!e) return false;
     var k = e.ts+'|'+e.who+'|'+e.msg;
     if(seen.has(k)) return false;
     seen.add(k); return true;
-  }).sort(function(a,b){ return (b.ts||0)-(a.ts||0); }).slice(0, 50);
+  }).sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
+}
+// Export the WHOLE crash log as a plain text file Chase can upload for fixing (v1217). The window shows
+// the newest 50 with long details cut short; the export keeps every entry and every detail in full, and
+// opens with a "most frequent" summary so the error that matters most is obvious straight away.
+async function exportCrashLog(){
+  var all = await _collectCrashLog();
+  if(!all.length){ showToast('No crashes logged \u2014 nothing to export'); return; }
+  var build = ''; try{ build = (document.querySelector('meta[name="version"]')||{}).content||''; }catch(e){}
+  var line = function(ch){ return new Array(61).join(ch); };
+  var out = [];
+  out.push('NWDA APP \u2014 CRASH LOG EXPORT');
+  out.push('Exported: '+new Date().toLocaleString()+' by '+((currentUser&&currentUser.name)||'?')+' \u00b7 app build on this phone: '+build);
+  out.push('Entries: '+all.length+' (every device, duplicates removed, newest first)');
+  out.push(line('='));
+  // Most frequent first: the same error message counted across every person and device.
+  var groups = {};
+  all.forEach(function(e){
+    var k = String(e.msg||'(no message)').trim();
+    var g = groups[k] || (groups[k] = { msg:k, n:0, who:{}, builds:{}, last:0 });
+    g.n++; g.who[e.who||'?']=1; g.builds[e.build||'?']=1; g.last=Math.max(g.last, e.ts||0);
+  });
+  out.push('MOST FREQUENT ERRORS');
+  Object.values(groups).sort(function(a,b){ return b.n-a.n || b.last-a.last; }).forEach(function(g,i){
+    out.push((i+1)+'. x'+g.n+'  '+g.msg);
+    out.push('   who: '+Object.keys(g.who).join(', ')+'  \u00b7  builds: '+Object.keys(g.builds).join(', ')
+      +'  \u00b7  last: '+(g.last?new Date(g.last).toLocaleString():'?'));
+  });
+  out.push(line('='));
+  out.push('EVERY ENTRY, IN FULL');
+  all.forEach(function(e, i){
+    out.push(line('-'));
+    out.push('#'+(i+1)+'  '+(e.ts?new Date(e.ts).toLocaleString()+'  ('+new Date(e.ts).toISOString()+')':'(no timestamp)'));
+    out.push('who: '+(e.who||'?')+'  \u00b7  page: '+(e.page||'?')+'  \u00b7  build: '+(e.build||'?'));
+    // Any other fields a crash may carry (device, line, source...) - include rather than guess which matter.
+    Object.keys(e).forEach(function(k){
+      if(['ts','who','page','build','msg','stack'].indexOf(k)>=0) return;
+      var v=e[k]; if(v==null || v==='') return;
+      out.push(k+': '+(typeof v==='object' ? JSON.stringify(v) : String(v)));
+    });
+    out.push('message: '+(e.msg||''));
+    if(e.stack) out.push('detail:\n'+String(e.stack));
+  });
+  out.push(line('='));
+  var d=new Date(), pad=function(x){ return String(x).padStart(2,'0'); };
+  downloadTextFile(out.join('\n'), 'NWDA-crash-log-'+d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'.txt', 'text/plain');
+  showToast('\uD83D\uDCC4 Crash log exported \u2014 '+all.length+' entr'+(all.length===1?'y':'ies'));
+}
+async function _showCrashLogModal(){
+  var all = (await _collectCrashLog()).slice(0, 50);
 
   var back=document.createElement('div'); back.id='crash-log-modal-back';
   back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13500;display:flex;align-items:center;justify-content:center;padding:1rem;';
@@ -25511,6 +25564,7 @@ async function _showCrashLogModal(){
     + '<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\uD83D\uDEA8 Crash log</div>'
     + '<div style="font-size:.78rem;color:var(--mid);margin-bottom:.8rem;">Most recent '+all.length+' error'+(all.length===1?'':'s')+' from any device, newest first.</div>'
     + rowsHtml
+    + (all.length ? '<button onclick="exportCrashLog()" style="width:100%;margin-top:.6rem;padding:.6rem;background:#b91c1c;color:#fff;border:none;border-radius:8px;font-family:inherit;font-weight:700;cursor:pointer;">\u2B07 Export full log (to send for fixing)</button>' : '')
     + '<button onclick="document.getElementById(\'crash-log-modal-back\').remove()" style="width:100%;margin-top:.6rem;padding:.6rem;background:var(--light);color:var(--black);border:none;border-radius:8px;font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">Close</button>'
     + '</div>';
   document.body.appendChild(back);
@@ -25917,6 +25971,7 @@ function renderCrashLogSection(){
   box.innerHTML = '<div style="border:1px solid var(--light);border-radius:10px;padding:.85rem;margin-bottom:1rem;background:var(--surface);">'
     + '<div style="font-size:.8rem;font-weight:700;color:var(--black);margin-bottom:.25rem;">\uD83D\uDEA8 Crash log</div>'
     + '<div style="font-size:.72rem;color:var(--mid);line-height:1.5;margin-bottom:.6rem;">'+summaryLine+'</div>'
+    + '<button type="button" onclick="exportCrashLog()" style="padding:.45rem .8rem;border-radius:8px;border:none;background:#b91c1c;color:#fff;font-family:inherit;font-size:.78rem;font-weight:700;cursor:pointer;margin-right:.4rem;">\u2B07 Export</button>'
     + '<button type="button" onclick="_showCrashLogModal()" style="padding:.45rem .8rem;border-radius:8px;border:1.5px solid #b91c1c;background:none;color:#b91c1c;font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.76rem;cursor:pointer;">View full log</button>'
     + '</div>';
 }
@@ -25944,7 +25999,10 @@ function renderAccessControl(){
     +'<div style="font-size:.72rem;color:var(--mid);line-height:1.5;margin-bottom:.6rem;">Sends every driver back through the quick setup screen at their next login so they can fill in newly added fields (business name, logo, availability, and more). They can still skip it.</div>'
     +'<button onclick="resetAllOnboarding()" style="padding:.5rem .9rem;border-radius:8px;border:1.5px solid var(--gold);background:none;color:var(--gold);font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.78rem;cursor:pointer;">Re-prompt all drivers</button>'
     +'</div>';
-  list.innerHTML = _subsIntroHTML() + USERS.map(function(u){
+  // The fresh-data test panel goes FIRST (v1218). It used to be appended after every person's block -
+  // subscription, calendar colour, surcharges and password each - so it sat at the very bottom of a long
+  // page, below the whole team, and Chase couldn't find it.
+  list.innerHTML = _freshPanel + _subsIntroHTML() + USERS.map(function(u){
     const dName  = USER_DRIVER_MAP[u.name]||'';
     const color  = dName ? driverColor(dName) : '#6b6b6b';
     const isMe   = u.name === currentUser.name;
@@ -26005,7 +26063,7 @@ function renderAccessControl(){
       +'<div id="pw-info-'+safeN+'" style="display:none;font-size:.66rem;color:var(--mid);margin-top:.25rem;background:var(--surface);border-radius:6px;padding:.4rem .5rem;">Set a new password if they\u2019re locked out — no current password needed.</div></div>'
       +'</div>'
       +'</div>';
-  }).join('') + _freshPanel + _onbResetPanel + buildColorVaultPanel();
+  }).join('') + _onbResetPanel + buildColorVaultPanel();
   setTimeout(function(){ try{ _renderEveryoneOpenTimes(); }catch(e){} }, 0);
 }
 
