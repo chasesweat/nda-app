@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191214">
+<meta name="version" content="202608191216">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2932,6 +2932,7 @@ function setupRealtimeListeners(){
   try{ _watchConnection(); }catch(e){}
   fbRef('nda/kat/rides').on('value', snap=>{
     window._ridesAsOf = Date.now();          // live data just arrived (v1210)
+    try{ _markOpen('fresh'); }catch(e){}     // open timing (v1215)
     _clearPushedRides();                      // live data is the truth now (v1211)
     try{ _renderOfflineBar(); }catch(e){}
     // Recovery: a live snapshot arriving means the connection is working and `rides` is about to
@@ -3225,7 +3226,103 @@ function _cacheSnapshotWriteDebounced(){
   if(!window._dataFresh || window._dataLoadFailed) return;   // never re-save a stale or mid-load state as the cache
   try{ if(_cacheWriteTimer) clearTimeout(_cacheWriteTimer); _cacheWriteTimer=setTimeout(function(){ _cacheWriteTimer=null; try{ _cacheSnapshotWrite(); }catch(e){} }, 4000); }catch(e){}
 }
+// ── FRESH-ONLY TEST MODE + OPEN TIMING (v1215) ────────────────────────────────
+// Chase wants a real-world test: turn OFF the saved copy on his and Morgan's phones only, see how slow
+// opening feels when it must wait for fresh data, then decide before rolling it out to anyone else.
+//
+// A switch ON THIS PHONE (localStorage), set from the admin page. When on, the saved copy is simply not
+// read, so the app takes its normal cold-load path and waits for live data - exactly what everyone would
+// get if the saved copy were removed. The copy is still WRITTEN, so switching back is instant.
+//
+// Timing is recorded either way, so the two modes can be compared on the same phone with real numbers:
+//   shown - when the screen first appeared
+//   fresh - when live data actually arrived
+// In the normal mode "shown" is fast but may be old data until "fresh"; in fresh-only they're about equal.
+// Worth knowing when reading the numbers: fresh data is downloaded on EVERY open in BOTH modes - the
+// saved copy only changes what's on screen while that happens, not how much is downloaded.
+function _freshOnly(){ try{ return localStorage.getItem('nda-fresh-only')==='1'; }catch(e){ return false; } }
+var _openTiming = { mode: _freshOnly() ? 'fresh-only' : 'normal', shown:null, fresh:null, at: Date.now() };
+function _saveOpenTiming(){
+  try{
+    var list = JSON.parse(localStorage.getItem('nda-open-times')||'[]');
+    if(list.length && list[list.length-1].at === _openTiming.at) list[list.length-1] = _openTiming;
+    else list.push(_openTiming);
+    localStorage.setItem('nda-open-times', JSON.stringify(list.slice(-30)));
+  }catch(e){}
+}
+function _markOpen(which){
+  if(_openTiming[which]!=null) return;
+  try{ _openTiming[which] = Math.round(performance.now()); }catch(e){ return; }
+  _saveOpenTiming();
+  if(which==='fresh') _uploadOpenTimes();      // the open is complete - report it (v1216)
+}
+function setFreshOnly(on){
+  try{ if(on) localStorage.setItem('nda-fresh-only','1'); else localStorage.removeItem('nda-fresh-only'); }catch(e){}
+  showToast(on ? 'Fresh-only ON for this phone \u2014 takes effect the next time the app opens'
+               : 'Fresh-only OFF \u2014 the saved copy is used again from the next open');
+  try{ renderAccessControl(); }catch(e){}
+}
+// Every phone's timings in one place (v1216) - so Chase can see Morgan's (and later everyone's)
+// without asking for screenshots. Each phone writes ONLY its own record, at nda/kat/openTimes/<login>,
+// so phones never overwrite each other. Written straight to Firebase rather than through storageSet():
+// storageSet() raises an admin change alert, and this updates on every open - it would flood admins, the
+// same trap quote drafts fell into (v1157). Small: the last 30 opens per person.
+function _openTimesKey(){
+  try{ var n=currentUser && currentUser.name; return n ? String(n).replace(/[.#$\[\]\/]/g,'_') : ''; }catch(e){ return ''; }
+}
+function _openDevice(){
+  try{ var ua=navigator.userAgent||''; return /iPhone|iPad|iPod/.test(ua) ? 'iPhone' : /Android/.test(ua) ? 'Android' : 'Computer'; }catch(e){ return ''; }
+}
+function _uploadOpenTimes(){
+  var k=_openTimesKey(); if(!k || typeof fbRef!=='function' || !fbRef) return;
+  try{
+    var list=JSON.parse(localStorage.getItem('nda-open-times')||'[]').slice(-30);
+    if(!list.length) return;
+    var p=fbRef('nda/kat/openTimes/'+k).set({ updatedAt:Date.now(), device:_openDevice(), opens:list });
+    if(p && p.catch) p.catch(function(){});
+  }catch(e){}
+}
+// One person's summary line, used for this phone AND for everyone's.
+function _openTimingSummary(list){
+  var med=function(a){ a=a.filter(function(x){return x!=null;}).sort(function(x,y){return x-y;}); return a.length ? a[Math.floor(a.length/2)] : null; };
+  var sec=function(ms){ return ms==null ? '\u2014' : (ms/1000).toFixed(1)+'s'; };
+  var row=function(mode){
+    var l=(list||[]).filter(function(x){ return x && x.mode===mode; });
+    if(!l.length) return '';
+    return '<div><b>'+(mode==='fresh-only'?'Fresh-only':'Normal (saved copy)')+'</b> \u2014 '+l.length+' open'+(l.length===1?'':'s')
+      +': screen appears in <b>'+sec(med(l.map(function(x){return x.shown;})))+'</b>, fresh data in <b>'
+      +sec(med(l.map(function(x){return x.fresh;})))+'</b> <span style="color:var(--mid);">(typical)</span></div>';
+  };
+  var out=row('normal')+row('fresh-only');
+  return out || '<div style="color:var(--mid);">No opens recorded yet</div>';
+}
+// Admin view: one block per person, loaded after the page draws.
+function _renderEveryoneOpenTimes(){
+  var el=document.getElementById('open-times-everyone'); if(!el) return;
+  if(typeof fbRef!=='function' || !fbRef){ el.innerHTML='<div style="color:var(--mid);">Not available offline.</div>'; return; }
+  el.innerHTML='<div style="color:var(--mid);">Loading\u2026</div>';
+  fbRef('nda/kat/openTimes').once('value').then(function(snap){
+    var all=(snap && snap.val()) || {};
+    var names=Object.keys(all).sort();
+    if(!names.length){ el.innerHTML='<div style="color:var(--mid);">Nobody\u2019s phone has reported yet \u2014 each phone reports after its next open.</div>'; return; }
+    el.innerHTML=names.map(function(n){
+      var r=all[n]||{}, opens=Array.isArray(r.opens)?r.opens:Object.values(r.opens||{});
+      var last=r.updatedAt ? new Date(r.updatedAt) : null;
+      var when=last ? last.toLocaleDateString([], {month:'short', day:'numeric'})+', '+last.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}) : '';
+      return '<div style="padding:.5rem 0;border-top:1px solid var(--light);">'
+        +'<div style="font-weight:800;font-size:.84rem;">'+escHtml(n)+(r.device?' <span style="font-weight:600;color:var(--mid);">\u00b7 '+escHtml(r.device)+'</span>':'')
+        +(when?' <span style="font-weight:600;color:var(--mid);font-size:.72rem;">\u00b7 last open '+escHtml(when)+'</span>':'')+'</div>'
+        +'<div style="font-size:.78rem;line-height:1.6;">'+_openTimingSummary(opens)+'</div></div>';
+    }).join('');
+  }).catch(function(){ el.innerHTML='<div style="color:var(--mid);">Couldn\u2019t load everyone\u2019s times right now.</div>'; });
+}
+function _openTimingHtml(){
+  var list=[]; try{ list=JSON.parse(localStorage.getItem('nda-open-times')||'[]'); }catch(e){}
+  return _openTimingSummary(list);
+}
 function _cacheSnapshotRead(){
+  // Test mode: pretend there is no saved copy, so this open waits for live data (v1215).
+  if(_freshOnly()) return null;
   try{
     var json = localStorage.getItem(_NDA_CACHE_KEY);
     if(!json) return null;
@@ -3513,6 +3610,7 @@ async function _loadAppData() {
 // Reveal the app once data is available: auto-login from a saved session (no login-screen
 // flash), else show the auth screen. Idempotent + shared by the cold and instant-paint paths.
 function _revealAfterLoad(){
+  try{ _markOpen('shown'); }catch(e){}
   if(window._nwdaRevealed) return window._nwdaRevealedApp;
   window._nwdaRevealed = true;
   let autoLoggedIn = false;
@@ -25830,6 +25928,17 @@ function renderAccessControl(){
   renderBusinessLogoManager();
   renderCrashLogSection();
   const list = document.getElementById('access-control-list');
+  // Fresh-only test switch + this phone's open timings (v1215).
+  const _freshPanel = '<div style="border:1px solid var(--light);border-radius:10px;padding:.85rem;margin-bottom:1rem;background:var(--surface);">'
+    + '<div style="font-size:.72rem;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Test: always wait for fresh data \u2014 this phone only</div>'
+    + '<label style="display:flex;align-items:center;gap:.55rem;cursor:pointer;margin-bottom:.45rem;">'
+    + '<input type="checkbox" '+(_freshOnly()?'checked':'')+' onchange="setFreshOnly(this.checked)" style="width:18px;height:18px;accent-color:var(--accent);">'
+    + '<span style="font-size:.86rem;font-weight:700;">Skip the saved copy when opening</span></label>'
+    + '<div style="font-size:.74rem;color:var(--mid);line-height:1.45;margin-bottom:.55rem;">Affects only this phone. The app will wait for live data every time it opens, so you can feel the real delay. Turn it off to go back to normal instantly.</div>'
+    + '<div style="font-size:.7rem;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--mid);margin:.2rem 0 .2rem;">This phone</div>'
+    + '<div style="font-size:.78rem;line-height:1.6;">'+_openTimingHtml()+'</div>'
+    + '<div style="font-size:.7rem;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--mid);margin:.8rem 0 .1rem;">Everyone</div>'
+    + '<div id="open-times-everyone" style="font-size:.78rem;"></div></div>';
   const _onbResetPanel = '<div style="border:1px solid var(--light);border-radius:10px;padding:.85rem;margin-bottom:1rem;background:var(--surface);">'
     +'<div style="font-size:.8rem;font-weight:700;color:var(--black);margin-bottom:.25rem;">\uD83D\uDD04 Re-prompt drivers to update their info</div>'
     +'<div style="font-size:.72rem;color:var(--mid);line-height:1.5;margin-bottom:.6rem;">Sends every driver back through the quick setup screen at their next login so they can fill in newly added fields (business name, logo, availability, and more). They can still skip it.</div>'
@@ -25896,7 +26005,8 @@ function renderAccessControl(){
       +'<div id="pw-info-'+safeN+'" style="display:none;font-size:.66rem;color:var(--mid);margin-top:.25rem;background:var(--surface);border-radius:6px;padding:.4rem .5rem;">Set a new password if they\u2019re locked out — no current password needed.</div></div>'
       +'</div>'
       +'</div>';
-  }).join('') + _onbResetPanel + buildColorVaultPanel();
+  }).join('') + _freshPanel + _onbResetPanel + buildColorVaultPanel();
+  setTimeout(function(){ try{ _renderEveryoneOpenTimes(); }catch(e){} }, 0);
 }
 
 
@@ -33832,6 +33942,9 @@ function enterApp(){
   (async function(){
     try{ if(window._dataFreshPromise) await window._dataFreshPromise; }catch(e){}
     try{ if(typeof syncPublicDriverDirectory==='function') syncPublicDriverDirectory(getMyDriverName()); }catch(e){}
+    // An open can finish before anyone is logged in, leaving no name to file its timings under - so
+    // report again once we know who this is (v1216).
+    try{ setTimeout(function(){ if(typeof _uploadOpenTimes==='function') _uploadOpenTimes(); }, 3000); }catch(e){}
   })();
   // Notification tapped while the app was closed: service worker launched us with a
   // deep-link URL — route to that ride/chat once we're in.
