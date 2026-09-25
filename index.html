@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191218">
+<meta name="version" content="202608191220">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2209,6 +2209,42 @@ let _currentPageId = 'dashboard';
 // render path while leaving no visible error at all.
 let _lastLoggedErrorKey = '';
 let _lastLoggedErrorTs = 0;
+var _earlyCrashes = [];
+// After login: put the person's name on crashes this open logged before they signed in. Updates the same
+// shared entries (Firebase), so it works even on a phone whose own storage is broken - exactly the phone
+// this was needed for.
+function _nameEarlyCrashes(){
+  try{
+    var who = currentUser && currentUser.name; if(!who || !_earlyCrashes.length) return;
+    _earlyCrashes.forEach(function(c){
+      var e = Object.assign({}, c.entry, { who: who + ' (before login)' });
+      try{ storageSetOne('kat:crashLog', c.key, e).catch(function(){}); }catch(err){}
+    });
+    _earlyCrashes = [];
+  }catch(e){}
+}
+// Is this phone refusing browser storage? Seen on an iPhone (v1217 export): every kind of storage failed,
+// so Firebase sign-in fell all the way back to NONE. The person is then logged out on every open (the login
+// is kept in storage) and never gets the saved copy (also kept in storage), so every open is a slow cold load.
+function _storageBlocked(){
+  if(window._authStorageMode === 'NONE') return true;
+  try{ localStorage.setItem('nda-probe','1'); localStorage.removeItem('nda-probe'); return false; }
+  catch(e){ return true; }
+}
+function _showStorageBlockedHelp(){
+  var ios = /iPhone|iPad|iPod/.test(navigator.userAgent||'');
+  var steps = ios
+    ? '1. Settings \u2192 Apps \u2192 Safari: turn OFF \u201CBlock All Cookies\u201D.\n'
+    + '2. Make sure the app isn\u2019t open in a Private Browsing tab.\n'
+    + '3. Settings \u2192 General \u2192 iPhone Storage: if it\u2019s nearly full, free up some space.\n'
+    + '4. Still happening? Settings \u2192 Apps \u2192 Safari \u2192 Advanced \u2192 Website Data: delete \u201Cchasesweat.github.io\u201D, then reopen the app and log in again.'
+    : '1. Make sure cookies and site data are allowed for this site in your browser settings.\n'
+    + '2. Make sure you\u2019re not in a private or incognito window.\n'
+    + '3. If your phone\u2019s storage is nearly full, free up some space.';
+  showConfirmModal({ icon:'\u26A0\uFE0F', title:'This phone is blocking the app\u2019s storage',
+    message:'That\u2019s why you get logged out every time and the app takes longer to open.\n\n' + steps,
+    buttons:[{ label:'OK', style:'primary', value:true }] });
+}
 function _logCrash(kind, message, stack){
   try{
     // Rate-limited: the same error repeating in a tight loop shouldn't flood storage with
@@ -2247,6 +2283,10 @@ function _logCrash(kind, message, stack){
     if(typeof storageSetOne==='function'){
       var entryKey = 'e'+now+'_'+Math.random().toString(36).slice(2,8);
       storageSetOne('kat:crashLog', entryKey, entry).catch(function(){});
+      // Crashes before login are logged as "(not logged in)" - the v1217 export showed a run of them from
+      // one iPhone with no way to tell whose. Remember them for this session; _nameEarlyCrashes() fills in
+      // the name on the SAME shared entries once someone logs in (v1219).
+      if(entry.who==='(not logged in)') _earlyCrashes.push({ key: entryKey, entry: entry });
     }
   }catch(e){ /* logging a crash must never itself be able to crash */ }
 }
@@ -2611,6 +2651,7 @@ async function _fbSignInWithFallback(){
       if(modes[i][1]) await _withTimeout(auth.setPersistence(modes[i][1]), 5000, 'setPersistence');
       if(auth.currentUser) return true;
       await _withTimeout(auth.signInAnonymously(), 8000, 'signInAnonymously');
+      window._authStorageMode = modes[i][0];     // v1219: lets the app tell a person their storage is blocked
       if(i>0){
         try{ if(typeof _logCrash==='function') _logCrash('auth-storage-fallback',
           'Browser storage failed for Firebase sign-in - fell back to '+modes[i][0]+' mode',
@@ -25504,6 +25545,7 @@ async function _collectCrashLog(){
 // the newest 50 with long details cut short; the export keeps every entry and every detail in full, and
 // opens with a "most frequent" summary so the error that matters most is obvious straight away.
 async function exportCrashLog(){
+  if(!isCurrentUserOwner()) return;          // Chase only (v1220)
   var all = await _collectCrashLog();
   if(!all.length){ showToast('No crashes logged \u2014 nothing to export'); return; }
   var build = ''; try{ build = (document.querySelector('meta[name="version"]')||{}).content||''; }catch(e){}
@@ -25547,6 +25589,7 @@ async function exportCrashLog(){
   showToast('\uD83D\uDCC4 Crash log exported \u2014 '+all.length+' entr'+(all.length===1?'y':'ies'));
 }
 async function _showCrashLogModal(){
+  if(!isCurrentUserOwner()) return;          // Chase only (v1220)
   var all = (await _collectCrashLog()).slice(0, 50);
 
   var back=document.createElement('div'); back.id='crash-log-modal-back';
@@ -25961,7 +26004,9 @@ function renderBusinessLogoManager(){
 function renderCrashLogSection(){
   const box = document.getElementById('crash-log-section');
   if(!box) return;
-  if(!(currentUser && currentUser.role==='admin')){ box.innerHTML=''; return; }
+  // Chase only (v1220) - not every admin. Crashes are still RECORDED from everyone's phones; only viewing
+  // and exporting are his. Same owner check that protects his password (isCurrentUserOwner).
+  if(!isCurrentUserOwner()){ box.innerHTML=''; return; }
   var local = [];
   try{ local = JSON.parse(localStorage.getItem('nda-crashlog')||'[]'); }catch(e){}
   var mostRecent = local.length ? local[local.length-1] : null;
@@ -34000,6 +34045,10 @@ function enterApp(){
   (async function(){
     try{ if(window._dataFreshPromise) await window._dataFreshPromise; }catch(e){}
     try{ if(typeof syncPublicDriverDirectory==='function') syncPublicDriverDirectory(getMyDriverName()); }catch(e){}
+    // Name any crashes logged before this person signed in, and if their phone is blocking storage, tell
+    // them why they keep getting logged out and how to fix it (v1219).
+    try{ _nameEarlyCrashes(); }catch(e){}
+    try{ setTimeout(function(){ if(_storageBlocked()) _showStorageBlockedHelp(); }, 1500); }catch(e){}
     // An open can finish before anyone is logged in, leaving no name to file its timings under - so
     // report again once we know who this is (v1216).
     try{ setTimeout(function(){ if(typeof _uploadOpenTimes==='function') _uploadOpenTimes(); }, 3000); }catch(e){}
