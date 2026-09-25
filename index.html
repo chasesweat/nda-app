@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191220">
+<meta name="version" content="202608191221">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -3247,6 +3247,11 @@ function _cacheStripImages(obj){
   }catch(e){ return null; }
 }
 function _cacheSnapshotWrite(){
+  // BUG FIXED (v1221): only the debounced writer checked this. After a timed-out cold load the startup
+  // code called THIS writer directly - having just set _dataFresh - so every timed-out open overwrote a
+  // good saved copy with whatever partial data had loaded. Under fresh-first the saved copy is exactly
+  // what a no-signal phone falls back to, so it must never be clobbered by a failed load.
+  if(window._dataLoadFailed) return;
   try{
     var data = {
       rides: rides, comments: comments, notifications: notifications,
@@ -3281,7 +3286,10 @@ function _cacheSnapshotWriteDebounced(){
 // In the normal mode "shown" is fast but may be old data until "fresh"; in fresh-only they're about equal.
 // Worth knowing when reading the numbers: fresh data is downloaded on EVERY open in BOTH modes - the
 // saved copy only changes what's on screen while that happens, not how much is downloaded.
-function _freshOnly(){ try{ return localStorage.getItem('nda-fresh-only')==='1'; }catch(e){ return false; } }
+// FRESH-FIRST FOR EVERYONE (v1221, Chase). Every open waits for live data instead of showing the saved
+// copy. The saved copy is kept, and used ONLY when live data can't be had at all - see the cold-load
+// fallback in initApp. (Was a per-phone test switch in v1215-v1220.)
+function _freshOnly(){ return true; }
 var _openTiming = { mode: _freshOnly() ? 'fresh-only' : 'normal', shown:null, fresh:null, at: Date.now() };
 function _saveOpenTiming(){
   try{
@@ -3330,11 +3338,12 @@ function _openTimingSummary(list){
   var row=function(mode){
     var l=(list||[]).filter(function(x){ return x && x.mode===mode; });
     if(!l.length) return '';
-    return '<div><b>'+(mode==='fresh-only'?'Fresh-only':'Normal (saved copy)')+'</b> \u2014 '+l.length+' open'+(l.length===1?'':'s')
+    var _label = mode==='fresh-only' ? 'Fresh data' : mode==='saved-copy fallback' ? 'Saved copy (no signal)' : 'Old saved-copy mode';
+    return '<div><b>'+_label+'</b> \u2014 '+l.length+' open'+(l.length===1?'':'s')
       +': screen appears in <b>'+sec(med(l.map(function(x){return x.shown;})))+'</b>, fresh data in <b>'
       +sec(med(l.map(function(x){return x.fresh;})))+'</b> <span style="color:var(--mid);">(typical)</span></div>';
   };
-  var out=row('normal')+row('fresh-only');
+  var out=row('fresh-only')+row('saved-copy fallback')+row('normal');
   return out || '<div style="color:var(--mid);">No opens recorded yet</div>';
 }
 // Admin view: one block per person, loaded after the page draws.
@@ -3361,9 +3370,10 @@ function _openTimingHtml(){
   var list=[]; try{ list=JSON.parse(localStorage.getItem('nda-open-times')||'[]'); }catch(e){}
   return _openTimingSummary(list);
 }
-function _cacheSnapshotRead(){
-  // Test mode: pretend there is no saved copy, so this open waits for live data (v1215).
-  if(_freshOnly()) return null;
+function _cacheSnapshotRead(forFallback){
+  // Fresh-first: the saved copy is not shown at open. It IS read as a fallback when live data can't be
+  // had (forFallback), so a phone in a dead zone still opens with its rides (v1221).
+  if(_freshOnly() && !forFallback) return null;
   try{
     var json = localStorage.getItem(_NDA_CACHE_KEY);
     if(!json) return null;
@@ -3449,7 +3459,8 @@ function _showStaleDataBanner(){
   var b=document.createElement('div');
   b.id='nda-stale-banner';
   b.style.cssText='position:fixed;left:0;right:0;top:0;z-index:20000;background:#b91c1c;color:#fff;padding:.7rem 1rem;font-size:.85rem;font-weight:700;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;box-shadow:0 2px 10px rgba(0,0,0,.3);';
-  b.innerHTML='<span style="flex:1;min-width:0;">\u26a0\ufe0f Couldn\u2019t load the latest rides \u2014 you may be seeing old information. Changes are paused so nothing gets overwritten.</span>'
+  var _asOf=''; try{ _asOf = (typeof _ridesAsOfLabel==='function') ? _ridesAsOfLabel() : ''; }catch(e){}
+  b.innerHTML='<span style="flex:1;min-width:0;">\u26a0\ufe0f Couldn\u2019t load the latest rides \u2014 '+(_asOf ? 'showing your saved copy from '+_asOf+'.' : 'you may be seeing old information.')+' Changes are paused so nothing gets overwritten.</span>'
     +'<button onclick="location.reload()" style="background:#fff;color:#b91c1c;border:none;border-radius:8px;padding:.45rem .85rem;font-family:inherit;font-weight:800;font-size:.8rem;cursor:pointer;white-space:nowrap;">Reload</button>';
   document.body.appendChild(b);
 }
@@ -3739,12 +3750,28 @@ async function initApp() {
   // loading screen never went away, with no error and no way out short of a reinstall.
   const _coldLoad = Promise.resolve(fbReady).then(function(){ return _loadAppData(); });
   try{
-    const _coldTimedOut = await Promise.race([
+    // A phone that already knows it has no connection doesn't wait 15 seconds for nothing (v1221).
+    const _offlineAtOpen = (typeof navigator!=='undefined' && navigator.onLine===false);
+    const _coldTimedOut = _offlineAtOpen ? true : await Promise.race([
       _coldLoad.then(function(){ return false; }),
-      new Promise(function(r){ setTimeout(function(){ r(true); }, 15000); })
+      new Promise(function(r){ setTimeout(function(){ r(true); }, 15000); }),
+      new Promise(function(r){ try{ window.addEventListener('offline', function(){ r(true); }, { once:true }); }catch(e){} })
     ]);
     if(_coldTimedOut){
-      try{ _logCrash('cold-load-timeout', 'Initial app load exceeded 15s - revealing with whatever data is available', ''); }catch(e){}
+      if(!_offlineAtOpen){ try{ _logCrash('cold-load-timeout', 'Initial app load exceeded 15s - revealing with whatever data is available', ''); }catch(e){} }
+      // NO FRESH DATA TO BE HAD - fall back to the saved copy (v1221). Without this, a driver in a dead zone
+      // would open to NO rides - no pickup address, no client phone. It's shown under the red "couldn't load
+      // the latest" banner and changes stay paused (v1196) until live data arrives, which replaces it.
+      try{
+        var _fbSnap = _cacheSnapshotRead(true);
+        if(_fbSnap && _fbSnap.data){
+          _cacheHydrateGlobals(_fbSnap.data);
+          window._ridesAsOf = Date.parse(_fbSnap.savedAt) || null;
+          try{ _openTiming.mode = 'saved-copy fallback'; }catch(e){}
+          // Rides a push delivered while the app was closed (v1211) are merged here too.
+          try{ await Promise.race([ _applyPushedRides(), new Promise(function(r){ setTimeout(r, 600); }) ]); }catch(e){}
+        }
+      }catch(e){ console.warn('saved-copy fallback failed', e); }
       // SAME HOLE AS v1196, SECOND LOCATION. This path never touched _dataFresh, so it kept its
       // default of TRUE - meaning a load that timed out and revealed "whatever data is available"
       // (possibly nothing, possibly partial) was treated as complete by _ensureFresh(). Mark paid,
@@ -3778,7 +3805,9 @@ async function initApp() {
     window._dataFresh = false;
     try{ _showStaleDataBanner(); }catch(e3){}
   }
-  window._dataFresh = true;
+  // Only mark the data fresh if it actually loaded. This used to be unconditional, so a timed-out open
+  // claimed fresh data (and then saved the saved copy - see _cacheSnapshotWrite's guard) (v1221).
+  if(!window._dataLoadFailed) window._dataFresh = true;
   _revealAfterLoad();
   try{ _cacheSnapshotWrite(); }catch(e){}
 }
@@ -26029,12 +26058,11 @@ function renderAccessControl(){
   renderCrashLogSection();
   const list = document.getElementById('access-control-list');
   // Fresh-only test switch + this phone's open timings (v1215).
+  // Open timings panel (v1215-v1216). The per-phone test switch was removed in v1221, when fresh-first
+  // became the behaviour for everyone; the timings stay, to watch how opening performs across the team.
   const _freshPanel = '<div style="border:1px solid var(--light);border-radius:10px;padding:.85rem;margin-bottom:1rem;background:var(--surface);">'
-    + '<div style="font-size:.72rem;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">Test: always wait for fresh data \u2014 this phone only</div>'
-    + '<label style="display:flex;align-items:center;gap:.55rem;cursor:pointer;margin-bottom:.45rem;">'
-    + '<input type="checkbox" '+(_freshOnly()?'checked':'')+' onchange="setFreshOnly(this.checked)" style="width:18px;height:18px;accent-color:var(--accent);">'
-    + '<span style="font-size:.86rem;font-weight:700;">Skip the saved copy when opening</span></label>'
-    + '<div style="font-size:.74rem;color:var(--mid);line-height:1.45;margin-bottom:.55rem;">Affects only this phone. The app will wait for live data every time it opens, so you can feel the real delay. Turn it off to go back to normal instantly.</div>'
+    + '<div style="font-size:.72rem;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--mid);margin-bottom:.35rem;">How long the app takes to open</div>'
+    + '<div style="font-size:.74rem;color:var(--mid);line-height:1.45;margin-bottom:.55rem;">Everyone now waits for fresh data when the app opens. A phone with no signal shows its saved copy instead, clearly marked, until live data arrives.</div>'
     + '<div style="font-size:.7rem;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--mid);margin:.2rem 0 .2rem;">This phone</div>'
     + '<div style="font-size:.78rem;line-height:1.6;">'+_openTimingHtml()+'</div>'
     + '<div style="font-size:.7rem;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--mid);margin:.8rem 0 .1rem;">Everyone</div>'
