@@ -12,8 +12,8 @@
 // app build 202608191927.)
 // VERSIONING RULE: the visible build number (hamburger menu, last 3 digits of index.html's
 // <meta name="version"> tag) is always this cache number PLUS 409. Bump both by exactly 1
-// together on every single deploy — never skip, never jump. Current: cache v812 = build 1221.
-const CACHE = 'nwda-cache-v812';
+// together on every single deploy — never skip, never jump. Current: cache v816 = build 1225.
+const CACHE = 'nwda-cache-v816';
 
 // Take over immediately on install.
 self.addEventListener('install', function (e) {

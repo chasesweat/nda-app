@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191221">
+<meta name="version" content="202608191225">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -3305,12 +3305,6 @@ function _markOpen(which){
   _saveOpenTiming();
   if(which==='fresh') _uploadOpenTimes();      // the open is complete - report it (v1216)
 }
-function setFreshOnly(on){
-  try{ if(on) localStorage.setItem('nda-fresh-only','1'); else localStorage.removeItem('nda-fresh-only'); }catch(e){}
-  showToast(on ? 'Fresh-only ON for this phone \u2014 takes effect the next time the app opens'
-               : 'Fresh-only OFF \u2014 the saved copy is used again from the next open');
-  try{ renderAccessControl(); }catch(e){}
-}
 // Every phone's timings in one place (v1216) - so Chase can see Morgan's (and later everyone's)
 // without asking for screenshots. Each phone writes ONLY its own record, at nda/kat/openTimes/<login>,
 // so phones never overwrite each other. Written straight to Firebase rather than through storageSet():
@@ -4388,12 +4382,12 @@ const TIP_DATA={
 
   dashboard:{icon:'🏠',title:'Dashboard',text:'Your income summary sits up top, then your action lists and upcoming rides. Tap any card to open the full details. Swipe left or right to jump between Home, Quote, Calendar, Clients, and Chat. '+_MTIP_HINT},
 
-  cal:{icon:'📅',title:'Calendar',text:'Tap any ride to see its full details. Creators and admins can also edit or cancel it from there. Search by client, phone, driver, or type. '+_MTIP_HINT},
+  cal:{icon:'📅',title:'Calendar',text:'Tap any ride to see its full details. The client\u2019s owner, the ride\u2019s driver, and admins can make changes or cancel it from there. Search by client, phone, driver, or type. '+_MTIP_HINT},
 
   myrides:{icon:'📋',title:'My Rides & Confirmations',text:'The To Confirm tab shows tomorrow\'s rides needing a day-before text. Once a ride is underway, Ride Completed asks whether it was paid or should be invoiced instead \u2014 invoiced skips the payment questions and logs your mileage, then Invoice Paid lets you add the tip and close it out once it clears. A round trip works differently: Pause once dropped off, Resume heading back, and the app adds both legs together. If your maps app closes mid-ride, Resume Navigation relaunches it right where you left off \u2014 no need to redo anything. '+_MTIP_HINT},
-  clients:{icon:'👥',title:'Client List',text:'Your client list is private \u2014 no other driver can see it, and an admin needs a second admin\u2019s approval before they can, for 24 hours. Added automatically when you book, or import a spreadsheet. Each client has an owner, which decides who earns the fee if someone else drives them. '+_MTIP_HINT},
+  clients:{icon:'👥',title:'Client List',text:'Your client list is private \u2014 no other driver can see it, and an admin needs a second admin\u2019s approval before they can, for 24 hours. Added automatically when a ride is scheduled \u2014 never from a quote alone \u2014 or import a spreadsheet. Each client has an owner, which decides who earns the fee if someone else drives them. '+_MTIP_HINT},
 
-  income:{icon:'💰',title:'Income & Receipts',text:'Track gross fares, expenses, and net take-home here. A ride counts as income only once it\'s marked paid, not the date it happened. Your mileage rate is yours to set, no admin needed, and can change mid-year. '+_MTIP_HINT},
+  income:{icon:'💰',title:'Income & Receipts',text:'Track gross fares, expenses, and net take-home here. Income always counts in the month the ride happened \u2014 an invoice paid weeks later still lands in the ride\u2019s month. It\'s added once the ride is marked paid. Your mileage rate is yours to set, no admin needed, and can change mid-year. '+_MTIP_HINT},
 
   chat:{icon:'💬',title:'Team Chat',text:'Offerings, Updates, and direct messages \u2014 all in one place. '+_MTIP_HINT},
 
@@ -5361,7 +5355,6 @@ function toggleXstopAddr(cntId, wrapId){
 }
 
 const CHRISTMAS_DATES=['12-23','12-24','12-25','12-26'];
-const HOLIDAY_DATES=['01-01','12-31','04-05','05-10','05-25','06-21','07-04','09-07','11-25','11-26','11-27','11-28','11-29','11-30'];
 const HOLIDAY_NAMES={'01-01':"New Year's Day",'12-31':"New Year's Eve",'04-05':'Easter','05-10':"Mother's Day",'05-25':'Memorial Day','06-21':"Father's Day",'07-04':'Independence Day','09-07':'Labor Day','11-25':'Prior Thanksgiving','11-26':'Thanksgiving','11-27':'Thanksgiving','11-28':'Thanksgiving','11-29':'Post-Thanksgiving','11-30':'Post-Thanksgiving Sunday','12-23':'Prior Christmas Eve','12-24':'Christmas Eve','12-25':'Christmas Day','12-26':'Post-Christmas'};
 // ALL_HOLIDAY_MMDD removed (v668, full dead-code sweep) - a combined list, superseded by
 // christmasDatesList()/holidayDatesList() checking their own arrays individually. Never
@@ -6488,20 +6481,6 @@ const TERMINAL_COORDS_BUILTIN = {
   'South Domestic':  '33.638882,-84.442656',
   'International':    '33.641312,-84.419636',
 };
-// Direct follow-up: kept the single combined route (per direct instruction), but pinned each
-// terminal to its own verified Google Place ID rather than relying on the coordinate alone.
-// Confirmed directly against Google's own Maps URLs documentation: a coordinate passed as a
-// waypoint can be snapped to the nearest road rather than treated as an exact point the way a
-// destination coordinate is - a real, documented gap between the two, not a guess. A place ID
-// sidesteps this entirely: "the best guarantee that you will link to the right place," per
-// Google's own wording. Each ID below was verified directly via a real places lookup before
-// use - all three match the same "street_address/subpremise" type, not a generic nearby
-// business or a dropoff-zone listing that could itself be a different, ambiguous point.
-const TERMINAL_PLACE_IDS = {
-  'North Domestic':  'ChIJ_98Qlbbj9IgRlX4_zgq4uoU',
-  'South Domestic':  'ChIJ-2rgaM7i9IgRVQn2WBwOG7A',
-  'International':   'ChIJoXJcnz399IgRniT5bRZjWjw',
-};
 // Live view: saved overrides win over the built-ins, per terminal. Anything malformed in saved
 // data is ignored rather than trusted - a bad coordinate sends a driver somewhere wrong, so the
 // built-in is the safer answer if an override doesn't parse.
@@ -6643,19 +6622,6 @@ function terminalToAddress(term){
     if(!key) return '';
   }
   return (_TC[key]||'').trim();
-}
-// Mirrors terminalToAddress()'s exact key-resolution logic above, but returns the place ID
-// instead of the coordinate - used alongside it (not instead of it) to pin a waypoint or
-// destination to an exact, verified establishment, per the reasoning where TERMINAL_PLACE_IDS
-// is defined.
-function terminalPlaceId(term){
-  if(!term) return '';
-  var key=String(term).trim();
-  if(!TERMINAL_PLACE_IDS[key]){
-    key=_classifyTerminalKey(key.toLowerCase());
-    if(!key) return '';
-  }
-  return TERMINAL_PLACE_IDS[key]||'';
 }
 // Catches a known-airport address by its own TEXT rather than by r.terminal — a stale auto-
 // filled leftover, a hand-typed variant, a client-entered address from the booking form,
@@ -10530,7 +10496,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
                 <div style="flex:1;min-width:0;">
                   <div class="week-ride-client" style="color:${tc};">${r.confirmSent?'<span style="color:var(--green);font-weight:900;">✓ </span>':''}${r.client}</div>
                   <div class="week-ride-detail" style="color:${tc};opacity:.78;">${vehTag(r.vehicle)} · ${driverShortName(r.driver)}${ic?` · <span style="color:#e0245e;font-weight:700;">❤️${ic}</span>`:''}</div>
-                  ${r.type==='AP PICK UP'&&r.flight?`<a href="${flightTrackUrl(r.flight)}" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:${tc};text-decoration:underline;opacity:.9;white-space:nowrap;">✈️ Flight Tracking</a>`:''}
+                  ${r.type==='AP PICK UP'&&r.flight?`<a href="${flightTrackUrl(r.flight)}" target="_blank" rel="noopener" onclick="event.stopPropagation();_flightLinkTapped()" style="font-size:.62rem;font-weight:700;color:${tc};text-decoration:underline;opacity:.9;white-space:nowrap;">✈️ Flight Tracking</a>`:''}
                   ${r.type==='AP RUN'?'<a href="https://www.atl.com/times/" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:'+tc+';text-decoration:underline;opacity:.9;white-space:nowrap;">🔒 TSA Wait Times</a>':''}  
                 </div>
                 <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
@@ -12314,31 +12280,10 @@ async function notifyDriverChange(ride, oldDriverName, newDriverName){
 // RIDE DETAIL MODAL
 // ═══════════════════════════════════════════
 function toggleDispatchTools(){ var e=document.getElementById('rm-dispatch'); if(e) e.classList.toggle('open'); }
-function openRideModal(id){
-  activeRideId=id;
-  const r=_rideById(id); if(!r) return;
-  if(!canSeeRide(r)){ activeRideId=null; showToast('This ride is private','error'); return; }
-  if(r.status==='placeholder'){ openPlaceholderViewModal(id); return; }
-  if(r.driver) warmDriverCardImage((r.driver||"").trim());
-  document.getElementById('rm-title').textContent=(r.private?'\uD83D\uDD12 ':'')+r.client;
-  // driver assign row
-  const drRow=document.getElementById('rm-driver-row');
-  drRow.style.display=canAssignOnRide(r)?'flex':'none';
-  // Dispatch tools: only shown to people who can actually use it (admins, or whoever
-  // created this ride) \u2014 an assigned driver with nothing they can do in here just sees
-  // a cleaner card. Collapsed by default even for dispatchers, so it behaves like a dropdown
-  // they open on demand rather than a block that's always taking up card space.
-  var _dx=document.getElementById('rm-dispatch');
-  var _canDispatch=canAssignOnRide(r);
-  if(_dx){ _dx.style.display=_canDispatch?'':'none'; _dx.classList.remove('open'); }
-  const dSel=document.getElementById('rm-driver-select');
-  dSel.innerHTML=driverOptionsHTML(r.driver, r.date);
-  // Confirmation-sent unmark, folded into Dispatch Tools alongside driver reassignment —
-  // same audience (creator/admin), one collapsed panel instead of two separate controls.
-  // The "Confirmation text sent · tap to unmark" indicator used to live here. Removed —
-  // the dashboard's own Confirmations widget now shows sent status in place (green accent,
-  // "Unsend") without needing to open the ride at all, so this became a redundant second
-  // control for the same toggle. _unmarkConfirmFromRide (its only caller) removed alongside it.
+// Dispatch Tools' prepaid controls (v1225). Was built ONLY when a ride was opened, so after recording a
+// prepayment the panel kept offering "This ride paid in advance" as if nothing had happened - Chase's report.
+// Now also called whenever a prepayment is recorded or removed.
+function _renderPrepaidSlot(r, _canDispatch){
   var _dxExtra=document.getElementById('rm-dispatch-extra');
   if(_dxExtra){
     _dxExtra.innerHTML='';
@@ -12379,6 +12324,35 @@ function openRideModal(id){
       }
     }catch(e){}
   }
+}
+function openRideModal(id){
+  activeRideId=id;
+  const r=_rideById(id); if(!r) return;
+  if(!canSeeRide(r)){ activeRideId=null; showToast('This ride is private','error'); return; }
+  if(r.status==='placeholder'){ openPlaceholderViewModal(id); return; }
+  if(r.driver) warmDriverCardImage((r.driver||"").trim());
+  document.getElementById('rm-title').textContent=(r.private?'\uD83D\uDD12 ':'')+r.client;
+  // driver assign row
+  const drRow=document.getElementById('rm-driver-row');
+  drRow.style.display=canAssignOnRide(r)?'flex':'none';
+  // Dispatch tools: only shown to people who can actually use it (admins, or whoever
+  // created this ride) \u2014 an assigned driver with nothing they can do in here just sees
+  // a cleaner card. Collapsed by default even for dispatchers, so it behaves like a dropdown
+  // they open on demand rather than a block that's always taking up card space.
+  var _dx=document.getElementById('rm-dispatch');
+  var _canDispatch=canAssignOnRide(r);
+  if(_dx){ _dx.style.display=_canDispatch?'':'none'; _dx.classList.remove('open'); }
+  const dSel=document.getElementById('rm-driver-select');
+  dSel.innerHTML=driverOptionsHTML(r.driver, r.date);
+  // Confirmation-sent unmark, folded into Dispatch Tools alongside driver reassignment —
+  // same audience (creator/admin), one collapsed panel instead of two separate controls.
+  // The "Confirmation text sent · tap to unmark" indicator used to live here. Removed —
+  // the dashboard's own Confirmations widget now shows sent status in place (green accent,
+  // "Unsend") without needing to open the ride at all, so this became a redundant second
+  // control for the same toggle. _unmarkConfirmFromRide (its only caller) removed alongside it.
+  // Prepaid controls live in their own function so they can refresh after a prepayment is recorded
+  // or removed, not only when the ride is opened (v1225).
+  _renderPrepaidSlot(r, _canDispatch);
   // reset closest-driver suggestions for the freshly-opened ride
   var _cd=document.getElementById('rm-closest-drivers'); if(_cd) _cd.innerHTML='';
   // Delete/Cancel live outside the collapsible now (see the HTML comment on rm-danger-zone
@@ -12611,7 +12585,7 @@ function renderRideView(r){
   // thumbnail for it.
   const flightRowHtml = r.flight
     ? '<div style="font-size:.88rem;margin-bottom:3px;display:flex;align-items:center;gap:.5rem;">Flight: ' + escHtml(r.flight)
-      + (_flightNum ? ' <a href="'+flightTrackUrl(_flightNum)+'" rel="noopener" style="font-size:.72rem;font-weight:700;color:#7c3aed;text-decoration:none;border:1px solid #7c3aed;border-radius:6px;padding:1px 7px;">\u2708\uFE0F Track</a>' : '')
+      + (_flightNum ? ' <a href="'+flightTrackUrl(_flightNum)+'" target="_blank" rel="noopener" onclick="_flightLinkTapped()" style="font-size:.72rem;font-weight:700;color:#7c3aed;text-decoration:none;border:1px solid #7c3aed;border-radius:6px;padding:1px 7px;">\u2708\uFE0F Track</a>' : '')
       + '</div>'
     : '';
   // Gate code — visible only to this client's owner and whoever's actually assigned to
@@ -13022,7 +12996,17 @@ function buildRideLifecycle(r, nested){
   const owner  = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
   const driver = r.driver || null;
   let payHtml;
-  if(!driver){
+  if(r.prepaid && r.status!=='paid'){
+    // Paid in advance (v1225): this section used to say "Client pays full fare" regardless, which on a
+    // prepaid ride is wrong. Shows what was paid, and any balance still to collect.
+    var _pp=r.prepaid, _pa=+_pp.amount||0, _bal=Math.round((fare-_pa)*100)/100;
+    payHtml = `<div style="display:flex;justify-content:space-between;padding:.3rem 0;">
+        <span style="color:#15803d;font-size:.84rem;font-weight:700;">\uD83D\uDCB5 Paid in advance${_pp.method?' \u00b7 '+escHtml(_pp.method):''}</span>
+        <span style="font-weight:700;color:#15803d;">$${_pa.toFixed(2)}</span></div>`
+      + ((+_pp.tip||0)>0 ? `<div style="display:flex;justify-content:space-between;padding:.15rem 0;"><span style="color:var(--mid);font-size:.8rem;">Tip paid in advance</span><span style="font-size:.84rem;color:#15803d;font-weight:700;">$${(+_pp.tip).toFixed(2)}</span></div>` : '')
+      + (_bal>0.004 ? `<div style="display:flex;justify-content:space-between;padding:.15rem 0;"><span style="color:#b45309;font-size:.84rem;font-weight:700;">Balance to collect</span><span style="font-weight:700;color:#b45309;">$${_bal.toFixed(2)}</span></div>`
+                    : `<div style="font-size:.76rem;color:var(--mid);padding-top:.1rem;">Nothing to collect \u2014 marked paid automatically after the ride.</div>`);
+  } else if(!driver){
     payHtml = `<div style="font-size:.82rem;color:var(--mid);">Assign a driver to see the fare.</div>`;
   } else if(!owner || owner===driver){
     // Client always pays the driver the full fare
@@ -13196,7 +13180,7 @@ function openMarkPaidCombined(rideId){
   // reading is what the driver actually has in front of them at the end of a ride, and the miles
   // are worked out from it. The box only exists when a starting reading was taken and no final one
   // yet; otherwise there's nothing to type there, so miles stays the first field as before.
-  setTimeout(function(){ var el=document.getElementById('mp-odo-end')||document.getElementById('mp-miles'); if(el)el.focus(); },100);
+  setTimeout(function(){ var el=document.getElementById('mp-odo-start')||document.getElementById('mp-odo-end')||document.getElementById('mp-miles'); if(el)el.focus(); },100);
 }
 
 function _paySelectMethodCombined(m){
@@ -13255,6 +13239,7 @@ async function _saveMarkPaidCombined(rideId){
     }
   }
   try{
+    if(!_takeOdoStartFromForm(r,'mp')){ try{ var _msb0=document.getElementById('mp-save-btn'); if(_msb0) delete _msb0.dataset.mpFired; }catch(_e){} return; }
     var odoEndInput=document.getElementById('mp-odo-end');
     var odoEndVal=odoEndInput ? parseFloat(odoEndInput.value) : NaN;
     var mi;
@@ -13651,7 +13636,9 @@ async function openPrepaid(id, isReturn){
   r.prepaid = { amount:n, tip:tip, method:method, at:Date.now(), by:(getMyDriverName()||currentUser?.name||'') };
   try{ touchRide(r, 'paid in advance \u2014 $'+n.toFixed(2)+(tip?(' + $'+tip.toFixed(2)+' tip'):'')+' by '+method); }catch(e){}
   await saveRides();
-  try{ renderRideView(r); }catch(e){}
+  // Refresh the ride that's actually OPEN. The return-trip prepayment is recorded on the return leg while the
+  // FIRST leg is on screen; re-rendering `r` here drew the return leg's details into the first leg's view (v1225).
+  try{ var _open = _rideById(activeRideId) || r; renderRideView(_open); _renderPrepaidSlot(_open, canAssignOnRide(_open)); }catch(e){}
   try{ refreshDash(); }catch(e){}
   showToast('\u2713 Recorded as paid in advance \u2014 the ride stays scheduled');
 }
@@ -13663,7 +13650,9 @@ async function clearPrepaid(id){
   delete r.prepaid;
   try{ touchRide(r, 'paid-in-advance record removed'); }catch(e){}
   await saveRides();
-  try{ renderRideView(r); }catch(e){}
+  // Refresh the ride that's actually OPEN. The return-trip prepayment is recorded on the return leg while the
+  // FIRST leg is on screen; re-rendering `r` here drew the return leg's details into the first leg's view (v1225).
+  try{ var _open = _rideById(activeRideId) || r; renderRideView(_open); _renderPrepaidSlot(_open, canAssignOnRide(_open)); }catch(e){}
   try{ refreshDash(); }catch(e){}
 }
 // Settle a prepaid ride to 'paid' once it has happened. Returns true if it changed anything.
@@ -15659,7 +15648,7 @@ function _gmapsDirUrl(stops, omitOrigin){
   // was pinning a waypoint against road-snapping; its cost is silently overriding a correct
   // coordinate and driving someone ten miles the wrong way. Snapping to the nearest road at the
   // airport is a far better worst case than a downtown misroute, and is not what was happening
-  // here anyway. TERMINAL_PLACE_IDS is left defined but deliberately unused by navigation - do
+  // here anyway. TERMINAL_PLACE_IDS was removed in v1222 (dead-code scan) - it was never used by navigation - do
   // not wire it back in without a way to continuously verify each ID still resolves to the
   // terminal it claims.
   if(list.length===1){
@@ -15815,24 +15804,6 @@ function _buildRouteUrlsFrom(r, startAddr, endAddr, linkRide){
 }
 
 function _closeNavModal(){ var o=document.getElementById('nav-modal-overlay'); if(o)o.remove(); }
-// Reverse-lookup from a stop's resolved value (a terminal coordinate, from either the
-// r.terminal-based override or the address-text safety net) to its known place ID, if any. Used
-// after the final stops array is built, not threaded through each transformation step
-// separately, so the resulting placeIds stay guaranteed-aligned with stops - derived from the
-// same final array, not tracked in parallel through filtering/deduping/splicing.
-// DELIBERATELY UNUSED as of the Atlanta Business Chronicle misroute fix - see _gmapsDirUrl's
-// own comment for the full reasoning. Navigation no longer sends place IDs at all, because a
-// stale or wrong ID silently overrides the correct coordinate and can route a driver miles off.
-// Kept only so the reason is discoverable from the function that used to be the entry point.
-// Do not reconnect this without a mechanism to continuously re-verify each ID.
-function _placeIdForStopValue(val){
-  if(!val) return '';
-  var coords = _resolvedTerminalCoords();
-  for(var key in coords){
-    if(coords[key] && coords[key]===val) return TERMINAL_PLACE_IDS[key]||'';
-  }
-  return '';
-}
 
 function openStartRide(rideId){
   // Used to ask "where are you starting" first - home or current location - before doing
@@ -16123,6 +16094,21 @@ function _buildOdoMilesTipGasFieldsHtml(prefix, r, milesExplanationText){
       +'<input id="'+prefix+'-odo-end" type="number" min="0" step="0.1" placeholder="e.g. 48261" oninput="_clearFieldError(\''+prefix+'-odo-end\');_'+prefix+'PreviewOdoMiles('+r.id+')" '
       +'style="width:100%;padding:.5rem .65rem;border:1.5px solid #fdba74;border-radius:8px;font-family:inherit;font-size:.95rem;box-sizing:border-box;">'
       +'</div>')
+    : (_refReading==null && r.odoEnd==null && r.odoPause==null)
+    // NO STARTING READING ON RECORD (v1224). Reported from Client Invoiced (and Mark Paid shares these
+    // fields): after Ride Completed there was nowhere to enter the odometer - only Miles Driven. The ending
+    // box only ever appeared when Start Ride had captured a starting reading, so a ride started any other
+    // way offered no odometer at all. Now both readings can be entered here; miles are worked out from them.
+    ? ('<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:9px;padding:.6rem .8rem;margin-bottom:.75rem;">'
+      +'<div style="font-size:.74rem;color:#7c2d12;line-height:1.5;margin-bottom:.5rem;">No starting reading was recorded for this ride. Enter both and the miles are worked out for you \u2014 or skip this and just enter the miles.</div>'
+      +'<div style="display:flex;gap:.5rem;">'
+      +'<div style="flex:1;min-width:0;"><label style="font-size:.68rem;font-weight:700;color:#7c2d12;display:block;margin-bottom:3px;">STARTING ODOMETER</label>'
+      +'<input id="'+prefix+'-odo-start" type="number" min="0" step="0.1" placeholder="e.g. 48219" oninput="_clearFieldError(\''+prefix+'-odo-end\');_'+prefix+'PreviewOdoMiles('+r.id+')" '
+      +'style="width:100%;padding:.5rem .65rem;border:1.5px solid #fdba74;border-radius:8px;font-family:inherit;font-size:.95rem;box-sizing:border-box;"></div>'
+      +'<div style="flex:1;min-width:0;"><label style="font-size:.68rem;font-weight:700;color:#7c2d12;display:block;margin-bottom:3px;">ENDING ODOMETER</label>'
+      +'<input id="'+prefix+'-odo-end" type="number" min="0" step="0.1" placeholder="e.g. 48261" oninput="_clearFieldError(\''+prefix+'-odo-end\');_'+prefix+'PreviewOdoMiles('+r.id+')" '
+      +'style="width:100%;padding:.5rem .65rem;border:1.5px solid #fdba74;border-radius:8px;font-family:inherit;font-size:.95rem;box-sizing:border-box;"></div>'
+      +'</div></div>')
     : '';
   var _milesBlurbSeen = isUiDismissed('miles-explain');
   var milesBlurbHtml = _milesBlurbSeen ? '' :
@@ -16259,11 +16245,31 @@ function _previewOdoTotal(r, val){
 // Shared by both the Mark Paid and Log Miles odometer previews - each is a thin wrapper
 // around this, differing only by which DOM elements they read/write. Both used to carry an
 // identical, independent copy of this same logic.
+// A starting reading typed into Mark Paid / Client Invoiced for a ride that had none (v1224). Stored on the
+// ride only when an ending reading HIGHER than it was also entered, so a typo never leaves a wrong starting
+// reading behind. Returns false (and says why) when the two don't make sense, so the save stops.
+function _takeOdoStartFromForm(r, prefix){
+  var sEl=document.getElementById(prefix+'-odo-start'), eEl=document.getElementById(prefix+'-odo-end');
+  if(!r || !sEl || r.odoStart!=null) return true;
+  var a=parseFloat(sEl.value), b=eEl ? parseFloat(eEl.value) : NaN;
+  if(!isFinite(a)) return true;                      // no starting reading typed - nothing to do
+  if(!isFinite(b)){ _showFieldError(prefix+'-odo-end','Enter the ending odometer too, or clear the starting reading.'); return false; }
+  if(b<=a){ _showFieldError(prefix+'-odo-end','Ending odometer must be higher than the starting reading of '+a+'. Nothing was saved.'); return false; }
+  r.odoStart = a;
+  return true;
+}
 function _previewOdoMiles(prefix, rideId){
   var r=_rideById(rideId);
   var endInput=document.getElementById(prefix+'-odo-end');
   var milesInput=document.getElementById(prefix+'-miles');
   if(!r || !endInput || !milesInput) return;
+  // No starting reading on record: work the miles out from the two boxes in the dialog (v1224).
+  var startInput=document.getElementById(prefix+'-odo-start');
+  if(startInput && r.odoStart==null){
+    var a=parseFloat(startInput.value), b=parseFloat(endInput.value);
+    if(isFinite(a) && isFinite(b) && b>a) milesInput.value = Math.round((b-a)*10)/10;
+    return;
+  }
   var total=_previewOdoTotal(r, parseFloat(endInput.value));
   if(total==null) return;
   milesInput.value=total;
@@ -16858,7 +16864,7 @@ function openLogMiles(rideId, billLater){
   // reading is what the driver actually has in front of them at the end of a ride, and the miles
   // are worked out from it. The box only exists when a starting reading was taken and no final one
   // yet; otherwise there's nothing to type there, so miles stays the first field as before.
-  setTimeout(function(){ var el=document.getElementById('lm-odo-end')||document.getElementById('lm-miles'); if(el)el.focus(); },100);
+  setTimeout(function(){ var el=document.getElementById('lm-odo-start')||document.getElementById('lm-odo-end')||document.getElementById('lm-miles'); if(el)el.focus(); },100);
 }
 
 // After a driver logs mileage/tip directly (not through the mark-paid flow, which
@@ -17088,6 +17094,7 @@ async function _saveLogMiles(rideId, billLater){
   // No single line here reproduces with synthetic test data, so rather than guess again, the
   // whole body is wrapped: whatever is actually throwing on a real device will now say so.
   try{
+    if(!_takeOdoStartFromForm(r,'lm')){ try{ var _lsb0=document.getElementById('lm-save-btn'); if(_lsb0) delete _lsb0.dataset.lmFired; }catch(_e){} return; }
     var lmOdoEndInput=document.getElementById('lm-odo-end');
     var lmOdoEndVal=lmOdoEndInput ? parseFloat(lmOdoEndInput.value) : NaN;
     var mi;
@@ -22292,7 +22299,7 @@ function refreshDash(){
         } else if(_isAirport && r.flight){
           var _flightNum=(r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'').toUpperCase();
           var _flightUrl=flightTrackUrl(_flightNum);
-          _btns.push('<a href="'+_flightUrl+'" rel="noopener" onclick="event.stopPropagation()" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;text-decoration:none;display:flex;align-items:center;justify-content:center;text-align:center;">\u2708\ufe0f Track</a>');
+          _btns.push('<a href="'+_flightUrl+'" target="_blank" rel="noopener" onclick="event.stopPropagation();_flightLinkTapped()" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;text-decoration:none;display:flex;align-items:center;justify-content:center;text-align:center;">\u2708\ufe0f Track</a>');
           // Send Arrival Text specifically (not Track, which stays available the whole time
           // an airport ride is relevant) only makes sense for the assigned driver, and only in
           // a tight window around the actual scheduled time - a real 6-hour SYMMETRIC cutoff on
@@ -31926,6 +31933,28 @@ async function toggleSchedTextReminder(driverName){
 // oversight — do not "improve" this back into a direct tracker link without checking first.
 //
 // The identifier is still normalised, because clients write "DL 33", "dl-33" and "#DL33".
+// FLIGHT LINKS OPEN OUTSIDE THE APP (v1223). Reported: tap Track flight, tap the FlightAware result, get
+// handed to the FlightAware app - and on reopening, the NWDA app was still sitting on the Google results.
+// Cause: these links had no target, so they navigated the APP'S OWN WINDOW to Google. They now open in a
+// separate window (target=_blank), so the app never leaves - and, as Chase asked, coming back to the app
+// afterwards lands on the dashboard. Still a Google search, deliberately (see below).
+function _flightLinkTapped(){ window._backToDashOnReturn = true; }
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState !== 'visible' || !window._backToDashOnReturn) return;
+  window._backToDashOnReturn = false;
+  try{
+    // Never throw away a ride someone is part-way through editing.
+    var ed = document.getElementById('rm-edit-mode');
+    var editing = !!(ed && ed.style.display !== 'none' && ed.offsetParent !== null);
+    if(!editing){
+      var m = document.getElementById('ride-modal');
+      // The ride view is shown with the 'show' class. closeRideModal() has its own unsaved-changes guard
+      // on top of the editing check above.
+      if(m && m.classList.contains('show') && typeof closeRideModal === 'function') closeRideModal();
+      if(typeof nav === 'function') nav('dashboard');
+    }
+  }catch(e){}
+});
 function flightTrackUrl(flightNum){
   var id = String(flightNum||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
   if(!id) return '';
