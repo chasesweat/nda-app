@@ -114,19 +114,46 @@ self.addEventListener('push', function (event) {
       icon: 'icon-192.png',
       badge: 'badge-monochrome.png',
       tag: tag,
-      renotify: true
+      renotify: true,
+      // THE FIX (v1235). Without this, event.notification.data is always undefined at click
+      // time - every push, of every type, loses all context the instant it's shown. Reported
+      // directly: tapping a "new booking request" push opened Quick Add blank instead of the
+      // request. The app ALREADY has the full receiving side for this - a 'notification-click'
+      // postMessage listener, and a cold-start ?nride=/?nchan=/?ntype= URL reader - built for
+      // exactly this handoff and simply never fed, because this line never existed to feed it.
+      data: data
     }),
     storeRide
   ]));
 });
 
-// Tapping the notification focuses (or opens) the app.
+// Tapping the notification focuses (or opens) the app, carrying what the push was ABOUT along
+// with it - handing off to the client-side notifRoute()/checkUrlNotifNav(), which already know
+// what to do with a rideId, a chat channel, or a client_request's clientRequestId. Before this,
+// every notification tap did only the focus-or-open half and threw the rest away.
 self.addEventListener('notificationclick', function (event) {
+  const data = event.notification.data || {};
   event.notification.close();
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (list) {
-      for (const c of list) { if ('focus' in c) return c.focus(); }
-      if (clients.openWindow) return clients.openWindow('./');
+      for (const c of list) {
+        if ('focus' in c) {
+          // The app may not be done loading currentUser yet - its own message listener already
+          // handles that by falling back to just opening the notification panel. Posting is
+          // harmless even if nobody is listening yet.
+          try { c.postMessage({ type: 'notification-click', data: data }); } catch (e) {}
+          return c.focus();
+        }
+      }
+      if (clients.openWindow) {
+        const params = new URLSearchParams();
+        if (data.rideId != null) params.set('nride', data.rideId);
+        if (data.channel) params.set('nchan', data.channel);
+        if (data.type) params.set('ntype', data.type);
+        if (data.clientRequestId) params.set('nreqid', data.clientRequestId);
+        const qs = params.toString();
+        return clients.openWindow(qs ? './?' + qs : './');
+      }
     })
   );
 });
