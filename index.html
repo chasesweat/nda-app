@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191242">
+<meta name="version" content="202608191249">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -660,6 +660,9 @@ input,select,textarea{font-size:16px;}
     <div id="dash-awaiting-invoice-past" style="margin-bottom:1.5rem;"></div>
     <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.75rem;" id="dash-upcoming-label">Your upcoming rides</div>
     <div id="upcoming-list"></div>
+    <!-- Direct request: a sent confirmation moves down here, by the fee-confirmation boxes, the
+         moment it's sent - instead of lingering in the actionable list at the top of the page. -->
+    <div id="dash-confirmations-sent" style="margin-bottom:1.5rem;"></div>
     <div id="dash-fees-awaiting-approval" style="margin-bottom:1.5rem;"></div>
   </div>
 
@@ -837,7 +840,7 @@ input,select,textarea{font-size:16px;}
         <div id="q-result" style="background:var(--black);border-radius:12px;padding:1.25rem;">
         <div id="quote-lines" style="margin-bottom:.75rem;"></div>
         <div style="border-top:2px solid var(--gold);padding-top:.75rem;display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-size:.72rem;letter-spacing:1px;text-transform:uppercase;color:#9b8fb8;">Total</span>
+          <span id="quote-total-label" style="font-size:.72rem;letter-spacing:1px;text-transform:uppercase;color:#9b8fb8;">Total</span>
           <span id="quote-total" style="font-size:1.75rem;font-weight:700;color:var(--gold);">$0.00</span>
         </div>
       </div>
@@ -6915,6 +6918,13 @@ function updateTripFields(){
   // as the surcharge label directly above, which already had this right.
   var _leg1Lbl = document.getElementById('q-leg1-lbl');
   if(_leg1Lbl) _leg1Lbl.textContent = (isAPRT||isRT) ? 'Leg 1 \u2014 Trip Details' : 'Trip Details';
+  // Direct instruction: drop the combined round-trip total everywhere. The value below this
+  // label was already fixed to show "$leg1 + $leg2" instead of one combined figure - but the
+  // static label sitting right above it still always said "TOTAL" regardless, which read as a
+  // mismatch (a "Total" heading over two separate numbers joined by a plus sign). AP ROUND TRIP
+  // gets "PRICE" instead; every other type keeps "Total", since there's only ever one real one.
+  var _totalLbl = document.getElementById('quote-total-label');
+  if(_totalLbl) _totalLbl.textContent = isAPRT ? 'Price' : 'Total';
   // Both legs get their auto-surcharges re-evaluated here, not just the return leg.
   //
   // This previously called applyReturnLegAutoAddons() alone. Leg 1's fuel default only ever
@@ -7455,7 +7465,7 @@ function _icsEventDesc(r, opts){
     // than the rest of the app considers responsible for that ride.
     var _d = (r.driver||'').trim();
     if(!_d){
-      try{ _d = (getClientOwner(r.client) || feeOwnerFor(r.createdBy) || (r.createdBy||'')).trim(); }catch(e){ _d=''; }
+      try{ _d = (_rideClientOwner(r) || (r.createdBy||'')).trim(); }catch(e){ _d=''; }
     }
     if(_d) out.push(_d);
     if(r.driver2 && String(r.driver2).trim()) out.push('+ '+String(r.driver2).trim());
@@ -7742,7 +7752,8 @@ function _quoteBreakdownBullets(lineEls){
   return out;
 }
 // Full quote details block - date, time, destination/pickup-location, pricing breakdown, and
-// (for AP Round Trip specifically) a second dated leg plus a combined Total Round Trip figure.
+// (for AP Round Trip specifically) a second dated leg, each leg priced separately - no combined
+// total anywhere, matching the PDF and the live Quote form's own display (v1245).
 // Same reasoning as _schedulingTripDetailsText(): the STRUCTURE genuinely differs for a round
 // trip, not just the values, so this returns the whole block for one {quoteDetails}
 // placeholder rather than trying to force it through several flat ones.
@@ -7766,7 +7777,6 @@ function _quoteDetailsText(){
         flight:(document.getElementById('q-rt-flight')||{}).value,
         terminal:(document.getElementById('q-rt-terminal')||{}).value },
     ];
-    var combinedTotal = 0;
     legDefs.forEach(function(leg, i){
       var tf = _quoteToFrom(leg.legType, leg.terminal, homeAddr);
       var flightPart = leg.flight ? ' ('+leg.flight+')' : '';
@@ -7786,11 +7796,7 @@ function _quoteDetailsText(){
       lines = lines.concat(_quoteBreakdownBullets(legEls));
       var legTotal = subtotalEl ? (parseFloat(subtotalEl.getAttribute('data-leg-subtotal-val'))||0) : 0;
       lines.push('\u2022 Total: $'+legTotal.toFixed(0)+' (Gratuity not included but always appreciated)');
-      combinedTotal += legTotal;
     });
-    lines.push('');
-    lines.push('Total Round Trip:');
-    lines.push('$'+combinedTotal.toFixed(0));
     return lines.join('\n');
   }
 
@@ -7858,9 +7864,6 @@ function _quoteDetailsTextFromSaved(q){
       });
       lines.push('\u2022 Total: $'+Math.round(legTotal)+' (Gratuity not included but always appreciated)');
     });
-    lines.push('');
-    lines.push('Total Round Trip:');
-    lines.push('$'+Math.round((bd.leg1||0)+(bd.leg2||0)));
     return lines.join('\n');
   }
 
@@ -8774,7 +8777,7 @@ function textComparisonToClient(){
   if(!phone.trim()){ showToast('Enter a client phone number first','error'); return; }
   const msg = _comparisonBodyText(c);
   const sep=/iphone|ipad|ipod|mac/i.test(navigator.userAgent)?'&':'?';
-  _navigate('sms:'+phone.replace(/[^0-9+]/g,'')+sep+'body='+encodeURIComponent(msg));
+  _navigate('sms:'+_phoneDigits(phone)+sep+'body='+encodeURIComponent(msg));
 }
 function emailComparisonToClient(){
   const c = window._lastComparison;
@@ -8982,6 +8985,17 @@ function openSavedQuoteDetail(qid){
   // already both legs combined; only the return date/time itself was never shown.
   const rtd = q.rtDateAP || q.rtDate || '';
   const rtDt = rtd ? (fmtDateShort(rtd)+(q.rtTime?' \u00b7 '+fmtTime12(q.rtTime):'')) : '';
+  // Direct instruction: drop the combined round-trip total everywhere, not just the client-facing
+  // text (v1244) - this card is admin-facing, but it's the same figure with the same problem.
+  // Two legs priced and billed separately, same as the PDF and the live Quote form's own display
+  // already show it - never one number here either. Every other type keeps its one real Total,
+  // since there's no ambiguity there - one vehicle, one leg, one price.
+  const isAPRT = q.type==='AP ROUND TRIP';
+  const _bdForTotal = isAPRT && typeof buildRideBreakdown==='function' ? buildRideBreakdown(q) : null;
+  const totalRowHtml = isAPRT
+    ? row('Leg 1', '$'+((_bdForTotal&&_bdForTotal.leg1!=null)?_bdForTotal.leg1:0).toFixed(2))
+      + row('Leg 2', '$'+((_bdForTotal&&_bdForTotal.leg2!=null)?_bdForTotal.leg2:0).toFixed(2))
+    : '<div style="display:flex;justify-content:space-between;gap:1rem;padding:.5rem 0 .1rem;"><span style="font-weight:800;color:var(--black);">Total</span><span style="font-weight:800;color:var(--gold);font-size:1.05rem;">$'+(parseFloat(q.price)||0).toFixed(2)+'</span></div>';
   const html='<div id="sq-modal" style="position:fixed;inset:0;background:rgba(10,4,24,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:1rem;" onclick="if(event.target===this)_closeSqModal()">'
     +'<div style="background:#fff;border-radius:16px;max-width:460px;width:100%;max-height:90vh;overflow:auto;padding:1.25rem;box-shadow:0 20px 60px rgba(0,0,0,.3);">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.15rem;"><div style="font-size:1.1rem;font-weight:800;color:var(--black);">'+escHtml(q.client||'Quote')+(q.newClient?' <span style="font-size:.6rem;font-weight:700;background:#f59e0b;color:#fff;border-radius:4px;padding:1px 6px;vertical-align:middle;">New client</span>':'')+'</div><button onclick="_closeSqModal()" style="background:none;border:none;font-size:1.5rem;color:var(--mid);cursor:pointer;line-height:1;">&times;</button></div>'
@@ -8989,7 +9003,7 @@ function openSavedQuoteDetail(qid){
       +'<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.5rem .8rem;margin-bottom:.9rem;">'
         +row('Date', dt)+(rtDt?row('Return', rtDt):'')+row('Type', q.type)+row('Vehicle', q.vehicle)+row('From', q.pickup)+row('To', q.home)
         +(q.miles?row('Miles', q.miles+' mi'):'')+(q.pax?row('Passengers', q.pax):'')+row('Phone', q.phone)
-        +'<div style="display:flex;justify-content:space-between;gap:1rem;padding:.5rem 0 .1rem;"><span style="font-weight:800;color:var(--black);">Total</span><span style="font-weight:800;color:var(--gold);font-size:1.05rem;">$'+(parseFloat(q.price)||0).toFixed(2)+'</span></div>'
+        +totalRowHtml
       +'</div>'
       +'<button onclick="editSavedQuote(\''+escAttr(qid)+'\')" style="width:100%;padding:.7rem;margin-bottom:.5rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:9px;font-family:inherit;font-size:.88rem;font-weight:700;cursor:pointer;">\u270f\uFE0F Edit quote</button>'
       +'<button onclick="textSavedQuote(\''+escAttr(qid)+'\')" style="width:100%;padding:.7rem;margin-bottom:.5rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:9px;font-family:inherit;font-size:.88rem;font-weight:700;cursor:pointer;">\uD83D\uDCAC Text quote to client</button>'
@@ -9003,7 +9017,7 @@ function openSavedQuoteDetail(qid){
 }
 async function textSavedQuote(qid){
   const q=(savedQuotes||[]).find(function(x){return x._quoteId===qid;}); if(!q) return;
-  const phone=(q.phone||'').replace(/[^0-9+]/g,'');
+  const phone=_phoneDigits(q.phone);
   const first=(q.client||'').trim().split(' ')[0]||'';
   // BUG: this used to be a third, separate hardcoded implementation of the same idea - could
   // not be edited by any driver, and had already drifted from the live quote's own wording
@@ -9586,7 +9600,7 @@ async function rejectAssignedRide(rideId){
   // on it now.
   r.rejectionLog = r.rejectionLog || [];
   r.rejectionLog.push({driver:_rejectingDriver, at:Date.now()});
-  var _owner = getClientOwner(r.client) || feeOwnerFor(r.createdBy) || '';
+  var _owner = _rideClientOwner(r) || '';
   r.driver = _owner;
   delete r.driverResponse; delete r.driverNotifiedAt; delete r.driverRespondedAt; delete r.driverAutoAccepted;
   touchRide(r, (_rejectingDriver||'A driver')+' rejected \u2014 reverted to '+(_owner||'owner'));
@@ -10174,6 +10188,16 @@ function driverColor(name){ return driverColors[name]||OUTSIDE_DRIVER_COLOR; }
 // card — so this adds the first initial of the last name whenever there's a collision,
 // checked against the whole DRIVERS list rather than just the rides on screen, so it's
 // consistent everywhere regardless of which specific ride is being shown.
+// Direct request: consistent with _icsEventDesc()'s own documented fallback (a blank driver
+// means "still with the client owner," not "nobody") - now shared so every place that actually
+// DISPLAYS a driver's name as a label uses the identical fallback chain, rather than each one
+// either reinventing it slightly differently or just showing the word "Unassigned."
+function _displayRideDriver(r){
+  if(!r) return '';
+  var d=(r.driver||'').trim();
+  if(d) return d;
+  try{ return (_rideClientOwner(r) || (r.createdBy||'')).trim(); }catch(e){ return ''; }
+}
 function driverShortName(fullName){
   if(!fullName) return 'Unassigned';
   const parts = fullName.trim().split(' ');
@@ -10555,7 +10579,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
                   </div>
                   <div style="flex:1;min-width:0;">
                     <div class="week-ride-client" style="color:${tc};">📌 Reserved — details TBD</div>
-                    <div class="week-ride-detail" style="color:${tc};opacity:.85;">${escHtml(r.note||'No notes yet')}${r.driver?' · '+driverShortName(r.driver):' · Unassigned'}</div>
+                    <div class="week-ride-detail" style="color:${tc};opacity:.85;">${escHtml(r.note||'No notes yet')}${_displayRideDriver(r)?' · '+driverShortName(_displayRideDriver(r)):''}</div>
                   </div>
                 </div>`;
               }
@@ -11050,7 +11074,7 @@ function renderConfirmations(){
       const _cphone=clientPhoneFor(r);
       const _rawphone=(r.phone||'').trim();
       const phoneLink=_cphone
-        ?('<a href="tel:'+_cphone.replace(/[^0-9+]/g,'')+'" onclick="event.stopPropagation()" style="color:var(--black);font-weight:600;text-decoration:none;">\uD83D\uDCDE '+escHtml(_cphone)+'</a>')
+        ?('<a href="tel:'+_phoneDigits(_cphone)+'" onclick="event.stopPropagation()" style="color:var(--black);font-weight:600;text-decoration:none;">\uD83D\uDCDE '+escHtml(_cphone)+'</a>')
         :(_rawphone?('<span style="color:var(--black);font-weight:600;">\uD83D\uDCCD '+escHtml(_rawphone)+'</span>'):'');
       const drvPreviewId='dc-prev-'+r.id;
       const pid=r.id;
@@ -11868,7 +11892,7 @@ function _baseRideTextRecipients(r){
   const _mePhone = phoneLast10(_meDriver ? (DRIVER_PROFILES[_meDriver]||{}).phone : '');
   const add=(name,raw)=>{
     if(!_looksLikePhone(raw)) return; // skip addresses / junk so we never text a wrong number
-    const d=(raw||'').replace(/[^0-9+]/g,'');
+    const d=_phoneDigits(raw);
     if(!d || seen.has(d)) return;
     if(_mePhone && phoneLast10(d)===_mePhone) return; // never text the sender (creator) themselves
     seen.add(d);
@@ -11925,7 +11949,7 @@ function buildClientVCard(ride){
   // same short login-style name shown throughout the rest of the app (Kat, Morgan, Reed...).
   const owner = (ride.createdBy||'').trim();
   const displayName = owner ? name+' ('+owner+')' : name;
-  const phone = (clientPhoneFor(ride)||'').replace(/[^0-9+]/g,'');
+  const phone = _phoneDigits(clientPhoneFor(ride));
   const parts = name.split(' ');
   const first = parts[0]||'';
   const last  = parts.slice(1).join(' ')||'';
@@ -12261,7 +12285,7 @@ function _ownerPhonesForClient(clientName){
   const phones = [];
   names.forEach(function(n){
     const p = (DRIVER_PROFILES[n]||{}).phone;
-    if(p) phones.push(p.replace(/[^0-9+]/g,''));
+    if(p) phones.push(_phoneDigits(p));
   });
   return Array.from(new Set(phones)); // dedupe — if owner already resolved to one of the pair
 }
@@ -12337,12 +12361,12 @@ async function notifyDriverChange(ride, oldDriverName, newDriverName){
     if(newPhone){
       const driverMsg = 'You\u2019ve been assigned '+(ride.client||'a client')+'\u2019s ride on '+(fmtDateShort(ride.date)||'')+' at '+(fmtTime12(ride.time)||'')+(ride.pickup?('. Pickup: '+ride.pickup):'')+'.';
       let driverFiles=[];
-      var _resolvedClientOwner = (getClientOwner(ride.client) || feeOwnerFor(ride.createdBy) || '').trim();
+      var _resolvedClientOwner = (_rideClientOwner(ride) || '').trim();
       var _newDriverOwnsClient = _resolvedClientOwner && (_resolvedClientOwner === (newDriverName||'').trim());
       if(!_newDriverOwnsClient){
         try{ const vcf=(window._confFilesMap&&window._confFilesMap[ride.id]&&window._confFilesMap[ride.id].vcard) || buildClientVCard(ride); if(vcf) driverFiles=[vcf]; }catch(e){ console.warn('client vcard build for driver-change failed',e); }
       }
-      await _sendTextWithFiles([newPhone.replace(/[^0-9+]/g,'')], driverMsg, driverFiles);
+      await _sendTextWithFiles([_phoneDigits(newPhone)], driverMsg, driverFiles);
     }
   }catch(e){ console.warn('new driver SMS failed',e); }
 
@@ -12354,7 +12378,7 @@ async function notifyDriverChange(ride, oldDriverName, newDriverName){
       let files=[];
       try{ const card=await warmDriverCardImage(newDriverName); if(card) files=[card]; }catch(e){}
       const clientMsg = _driverChangeClientMessage(ride, newDriverName, newPhone);
-      await _sendTextWithFiles([clientPhone.replace(/[^0-9+]/g,'')], clientMsg, files);
+      await _sendTextWithFiles([_phoneDigits(clientPhone)], clientMsg, files);
     } else {
       showToast('\u26A0\uFE0F No client phone on file \u2014 driver-change text to '+(ride.client||'the client')+' was not sent','error');
     }
@@ -12766,7 +12790,7 @@ function renderRideView(r){
       // Visible to the assigned driver and the client's OWNER (proxy-aware:
       // Morgan's clients belong to Kat), matching how fees resolve ownership.
       const myDrv = getMyDriverName();
-      const ownerDrv = getClientOwner(r.client) || feeOwnerFor(r.createdBy);
+      const ownerDrv = _rideClientOwner(r);
       const canSee = (currentUser && (myDrv===r.driver || (ownerDrv && ownerDrv===myDrv)));
       if(!canSee) return '';
       const prevDriver = prev.driver || 'the previous driver';
@@ -12811,7 +12835,7 @@ function renderRideView(r){
       <div style="display:flex;align-items:flex-start;gap:.75rem;">
         <i class="ti ti-users" style="font-size:18px;color:${ink};margin-top:2px;" aria-hidden="true"></i>
         <div>
-          <div style="font-size:.92rem;font-weight:600;color:var(--black);">${r.driver||'Unassigned'}</div>
+          <div style="font-size:.92rem;font-weight:600;color:var(--black);">${_displayRideDriver(r)||'Unassigned'}</div>
           <div style="font-size:.82rem;color:var(--mid);">${r.xxl&&r.vehicle2?'<span style="font-size:.7rem;font-weight:700;background:#6b21a8;color:#fff;border-radius:3px;padding:1px 4px;">XXL</span>&nbsp;+&nbsp;'+r.vehicle2+(r.driver2?'&nbsp;('+r.driver2.split(' ')[0]+')':'')+'&nbsp;&mdash;&nbsp;$'+r.price2:''}</div>
         </div>
       </div>
@@ -13088,7 +13112,7 @@ function buildRideLifecycle(r, nested){
 
   const fare = parseFloat(r.price)||0;
   // Driver-as-client rides owe no fee; otherwise resolve owner proxy-aware.
-  const owner  = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
+  const owner  = _rideFeeOwner(r);
   const driver = r.driver || null;
   let payHtml;
   if(r.prepaid && r.status!=='paid'){
@@ -13421,7 +13445,7 @@ async function _saveMarkPaidCombined(rideId){
                           // can't reference a ride record that didn't actually save yet.
         var prev = previousUnpaidAPRide(r);
         if(prev && r.carryoverNotified!==prev.id){
-          var prevDriver=prev.driver||''; var owner=getClientOwner(prev.client)||feeOwnerFor(prev.createdBy);
+          var prevDriver=prev.driver||''; var owner=_rideClientOwner(prev);
           var msg=(r.paidBy||'A driver')+' collected payment on '+r.client+"'s "+fmtDateShort(r.date)+' ride. '
             +"You're owed $"+parseFloat(prev.price||0).toFixed(2)+' for the '+fmtDateShort(prev.date)+' ride \u2014 mark it paid once you\u2019ve received it.';
           var notified={};
@@ -15037,7 +15061,10 @@ async function markRideUnpaid(id){
   try{ await saveRides(); }catch(e){}
   // Also revert the 15% finder fee for this ride (owner is paid by the covering driver).
   try{
-    var _own=(typeof feeOwnerFor==='function'?feeOwnerFor(r.createdBy):null)||(typeof getClientOwner==='function'?getClientOwner(r.client):null);
+    // Was feeOwnerFor-then-getClientOwner - the wrong order, inconsistent with every other
+    // resolution in the app. Reverting a fee should land on exactly the same owner that was
+    // charged it in the first place.
+    var _own=_rideFeeOwner(r);
     var _drv=r.driver;
     if(_own && _drv && _own!==_drv && typeof feePayments!=='undefined'){
       var _k=_own+':recv:'+_drv; var fp=feePayments[_k];
@@ -15134,7 +15161,7 @@ async function setRideStatus(id, status){
       // shouldn't spam the previous driver.
       if(prev && r.carryoverNotified!==prev.id){
         const prevDriver = prev.driver || '';
-        const owner = getClientOwner(prev.client) || feeOwnerFor(prev.createdBy);
+        const owner = _rideClientOwner(prev);
         const msg = `${r.paidBy||'A driver'} collected payment on ${r.client}'s ${fmtDateShort(r.date)} ride. You're owed $${(parseFloat(prev.price||0)).toFixed(2)} for the ${fmtDateShort(prev.date)} ride — mark it paid once you've received it.`;
         const notified = {};
         [prevDriver, owner].forEach(function(who){
@@ -20106,6 +20133,28 @@ function previousUnpaidAPRide(refRide){
   });
   return best;
 }
+// Preventative scan finding, not a reported bug: "who owns this client" was computed at least 6
+// different, inconsistent ways across roughly 35 places - some checked getClientOwner() first and
+// fell back to feeOwnerFor(createdBy), some skipped the fallback, a few skipped getClientOwner()
+// entirely and used only feeOwnerFor, one or two even had the two checks in the WRONG order. Two
+// shared functions now, for the two genuinely different questions this app asks:
+//   _rideClientOwner(r) - "who is responsible for this ride" - edit permission, gate codes,
+//     display attribution, calendar exports. Even a ride for a client who is themselves a driver
+//     still has an owner for these purposes.
+//   _rideFeeOwner(r) - "who earns the 15% finder's fee on this ride" - returns null when the
+//     client is themselves a driver, since no fee is ever owed on that ride no matter who drives it.
+// Both call the EXISTING, unmodified getClientOwner() and feeOwnerFor() - the Kat/Morgan proxy
+// rule (a ride Morgan creates is fee-attributed to Kat, since Morgan dispatches on her behalf)
+// lives entirely inside feeOwnerFor() already and is untouched by this change; centralizing how
+// the two functions are COMBINED can't alter what either one of them, on its own, decides.
+function _rideClientOwner(r){
+  if(!r) return null;
+  return getClientOwner(r.client) || feeOwnerFor(r.createdBy) || null;
+}
+function _rideFeeOwner(r){
+  if(!r || clientIsDriver(r.client)) return null;
+  return _rideClientOwner(r);
+}
 function getClientOwner(clientName){
   if(!clientName) return null;
   const key=(clientName||'').toLowerCase().trim();
@@ -20132,7 +20181,7 @@ function canEditRide(ride){
   const isDriver = !!(myDriverName && (ride.driver===myDriverName || ride.driver2===myDriverName));
   const myLogin = currentUser && currentUser.name;
   const myResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[myLogin]) || myDriverName;
-  const owner = getClientOwner(ride.client) || feeOwnerFor(ride.createdBy);
+  const owner = _rideClientOwner(ride);
   const isOwner = !!(owner && owner===myResolvedIdentity);
   return isOwner || isDriver;
 }
@@ -20150,7 +20199,7 @@ function canSeeGateCode(ride){
     // code on Kat's clients same as she can manage everything else about them.
     const myLogin = currentUser && currentUser.name;
     const myResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[myLogin]) || myDriverName;
-    const owner = getClientOwner(ride.client) || feeOwnerFor(ride.createdBy);
+    const owner = _rideClientOwner(ride);
     return !!(owner && owner===myResolvedIdentity);
   }catch(e){ return false; }
 }
@@ -22089,7 +22138,7 @@ function showQuoteBookingFlow(ride){
     // never passed date/time/price/ride at all - a third pre-existing gap in this same
     // family, alongside the two already fixed above.
     const policyMsg=policyTextMessage(first, ride.date, ride.time, ride.price, ride);
-    const hasPh=!!String(ride.phone||'').replace(/[^0-9+]/g,'');
+    const hasPh=!!_phoneDigits(ride.phone);
     back.innerHTML='<div style="background:var(--white);border-radius:16px;max-width:400px;width:100%;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
       +'<div style="font-size:1.05rem;font-weight:700;color:var(--black);margin-bottom:.3rem;">\u2705 Ride Saved \u2014 '+escHtml(client)+'</div>'
       +'<div style="font-size:.82rem;color:var(--mid);margin-bottom:.75rem;">Step 1 of 2 \u00b7 cancellation policy</div>'
@@ -22156,7 +22205,7 @@ function showQuoteBookingFlow(ride){
   step1();
 }
 async function sendPolicyText(phone, firstName, rideDate, rideTime, ridePrice, ride){
-  const num=String(phone||'').replace(/[^0-9+]/g,'');
+  const num=_phoneDigits(phone);
   if(!num){ showToast('No phone number on file for this client','error'); return; }
   const body=policyTextMessage(firstName, rideDate, rideTime, ridePrice, ride);
   // Tracks that the scheduling text was actually sent - previously nothing recorded this at
@@ -22194,7 +22243,7 @@ async function sendPolicyText(phone, firstName, rideDate, rideTime, ridePrice, r
 function showPolicyTextPrompt(clientName, phone, rideDate, rideTime, ridePrice, ride){
   if(!confirmTextGate()) return;
   const first=(String(clientName||'').trim().split(' ')[0])||'';
-  const hasPhone=!!String(phone||'').replace(/[^0-9+]/g,'');
+  const hasPhone=!!_phoneDigits(phone);
   const preview=policyTextMessage(first, rideDate, rideTime, ridePrice, ride);
   const back=document.createElement('div');
   back.setAttribute('data-policy-modal','1');
@@ -22377,6 +22426,7 @@ async function assignDriver(){
     if(newDriver){ try{ if(typeof warmDriverCardImage==='function') warmDriverCardImage(newDriver); }catch(e){} }
     try{ if(typeof renderConfirmations==='function') renderConfirmations(); }catch(e){}
     try{ if(typeof renderDashConfirmations==='function') renderDashConfirmations(); }catch(e){}
+    try{ if(typeof renderDashConfirmationsSent==='function') renderDashConfirmationsSent(); }catch(e){}
   }
   if(newDriver!==oldDriver && _wasConfirmed){ showToast('Driver changed \u2014 the client\u2019s confirmation still shows the old driver until you re-send it.'); }
   if(_driverNeedsOverride) await sendAvailOverrideRequest(r, currentUser?.name||'');
@@ -22502,6 +22552,7 @@ function refreshDash(){
 
   // Confirmations due for tomorrow's rides
   renderDashConfirmations();
+  renderDashConfirmationsSent();
   try{ renderDashGateCodes(); }catch(e){}
 
   // Quotes and drafts approaching the retention cutoff - sits high on the page because it is
@@ -22559,7 +22610,7 @@ function refreshDash(){
           <div class="ride-client" style="color:${tc};">${_rideIsConfirmed(r)?'<span title="Confirmed" style="color:#15803d;font-weight:700;">&#x2713;</span> ':''}${r.client}</div>
           <div class="ride-price" style="color:${tc==='#fff'?'#fff':'var(--green)'};flex-shrink:0;">$${r.price}${_ridePaidTag(r)}</div>
         </div>
-        <div class="ride-detail" style="color:${tc};opacity:.78;">${r.type} · ${vehTag(r.vehicle)} · ${r.driver?driverShortName(r.driver):'<em>Unassigned</em>'}</div>
+        <div class="ride-detail" style="color:${tc};opacity:.78;">${r.type} · ${vehTag(r.vehicle)} · ${_displayRideDriver(r)?driverShortName(_displayRideDriver(r)):'<em>Unassigned</em>'}</div>
       </div>
       ${/* The type badge that used to sit here was removed (v858). It rendered
             "AP RUN · Sedan" while the detail line directly above already read
@@ -22788,6 +22839,12 @@ function renderDashAwaitingInvoicePast(){
     +rows
     +'</div>';
 }
+// Reported directly: an admin only ever saw a COUNT of the team's unpaid rides ("Mark ALL 2 team
+// rides paid"), never which ones or whose - "make the driver clickable so I can see what rides
+// need to be wrapped up." Tapping a driver's name now filters this box to just their rides;
+// tapping it again (or the "Show all" pill) clears the filter. Persisted across re-renders in
+// window._needsAttentionDriverFilter, not a local variable, since this function is called fresh
+// on every refreshDash() and a plain local would forget the filter on the very next refresh.
 function renderDashNeedsAttention(){
   var box=document.getElementById('dash-needs-attention'); if(!box) return;
   var todayStr=toDateStr(nowET());
@@ -22796,28 +22853,53 @@ function renderDashNeedsAttention(){
   // Computed once, up front, rather than only inside the admin button's own markup - an admin
   // with zero unpaid rides of their own but a team that has plenty shouldn't have this whole
   // banner (and the one action that matters to them) disappear just because THEIR count is 0.
-  var companyCount = isAdmin()
-    ? (rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && !_isAwaitingInvoice(r) && parseFloat(r.price||0)>0 && ((r.status==='completed')||(r.date && r.date<todayStr)); }).length
-    : 0;
-  if(!overdue.length && !companyCount){ box.innerHTML=''; return; }
-  var rows=overdue.slice(0,15).map(function(r){
-    return '<div onclick="openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem;border-bottom:1px solid #f3c98a;cursor:pointer;">'
-      +'<span style="min-width:52px;font-size:.76rem;font-weight:700;color:var(--black);">'+fmtDateShort(r.date)+'</span>'
+  // Same filter as before (the count an admin already sees must not silently change), now also
+  // kept as the actual ride list, not thrown away after counting it.
+  var companyOverdue = isAdmin()
+    ? (rides||[]).filter(function(r){ return r && r.status!=='cancelled' && r.status!=='paid' && !_isAwaitingInvoice(r) && parseFloat(r.price||0)>0 && ((r.status==='completed')||(r.date && r.date<todayStr)); })
+        .sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); })
+    : [];
+  var companyCount = companyOverdue.length;
+  if(!overdue.length && !companyCount){ box.innerHTML=''; window._needsAttentionDriverFilter=null; return; }
+
+  // An admin sees the whole team's list (which already includes their own rides); anyone else
+  // still only ever sees their own, exactly as before.
+  var fullList = isAdmin() ? companyOverdue : overdue;
+  var activeFilter = window._needsAttentionDriverFilter || null;
+  if(activeFilter && !fullList.some(function(r){ return _displayRideDriver(r)===activeFilter; })){
+    activeFilter = window._needsAttentionDriverFilter = null;   // the filtered driver has nothing left - don't show an empty, confusing filter pill
+  }
+  var shown = activeFilter ? fullList.filter(function(r){ return _displayRideDriver(r)===activeFilter; }) : fullList;
+
+  var rows=shown.slice(0,15).map(function(r){
+    var drv=_displayRideDriver(r);
+    var drvShort=drv?driverShortName(drv):'Unassigned';
+    return '<div onclick="openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.5rem;padding:.5rem .2rem;border-bottom:1px solid #f3c98a;cursor:pointer;">'
+      +'<span style="min-width:48px;font-size:.76rem;font-weight:700;color:var(--black);">'+fmtDateShort(r.date)+'</span>'
       +'<span style="flex:1;min-width:0;font-size:.85rem;color:var(--black);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+escHtml(r.client||'\u2014')+' <span style="color:var(--mid);font-size:.72rem;">'+escHtml(r.type||'')+'</span></span>'
+      +(isAdmin() ? '<span onclick="event.stopPropagation();_dashNeedsAttentionFilterByDriver('+JSON.stringify(drv)+')" style="font-size:.72rem;font-weight:700;color:#7c3aed;white-space:nowrap;cursor:pointer;text-decoration:underline;">'+escHtml(drvShort)+'</span>' : '')
       +'<span style="font-size:.82rem;font-weight:700;color:var(--green);">$'+(r.price||0)+'</span>'
       +'<button onclick="event.stopPropagation();flagRideCautious('+r.id+')" title="Flag this client as cautious" style="padding:.3rem .55rem;background:none;border:1.5px solid #d97706;color:#d97706;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;">\u26A0\uFE0F</button>'
       +'<button onclick="event.stopPropagation();toggleRidePaid('+r.id+')" style="padding:.3rem .7rem;background:#b5651d;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;">Mark paid</button>'
       +'</div>';
   }).join('');
+  var filterPill = activeFilter
+    ? '<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.5rem;font-size:.76rem;color:#92400e;">Showing just <b>'+escHtml(driverShortName(activeFilter))+'</b> <span onclick="_dashNeedsAttentionFilterByDriver(null)" style="color:#7c3aed;font-weight:700;cursor:pointer;text-decoration:underline;">Show all</span></div>'
+    : '';
   box.innerHTML='<div style="background:#fff8ec;border:1.5px solid #f3c98a;border-radius:12px;padding:1rem;">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.4rem;">'
     +'<span style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#b5651d;">\u26A0\uFE0F '+(overdue.length ? ('Rides to wrap up \u00b7 '+overdue.length) : 'Team rides to wrap up')+'</span>'
     +(overdue.length>1?'<button onclick="markAllPrevPaid()" style="background:#b5651d;color:#fff;border:none;border-radius:8px;padding:.4rem .8rem;font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;">\u2713 Mark all paid</button>':'')
     +(isAdmin() && companyCount ? '<button onclick="markAllPastRidesPaidAdmin()" style="margin-left:.4rem;background:none;border:1.5px solid #b91c1c;color:#b91c1c;border-radius:8px;padding:.35rem .7rem;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;">\u26a0\ufe0f Mark ALL '+companyCount+' team rides paid</button>' : '')
     +'</div>'
-    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">Past or completed rides you haven\u2019t marked paid yet. Open one to mark it paid and record how the client paid\u2014or <b>Mark all paid</b> to clear them all at once (this skips miles &amp; tip; add those anytime in Income).</div>'
+    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">Past or completed rides you haven\u2019t marked paid yet. Open one to mark it paid and record how the client paid\u2014or <b>Mark all paid</b> to clear them all at once (this skips miles &amp; tip; add those anytime in Income).'+(isAdmin()?' Tap a driver\u2019s name to see just their rides.':'')+'</div>'
+    +filterPill
     +rows
     +'</div>';
+}
+function _dashNeedsAttentionFilterByDriver(driverName){
+  window._needsAttentionDriverFilter = driverName || null;
+  renderDashNeedsAttention();
 }
 
 // Tomorrow's rides you SCHEDULED that still need a confirmation text — a simple list + link to My Rides.
@@ -22923,6 +23005,7 @@ async function _sendConfirmationNow(rideId){
   }catch(e){}
   try{ renderMyCal(); }catch(e){}
   try{ renderDashConfirmations(); }catch(e){}
+  try{ renderDashConfirmationsSent(); }catch(e){}
   window.location.href=smsUrl;
 }
 function renderDashConfirmations(){
@@ -22938,20 +23021,24 @@ function renderDashConfirmations(){
   }).sort((a,b)=>(a.time||'').localeCompare(b.time||''));
 
   if(!due.length){ box.innerHTML=''; return; }
-  const stillDue = due.filter(r=>!r.confirmSent).length;
+  // Reported directly: an already-sent confirmation used to sit right here at the top, in the
+  // same actionable box as the ones still needing a text - "it shouldn't hang out at the top."
+  // This box now only ever lists what's still unsent; a sent one moves down to its own quieter
+  // section (renderDashConfirmationsSent, right by the fee-confirmation boxes it was asked to
+  // join) the moment the dashboard next refreshes after sending it.
+  due = due.filter(r=>!r.confirmSent);
+  if(!due.length){ box.innerHTML=''; return; }
+  const stillDue = due.length;
 
+  // Every row here is now guaranteed unsent (filtered above), so this no longer needs its own
+  // sent/unsent branching - that lives in renderDashConfirmationsSent() now, for the rows that
+  // actually need it.
   const rows = due.map(r=>{
-    const sent = !!r.confirmSent;
-    const accent = sent ? '#15803d' : '#f3d9a0';
-    const bg = sent ? '#f0fdf4' : 'transparent';
-    const action = sent
-      ? `<span onclick="event.stopPropagation();toggleConfirmSent(${r.id}).then(renderDashConfirmations);" style="font-size:.78rem;font-weight:800;color:#15803d;white-space:nowrap;cursor:pointer;">✓ Sent · Unsend</span>`
-      : `<span style="font-size:.8rem;font-weight:800;color:#b5651d;white-space:nowrap;">Send &rsaquo;</span>`;
-    return `<div onclick="openRideModal(${r.id})" style="display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem;border-bottom:1px solid #f3d9a0;border-left:4px solid ${accent};background:${bg};cursor:pointer;">
+    return `<div onclick="openRideModal(${r.id})" style="display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem;border-bottom:1px solid #f3d9a0;cursor:pointer;">
       <span style="min-width:58px;font-size:.8rem;font-weight:700;color:var(--black);">${fmtTime12(r.time)||'—'}</span>
       <span style="flex:1;font-size:.85rem;color:var(--black);">${escHtml(r.client||'—')}</span>
-      <span style="font-size:.72rem;color:var(--mid);">${escHtml(driverShortName(r.driver))}</span>
-      ${action}
+      <span style="font-size:.72rem;color:var(--mid);">${escHtml(driverShortName(_displayRideDriver(r)))}</span>
+      <span style="font-size:.8rem;font-weight:800;color:#b5651d;white-space:nowrap;">Send &rsaquo;</span>
     </div>`;
   }).join('');
 
@@ -22962,6 +23049,35 @@ function renderDashConfirmations(){
   </div>`;
 }
 
+// Confirmations already sent, for tomorrow's rides - split out of renderDashConfirmations() so a
+// sent one stops occupying the actionable "still needs sending" box the moment it's done, and
+// shows here instead: a quiet, already-handled list, same spirit as the fee boxes right below it,
+// with Unsend still one tap away for anyone who sent it by mistake.
+function renderDashConfirmationsSent(){
+  const box = document.getElementById('dash-confirmations-sent');
+  if(!box) return;
+  if(!hasIncomeAccess()){ box.innerHTML=''; return; }
+  if(!confTextEnabled(getMyDriverName())){ box.innerHTML=''; return; }
+  const tomorrow = toDateStr(addDays(nowET(),1));
+  const sent = rides.filter(r=>{
+    if(r.date!==tomorrow || r.status==='cancelled' || r.status==='placeholder') return false;
+    if(!r.confirmSent) return false;
+    return isMyScheduledRide(r);
+  }).sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+  if(!sent.length){ box.innerHTML=''; return; }
+
+  const rows = sent.map(r=>`<div onclick="openRideModal(${r.id})" style="display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem;border-bottom:1px solid #bbf7d0;cursor:pointer;">
+    <span style="min-width:58px;font-size:.8rem;font-weight:700;color:var(--black);">${fmtTime12(r.time)||'—'}</span>
+    <span style="flex:1;font-size:.85rem;color:var(--black);">${escHtml(r.client||'—')}</span>
+    <span style="font-size:.72rem;color:var(--mid);">${escHtml(driverShortName(_displayRideDriver(r)))}</span>
+    <span onclick="event.stopPropagation();toggleConfirmSent(${r.id})" style="font-size:.78rem;font-weight:800;color:#15803d;white-space:nowrap;cursor:pointer;">✓ Sent · Unsend</span>
+  </div>`).join('');
+
+  box.innerHTML = `<div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:12px;padding:1rem;">
+    <div style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#15803d;margin-bottom:.5rem;">✓ Confirmations sent for tomorrow · ${sent.length}</div>
+    ${rows}
+  </div>`;
+}
 // Dashboard 15% finder-fee summary — unpaid fees owed to/by the logged-in driver
 // A fee is settled per-RIDE, not per driver pair: each ride is marked paid on its own.
 // Payments recorded before per-ride tracking existed cover rides dated on/before that
@@ -23730,8 +23846,7 @@ function renderDashFees(){
     // let a fee show as "owed" the same day as the ride, before payment was ever taken.
     if(!r.date||r.date>today||r.status!=='paid'||parseFloat(r.price||0)<=0) return;
     // A ride whose client is themselves a driver never generates a finder's fee.
-    if(clientIsDriver(r.client)) return;
-    const owner=feeOwnerFor(r.createdBy);
+    const owner=_rideFeeOwner(r);
     const driver=r.driver||null;
     if(!owner||!driver||owner===driver) return;
     const fee=_rideFinderFee(r);
@@ -23750,7 +23865,8 @@ function renderDashFees(){
     // Same rule as the owed/received loop above \u2014 a waiver only makes sense once
     // there was actually a fee to waive, which requires the ride to be marked paid.
     if(!r.date||r.date>today||r.status!=='paid'||parseFloat(r.price||0)<=0) return;
-    const ow=feeOwnerFor(r.createdBy);
+    // This loop had no clientIsDriver guard at all before - _rideFeeOwner() closes that gap too.
+    const ow=_rideFeeOwner(r);
     const dr=r.driver||null;
     if(!ow||!dr||ow===dr||ow!==dName) return;
     const fp2=feePayments[ow+':recv:'+dr]||{};
@@ -23876,8 +23992,7 @@ function renderDashFeesAwaitingYourApproval(){
   const rows=[];
   rides.forEach(function(r){
     if(!r.date||r.date>today||r.status!=='paid'||parseFloat(r.price||0)<=0) return;
-    if(clientIsDriver(r.client)) return;
-    const owner=feeOwnerFor(r.createdBy), driver=r.driver||null;
+    const owner=_rideFeeOwner(r), driver=r.driver||null;
     if(!owner||!driver||owner===driver||owner!==dName) return;
     const _fpr=feePayments[dName+':recv:'+driver]||{};
     if(feeSettledForRide(_fpr, r)) return;
@@ -23912,8 +24027,7 @@ function renderDashFeesAwaitingApproval(){
   const rows=[];
   rides.forEach(function(r){
     if(!r.date||r.date>today||r.status!=='paid'||parseFloat(r.price||0)<=0) return;
-    if(clientIsDriver(r.client)) return;
-    const owner=feeOwnerFor(r.createdBy), driver=r.driver||null;
+    const owner=_rideFeeOwner(r), driver=r.driver||null;
     if(!owner||!driver||owner===driver||driver!==dName) return;
     const _fpo=feePayments[owner+':recv:'+dName]||{};
     if(feeSettledForRide(_fpo, r)) return;
@@ -25082,7 +25196,7 @@ function renderPricingTracker(){
       const day=String(r.date).slice(0,10);
       if(day<rFrom||day>rTo) return;
       // Pricing is set by the CLIENT OWNER (whoever booked the ride), not the assigned driver.
-      const owner = getClientOwner(r.client) || feeOwnerFor(r.createdBy);
+      const owner = _rideClientOwner(r);
       if(!owner) return;
       // An archived driver isn't in DRIVERS any more, so they weren't pre-seeded above - but a
       // ride they owned during this date range still really happened. Archiving must never
@@ -27234,7 +27348,7 @@ async function _sendBookingLinkVia(channel, link, clientName, phone, email){
   var body=(first?'Hi '+first+' \u2014 ':'')+'you can book directly with me here: '+link;
   var href;
   if(channel==='sms'){
-    var num=(phone||'').replace(/[^0-9+]/g,'');
+    var num=_phoneDigits(phone);
     // iOS wants &body=, Android wants ?body= - the separator is the whole difference, and
     // getting it wrong opens Messages with an empty message and no explanation.
     var sep=/iPhone|iPad|iPod|Macintosh/i.test(navigator.userAgent) ? '&' : '?';
@@ -27624,7 +27738,7 @@ function openPlaceholderViewModal(id){
     +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Notes</div>'
     +'<div style="font-size:.9rem;color:var(--black);margin-bottom:.6rem;">'+(r.note?escHtml(r.note):'<span style="color:var(--mid);">Nothing noted yet</span>')+'</div>'
     +'<div style="font-size:.62rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Driver</div>'
-    +'<div style="font-size:.9rem;color:var(--black);">'+(r.driver?escHtml(driverShortName(r.driver)):'<span style="color:var(--mid);">Unassigned</span>')+'</div>'
+    +'<div style="font-size:.9rem;color:var(--black);">'+(_displayRideDriver(r)?escHtml(driverShortName(_displayRideDriver(r))):'<span style="color:var(--mid);">Unassigned</span>')+'</div>'
     +'</div>'
     +'<div style="font-size:.74rem;color:var(--mid);margin-bottom:.8rem;">Reserved by '+escHtml(r.createdBy||'—')+'.</div>'
     +(canEdit
@@ -28423,7 +28537,7 @@ function calcNetTakeHomeForMonth(dName){
   monthRides.forEach(r=>{
     if(r._outside) return;
     const fare = parseFloat(r.price||0);
-    const owner = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
+    const owner = _rideFeeOwner(r);
     if(owner && owner!==dName){
       const fp = feePayments[owner+':recv:'+dName]||{};
       if(!_feeWaivedForRide(fp, r)) feeCost += _rideFinderFee(r);
@@ -28438,7 +28552,7 @@ function calcNetTakeHomeForMonth(dName){
     if(!r.date || parseFloat(r.price||0)===0) return;
     if(!isCompleted(r) || !inMonth(r)) return;
     const fare = parseFloat(r.price||0);
-    const owner = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
+    const owner = _rideFeeOwner(r);
     if(owner===dName){
       const fp = feePayments[dName+':recv:'+r.driver]||{};
       if(!_feeWaivedForRide(fp, r)) feesReceived += _rideFinderFee(r);
@@ -28469,6 +28583,21 @@ function calcNetTakeHomeForMonth(dName){
 // The components are stored alongside the combined rate, not just the final number, so a past
 // ride can always be explained ("$3.39/gal at 23.5 mpg") rather than just asserted - and so the
 // Income page can still break gas and maintenance into separate cards for historical rides.
+// Preventative scan finding (#2): _rideCostBasis() and _stampRideCostBasis() independently
+// resolved a ride's vehicle, driver profile, mpg, gas price and maintenance rate - identical
+// fallback chain, same order, line for line, kept in sync by hand. One shared function now.
+function _resolveRideCostInputs(ride){
+  var dName = ride && ride.driver;
+  var veh   = (typeof rideVehicle==='function' && ride) ? rideVehicle(ride) : null;
+  var prof  = (typeof DRIVER_PROFILES!=='undefined' && dName && DRIVER_PROFILES[dName]) || {};
+  var src   = veh || {};
+  var _pick = function(a,b){ return (a!=null && a!=='') ? a : b; };
+  var mpg       = parseFloat(_pick(src.mpg, prof.mpg))||0;
+  var gasPrice  = parseFloat(_pick(src.gasPrice, prof.gasPrice))||3.50;
+  var maintRate = parseFloat(_pick(src.maintRate, prof.maintRate))||IRS_MAINTENANCE_RATE;
+  var gasCpm    = mpg ? (gasPrice/mpg) : 0;
+  return { mpg: mpg, gasPrice: gasPrice, maintRate: maintRate, gasCpm: gasCpm, vehicleLabel: (src.label||prof.vehicle||'') };
+}
 function _rideCostBasis(ride){
   var b = ride && ride.cpmBasis;
   if(b && isFinite(parseFloat(b.cpm))){
@@ -28481,16 +28610,8 @@ function _rideCostBasis(ride){
   }
   // No stamp: an older ride recorded before this existed. Fall back to the live rate, which is
   // exactly the old behavior - so nothing changes for historical data until it gets stamped.
-  var dName = ride && ride.driver;
-  var veh   = (typeof rideVehicle==='function' && ride) ? rideVehicle(ride) : null;
-  var prof  = (typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[dName]) || {};
-  var src   = veh || {};
-  var _pick = function(a,b){ return (a!=null && a!=='') ? a : b; };
-  var mpg       = parseFloat(_pick(src.mpg, prof.mpg))||0;
-  var gasPrice  = parseFloat(_pick(src.gasPrice, prof.gasPrice))||3.50;
-  var maintRate = parseFloat(_pick(src.maintRate, prof.maintRate))||IRS_MAINTENANCE_RATE;
-  var gasCpm    = mpg ? (gasPrice/mpg) : 0;
-  return { cpm: gasCpm + maintRate, gasCpm: gasCpm, maintCpm: maintRate, stamped:false };
+  var inputs = _resolveRideCostInputs(ride);
+  return { cpm: inputs.gasCpm + inputs.maintRate, gasCpm: inputs.gasCpm, maintCpm: inputs.maintRate, stamped:false };
 }
 // Stamps the CURRENT rate onto a ride, once. Deliberately never overwrites an existing stamp:
 // re-logging miles or re-marking a ride paid must not silently re-price it at today's rate,
@@ -28498,19 +28619,12 @@ function _rideCostBasis(ride){
 function _stampRideCostBasis(ride){
   try{
     if(!ride || ride.cpmBasis) return;            // already stamped - leave it alone
-    var dName = ride.driver; if(!dName) return;   // no driver yet: nothing to price against
-    var veh   = (typeof rideVehicle==='function') ? rideVehicle(ride) : null;
-    var prof  = (typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[dName]) || {};
-    var src   = veh || {};
-    var _pick = function(a,b){ return (a!=null && a!=='') ? a : b; };
-    var mpg       = parseFloat(_pick(src.mpg, prof.mpg))||0;
-    var gasPrice  = parseFloat(_pick(src.gasPrice, prof.gasPrice))||3.50;
-    var maintRate = parseFloat(_pick(src.maintRate, prof.maintRate))||IRS_MAINTENANCE_RATE;
-    var gasCpm    = mpg ? (gasPrice/mpg) : 0;
+    if(!ride.driver) return;                      // no driver yet: nothing to price against
+    var inputs = _resolveRideCostInputs(ride);
     ride.cpmBasis = {
-      cpm: gasCpm + maintRate, gasCpm: gasCpm, maintCpm: maintRate,
-      gasPrice: gasPrice, mpg: mpg, maintRate: maintRate,
-      vehicle: (src.label||prof.vehicle||''), at: Date.now()
+      cpm: inputs.gasCpm + inputs.maintRate, gasCpm: inputs.gasCpm, maintCpm: inputs.maintRate,
+      gasPrice: inputs.gasPrice, mpg: inputs.mpg, maintRate: inputs.maintRate,
+      vehicle: inputs.vehicleLabel, at: Date.now()
     };
   }catch(e){ console.warn('_stampRideCostBasis failed (non-fatal)', e); }
 }
@@ -29526,7 +29640,7 @@ function renderIncome(){
   if(personalView && dName){
     myDrivenRides.forEach(r=>{
       const fare = parseFloat(r.price||0);
-      const owner = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
+      const owner = _rideFeeOwner(r);
       if(owner && owner!==dName){
         // Filter by how THIS FEE was actually settled (Zelle, cash, Venmo...) — not by how the
         // client originally paid the ride's fare, which is a completely different payment and
@@ -29572,7 +29686,7 @@ function renderIncome(){
         if(d<start||d>end) return;
       }
       const fare = parseFloat(r.price||0);
-      const owner = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
+      const owner = _rideFeeOwner(r);
       if(owner===dName){
         const fp = feePayments[dName+':recv:'+r.driver]||{};
         if(incPayFilter.length && !incPayFilter.includes(_feePaymentMethodForRide(fp, r.id))) return;
@@ -29911,7 +30025,7 @@ function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm,
     // don't carry createdBy themselves.
     // Exception: if the CLIENT is themselves a driver in the group, the ride is
     // that driver's own client and never owes a fee, no matter who drives it.
-    const owner = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
+    const owner = _rideFeeOwner(r);
     const _fpRow = (owner && owner!==dName) ? (feePayments[owner+':recv:'+dName]||{}) : null;
     const fee   = (owner && owner!==dName && !_feeWaivedForRide(_fpRow, r)) ? _rideFinderFee(r) : 0;
     const gross = fare + tip;
@@ -30914,6 +31028,15 @@ async function submitEditClient(oldName){
   rec.phone=phone; rec.phones=phone?[{label:'',number:phone}]:[];
   rec.email=email; rec.emails=email?[email]:[];
   rec.address=(document.getElementById('ec-address')?.value||'').trim();
+  // BUG FIX, reported directly: a client's Home address, saved right here, never actually
+  // reached the booking link's saved-address dropdown - that reads from the shared
+  // clientAddressOverrides store (clientAddresses in Firebase), while this field was only ever
+  // written into this driver's own private client record. Only an address added through the
+  // separate "Other labeled addresses" list below ever made it into the booking link at all; the
+  // one address a returning client is most likely to want - their own home - silently couldn't.
+  // setClientAddress() already finds and updates an existing "Home" entry rather than
+  // duplicating it (matches on label OR address), so this is safe to run on every save.
+  if(rec.address){ try{ setClientAddress(newKey, 'Home', rec.address, true); }catch(e){} }
   rec.paymentMethod=(document.getElementById('ec-pay')?.value||'').trim();
   rec.notes=(document.getElementById('ec-notes')?.value||'').trim();
   var _termPref=(document.getElementById('ec-terminal-pref')?.value||'').trim();
@@ -32112,7 +32235,16 @@ async function sendAllConf(id){
     // so a stale snapshot reverting it means an already-sent confirmation looks unsent again.
     window._pendingUnsavedRideIds.add(r.id);
     setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
-    saveRides().then(function(ok){ if(ok) window._pendingUnsavedRideIds.delete(r.id); }).catch(function(){});
+    // Reported directly: Morgan sent confirmation texts for Kat's clients, and they still showed
+    // up on Kat's own dashboard as needing to be sent. Same race already fixed in sendPolicyText
+    // (v1237) and _sendConfirmationNow (v1238), found here too: the save was never awaited, so
+    // if the app got backgrounded or closed any time soon after textClient() already switched to
+    // Messages/WhatsApp above, the write could be lost silently - the in-memory flag was set, but
+    // the server never actually learned about it, which is exactly what a stale dashboard means.
+    try{
+      var _ok = await saveRides();
+      if(_ok) window._pendingUnsavedRideIds.delete(r.id);
+    }catch(e){}
     setTimeout(function(){
       renderConfirmations();
       renderCal();
@@ -32418,6 +32550,7 @@ async function toggleConfText(driverName){
   await saveDriverSettings(driverName);
   renderDriverMembers();
   if(typeof renderDashConfirmations==='function') renderDashConfirmations();
+  if(typeof renderDashConfirmationsSent==='function') renderDashConfirmationsSent();
   if(typeof renderConfirmations==='function' && document.getElementById('my-confirm-panel')){ try{ renderConfirmations(); }catch(e){} }
   showToast('Schedule Confirmation '+(driverSettings[driverName].confEnabled?'turned on':'turned off'));
 }
@@ -32660,7 +32793,7 @@ function sendConfText(id){
   }
   _doSendConfText(id);
 }
-function _doSendConfText(id){
+async function _doSendConfText(id){
   const r=rides.find(function(x){ return x.id===id; }); if(!r) return;
   const conf=buildConfirmationText(r);
   // Same real bug as sendArrivalText() had, same fix: openGroupThread() already correctly
@@ -32674,14 +32807,23 @@ function _doSendConfText(id){
   // the "Confirmation text" row directly sends the exact same message and should mark the
   // ride confirmed too, not just the bundled Send-everything button.
   _markRideConfirmed(r);
-  saveRides().then(function(){
-    setTimeout(function(){
-      renderConfirmations();
-      renderCal();
-      renderMyCal();
-      if(typeof refreshDash==='function') refreshDash();
-    }, 200);
-  });
+  // Reported directly: Morgan sent confirmations for Kat's clients, still showed as needing to
+  // be sent on Kat's dashboard. Same race as sendAllConf's own fix just above, for the identical
+  // reason: openGroupThread() already switched apps by the time this runs, and the save was
+  // never awaited - was also a plain, non-async function until now, so the save had no way to
+  // be awaited even by a caller that wanted to.
+  window._pendingUnsavedRideIds.add(r.id);
+  setTimeout(function(){ window._pendingUnsavedRideIds.delete(r.id); }, 90000);
+  try{
+    var _ok = await saveRides();
+    if(_ok) window._pendingUnsavedRideIds.delete(r.id);
+  }catch(e){}
+  setTimeout(function(){
+    renderConfirmations();
+    renderCal();
+    renderMyCal();
+    if(typeof refreshDash==='function') refreshDash();
+  }, 200);
 }
 var _vehPickerCb=null;
 function openVehiclePicker(id, onChosen){
@@ -32846,7 +32988,7 @@ function renderFinderFees(dName, start, end){
     if(!inRange(r)) return;
     // A ride whose client is themselves a driver never generates a finder's fee.
     if(clientIsDriver(r.client)) return;
-    const owner  = getClientOwner(r.client) || feeOwnerFor(r.createdBy);
+    const owner  = _rideClientOwner(r);
     const driver = r.driver || null;
     if(!owner || !driver || owner===driver) return;
     const fare = parseFloat(r.price)||0;
@@ -33036,7 +33178,7 @@ async function exportIncomeCSV(){
   const rows = [
     ['Date','Time','Client','Driver','Type','Vehicle','Miles','Phone','Terminal','Flight','Price','Surcharges','Notes'],
     ...filtered.map(r=>[
-      r.date, r.time||'', r.client, r.driver||'Unassigned', r._outside?'OUTSIDE — '+(r.type||''):r.type,
+      r.date, r.time||'', r.client, _displayRideDriver(r)||'Unassigned', r._outside?'OUTSIDE — '+(r.type||''):r.type,
       r.vehicle||'', r.miles||0, r.phone||'', r.terminal||'', r.flight||'',
       r.price, r._outside?'':buildFeeBreakdown(r), r.notes||''
     ])
@@ -33311,7 +33453,7 @@ function generatePricingAudit(){
     sumSurcharge+=surTotal; sumManual+=manualAdj; sumComputed+=computed; sumQuoted+=quoted; sumVariance+=variance;
 
     rows.push([
-      r.date||'', r.time||'', r.client||'', (r.driver||'Unassigned'),
+      r.date||'', r.time||'', r.client||'', (_displayRideDriver(r)||'Unassigned'),
       r.type||'', vehTag(r.vehicle)||'', parseFloat(r.miles)||0,
       bb.baseAmount?('$'+bb.baseAmount.toFixed(2)):'',
       bb.mileageAmount?('$'+bb.mileageAmount.toFixed(2)):'',
@@ -33862,9 +34004,10 @@ async function generateYearEndPL(){
     const fare = parseFloat(r.price)||0;
     const tip  = parseFloat(r.tip)||0;
     const mi   = parseFloat(r.drivenMiles||r.miles||0)||0;
-    // 15% client fee: charged only when the client is owned by someone other than this driver
-    const owner = (typeof clientIsDriver==='function' && clientIsDriver(r.client)) ? null
-                 : ((typeof feeOwnerFor==='function' ? feeOwnerFor(r.createdBy) : null) || (typeof getClientOwner==='function' ? getClientOwner(r.client) : null));
+    // 15% client fee: charged only when the client is owned by someone other than this driver.
+    // Was feeOwnerFor-then-getClientOwner - the wrong order, inconsistent with every other
+    // resolution in the app (and with how the fee was actually attributed when the ride was made).
+    const owner = _rideFeeOwner(r);
     // BUG FIX, reported directly with a screenshot: a genuinely waived fee still counted as a
     // deductible expense here. Cash-basis, Schedule C-mapped tax report - a fee never actually
     // paid should never reduce it, the same fix applied to renderDashIncome for the same reason.
@@ -34317,7 +34460,15 @@ function parseAndImportICS(icsText, cutoffDate, skipKat){
       return match ? match[1].trim() : '';
     };
     const getML = key => {
-      const match = block.match(new RegExp(`${key}[^:]*:([\\s\\S]*?)(?=\\r?\\n[A-Z])`));
+      // Found while fixing the terminal-into-notes gap just below: this required ANOTHER
+      // property line (or at least an uppercase letter) to immediately follow, as the only way
+      // to know where a multi-line value like DESCRIPTION ends. Whenever DESCRIPTION happened to
+      // be the LAST property before the event simply ended - no trailing STATUS/SEQUENCE/etc,
+      // which plenty of real calendar sources never add - this silently matched nothing at all,
+      // losing the terminal, phone, and price hidden inside it, with no error anywhere. The end
+      // of the block is now an equally valid place for the value to stop, not just another
+      // property starting.
+      const match = block.match(new RegExp(`${key}[^:]*:([\\s\\S]*?)(?=\\r?\\n[A-Z]|$)`));
       return match ? match[1].replace(/\\n/g,'\n').replace(/\\,/g,',').trim() : '';
     };
 
@@ -34526,6 +34677,15 @@ function parseAndImportICS(icsText, cutoffDate, skipKat){
     const home   = loc || '';
     const pickup = type==='AP PICK UP' ? '' : '';
 
+    // Direct instruction: the terminal was already captured into the ride's own structured
+    // `terminal` field (above), the same field the app's own calendar EXPORT already reads to
+    // build a line like "South Terminal" in the event description - confirmed directly against
+    // a real exported event. Imported rides never got the matching readable line in their own
+    // Notes, so that detail only ever showed up again once a ride was re-exported, not on the
+    // ride itself inside the app. Uses the exact same wording export already uses
+    // (_terminalPhrase), so the two can't describe the same terminal two different ways.
+    const terminalNote = terminal ? (typeof _terminalPhrase==='function' ? _terminalPhrase(terminal) : terminal) : '';
+
     // Check if cancelled
     const confirmed = !isCancelled;
 
@@ -34551,7 +34711,7 @@ function parseAndImportICS(icsText, cutoffDate, skipKat){
       fuel:'N', xstop:0, traffic:'N',
       wait:0, email:'',
       confirmed,
-      notes: isCancelled ? '❌ CANCELLED' : '',
+      notes: [isCancelled ? '❌ CANCELLED' : '', terminalNote].filter(Boolean).join(' \u00b7 '),
       createdBy: importedCreatedBy,
     };
     rides.push(ride);
@@ -34852,7 +35012,15 @@ async function repairImportedClients(){
 // CLIENT CONTACTS — multiple phones (labeled) + emails, shared by rides & directory
 // Back-compat: every client still exposes a single primary .phone / .email (= first entry).
 // ═══════════════════════════════════════════
-const _phoneDigits = s => (s||'').replace(/[^0-9+]/g,'');
+// Preventative scan finding (#3): stripping a phone string down to digits-and-plus, for building
+// an sms:/tel: link, was rewritten the same way in 13 separate places instead of through one
+// shared helper - this one local arrow function already existed under this exact name, just
+// scoped to this one spot instead of shared. A plain `function` declaration (not `const`) so it's
+// fully hoisted and usable from every call site regardless of where in the file it's actually
+// declared. String(s||'') rather than just (s||'') - safe even if something other than a real
+// string (a number, undefined) ever reaches it, which (s||'') alone is not: .replace() would
+// throw on a bare number.
+function _phoneDigits(s){ return String(s||'').replace(/[^0-9+]/g,''); }
 function clientPhoneList(rec){
   if(rec && Array.isArray(rec.phones) && rec.phones.length) return rec.phones.filter(p=>p&&p.number);
   if(rec && rec.phone) return [{label:'',number:rec.phone}];
