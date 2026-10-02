@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191239">
+<meta name="version" content="202608191242">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -5132,6 +5132,19 @@ let _addonTouched = { premium:false, traffic:false, holiday:false, christmas:fal
 let globalSettings = { fuelEnabled: true }; // admin-controlled global pricing flags
 // Fuel surcharge percentage (editable by admins). Stored as a whole number, default 8.
 function fuelPct(){ var p=parseFloat(globalSettings&&globalSettings.fuelPct); return (isFinite(p)&&p>=0)?p:8; }
+// A ride's finder's fee - normally fare times the global rate, but a manual override lets an
+// admin correct the rare case where the actual agreed fee differs from the standard percentage.
+// Direct request, after confirming this was not editable anywhere. One shared function so every
+// place that computes a ride's fee - the dashboard cards, Income, the Year-End report, My Fares,
+// the Venmo auto-mark - can never drift out of agreement about what a given ride's fee actually is.
+function _rideFinderFee(r){
+  if(!r) return 0;
+  if(r.feeOverride!=null && r.feeOverride!==''){
+    var ov=parseFloat(r.feeOverride);
+    if(isFinite(ov)) return Math.round(ov*100)/100;
+  }
+  return Math.round((parseFloat(r.price)||0)*clientFeeRate()*100)/100;
+}
 function fuelRate(){ return fuelPct()/100; } function clientFeePct(){ var p=parseFloat(globalSettings&&globalSettings.clientFeePct); return (isFinite(p)&&p>=0)?p:15; } function clientFeeRate(){ return clientFeePct()/100; }
 function fuelLabel(){ return 'Fuel surcharge ('+fuelPct()+'%)'; }
 // ── EDITABLE PRICE POINTS (admin-controlled, single source of truth) ──
@@ -10149,7 +10162,13 @@ function renderNotifPanel(){
 // ═══════════════════════════════════════════
 // DRIVER COLOR HELPERS
 // ═══════════════════════════════════════════
-function driverColor(name){ return driverColors[name]||'#6b6b6b'; }
+// Reserved for an outside driver (someone covering a ride who isn't a group member - v1233) and
+// any other name with no real entry in driverColors. Direct request: this must never be a color a
+// real driver could also end up with, or an outside-driver ride could look identical to a specific
+// person's rides on the calendar. Enforced below in setDriverColor() (the only place a human sets
+// one) and pickUnusedColor()'s random fallback - not just "happens not to be in COLOR_POOL today."
+const OUTSIDE_DRIVER_COLOR = '#6b6b6b';
+function driverColor(name){ return driverColors[name]||OUTSIDE_DRIVER_COLOR; }
 // The short driver label shown on ride cards is normally just the first name. If two
 // drivers on the roster share a first name (e.g. two Michaels), that's ambiguous on a
 // card — so this adds the first initial of the last name whenever there's a collision,
@@ -10171,7 +10190,18 @@ function driverShortName(fullName){
 }
 const COLOR_POOL = ['#7c3aed','#4a148c','#f5a623','#ffcba4','#000000','#e53935','#43a047','#1e88e5','#e0c3fc','#a0522d','#a0a0a0','#ff6d00','#8b0000','#2e7d32','#ff6b6b','#c8920a','#0097a7','#e91e8c','#00838f','#5d4037','#c2185b','#00897b','#6d4c41','#455a64','#d84315','#827717'];
 function _norm(c){ return (c||'').toLowerCase(); }
-function pickUnusedColor(){ var used=Object.values(driverColors).map(_norm); var free=COLOR_POOL.filter(function(c){ return used.indexOf(_norm(c))<0; }); if(free.length) return free[Math.floor(Math.random()*free.length)]; var r=function(){return Math.floor(Math.random()*180+30);}; return '#'+[r(),r(),r()].map(function(n){return n.toString(16).padStart(2,'0');}).join(''); }
+function pickUnusedColor(){
+  var used=Object.values(driverColors).map(_norm);
+  var free=COLOR_POOL.filter(function(c){ return used.indexOf(_norm(c))<0; });
+  if(free.length) return free[Math.floor(Math.random()*free.length)];
+  // The whole pool is taken - generate something new. Each channel's 30-209 range genuinely can
+  // land on OUTSIDE_DRIVER_COLOR (107,107,107) by chance, so this retries rather than risk it.
+  var r=function(){return Math.floor(Math.random()*180+30);};
+  var gen; var tries=0;
+  do{ gen='#'+[r(),r(),r()].map(function(n){return n.toString(16).padStart(2,'0');}).join(''); tries++; }
+  while(_norm(gen)===_norm(OUTSIDE_DRIVER_COLOR) && tries<10);
+  return gen;
+}
 
 // ── DRIVER COLOR VAULT ──────────────────────────────────────────────────────
 // The live color map (driverColors) is ONE shared object saved wholesale with
@@ -16249,11 +16279,15 @@ async function _skipOdometerStart(rideId){
 // done" instead of a separate, earlier step.
 
 // Builds the "ending odometer (if applicable) + miles driven + tip + gas price" field block -
-// identical between openMarkPaidCombined and openLogMiles aside from three things, which stay
-// parameters rather than being unified: the field-id prefix ('mp' or 'lm'), which preview
-// function the odometer field's oninput calls (_mpPreviewOdoMiles vs _lmPreviewOdoMiles - built
-// from the same prefix), and the miles-explanation sentence itself, which genuinely reads
-// differently between the two screens on purpose and stays exactly as each one already had it.
+// shared by openMarkPaidCombined, openLogMiles, and openPrepaidRideCompleted, with two things
+// left as real parameters rather than being unified: the field-id prefix ('mp'/'lm'/'pc'), and the
+// miles-explanation sentence, which genuinely reads differently across the screens on purpose.
+// The odometer field's oninput calls _previewOdoMiles(prefix, rideId) directly (v1242) - it used
+// to call a dynamically-named per-prefix wrapper (_mpPreviewOdoMiles, _lmPreviewOdoMiles) that had
+// to be hand-built for every new prefix; when the 'pc' prefix was added for the prepaid-completion
+// flow, nobody built its wrapper, so Miles Driven silently stopped updating on that one screen -
+// every keystroke threw inside the inline handler. Calling the shared function directly removes
+// the missing-wrapper failure mode entirely, for this prefix and any future one.
 function _buildOdoMilesTipGasFieldsHtml(prefix, r, milesExplanationText){
   // A resumed round trip's relevant checkpoint is the resume reading, not the original start -
   // that's the number the driver would actually recognize and the trip segment that's still
@@ -16281,7 +16315,7 @@ function _buildOdoMilesTipGasFieldsHtml(prefix, r, milesExplanationText){
     ? ('<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:9px;padding:.6rem .8rem;margin-bottom:.75rem;">'
       +'<div style="font-size:.74rem;color:#7c2d12;line-height:1.5;margin-bottom:.5rem;">You '+_refLabel+' at <strong>'+_refReading+'</strong> \u2014 enter where you ended and the miles below fill in automatically, or skip this and enter your total mileage directly.</div>'
       +'<label style="font-size:.68rem;font-weight:700;color:#7c2d12;display:block;margin-bottom:3px;">ENDING ODOMETER</label>'
-      +'<input id="'+prefix+'-odo-end" type="text" inputmode="decimal" placeholder="e.g. 48261" oninput="_sanitizeNumField(this);_clearFieldError(\''+prefix+'-odo-end\');_'+prefix+'PreviewOdoMiles('+r.id+')" '
+      +'<input id="'+prefix+'-odo-end" type="text" inputmode="decimal" placeholder="e.g. 48261" oninput="_sanitizeNumField(this);_clearFieldError(\''+prefix+'-odo-end\');_previewOdoMiles(\''+prefix+'\','+r.id+')" '
       +'style="width:100%;padding:.5rem .65rem;border:1.5px solid #fdba74;border-radius:8px;font-family:inherit;font-size:.95rem;box-sizing:border-box;">'
       +'</div>')
     : (_refReading==null && r.odoEnd==null && r.odoPause==null)
@@ -16293,10 +16327,10 @@ function _buildOdoMilesTipGasFieldsHtml(prefix, r, milesExplanationText){
       +'<div style="font-size:.74rem;color:#7c2d12;line-height:1.5;margin-bottom:.5rem;">No starting reading was recorded for this ride. Enter both and the miles are worked out for you \u2014 or skip this and just enter the miles.</div>'
       +'<div style="display:flex;gap:.5rem;">'
       +'<div style="flex:1;min-width:0;"><label style="font-size:.68rem;font-weight:700;color:#7c2d12;display:block;margin-bottom:3px;">STARTING ODOMETER</label>'
-      +'<input id="'+prefix+'-odo-start" type="text" inputmode="decimal" placeholder="e.g. 48219" oninput="_sanitizeNumField(this);_clearFieldError(\''+prefix+'-odo-end\');_'+prefix+'PreviewOdoMiles('+r.id+')" '
+      +'<input id="'+prefix+'-odo-start" type="text" inputmode="decimal" placeholder="e.g. 48219" oninput="_sanitizeNumField(this);_clearFieldError(\''+prefix+'-odo-end\');_previewOdoMiles(\''+prefix+'\','+r.id+')" '
       +'style="width:100%;padding:.5rem .65rem;border:1.5px solid #fdba74;border-radius:8px;font-family:inherit;font-size:.95rem;box-sizing:border-box;"></div>'
       +'<div style="flex:1;min-width:0;"><label style="font-size:.68rem;font-weight:700;color:#7c2d12;display:block;margin-bottom:3px;">ENDING ODOMETER</label>'
-      +'<input id="'+prefix+'-odo-end" type="text" inputmode="decimal" placeholder="e.g. 48261" oninput="_sanitizeNumField(this);_clearFieldError(\''+prefix+'-odo-end\');_'+prefix+'PreviewOdoMiles('+r.id+')" '
+      +'<input id="'+prefix+'-odo-end" type="text" inputmode="decimal" placeholder="e.g. 48261" oninput="_sanitizeNumField(this);_clearFieldError(\''+prefix+'-odo-end\');_previewOdoMiles(\''+prefix+'\','+r.id+')" '
       +'style="width:100%;padding:.5rem .65rem;border:1.5px solid #fdba74;border-radius:8px;font-family:inherit;font-size:.95rem;box-sizing:border-box;"></div>'
       +'</div></div>')
     : '';
@@ -16480,7 +16514,6 @@ function _previewOdoMiles(prefix, rideId){
   if(total==null) return;
   milesInput.value=total;
 }
-function _mpPreviewOdoMiles(rideId){ _previewOdoMiles('mp', rideId); }
 
 // Pause/Resume exist only for genuine ROUND TRIP rides (not AP ROUND TRIP) - Chase's explicit
 // design: Stop Ride is gone everywhere, but a regular round trip has two real driving segments
@@ -17097,7 +17130,7 @@ function _maybeOfferFeeAndPaid(rideId){
   var key=owner+':recv:'+dName;
   var fp=feePayments[key]||{};
   if(_feeRidePending(fp, rideId) || (fp.paidRides && fp.paidRides.indexOf(rideId)>=0) || (typeof _feeWaivedForRide==='function' && _feeWaivedForRide(fp, r))) return; // already sent, paid, or waived
-  var fee=Math.round(fare*(typeof clientFeeRate==='function'?clientFeeRate():0.15)*100)/100;
+  var fee=_rideFinderFee(r);
   if(fee<=0) return;
   var handle=(typeof driverVenmo!=='undefined')?driverVenmo[owner]:'';
   var venmoUrl=handle?((typeof venmoPayUrl==='function')?venmoPayUrl(handle, fee, (typeof _venmoRideNote==='function')?_venmoRideNote(r):''):''):'';
@@ -17276,7 +17309,6 @@ function renderDashPendingAccept(){
 
 // Thin wrapper around the shared _previewOdoMiles() - same logic as Mark Paid's version,
 // just this form's own element ids.
-function _lmPreviewOdoMiles(rideId){ _previewOdoMiles('lm', rideId); }
 async function _saveLogMiles(rideId, billLater){
   // This `if(!r)` used to be a bare `return` — no toast, no throw, no console line. Combined
   // with the id-type coercion described on _rideById, that made Save a button that visibly
@@ -23702,7 +23734,7 @@ function renderDashFees(){
     const owner=feeOwnerFor(r.createdBy);
     const driver=r.driver||null;
     if(!owner||!driver||owner===driver) return;
-    const fee=parseFloat(r.price)*clientFeeRate();
+    const fee=_rideFinderFee(r);
     const _fp=feePayments[owner+':recv:'+driver]||{};
     const settled=feeSettledForRide(_fp, r);
     if(dName){
@@ -23722,7 +23754,7 @@ function renderDashFees(){
     const dr=r.driver||null;
     if(!ow||!dr||ow===dr||ow!==dName) return;
     const fp2=feePayments[ow+':recv:'+dr]||{};
-    if(fp2.waived && (fp2.waiveFrom ? (r.date>=fp2.waiveFrom && r.date<=fp2.waiveUntil) : (!fp2.waiveUntil || r.date<=fp2.waiveUntil))){ const fee2=parseFloat(r.price)*clientFeeRate(); (waivedByMe[dr]=waivedByMe[dr]||{fee:0,n:0,until:fp2.waiveUntil||null}); waivedByMe[dr].fee+=fee2; waivedByMe[dr].n++; }
+    if(fp2.waived && (fp2.waiveFrom ? (r.date>=fp2.waiveFrom && r.date<=fp2.waiveUntil) : (!fp2.waiveUntil || r.date<=fp2.waiveUntil))){ const fee2=_rideFinderFee(r); (waivedByMe[dr]=waivedByMe[dr]||{fee:0,n:0,until:fp2.waiveUntil||null}); waivedByMe[dr].fee+=fee2; waivedByMe[dr].n++; }
   });
   const hasWaivedByMe=Object.keys(waivedByMe).length;
   // BUG FIX, reported directly and confirmed precisely: the header below used to show even with
@@ -23850,7 +23882,7 @@ function renderDashFeesAwaitingYourApproval(){
     const _fpr=feePayments[dName+':recv:'+driver]||{};
     if(feeSettledForRide(_fpr, r)) return;
     if(!_feeRidePending(_fpr, r.id)) return;
-    rows.push({driver:driver, client:r.client, date:r.date, fee:parseFloat(r.price)*clientFeeRate(), id:r.id,
+    rows.push({driver:driver, client:r.client, date:r.date, fee:_rideFinderFee(r), id:r.id,
       method:(_fpr.pendingMethod && _fpr.pendingMethod[r.id]) || 'Venmo'});
   });
   if(!rows.length){ box.innerHTML=''; return; }
@@ -23886,7 +23918,7 @@ function renderDashFeesAwaitingApproval(){
     const _fpo=feePayments[owner+':recv:'+dName]||{};
     if(feeSettledForRide(_fpo, r)) return;
     if(!_feeRidePending(_fpo, r.id)) return;
-    rows.push({owner:owner, client:r.client, date:r.date, fee:parseFloat(r.price)*clientFeeRate(), id:r.id});
+    rows.push({owner:owner, client:r.client, date:r.date, fee:_rideFinderFee(r), id:r.id});
   });
   if(!rows.length){ box.innerHTML=''; return; }
   rows.sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
@@ -28394,7 +28426,7 @@ function calcNetTakeHomeForMonth(dName){
     const owner = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
     if(owner && owner!==dName){
       const fp = feePayments[owner+':recv:'+dName]||{};
-      if(!_feeWaivedForRide(fp, r)) feeCost += Math.round(fare*clientFeeRate()*100)/100;
+      if(!_feeWaivedForRide(fp, r)) feeCost += _rideFinderFee(r);
     }
   });
 
@@ -28409,7 +28441,7 @@ function calcNetTakeHomeForMonth(dName){
     const owner = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
     if(owner===dName){
       const fp = feePayments[dName+':recv:'+r.driver]||{};
-      if(!_feeWaivedForRide(fp, r)) feesReceived += fare*clientFeeRate();
+      if(!_feeWaivedForRide(fp, r)) feesReceived += _rideFinderFee(r);
     }
   });
 
@@ -28600,6 +28632,14 @@ async function shareDriverVenmo(fullName){
 
 async function setDriverColor(name, color){
   if(!requireAdmin('change driver colors')) return;
+  // Direct request: a real driver must never end up with the color reserved for outside/covering
+  // drivers - that would make an outside driver's ride look exactly like a specific person's.
+  // Refused here, the one place a human actually sets a color, rather than only hoping nobody's
+  // picker ever lands on it.
+  if(_norm(color)===_norm(OUTSIDE_DRIVER_COLOR)){
+    showToast('That shade is reserved for outside/covering drivers \u2014 pick a different one','error');
+    return;
+  }
   driverColors[name]=color;
   vaultDriverColor(name, color);   // record the official saved code (only bumps on a real change)
   await saveColors();
@@ -29502,7 +29542,7 @@ function renderIncome(){
         // waived fee still reduced this page's "Net Take-Home" exactly as if it had genuinely
         // been charged. Now checked the same way, with the same shared function.
         if(_feeWaivedForRide(fp, r)) return;
-        totalFinderFees += fare*clientFeeRate();
+        totalFinderFees += _rideFinderFee(r);
       }
     });
   }
@@ -29539,7 +29579,7 @@ function renderIncome(){
         // Same fix as totalFinderFees just above, mirrored: a fee owed TO this driver can be
         // waived too, and must be excluded the same way.
         if(_feeWaivedForRide(fp, r)) return;
-        totalFeesReceived += fare*clientFeeRate();
+        totalFeesReceived += _rideFinderFee(r);
       }
     });
   }
@@ -29873,7 +29913,7 @@ function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm,
     // that driver's own client and never owes a fee, no matter who drives it.
     const owner = clientIsDriver(r.client) ? null : (getClientOwner(r.client) || feeOwnerFor(r.createdBy));
     const _fpRow = (owner && owner!==dName) ? (feePayments[owner+':recv:'+dName]||{}) : null;
-    const fee   = (owner && owner!==dName && !_feeWaivedForRide(_fpRow, r)) ? fare*clientFeeRate() : 0;
+    const fee   = (owner && owner!==dName && !_feeWaivedForRide(_fpRow, r)) ? _rideFinderFee(r) : 0;
     const gross = fare + tip;
     const cost  = gas + maint + fee;
     const net   = gross - cost;
@@ -29881,7 +29921,7 @@ function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm,
     const bg   = i%2===0?'var(--white)':'var(--surface)';
     const rc   = rideColor(r);
     const typeLabel = r.type==='AP RUN'?'AP Run':r.type==='AP PICK UP'?'AP Pick Up':r.type==='AP ROUND TRIP'?'AP Round Trip':r.type==='ROUND TRIP'?'Round Trip':r.type==='ONE WAY'?'One Way':r.type;
-    return `<div class="fare-item" data-row-id="${r.id}" data-fare="${fare.toFixed(2)}" data-cost="${cost.toFixed(2)}" style="border:1.5px solid var(--light);border-radius:10px;margin-bottom:.5rem;overflow:hidden;background:var(--white);">
+    return `<div class="fare-item" data-row-id="${r.id}" data-fare="${fare.toFixed(2)}" data-cost="${cost.toFixed(2)}" data-rendered-fee="${fee.toFixed(2)}" style="border:1.5px solid var(--light);border-radius:10px;margin-bottom:.5rem;overflow:hidden;background:var(--white);">
       <div onclick="_toggleFareItem(this)" style="display:flex;align-items:center;gap:.6rem;padding:.6rem .75rem;cursor:pointer;">
         <span style="width:9px;height:9px;border-radius:50%;background:${rc};flex-shrink:0;"></span>
         <div style="flex:1;min-width:0;">
@@ -29913,7 +29953,16 @@ function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm,
         <div style="display:flex;justify-content:space-between;padding:.3rem 0;font-size:.82rem;color:#dc2626;">
           <span>Vehicle cost <span style="font-size:.7rem;">(gas + maint)</span></span><span>−$${(gas+maint).toFixed(2)}</span>
         </div>
-        ${fee>0?`<div style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;font-size:.82rem;color:#dc2626;gap:.5rem;"><span>Client fee (15%)</span><span style="display:flex;align-items:center;gap:.5rem;"><span>\u2212$${fee.toFixed(2)}</span>${isAdmin()?`<button onclick="event.stopPropagation();_feeCorrectPaidToWaived('${owner}','${dName}',${_feeIdArg(r.id)})" style="padding:.2rem .5rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:7px;font-family:inherit;font-size:.66rem;font-weight:600;cursor:pointer;white-space:nowrap;">\u21a9 Shouldn\u2019t have charged</button>`:''}</span></div>`:''}
+        ${fee>0?`<div style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;font-size:.82rem;color:#dc2626;gap:.5rem;flex-wrap:wrap;">
+          <span>Client fee${(r.feeOverride!=null&&r.feeOverride!=='')?' <em style="font-style:italic;color:var(--mid);font-size:.72rem;">(adjusted)</em>':' ('+clientFeePct()+'%)'}</span>
+          <span style="display:flex;align-items:center;gap:.4rem;">
+            ${isAdmin()
+              ? `<span style="display:flex;align-items:center;gap:.1rem;">\u2212$<input type="number" min="0" step="0.01" value="${fee.toFixed(2)}" class="income-fee-input" data-ride-id="${r.id}" data-fare="${fare.toFixed(2)}" oninput="updateFareFeeTotal(this)" onblur="persistRideFeeOverride(${r.id},this.value)" onclick="event.stopPropagation()" style="width:60px;padding:.15rem .3rem;border:1.5px solid var(--light);border-radius:5px;font-family:'DM Sans',sans-serif;font-size:.82rem;color:#dc2626;text-align:right;"></span>`
+              : `<span>\u2212$${fee.toFixed(2)}</span>`}
+            ${(isAdmin()&&r.feeOverride!=null&&r.feeOverride!=='')?`<button onclick="event.stopPropagation();resetRideFeeOverride(${r.id})" style="padding:.2rem .5rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:7px;font-family:inherit;font-size:.66rem;font-weight:600;cursor:pointer;white-space:nowrap;">\u21ba Reset to ${clientFeePct()}%</button>`:''}
+            ${isAdmin()?`<button onclick="event.stopPropagation();_feeCorrectPaidToWaived('${owner}','${dName}',${_feeIdArg(r.id)})" style="padding:.2rem .5rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:7px;font-family:inherit;font-size:.66rem;font-weight:600;cursor:pointer;white-space:nowrap;">\u21a9 Shouldn\u2019t have charged</button>`:''}
+          </span>
+        </div>`:''}
         <div style="display:flex;justify-content:space-between;padding:.45rem 0 0;margin-top:.3rem;border-top:1.5px solid var(--light);font-size:.9rem;">
           <span style="font-weight:700;">Net</span><span class="row-net" style="font-weight:700;color:${net>=0?'var(--green)':'#dc2626'};">$${net.toFixed(2)}</span>
         </div>
@@ -29932,6 +29981,27 @@ function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm,
 }
 
 // Live-update the gross and net for a row when the driver types a tip, and refresh totals
+// Mirrors updateFareTipTotal() below - live math only, no save (persistRideFeeOverride does
+// that, on blur, same split as the tip field).
+function updateFareFeeTotal(changedInput){
+  if(!changedInput) return;
+  const item=changedInput.closest('[data-row-id]');
+  if(!item) return;
+  const fee=parseFloat(changedInput.value)||0;
+  const fare=parseFloat(item.dataset.fare)||0;
+  const cost=parseFloat(item.dataset.cost)||0;   // already includes the OLD fee baked in from render time
+  // dataset.cost was computed with the fee AT RENDER TIME, so swap that out for the live value
+  // the same way updateFareTipTotal swaps the tip into gross - the net shown while typing is
+  // never more than one edit away from exactly right, and persistRideFeeOverride's own save,
+  // followed by the next full render, settles it exactly either way.
+  const renderedFee=parseFloat(item.dataset.renderedFee||'0')||0;
+  const newCost=cost-renderedFee+fee;
+  item.dataset.cost=newCost.toFixed(2);
+  const grossEl=item.querySelector('.row-gross');
+  const gross=grossEl?parseFloat(grossEl.textContent.replace(/[^0-9.-]/g,''))||0:fare;
+  const net=gross-newCost;
+  item.querySelectorAll('.row-net').forEach(el=>{ el.textContent='$'+net.toFixed(2); el.style.color=net>=0?'var(--green)':'#dc2626'; });
+}
 function updateFareTipTotal(changedInput){
   if(changedInput){
     const item=changedInput.closest('[data-row-id]');
@@ -29968,6 +30038,30 @@ async function persistRideTip(rideId,val){
   try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
 }
 
+// Mirrors persistRideTip() just above - same admin-only field, same save-on-blur, same refresh
+// of the Bottom Line and dashboard afterward, so an edited fee is reflected everywhere else that
+// shows one (My Fares' own totals, the dashboard fee cards, Income's totals) without having to
+// re-open the page.
+async function persistRideFeeOverride(rideId, val){
+  const r=rides.find(x=>x.id===rideId); if(!r) return;
+  const v=(val==null?'':String(val).trim());
+  const standard=(parseFloat(r.price)||0)*clientFeeRate();
+  const typed=parseFloat(v);
+  // Typing back the exact standard amount (or clearing the box) removes the override entirely,
+  // rather than leaving a "(adjusted)" tag on a ride that's actually back to the normal rate.
+  if(v===''||!isFinite(typed)||Math.abs(typed-standard)<0.005){ delete r.feeOverride; }
+  else { r.feeOverride=Math.round(typed*100)/100; }
+  try{ await saveRides(); }catch(e){ console.warn('fee override save failed',e); }
+  try{ if(typeof renderIncome==='function' && document.getElementById('page-income') && document.getElementById('page-income').classList.contains('active')) renderIncome(); }catch(e){}
+  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+}
+async function resetRideFeeOverride(rideId){
+  const r=rides.find(x=>x.id===rideId); if(!r) return;
+  delete r.feeOverride;
+  try{ await saveRides(); }catch(e){ console.warn('fee override reset failed',e); }
+  try{ if(typeof renderIncome==='function') renderIncome(); }catch(e){}
+  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+}
 // ── 15% FEE PAYMENT TRACKING ──────────────────────────────────────────────
 // Stores paid status + method per driver-pair per direction.
 // Key format: "driverName:owe|recv:counterpartyName"
@@ -32756,7 +32850,7 @@ function renderFinderFees(dName, start, end){
     const driver = r.driver || null;
     if(!owner || !driver || owner===driver) return;
     const fare = parseFloat(r.price)||0;
-    const fee  = fare*clientFeeRate();
+    const fee  = _rideFinderFee(r);
     // Upgraded from a flat fp.waived/fp.paid check to the real shared _feeWaivedForRide() -
     // that flat check only ever caught a blanket waiver, missing both date-ranged waivers
     // (fp.waiveFrom/waiveUntil) and per-ride waivers (fp.waivedRides), the same gap just fixed
@@ -33775,7 +33869,7 @@ async function generateYearEndPL(){
     // deductible expense here. Cash-basis, Schedule C-mapped tax report - a fee never actually
     // paid should never reduce it, the same fix applied to renderDashIncome for the same reason.
     const _fpYepl = (owner && owner!==dName) ? (feePayments[owner+':recv:'+dName]||{}) : null;
-    const fee = (owner && owner!==dName && !_feeWaivedForRide(_fpYepl, r)) ? fare*clientFeeRate() : 0;
+    const fee = (owner && owner!==dName && !_feeWaivedForRide(_fpYepl, r)) ? _rideFinderFee(r) : 0;
     // Year-end P&L must reflect what a ride ACTUALLY cost when it happened, not today's gas
     // price - otherwise editing the gas price silently restates an already-filed tax year.
     const _cb   = _rideCostBasis(r);
