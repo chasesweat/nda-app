@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191249">
+<meta name="version" content="202608191256">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -661,9 +661,17 @@ input,select,textarea{font-size:16px;}
     <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.75rem;" id="dash-upcoming-label">Your upcoming rides</div>
     <div id="upcoming-list"></div>
     <!-- Direct request: a sent confirmation moves down here, by the fee-confirmation boxes, the
-         moment it's sent - instead of lingering in the actionable list at the top of the page. -->
-    <div id="dash-confirmations-sent" style="margin-bottom:1.5rem;"></div>
-    <div id="dash-fees-awaiting-approval" style="margin-bottom:1.5rem;"></div>
+         moment it's sent - instead of lingering in the actionable list at the top of the page.
+         margin-top (not just margin-bottom) here specifically: this sits right after the Rides
+         You're Driving list above, which has no bottom margin of its own (it isn't a
+         margin-bottom:1.5rem box like every other dashboard section) - without a top margin here,
+         this box lands flush against it with no breathing room, reading as a continuation of the
+         rides list rather than its own separate part of the page, exactly as reported. -->
+    <div id="dash-confirmations-sent" style="margin-top:1.5rem;margin-bottom:1.5rem;"></div>
+    <!-- Same margin-top reasoning as dash-confirmations-sent just above: if there are no sent
+         confirmations to show (empty box, no height), this one becomes the first thing after the
+         rides list instead, and needs the same breathing room for the identical reason. -->
+    <div id="dash-fees-awaiting-approval" style="margin-top:1.5rem;margin-bottom:1.5rem;"></div>
   </div>
 
   <!-- QUOTE -->
@@ -22839,12 +22847,14 @@ function renderDashAwaitingInvoicePast(){
     +rows
     +'</div>';
 }
-// Reported directly: an admin only ever saw a COUNT of the team's unpaid rides ("Mark ALL 2 team
-// rides paid"), never which ones or whose - "make the driver clickable so I can see what rides
-// need to be wrapped up." Tapping a driver's name now filters this box to just their rides;
-// tapping it again (or the "Show all" pill) clears the filter. Persisted across re-renders in
-// window._needsAttentionDriverFilter, not a local variable, since this function is called fresh
-// on every refreshDash() and a plain local would forget the filter on the very next refresh.
+// Direct follow-up request: the per-row "make the driver clickable" filter (just above, in spirit)
+// put every ride on the dashboard at once with a filter to narrow it - not what was actually
+// wanted. "I still want the collapsed box like we used to have ... click on the driver and it
+// expand a drop down ... not each individual ride showing up on the dashboard." Collapsed by
+// default now: one row per driver (name, ride count, total), tapping a driver expands an
+// accordion of just their rides underneath; tapping again (or a different driver) collapses it.
+// Persisted in window._needsAttentionExpandedDriver, not a local variable, for the same reason as
+// before - this function re-renders fresh on every refreshDash().
 function renderDashNeedsAttention(){
   var box=document.getElementById('dash-needs-attention'); if(!box) return;
   var todayStr=toDateStr(nowET());
@@ -22860,46 +22870,87 @@ function renderDashNeedsAttention(){
         .sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); })
     : [];
   var companyCount = companyOverdue.length;
-  if(!overdue.length && !companyCount){ box.innerHTML=''; window._needsAttentionDriverFilter=null; return; }
+  if(!overdue.length && !companyCount){ box.innerHTML=''; window._needsAttentionExpandedDriver=null; return; }
 
-  // An admin sees the whole team's list (which already includes their own rides); anyone else
-  // still only ever sees their own, exactly as before.
-  var fullList = isAdmin() ? companyOverdue : overdue;
-  var activeFilter = window._needsAttentionDriverFilter || null;
-  if(activeFilter && !fullList.some(function(r){ return _displayRideDriver(r)===activeFilter; })){
-    activeFilter = window._needsAttentionDriverFilter = null;   // the filtered driver has nothing left - don't show an empty, confusing filter pill
-  }
-  var shown = activeFilter ? fullList.filter(function(r){ return _displayRideDriver(r)===activeFilter; }) : fullList;
-
-  var rows=shown.slice(0,15).map(function(r){
-    var drv=_displayRideDriver(r);
-    var drvShort=drv?driverShortName(drv):'Unassigned';
-    return '<div onclick="openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.5rem;padding:.5rem .2rem;border-bottom:1px solid #f3c98a;cursor:pointer;">'
+  function rideRowHtml(r){
+    return '<div onclick="openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.5rem;padding:.5rem .2rem .5rem 1rem;border-top:1px solid #f3c98a;cursor:pointer;">'
       +'<span style="min-width:48px;font-size:.76rem;font-weight:700;color:var(--black);">'+fmtDateShort(r.date)+'</span>'
       +'<span style="flex:1;min-width:0;font-size:.85rem;color:var(--black);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+escHtml(r.client||'\u2014')+' <span style="color:var(--mid);font-size:.72rem;">'+escHtml(r.type||'')+'</span></span>'
-      +(isAdmin() ? '<span onclick="event.stopPropagation();_dashNeedsAttentionFilterByDriver('+JSON.stringify(drv)+')" style="font-size:.72rem;font-weight:700;color:#7c3aed;white-space:nowrap;cursor:pointer;text-decoration:underline;">'+escHtml(drvShort)+'</span>' : '')
       +'<span style="font-size:.82rem;font-weight:700;color:var(--green);">$'+(r.price||0)+'</span>'
       +'<button onclick="event.stopPropagation();flagRideCautious('+r.id+')" title="Flag this client as cautious" style="padding:.3rem .55rem;background:none;border:1.5px solid #d97706;color:#d97706;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;">\u26A0\uFE0F</button>'
       +'<button onclick="event.stopPropagation();toggleRidePaid('+r.id+')" style="padding:.3rem .7rem;background:#b5651d;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;">Mark paid</button>'
       +'</div>';
-  }).join('');
-  var filterPill = activeFilter
-    ? '<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.5rem;font-size:.76rem;color:#92400e;">Showing just <b>'+escHtml(driverShortName(activeFilter))+'</b> <span onclick="_dashNeedsAttentionFilterByDriver(null)" style="color:#7c3aed;font-weight:700;cursor:pointer;text-decoration:underline;">Show all</span></div>'
-    : '';
+  }
+
+  var bodyHtml;
+  if(isAdmin()){
+    // Grouped by driver, collapsed by default - the actual ask, refined a second time: "I do not
+    // want a big dashboard thing with everybody's ride name ... you click on the driver name and
+    // you see a POP-UP of what rides have and have not been paid." Not an inline accordion
+    // (the first attempt) - nothing but the driver's name, count, and total ever shows directly
+    // on the dashboard; the rides themselves only ever appear in the popup.
+    var byDriver = {};
+    companyOverdue.forEach(function(r){
+      var d = _displayRideDriver(r) || 'Unassigned';
+      (byDriver[d] = byDriver[d] || []).push(r);
+    });
+    var driverNames = Object.keys(byDriver).sort();
+    window._needsAttentionByDriver = byDriver;   // read by _openDriverWrapUpModal below, kept current on every render
+    bodyHtml = driverNames.map(function(d){
+      var list = byDriver[d];
+      var total = list.reduce(function(s,r){ return s + (parseFloat(r.price)||0); }, 0);
+      return '<div onclick="_openDriverWrapUpModal('+JSON.stringify(d)+')" style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.6rem .2rem;border-top:1px solid #f3c98a;cursor:pointer;">'
+          +'<span style="font-size:.86rem;font-weight:700;color:#7c3aed;">'+escHtml(driverShortName(d))+'</span>'
+          +'<span style="display:flex;align-items:center;gap:.6rem;">'
+            +'<span style="font-size:.78rem;color:var(--mid);">'+list.length+' ride'+(list.length>1?'s':'')+' \u00b7 $'+total.toFixed(0)+'</span>'
+            +'<span style="font-size:.78rem;color:var(--mid);">\u203a</span>'
+          +'</span>'
+        +'</div>';
+    }).join('');
+  } else {
+    // Just your own rides - a flat list, same as always, no driver grouping or popup needed.
+    bodyHtml = overdue.slice(0,15).map(rideRowHtml).join('');
+  }
+
   box.innerHTML='<div style="background:#fff8ec;border:1.5px solid #f3c98a;border-radius:12px;padding:1rem;">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.4rem;">'
     +'<span style="font-size:.74rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#b5651d;">\u26A0\uFE0F '+(overdue.length ? ('Rides to wrap up \u00b7 '+overdue.length) : 'Team rides to wrap up')+'</span>'
     +(overdue.length>1?'<button onclick="markAllPrevPaid()" style="background:#b5651d;color:#fff;border:none;border-radius:8px;padding:.4rem .8rem;font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;">\u2713 Mark all paid</button>':'')
     +(isAdmin() && companyCount ? '<button onclick="markAllPastRidesPaidAdmin()" style="margin-left:.4rem;background:none;border:1.5px solid #b91c1c;color:#b91c1c;border-radius:8px;padding:.35rem .7rem;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;">\u26a0\ufe0f Mark ALL '+companyCount+' team rides paid</button>' : '')
     +'</div>'
-    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">Past or completed rides you haven\u2019t marked paid yet. Open one to mark it paid and record how the client paid\u2014or <b>Mark all paid</b> to clear them all at once (this skips miles &amp; tip; add those anytime in Income).'+(isAdmin()?' Tap a driver\u2019s name to see just their rides.':'')+'</div>'
-    +filterPill
-    +rows
+    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.5rem;line-height:1.45;">Past or completed rides you haven\u2019t marked paid yet. Open one to mark it paid and record how the client paid\u2014or <b>Mark all paid</b> to clear them all at once (this skips miles &amp; tip; add those anytime in Income).'+(isAdmin()?' Tap a driver\u2019s name to see their rides.':'')+'</div>'
+    +bodyHtml
     +'</div>';
 }
-function _dashNeedsAttentionFilterByDriver(driverName){
-  window._needsAttentionDriverFilter = driverName || null;
-  renderDashNeedsAttention();
+// Second attempt at "make the driver clickable": the first (v1252) expanded their rides inline
+// on the dashboard itself - reported back as still not what was wanted. This opens a popup
+// instead, reusing the exact row style/actions (Mark Paid, flag) already built for it, matching
+// the "Mark past rides paid" driver-picker's own clean, name-only list as the explicit reference
+// for what the dashboard itself should look like.
+function _openDriverWrapUpModal(driverName){
+  var list = (window._needsAttentionByDriver || {})[driverName] || [];
+  var back=document.createElement('div');
+  back.id='driver-wrapup-overlay';
+  back.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:14200;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  back.onclick=function(e){ if(e.target===back) back.remove(); };
+  var rowsHtml = list.map(function(r){
+    return '<div onclick="openRideModal('+r.id+')" style="display:flex;align-items:center;gap:.5rem;padding:.55rem 0;border-top:1px solid var(--light);cursor:pointer;">'
+      +'<span style="min-width:48px;font-size:.76rem;font-weight:700;color:var(--black);">'+fmtDateShort(r.date)+'</span>'
+      +'<span style="flex:1;min-width:0;font-size:.85rem;color:var(--black);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+escHtml(r.client||'\u2014')+' <span style="color:var(--mid);font-size:.72rem;">'+escHtml(r.type||'')+'</span></span>'
+      +'<span style="font-size:.82rem;font-weight:700;color:var(--green);">$'+(r.price||0)+'</span>'
+      +'<button onclick="event.stopPropagation();flagRideCautious('+r.id+')" title="Flag this client as cautious" style="padding:.3rem .55rem;background:none;border:1.5px solid #d97706;color:#d97706;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;">\u26A0\uFE0F</button>'
+      +'<button onclick="event.stopPropagation();toggleRidePaid('+r.id+');document.getElementById(\'driver-wrapup-overlay\').remove();" style="padding:.3rem .7rem;background:#b5651d;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;">Mark paid</button>'
+      +'</div>';
+  }).join('');
+  back.innerHTML='<div style="background:#fff;border-radius:16px;max-width:420px;width:100%;max-height:80vh;overflow-y:auto;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.35);">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.2rem;">'
+      +'<div style="font-size:1.05rem;font-weight:800;color:#0f172a;">'+escHtml(driverShortName(driverName))+'</div>'
+      +'<span onclick="document.getElementById(\'driver-wrapup-overlay\').remove()" style="cursor:pointer;color:var(--mid);font-size:1.3rem;line-height:1;">&times;</span>'
+    +'</div>'
+    +'<div style="font-size:.78rem;color:var(--mid);margin-bottom:.3rem;">'+list.length+' ride'+(list.length>1?'s':'')+' not yet marked paid</div>'
+    +rowsHtml
+    +'</div>';
+  document.body.appendChild(back);
 }
 
 // Tomorrow's rides you SCHEDULED that still need a confirmation text — a simple list + link to My Rides.
@@ -25627,6 +25678,7 @@ function _buildTerminalCoordCardHtml(){
         +'<input id="'+id+'" value="'+escHtml(live[k]||'')+'" '+(canEdit?'':'readonly ')
           +'placeholder="33.641718,-84.448644" '
           +'style="flex:1;min-width:0;padding:.4rem .55rem;border:1.5px solid var(--light);border-radius:8px;font-family:inherit;font-size:.8rem;box-sizing:border-box;'+(canEdit?'':'background:var(--surface);color:var(--mid);')+'">'
+        +'<button onclick="event.stopPropagation();_previewTerminalCoord(\''+id+'\')" title="Open this coordinate in your own Maps app, without saving it" style="flex-shrink:0;padding:.4rem .6rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;">\ud83d\udccd Preview</button>'
         +(canEdit?'<button onclick="_saveTerminalCoord(\''+k+'\',\''+id+'\')" style="flex-shrink:0;padding:.4rem .7rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">Save</button>':'')
         +(canEdit&&custom?'<button onclick="_resetTerminalCoord(\''+k+'\')" style="flex-shrink:0;padding:.4rem .6rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">Reset</button>':'')
       +'</div></div>';
@@ -25650,10 +25702,26 @@ function _buildTerminalCoordCardHtml(){
   return '<div style="background:var(--surface);border-radius:12px;padding:1.1rem;border:1.5px solid var(--light);margin-bottom:1.25rem;">'
     +'<div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.25rem;">Airport pickup points</div>'
     +_rejectedHtml
-    +'<div style="font-size:.72rem;color:var(--mid);margin-bottom:.8rem;line-height:1.5;">Exactly where Start Ride sends a driver for each terminal. If navigation is dropping you in a parking deck or anywhere other than the right curb, stand at the correct spot, long-press it in Google Maps to copy the coordinates, and paste them here. Applies to everyone.</div>'
+    +'<div style="font-size:.72rem;color:var(--mid);margin-bottom:.8rem;line-height:1.5;">Exactly where Start Ride sends a driver for each terminal. If navigation is dropping you in a parking deck or anywhere other than the right curb, stand at the correct spot, long-press it in Google Maps to copy the coordinates, and paste them here. One known cause: a coordinate that exactly matches a business\u2019s own registered location can get routed there by name instead of as a bare point - if that business has more than one location, you can land at the wrong one, miles away. A tiny nudge to the coordinate (changing the last couple of digits) is usually enough to fix it. Use <b>Preview</b> to test whatever you\u2019ve typed in your own Maps app before saving - it won\u2019t change anything until you tap Save. Applies to everyone.</div>'
     +rows
     +(canEdit?'':'<div style="font-size:.68rem;color:var(--mid);margin-top:.2rem;">Only an admin can change these.</div>')
     +'</div>';
+}
+// Direct request, after real evidence (a Google search) showed a built-in terminal coordinate
+// resolving to a named business with two locations - one of them wrong, miles away downtown.
+// There was no way to find out whether a corrected coordinate actually escapes that kind of
+// collision without saving it blindly and then test-driving it for real. This opens whatever is
+// currently TYPED in the field - saved or not - through the exact same openNav()/mapsHref()
+// mechanism a real ride's navigation already uses, so the person who actually has a phone and can
+// see what it resolves to can verify a candidate before committing to it, not after.
+function _previewTerminalCoord(inputId){
+  var el = document.getElementById(inputId); if(!el) return;
+  var v = (el.value||'').trim();
+  if(!_isValidLatLng(v)){
+    showToast('Type a coordinate first \u2014 e.g. 33.641718,-84.448644','error');
+    return;
+  }
+  try{ openNav(v); }catch(e){ console.warn('preview failed', e); }
 }
 async function _saveTerminalCoord(term, inputId){
   var el = document.getElementById(inputId); if(!el) return;
@@ -26733,7 +26801,12 @@ async function renderArchivedDrivers(){
 }
 
 function buildDriverIncomeData(fullName){
-  let dRides = rides.filter(r => r.driver===fullName && r.date && parseFloat(r.price||0)>0);
+  // BUG FIX, same root cause as renderIncome's own filter and calcNetTakeHomeForMonth: a
+  // deliberately-waived $0 ride dropped out of this driver's own income/receipts document
+  // entirely. r.status==='paid' is the correct, sole gate here - this function had no other
+  // status check at all, unlike those two, so the price check is replaced rather than just
+  // removed, to keep excluding a ride that was simply never priced or paid in the first place.
+  let dRides = rides.filter(r => r.driver===fullName && r.date && r.status==='paid');
   // Include their logged outside rides too
   const outside = (outsideRides[fullName]||[]).filter(o=>o.date && parseFloat(o.price||0)>0).map(o=>({
     date:o.date, time:o.time||'', client:o.client||'Outside ride', type:'OUTSIDE — '+(o.type||''),
@@ -28508,7 +28581,13 @@ function calcNetTakeHomeForMonth(dName){
   // page's own _incEarned; a one-line boolean isn't worth its own shared-function indirection.
   const isCompleted = r => r.status!=='cancelled' && (r.status==='paid' || r._outside);
 
-  let monthRides = rides.filter(r => inMonth(r) && parseFloat(r.price||0)>0 && r.driver===dName && isCompleted(r));
+  // BUG FIX, reported directly: a ride whose fee was deliberately edited down to $0 (waived -
+  // "Edit fee" already supports this, documented with a note) disappeared from here entirely -
+  // its real mileage, gas, and maintenance cost silently vanished from Net Take-Home along with
+  // it, even though all of that still genuinely happened. isCompleted(r) already requires
+  // status==='paid' - the ONLY thing that should decide whether a ride counts here - so the price
+  // check was never actually guarding against anything except this exact case.
+  let monthRides = rides.filter(r => inMonth(r) && r.driver===dName && isCompleted(r));
   const outsideRidesThisMonth = getMyOutsideRidesAsRides().filter(r => inMonth(r) && parseFloat(r.price||0)>0 && isCompleted(r));
   monthRides = monthRides.concat(outsideRidesThisMonth);
 
@@ -29551,7 +29630,12 @@ function renderIncome(){
   const _incEarned = r => r.status!=='cancelled' && (r.status==='paid' || r._outside);
   let filtered = rides.filter(r=>{
     if(dName && r.driver!==dName && (!_incLinked||r.driver!==_incLinked)) return false;
-    if(!r.date||r.price===0) return false;
+    if(!r.date) return false;
+    // BUG FIX, reported directly: a ride deliberately waived to $0 via Edit Fee vanished from My
+    // Fares and the Bottom Line entirely - mileage, vehicle cost, and any separately-set 15% fee
+    // override along with it. _incEarned(r), right below, already requires status==='paid' - the
+    // correct, sole gate for "did this actually happen and get paid" - so excluding price===0 on
+    // top of that only ever excluded a ride that was real, paid, and deliberately priced at zero.
     if(!_incEarned(r)) return false;
     if(!_matchesPayFilter(r)) return false;
     if(start && end){
@@ -30054,7 +30138,10 @@ function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm,
           <span class="row-gross" style="font-weight:700;color:var(--green);">$${gross.toFixed(2)}</span>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;font-size:.82rem;">
-          <span style="color:var(--mid);">Fare</span><span>$${fare.toFixed(2)}</span>
+          <span style="color:var(--mid);">Fare</span>
+          ${canDeleteRide(r)
+            ? `<span style="display:flex;align-items:center;gap:.15rem;">$<input type="number" min="0" step="0.01" value="${fare.toFixed(2)}" class="income-fare-input" data-ride-id="${r.id}" oninput="updateFareFareTotal(this)" onblur="persistRideFareEdit(${r.id},this.value)" onclick="event.stopPropagation()" style="width:72px;padding:.15rem .3rem;border:1.5px solid var(--light);border-radius:5px;font-family:'DM Sans',sans-serif;font-size:.82rem;text-align:right;"></span>`
+            : `<span>$${fare.toFixed(2)}</span>`}
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;font-size:.82rem;">
           <span style="color:var(--mid);">Tip</span>
@@ -30152,6 +30239,34 @@ async function persistRideTip(rideId,val){
   try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
 }
 
+// Direct request: editing a ride's fare used to require opening the ride itself and finding
+// "Edit fee" inside the collapsed Dispatch Tools section - this is the same field, made editable
+// right here in My Fares too, since that's a much shorter path for the common case of a quick
+// correction. The fuller Edit Fee modal still exists for when surcharges, mileage, or a note
+// documenting WHY need to change at the same time - this is for "just the number," same spirit
+// as the tip field right above it.
+function updateFareFareTotal(changedInput){
+  if(!changedInput) return;
+  const item=changedInput.closest('[data-row-id]');
+  if(!item) return;
+  const fare=parseFloat(changedInput.value)||0;
+  item.dataset.fare=fare.toFixed(2);   // kept current so a tip edit right after still uses the new fare, not the stale one
+  const tipInput=item.querySelector('.income-tip-input');
+  const tip=tipInput?(parseFloat(tipInput.value)||0):0;
+  const cost=parseFloat(item.dataset.cost)||0;
+  const gross=fare+tip; const net=gross-cost;
+  item.querySelectorAll('.row-gross').forEach(el=>{ el.textContent='$'+gross.toFixed(2); });
+  item.querySelectorAll('.row-net').forEach(el=>{ el.textContent='$'+net.toFixed(2); el.style.color=net>=0?'var(--green)':'#dc2626'; });
+}
+async function persistRideFareEdit(rideId, val){
+  const r=rides.find(x=>x.id===rideId); if(!r) return;
+  const newFare=parseFloat(val);
+  if(isNaN(newFare) || newFare<0){ showToast('Enter a valid fare amount','error'); return; }
+  r.price=Math.round(newFare*100)/100;
+  try{ await saveRides(); }catch(e){ console.warn('fare save failed',e); }
+  try{ if(typeof renderIncome==='function' && document.getElementById('page-income') && document.getElementById('page-income').classList.contains('active')) renderIncome(); }catch(e){}
+  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+}
 // Mirrors persistRideTip() just above - same admin-only field, same save-on-blur, same refresh
 // of the Bottom Line and dashboard afterward, so an edited fee is reflected everywhere else that
 // shows one (My Fares' own totals, the dashboard fee cards, Income's totals) without having to
@@ -33992,8 +34107,12 @@ async function generateYearEndPL(){
   const _earned = r => r.status!=='cancelled' && r.status==='paid';
   const _unpaid = r => r.status!=='cancelled' && r.status!=='paid' && r.date && r.date < toDateStr(nowET());
 
-  // App-booked rides this year that this driver drove and earned on
-  const appRides = rides.filter(r=>r.driver===dName && r.date && r.date>=ys && r.date<=ye && parseFloat(r.price||0)>0 && _earned(r));
+  // App-booked rides this year that this driver drove and earned on. BUG FIX, same root cause as
+  // the Income page and dashboard: _earned(r) already requires status==='paid', the correct, sole
+  // gate - the price check only ever excluded a ride that genuinely happened and got paid, but was
+  // deliberately priced at $0 (Edit Fee). Mileage still needs to be in this report whether or not
+  // the fare was waived.
+  const appRides = rides.filter(r=>r.driver===dName && r.date && r.date>=ys && r.date<=ye && _earned(r));
   // Outside rides this year (driver's own, already net of provider fees)
   const outRaw = (typeof outsideRides==='object' && outsideRides) ? (outsideRides[dName]||[]) : [];
   const outRides = outRaw.filter(o=>o && o.date && o.date>=ys && o.date<=ye && parseFloat(o.price||o.amount||0)>0);
@@ -36968,8 +37087,15 @@ async function registerSW(){
   try {
     const reg = await navigator.serviceWorker.register('sw.js');
       // Auto-update: pull new deploys instead of serving a stale cached build.
-      try{ reg.update(); }catch(_e){}
-      setInterval(function(){ try{ reg.update(); }catch(_e){} }, 60*60*1000);
+      // reg.update() returns a PROMISE - a bare try/catch around the call only catches a
+      // SYNCHRONOUS throw, never a rejection from the promise itself. Found in the crash log as
+      // "Failed to update a ServiceWorker ... An unknown error occurred when fetching the
+      // script" - a transient network hiccup during this background check, completely harmless
+      // (it just tries again next hour, or on the next page load), but it was reaching the
+      // global unhandledrejection handler and logging itself as if it were a real app crash.
+      // .catch() here, not try/catch, actually catches it.
+      reg.update().catch(function(_e){});
+      setInterval(function(){ reg.update().catch(function(_e){}); }, 60*60*1000);
       reg.addEventListener('updatefound', function(){
         var nw=reg.installing;
         if(nw){ nw.addEventListener('statechange', function(){
