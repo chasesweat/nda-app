@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191257">
+<meta name="version" content="202608191258">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2259,7 +2259,62 @@ function _storageBlocked(){
   try{ localStorage.setItem('nda-probe','1'); localStorage.removeItem('nda-probe'); return false; }
   catch(e){ return true; }
 }
-function _showStorageBlockedHelp(){
+// ---- STORAGE HEALTH (v1258) -------------------------------------------------------------------
+// A phone reported "This phone is blocking the app's storage" with auth/unsupported-persistence-type -
+// the browser refused a storage type outright - but nothing recorded WHICH storage failed or why, so the
+// message could only offer generic advice. These measure it.
+//
+// localStorage's quota is counted in CHARACTERS (about 5 million per site). The app uses it heavily - a
+// mirror of every key it writes plus the saved-copy snapshot - and Firebase's own sign-in keys live in
+// the same pool. If the app fills it, Firebase's availability probe (a one-byte write) fails and its
+// sign-in falls back through every storage mode: exactly this error.
+var _LS_BUDGET = 4000000;        // the app's own caches may use this much; the rest is reserved
+var _LS_HARD_LIMIT = 4300000;    // above this at startup, regenerable caches are cleared before sign-in
+function _lsUsedChars(){
+  try{ var n=0; for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); n += k.length + (localStorage.getItem(k)||'').length; } return n; }
+  catch(e){ return -1; }
+}
+async function _storageHealthText(){
+  var out=[], used=_lsUsedChars();
+  var usedTxt = used>=0 ? (Math.round(used/10000)/100)+'M of ~5M characters used' : 'usage unknown';
+  try{ localStorage.setItem('nda-probe','1'); localStorage.removeItem('nda-probe'); out.push('localStorage: writes OK, '+usedTxt); }
+  catch(e){ out.push('localStorage: write FAILED ('+((e&&e.name)||'error')+'), '+usedTxt); }
+  try{ sessionStorage.setItem('nda-probe','1'); sessionStorage.removeItem('nda-probe'); out.push('sessionStorage: writes OK'); }
+  catch(e){ out.push('sessionStorage: write FAILED ('+((e&&e.name)||'error')+')'); }
+  try{
+    var idb = await Promise.race([
+      new Promise(function(res){
+        try{
+          var rq=indexedDB.open('nda-probe-db',1);
+          rq.onupgradeneeded=function(){ try{ rq.result.createObjectStore('p'); }catch(e){} };
+          rq.onsuccess=function(){ try{ rq.result.close(); indexedDB.deleteDatabase('nda-probe-db'); }catch(e){} res('OK'); };
+          rq.onerror=function(){ res('FAILED ('+((rq.error&&rq.error.name)||'error')+')'); };
+          rq.onblocked=function(){ res('blocked'); };
+        }catch(e){ res('FAILED ('+((e&&e.name)||'error')+')'); }
+      }),
+      new Promise(function(res){ setTimeout(function(){ res('did not answer in 3s'); }, 3000); })
+    ]);
+    out.push('IndexedDB: '+idb);
+  }catch(e){ out.push('IndexedDB: unknown'); }
+  try{
+    if(navigator.storage && navigator.storage.estimate){
+      var est = await Promise.race([ navigator.storage.estimate(), new Promise(function(r){ setTimeout(function(){ r(null); }, 2000); }) ]);
+      if(est && est.quota) out.push('Browser storage for this site: '+Math.round(est.usage/1048576)+' MB used of '+Math.round(est.quota/1048576)+' MB allowed');
+    }
+  }catch(e){}
+  return out.join(' \u00b7 ');
+}
+// Before Firebase signs in: if the app's own caches have crowded localStorage, clear the REGENERABLE ones
+// (the saved-copy snapshot and open timings - both rebuilt from live data) so Firebase's tiny keys fit.
+function _ensureStorageHeadroom(){
+  try{
+    var before=_lsUsedChars(); if(before<0 || before<=_LS_HARD_LIMIT) return;
+    ['nda-cache-v1','nda-open-times'].forEach(function(k){ try{ if(_lsUsedChars()>_LS_HARD_LIMIT) localStorage.removeItem(k); }catch(e){} });
+    var after=_lsUsedChars();
+    try{ if(typeof _logCrash==='function') _logCrash('storage-headroom', 'localStorage was '+Math.round(before/10000)/100+'M characters (of ~5M) at startup - cleared the saved-copy cache to leave room for sign-in; now '+Math.round(after/10000)/100+'M', ''); }catch(e){}
+  }catch(e){}
+}
+async function _showStorageBlockedHelp(){
   var ios = /iPhone|iPad|iPod/.test(navigator.userAgent||'');
   var steps = ios
     ? '1. Settings \u2192 Apps \u2192 Safari: turn OFF \u201CBlock All Cookies\u201D.\n'
@@ -2269,8 +2324,21 @@ function _showStorageBlockedHelp(){
     : '1. Make sure cookies and site data are allowed for this site in your browser settings.\n'
     + '2. Make sure you\u2019re not in a private or incognito window.\n'
     + '3. If your phone\u2019s storage is nearly full, free up some space.';
+  // v1258: the old text always said "that's why you get logged out every time". That is only true when the
+  // app's OWN storage fails (the iPhone this was written for). On a phone where only Firebase's sign-in
+  // storage was refused but the app's own login still saves, it was wrong - so say which one it is, and
+  // show what this phone actually reported instead of leaving it to guesswork.
+  var ownOk = true; try{ localStorage.setItem('nda-probe','1'); localStorage.removeItem('nda-probe'); }catch(e){ ownOk=false; }
+  if(ownOk){
+    // Told at most once a day - the facts are in the crash log every time, and a modal on every open is just noise.
+    try{ var _last=parseInt(localStorage.getItem('nda-storage-help-at')||'0',10); if(_last && Date.now()-_last < 24*3600*1000) return; localStorage.setItem('nda-storage-help-at', String(Date.now())); }catch(e){}
+  }
+  var facts=''; try{ facts = await _storageHealthText(); }catch(e){}
+  var lead = ownOk
+    ? 'You\u2019re still logged in, but this phone\u2019s browser refused the storage Firebase uses to remember its sign-in, so it has to sign in again behind the scenes on every open. The app still works; it can just open a little slower.\n\n'
+    : 'That\u2019s why you get logged out every time and the app takes longer to open.\n\n';
   showConfirmModal({ icon:'\u26A0\uFE0F', title:'This phone is blocking the app\u2019s storage',
-    message:'That\u2019s why you get logged out every time and the app takes longer to open.\n\n' + steps,
+    message: lead + steps + (facts ? '\n\nWhat this phone reports:\n' + facts : ''),
     buttons:[{ label:'OK', style:'primary', value:true }] });
 }
 function _logCrash(kind, message, stack){
@@ -2630,6 +2698,7 @@ async function initFirebase(){
     // setupRealtimeListeners() - the last step of loading - so a load that stalled never knew
     // whether the database was even reachable, and the banner could not say.
     try{ _watchConnection(); }catch(_e){}
+    try{ _ensureStorageHeadroom(); }catch(_e){}
     // Sign in anonymously so the database can require an authenticated client
     // (lets us lock the security rules to "auth != null" instead of fully public).
     if(firebase.auth){
@@ -2685,9 +2754,10 @@ async function _fbSignInWithFallback(){
       await _withTimeout(auth.signInAnonymously(), 8000, 'signInAnonymously');
       window._authStorageMode = modes[i][0];     // v1219: lets the app tell a person their storage is blocked
       if(i>0){
+        var _health=''; try{ _health = await _withTimeout(_storageHealthText(), 6000, 'storage check'); }catch(e){ _health='(storage check did not finish)'; }
         try{ if(typeof _logCrash==='function') _logCrash('auth-storage-fallback',
           'Browser storage failed for Firebase sign-in - fell back to '+modes[i][0]+' mode',
-          lastErr && (lastErr.stack||lastErr.message)); }catch(e){}
+          'STORAGE CHECK: '+_health+'\n\n'+(lastErr && (lastErr.stack||lastErr.message))); }catch(e){}
       }
       return true;
     }catch(e){ lastErr=e; console.warn('Firebase sign-in ('+modes[i][0]+') failed:', e && e.message); }
@@ -3008,9 +3078,10 @@ function _renderOfflineBar(){
           +'. Changes will send when you\u2019re back online.';
   if(!bar){
     bar=document.createElement('div'); bar.id='nda-offline-bar';
-    bar.style.cssText='position:fixed;left:0;right:0;top:0;z-index:19999;background:#b45309;color:#fff;'
+    // v1258: same fix as the red banner - in flow, below the menu and modals, never over the header.
+    bar.style.cssText='position:sticky;top:0;z-index:9000;background:#b45309;color:#fff;'
       +'padding:calc(.55rem + env(safe-area-inset-top,0px)) 1rem .55rem;font-size:.82rem;line-height:1.4;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.25);';
-    document.body.appendChild(bar);
+    document.body.insertBefore(bar, document.body.firstChild);
   }
   bar.innerHTML=html;
 }
@@ -3319,6 +3390,16 @@ function _cacheSnapshotWrite(){
     if(!slim) return;
     var json = JSON.stringify({ v:_appBuildTag(), savedAt:nowET().toISOString(), data:slim });
     if(json.length > 4600000) return;     // still too big after stripping images: skip this cycle
+    // v1258: that cap alone allowed the snapshot to take ~92% of a ~5M-character quota while storageSet()
+    // mirrors every key it writes with no budget at all - together they could leave nothing for Firebase's own
+    // sign-in keys, producing auth/unsupported-persistence-type. The snapshot may now only use what fits
+    // inside the app's budget alongside everything else already stored; if it doesn't fit it is skipped this
+    // cycle (the previous one stays), same as the existing too-big case.
+    try{
+      var _own = 0; try{ _own = _NDA_CACHE_KEY.length + (localStorage.getItem(_NDA_CACHE_KEY)||'').length; }catch(e){}
+      var _others = _lsUsedChars() - _own;
+      if(_others >= 0 && _others + json.length > _LS_BUDGET) return;
+    }catch(e){}
     localStorage.setItem(_NDA_CACHE_KEY, json);
   }catch(e){ /* quota / serialization: never crash boot over the cache */ }
 }
@@ -3506,7 +3587,13 @@ function _showStaleDataBanner(){
   if(document.getElementById('nda-stale-banner')) return;
   var b=document.createElement('div');
   b.id='nda-stale-banner';
-  b.style.cssText='position:fixed;left:0;right:0;top:0;z-index:20000;background:#b91c1c;color:#fff;padding:.7rem 1rem;font-size:.85rem;font-weight:700;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;box-shadow:0 2px 10px rgba(0,0,0,.3);';
+  // v1258: was position:fixed;top:0;z-index:20000 - painted ON TOP of the header, so the hamburger
+  // (the only way to the crash log, which is where this banner's own cause gets recorded) was
+  // unreachable on exactly the screen that needed it, and at 20000 it also sat above the side menu and
+  // every modal. The header is in normal page flow, so this is now an in-flow, sticky first child of
+  // <body>: it takes its own space and pushes the header DOWN instead of covering it, and its z-index
+  // is below the menu (9999) and modals so nothing it says can ever block something that fixes it.
+  b.style.cssText='position:sticky;top:0;z-index:9000;background:#b91c1c;color:#fff;padding:calc(.7rem + env(safe-area-inset-top,0px)) 1rem .7rem;font-size:.85rem;font-weight:700;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;box-shadow:0 2px 10px rgba(0,0,0,.3);';
   var _asOf=''; try{ _asOf = (typeof _ridesAsOfLabel==='function') ? _ridesAsOfLabel() : ''; }catch(e){}
   var _why=''; try{
     if(window._fbConnected===false) _why=' The database isn\u2019t reachable right now.';
@@ -3515,7 +3602,7 @@ function _showStaleDataBanner(){
   }catch(e){}
   b.innerHTML='<span style="flex:1;min-width:0;">\u26a0\ufe0f Couldn\u2019t load the latest rides \u2014 '+(_asOf ? 'showing your saved copy from '+_asOf+'.' : 'you may be seeing old information.')+_why+' Changes are paused so nothing gets overwritten.</span>'
     +'<button onclick="location.reload()" style="background:#fff;color:#b91c1c;border:none;border-radius:8px;padding:.45rem .85rem;font-family:inherit;font-weight:800;font-size:.8rem;cursor:pointer;white-space:nowrap;">Reload</button>';
-  document.body.appendChild(b);
+  document.body.insertBefore(b, document.body.firstChild);
 }
 async function _ensureFresh(){
   // A load that FAILED must refuse, not proceed. This throws on purpose: every caller does
