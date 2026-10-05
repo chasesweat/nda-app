@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191262">
+<meta name="version" content="202608191265">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2314,11 +2314,16 @@ var _LS_LABELS = {
   'kat:importedClients':'Client lists backup', 'kat:comments':'Ride comments backup', 'kat:notifications':'Notifications backup',
   'nda_geo_cache':'Address lookup cache', 'nda_dm_cache':'Drive-distance cache', 'kat:driverProfiles':'Driver profiles backup',
   'kat:publicDriverDirectory':'Public driver directory backup', 'kat:receipts':'Receipts backup', 'kat:feePayments':'Fee ledger backup',
-  'kat:ridesArchive':'Archived rides backup', 'nda-crashlog':'Crash log', 'nda-open-times':'Open timings', 'kat:outsideRides':'Outside rides backup'
+  'kat:ridesArchive':'Archived rides backup', 'nda-crashlog':'Crash log', 'nda-open-times':'Open timings', 'kat:outsideRides':'Outside rides backup',
+  // v1263: these showed up as raw key names in the first real Check storage - and they are the biggest items left, all images:
+  'kat:driverSettings':'Driver settings backup (includes selfies)', 'kat:addedDrivers':'Added drivers backup (includes photos)',
+  'kat:documents':'Documents backup', 'kat:daySelfie':'Daily selfie backup'
 };
 // Caches that rebuild themselves from live data - the only things 'Free up space' touches. Backups of real data
 // (rides, clients, fees) are never cleared from here.
-var _LS_CLEARABLE = ['kat:driverPhotoOverrideCache', 'nda-open-times', 'nda-cache-v1'];
+// v1263: 'nda-open-times' was in this list and in the startup pass. It is a few KB, so clearing it frees nothing - but it IS
+// the history Chase compares open speed against, and the first real cleanup silently reset it ("17 opens" became "1 open").
+var _LS_CLEARABLE = ['kat:driverPhotoOverrideCache', 'nda-cache-v1'];
 function _lsBreakdown(){
   var rows=[], used=0;
   try{
@@ -2341,9 +2346,13 @@ async function showStorageCheck(){
   }).join('\n');
   var clearable=b.rows.filter(function(r){ return _LS_CLEARABLE.indexOf(r.key)>=0; }).reduce(function(n,r){ return n+r.chars; },0);
   var msg='This device is using '+_fmtM(b.used)+' of about '+_fmtM(_LS_QUOTA)+' ('+pct+'%).\n\nBiggest items:\n'+top
-    +'\n\nCaches that rebuild themselves: '+_fmtM(clearable)+'. Everything else is a backup copy of real data and is left alone.';
+    +(clearable>0
+      ? '\n\nCaches that rebuild themselves: '+_fmtM(clearable)+'. Everything else is a backup copy of real data and is left alone.'
+      : '\n\nNothing here rebuilds itself right now, so there is nothing to clear. Everything listed is a backup copy of real data.');
+  // v1263: used to offer "Free up space" even when 0M could be cleared - a button that could only do nothing.
   var r=await showConfirmModal({ icon:'\uD83D\uDCBE', title:'Storage on this device', message:msg,
-    buttons:[{ label:'Free up space', style:'primary', value:'clear' }, { label:'Close', style:'secondary', value:null }] });
+    buttons: clearable>0 ? [{ label:'Free up space', style:'primary', value:'clear' }, { label:'Close', style:'secondary', value:null }]
+                         : [{ label:'Close', style:'primary', value:null }] });
   if(r==='clear'){
     var res=_clearRegenerableCaches();
     showToast('Freed '+_fmtM(res.before-res.after)+' \u2014 now using '+_fmtM(res.after)+' ('+Math.round(res.after/_LS_QUOTA*100)+'%)');
@@ -2398,14 +2407,16 @@ function _ensureStorageHeadroom(){
     var cleared=[];
     // Past the SOFT line: only caches that rebuild themselves - the driver-photo cache (re-fetched from Firebase on
     // demand, and the biggest single item on an admin's device) and open timings.
-    ['kat:driverPhotoOverrideCache','nda-open-times'].forEach(function(k){ try{ if(_lsUsedChars()>_LS_SOFT_LIMIT && localStorage.getItem(k)!==null){ localStorage.removeItem(k); cleared.push(k); } }catch(e){} });
+    ['kat:driverPhotoOverrideCache'].forEach(function(k){ try{ if(_lsUsedChars()>_LS_SOFT_LIMIT && localStorage.getItem(k)!==null){ localStorage.removeItem(k); cleared.push(k); } }catch(e){} });
     // Past the HARD line: the saved-copy snapshot goes too, last, because it is what a no-signal phone falls back to.
     try{ if(_lsUsedChars()>_LS_HARD_LIMIT && localStorage.getItem('nda-cache-v1')!==null){ localStorage.removeItem('nda-cache-v1'); cleared.push('nda-cache-v1'); } }catch(e){}
     var after=_lsUsedChars();
     // Logged whenever something was cleared; otherwise at most once a day, so being over the soft line with nothing
     // clearable still names what is big without writing the same entry on every open.
     var shouldLog = cleared.length>0;
-    if(!shouldLog){
+    // v1263: at 61% (3.19M) with nothing clearable this wrote a "cleared nothing" entry every day - noise about a healthy
+    // device. Now only when something was cleared, or usage is genuinely high (over the 4.0M budget).
+    if(!shouldLog && after > _LS_BUDGET){
       try{ var last=parseInt(localStorage.getItem('nda-headroom-log-at')||'0',10); if(!last || Date.now()-last>24*3600*1000){ shouldLog=true; localStorage.setItem('nda-headroom-log-at', String(Date.now())); } }catch(e){ shouldLog=true; }
     }
     if(shouldLog){
@@ -12499,9 +12510,19 @@ function warmDriverCardImage(name){
   if(!name) return Promise.resolve(null);
   return _cachePromise(_driverCardImgCache, name, function(){ return buildDriverCardImageFile(name); });
 }
-function prebuildAllDriverCardImages(){
-  if(typeof DRIVERS==='undefined') return;
-  DRIVERS.forEach(d=>warmDriverCardImage(d));
+// v1265: this used to be prebuildAllDriverCardImages(). At EVERY app open, 1.8s after login, it built a card for every
+// driver (~21), and each card starts with `await _ensureDriverPhotoLoaded(name)` - so every open fetched every driver's
+// photo from Firebase and drew and PNG-encoded 21 canvases, whether anyone needed one or not. That quietly undid the
+// v800/v801 lazy photo loading, and it is what filled the photo cache to 1.9M. Every flow that actually needs a card
+// already warms the specific driver it is about, ahead of the tap: the To Confirm render, opening a ride, assigning a
+// driver. So only the signed-in person's OWN card is warmed at open (the one they are most likely to send); every other
+// card is built the first time something asks for it.
+function prebuildMyDriverCardImage(){
+  try{
+    if(typeof DRIVERS==='undefined') return;
+    var me = (typeof getMyDriverName==='function') ? getMyDriverName() : null;
+    if(me && DRIVERS.indexOf(me) >= 0) warmDriverCardImage(me);
+  }catch(e){}
 }
 
 function _setConfInstKey(id,val){ window._confInstKey=window._confInstKey||{}; window._confInstKey[id]=val; }
@@ -26544,13 +26565,21 @@ async function _collectCrashLog(){
     var d = await storageGet('kat:crashLog');
     if(d && typeof d==='object') shared = Object.values(d);
   }catch(e){}
-  var seen = new Set();
-  return local.concat(shared).filter(function(e){
-    if(!e) return false;
-    var k = e.ts+'|'+e.who+'|'+e.msg;
-    if(seen.has(k)) return false;
-    seen.add(k); return true;
-  }).sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
+  // v1264: duplicates were matched on time + WHO + message. An entry logged before login is saved locally as
+  // "(not logged in)", and once someone signs in the SHARED copy is renamed (e.g. "Chase (before login)") - so the two
+  // never matched and every pre-login entry showed twice (and was counted twice in the export). The same event is the
+  // same time + message + device, whatever name it has since been given; when both copies exist the named one is kept.
+  var byKey = {}, order = [];
+  local.concat(shared).forEach(function(e){
+    if(!e) return;
+    var k = e.ts+'|'+e.msg+'|'+(e.ua||'');
+    var prev = byKey[k];
+    if(!prev){ byKey[k] = e; order.push(k); return; }
+    var prevAnon = String(prev.who||'').indexOf('(not logged in)') === 0;
+    var thisAnon = String(e.who||'').indexOf('(not logged in)') === 0;
+    if(prevAnon && !thisAnon) byKey[k] = e;
+  });
+  return order.map(function(k){ return byKey[k]; }).sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
 }
 // Export the WHOLE crash log as a plain text file Chase can upload for fixing (v1217). The window shows
 // the newest 50 with long details cut short; the export keeps every entry and every detail in full, and
@@ -35364,7 +35393,7 @@ function enterApp(){
   window._showCombinedIncome=_myDS.combineEnabled===true;
     document.getElementById('auth-screen').style.display='none';
   document.getElementById('app').style.display='flex';
-  setTimeout(prebuildAllDriverCardImages, 1800);
+  setTimeout(prebuildMyDriverCardImage, 1800);
 
   const admin = currentUser.role === 'admin';
   const dName = getMyDriverName();
