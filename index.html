@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191258">
+<meta name="version" content="202608191262">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2274,9 +2274,94 @@ function _lsUsedChars(){
   try{ var n=0; for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); n += k.length + (localStorage.getItem(k)||'').length; } return n; }
   catch(e){ return -1; }
 }
+// Writes a localStorage backup copy WITHOUT letting the app fill the site's whole quota (v1258).
+//
+// The first check after v1258 shipped logged the proof: localStorage was 5.24M characters at startup -
+// 5,242,880 is the browser's entire limit - so it was completely full and Firebase had no room for its
+// own sign-in keys. Clearing just the saved-copy snapshot only brought it to 4.28M. The rest was the
+// app's own writes: every storageSet()/storageSetOne()/rides save mirrored its whole value with no
+// budget at all (the rides mirror even carried a comment saying it "costs nothing").
+//
+// Rule: a large value (over 150K characters) is only mirrored if the total stays inside _LS_BUDGET.
+// Otherwise its old mirror is removed (never left stale) and the write is skipped. This applies ONLY
+// when Firebase is live and holds the real copy (serverHasIt): in localStorage-only mode (Firebase
+// unavailable) the mirror IS the database and must always be written.
+function _lsMirror(key, json, serverHasIt){
+  try{
+    if(serverHasIt && json.length > 150000){
+      var own = key.length + (localStorage.getItem(key)||'').length;
+      var others = _lsUsedChars() - own;
+      if(others >= 0 && others + key.length + json.length > _LS_BUDGET){
+        try{ localStorage.removeItem(key); }catch(e){}
+        return false;
+      }
+    }
+    localStorage.setItem(key, json);
+    return true;
+  }catch(e){ return false; }
+}
+// v1262: the startup cleanup below used to run only past _LS_HARD_LIMIT (4.3M). The number Chase was watching
+// was 4.28M - 82% full, and just under that line - so it NEVER fired. Regenerable caches are now trimmed once
+// usage passes this softer line; the saved copy (what a no-signal phone falls back to) is still the last thing
+// given up, and only past the hard limit.
+var _LS_SOFT_LIMIT = 3000000;
+var _LS_QUOTA = 5242880;                 // 5 MiB of characters: the browser's whole localStorage allowance
+var _PHOTO_CACHE_MAX_CHARS = 800000;     // the photo cache's OWN ceiling - it used to share the whole 4.0M budget
+var _GEO_CACHE_MAX = 1500;               // address-lookup cache entries kept (it had no limit at all)
+// What each key is, in words a person can use.
+var _LS_LABELS = {
+  'kat:rides':'Ride list backup', 'nda-cache-v1':'Saved copy for offline use', 'kat:driverPhotoOverrideCache':'Driver photo cache',
+  'kat:importedClients':'Client lists backup', 'kat:comments':'Ride comments backup', 'kat:notifications':'Notifications backup',
+  'nda_geo_cache':'Address lookup cache', 'nda_dm_cache':'Drive-distance cache', 'kat:driverProfiles':'Driver profiles backup',
+  'kat:publicDriverDirectory':'Public driver directory backup', 'kat:receipts':'Receipts backup', 'kat:feePayments':'Fee ledger backup',
+  'kat:ridesArchive':'Archived rides backup', 'nda-crashlog':'Crash log', 'nda-open-times':'Open timings', 'kat:outsideRides':'Outside rides backup'
+};
+// Caches that rebuild themselves from live data - the only things 'Free up space' touches. Backups of real data
+// (rides, clients, fees) are never cleared from here.
+var _LS_CLEARABLE = ['kat:driverPhotoOverrideCache', 'nda-open-times', 'nda-cache-v1'];
+function _lsBreakdown(){
+  var rows=[], used=0;
+  try{
+    for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); var c=k.length+(localStorage.getItem(k)||'').length; used+=c; rows.push({ key:k, label:_LS_LABELS[k]||k, chars:c }); }
+  }catch(e){}
+  rows.sort(function(a,b){ return b.chars-a.chars; });
+  return { used:used, rows:rows };
+}
+function _clearRegenerableCaches(){
+  var before=_lsUsedChars(), cleared=[];
+  _LS_CLEARABLE.forEach(function(k){ try{ if(localStorage.getItem(k)!==null){ localStorage.removeItem(k); cleared.push(k); } }catch(e){} });
+  return { before:before, after:_lsUsedChars(), cleared:cleared };
+}
+function _fmtM(c){ return (Math.round(c/10000)/100)+'M'; }
+async function showStorageCheck(){
+  var b=_lsBreakdown(), pct=Math.round(b.used/_LS_QUOTA*100);
+  var top=b.rows.slice(0,8).map(function(r){
+    var safe=_LS_CLEARABLE.indexOf(r.key)>=0 ? '  (safe to clear \u2014 rebuilds itself)' : '';
+    return '\u2022 '+r.label+' \u2014 '+_fmtM(r.chars)+safe;
+  }).join('\n');
+  var clearable=b.rows.filter(function(r){ return _LS_CLEARABLE.indexOf(r.key)>=0; }).reduce(function(n,r){ return n+r.chars; },0);
+  var msg='This device is using '+_fmtM(b.used)+' of about '+_fmtM(_LS_QUOTA)+' ('+pct+'%).\n\nBiggest items:\n'+top
+    +'\n\nCaches that rebuild themselves: '+_fmtM(clearable)+'. Everything else is a backup copy of real data and is left alone.';
+  var r=await showConfirmModal({ icon:'\uD83D\uDCBE', title:'Storage on this device', message:msg,
+    buttons:[{ label:'Free up space', style:'primary', value:'clear' }, { label:'Close', style:'secondary', value:null }] });
+  if(r==='clear'){
+    var res=_clearRegenerableCaches();
+    showToast('Freed '+_fmtM(res.before-res.after)+' \u2014 now using '+_fmtM(res.after)+' ('+Math.round(res.after/_LS_QUOTA*100)+'%)');
+  }
+}
+// The biggest things in localStorage, so "it's full" can be followed by "of what".
+function _lsTopKeys(count){
+  try{
+    var rows=[];
+    for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); rows.push([k, k.length+(localStorage.getItem(k)||'').length]); }
+    rows.sort(function(a,b){ return b[1]-a[1]; });
+    return rows.slice(0, count||5).map(function(r){ return r[0]+' '+(Math.round(r[1]/10000)/100)+'M'; }).join(', ');
+  }catch(e){ return ''; }
+}
 async function _storageHealthText(){
   var out=[], used=_lsUsedChars();
   var usedTxt = used>=0 ? (Math.round(used/10000)/100)+'M of ~5M characters used' : 'usage unknown';
+  var _top = _lsTopKeys(5); if(_top) usedTxt += ' (largest: '+_top+')';
   try{ localStorage.setItem('nda-probe','1'); localStorage.removeItem('nda-probe'); out.push('localStorage: writes OK, '+usedTxt); }
   catch(e){ out.push('localStorage: write FAILED ('+((e&&e.name)||'error')+'), '+usedTxt); }
   try{ sessionStorage.setItem('nda-probe','1'); sessionStorage.removeItem('nda-probe'); out.push('sessionStorage: writes OK'); }
@@ -2308,10 +2393,24 @@ async function _storageHealthText(){
 // (the saved-copy snapshot and open timings - both rebuilt from live data) so Firebase's tiny keys fit.
 function _ensureStorageHeadroom(){
   try{
-    var before=_lsUsedChars(); if(before<0 || before<=_LS_HARD_LIMIT) return;
-    ['nda-cache-v1','nda-open-times'].forEach(function(k){ try{ if(_lsUsedChars()>_LS_HARD_LIMIT) localStorage.removeItem(k); }catch(e){} });
+    var before=_lsUsedChars(); if(before<0 || before<=_LS_SOFT_LIMIT) return;
+    var _topBefore = _lsTopKeys(6);
+    var cleared=[];
+    // Past the SOFT line: only caches that rebuild themselves - the driver-photo cache (re-fetched from Firebase on
+    // demand, and the biggest single item on an admin's device) and open timings.
+    ['kat:driverPhotoOverrideCache','nda-open-times'].forEach(function(k){ try{ if(_lsUsedChars()>_LS_SOFT_LIMIT && localStorage.getItem(k)!==null){ localStorage.removeItem(k); cleared.push(k); } }catch(e){} });
+    // Past the HARD line: the saved-copy snapshot goes too, last, because it is what a no-signal phone falls back to.
+    try{ if(_lsUsedChars()>_LS_HARD_LIMIT && localStorage.getItem('nda-cache-v1')!==null){ localStorage.removeItem('nda-cache-v1'); cleared.push('nda-cache-v1'); } }catch(e){}
     var after=_lsUsedChars();
-    try{ if(typeof _logCrash==='function') _logCrash('storage-headroom', 'localStorage was '+Math.round(before/10000)/100+'M characters (of ~5M) at startup - cleared the saved-copy cache to leave room for sign-in; now '+Math.round(after/10000)/100+'M', ''); }catch(e){}
+    // Logged whenever something was cleared; otherwise at most once a day, so being over the soft line with nothing
+    // clearable still names what is big without writing the same entry on every open.
+    var shouldLog = cleared.length>0;
+    if(!shouldLog){
+      try{ var last=parseInt(localStorage.getItem('nda-headroom-log-at')||'0',10); if(!last || Date.now()-last>24*3600*1000){ shouldLog=true; localStorage.setItem('nda-headroom-log-at', String(Date.now())); } }catch(e){ shouldLog=true; }
+    }
+    if(shouldLog){
+      try{ if(typeof _logCrash==='function') _logCrash('storage-headroom', 'localStorage was '+Math.round(before/10000)/100+'M characters (of ~5M) at startup - cleared '+(cleared.join(', ')||'nothing (nothing clearable)')+'; now '+Math.round(after/10000)/100+'M. Largest before: '+_topBefore, ''); }catch(e){}
+    }
   }catch(e){}
 }
 async function _showStorageBlockedHelp(){
@@ -2989,8 +3088,8 @@ async function storageSet(key, val) {
       await fbRef('nda/'+key.replace(/:/g,'/')).set(val);
     } catch(e){ console.warn('Firebase write failed:', e); _ok = false; }
   }
-  // Also write to localStorage as backup
-  try { localStorage.setItem(key, JSON.stringify(val)); } catch(e) {}
+  // Also write to localStorage as backup - budgeted, see _lsMirror() (v1258)
+  _lsMirror(key, JSON.stringify(val), !!fbDB && _ok);
   try{ _auditAdminChange(key); }catch(e){}
   return _ok;
 }
@@ -3030,7 +3129,7 @@ async function storageSetOne(coll, key, val, wholeObj){
   // Keep the localStorage backup whole-collection shaped, matching what storageSet writes and
   // what the loader expects - a partial cache would read back as a collection of one.
   if(wholeObj!==undefined){
-    try{ localStorage.setItem(coll, JSON.stringify(wholeObj)); }catch(e){}
+    _lsMirror(coll, JSON.stringify(wholeObj), !!fbDB && _ok);   // budgeted (v1258)
   }
   try{ _auditAdminChange(coll); }catch(e){}
   return _ok;
@@ -3135,7 +3234,12 @@ function setupRealtimeListeners(){
           if(_localById[id] && !incoming.some(function(r){return r&&r.id===id;})) incoming.push(_localById[id]);
         });
       }
-      rides = incoming;
+      // v1261: loaded history used to be DROPPED here on every live update (and the flag reset), so any screen
+      // showing it - an old month, a search, Income for last year - quietly shrank the moment anyone changed a
+      // ride anywhere. It is carried across now. The BASELINE below is built from the live rides only: archived
+      // rides are never saved, so they must not count toward the length/position the diff compares against.
+      var _heldArch = (_archiveLoaded && window._archivedHeldList && window._archivedHeldList.length) ? window._archivedHeldList : null;
+      rides = _heldArch ? incoming.concat(_heldArch.filter(function(a){ return !_serverById[a.id]; })) : incoming;
       // The server just told us what it holds, so that is the new baseline saveRides() diffs
       // against. Without this the first save after any inbound update would see a mismatched
       // baseline and fall back to rewriting the whole node — which is exactly what we removed.
@@ -3148,16 +3252,15 @@ function setupRealtimeListeners(){
       // get written. A ride the server doesn't have at all gets no baseline, so it is always written.
       // This also gives the revision check in _saveChangedRidesChecked() the true server revision.
       try{
-        _ridesBaseline = rides.map(function(r){
+        _ridesBaseline = incoming.map(function(r){
           if(!r) return JSON.stringify(r);
           var pending = window._pendingUnsavedRideIds && window._pendingUnsavedRideIds.has(r.id);
           if(!pending) return JSON.stringify(r);
           return _serverById[r.id] ? JSON.stringify(_serverById[r.id]) : undefined;
         });
-      }catch(_e){ _snapshotRidesBaseline(rides); }
-      // A live update replaces `rides` with the live node only, so any temporarily
-      // loaded archive is no longer merged in. Keep the flag honest.
-      _archiveLoaded = false;
+      }catch(_e){ _snapshotRidesBaseline(incoming); }
+      // History is only still loaded if it was carried across above.
+      if(!_heldArch){ _archiveLoaded = false; }
       // Re-render if app is visible
       if(document.getElementById('app').style.display!=='none'){
         refreshDash(); renderCal();
@@ -3379,7 +3482,7 @@ function _cacheSnapshotWrite(){
   if(window._dataLoadFailed) return;
   try{
     var data = {
-      rides: rides, comments: comments, notifications: notifications,
+      rides: (rides||[]).filter(function(r){ return !(r && r._archived); }), comments: comments, notifications: notifications,
       DRIVER_PROFILES: DRIVER_PROFILES, driverColors: driverColors, driverColorVault: driverColorVault,
       clientAddressOverrides: clientAddressOverrides, importedClients: importedClients, clientOwners: clientOwners,
       globalSettings: globalSettings, driverSettings: driverSettings, feePayments: feePayments,
@@ -4874,9 +4977,26 @@ function _handleRideConflicts(conflicts){
   try{ if(typeof activeRideId!=='undefined' && activeRideId!=null){ var ar=_rideById(activeRideId); if(ar) renderRideView(ar); } }catch(e){}
 }
 async function _saveRidesInner(){
-  const arr = rides || [];
-  // localStorage stays a full mirror — it is the offline fallback and costs nothing.
-  try{ localStorage.setItem('kat:rides', JSON.stringify(arr)); }catch(_e){}
+  // v1260: archived rides loaded via Load History are VIEW-ONLY and must never be written to the live node.
+  const _archivedHeld = (rides||[]).filter(function(r){ return r && r._archived; });
+  if(_archivedHeld.length){
+    var _edited = 0;
+    _archivedHeld.forEach(function(r){
+      try{
+        var cur = {}; Object.keys(r).forEach(function(k){ if(k!=='_archived' && k!=='_archSnap') cur[k]=r[k]; });
+        if(JSON.stringify(cur) !== r._archSnap){
+          // restore it exactly as loaded - an edit that cannot be saved must not look like it was
+          Object.keys(r).forEach(function(k){ if(k!=='_archived' && k!=='_archSnap') delete r[k]; });
+          Object.assign(r, JSON.parse(r._archSnap)); _edited++;
+        }
+      }catch(e){}
+    });
+    if(_edited){ try{ showToast('Archived rides are view-only \u2014 that change wasn\u2019t saved. Reload the app to edit it in the live view.','error'); }catch(e){} }
+  }
+  const arr = _archivedHeld.length ? (rides||[]).filter(function(r){ return !(r && r._archived); }) : (rides || []);
+  // localStorage mirror of the rides - the offline fallback. It does NOT cost nothing: it counts against
+  // the site's ~5M-character quota, and at 100% full Firebase can no longer sign in (v1258). Budgeted.
+  _lsMirror('kat:rides', JSON.stringify(arr), !!fbDB);
 
   if(!fbDB){ _snapshotRidesBaseline(arr); try{ _auditAdminChange('kat:rides'); }catch(_e){} return true; }
 
@@ -4997,7 +5117,7 @@ async function _saveRidesInner(){
           if(_rescued.length){
             console.warn('saveRides: kept '+_rescued.length+' ride(s) from the server this device had not loaded');
             _toWrite = _toWrite.concat(_rescued);
-            rides = _toWrite;
+            rides = _archivedHeld.length ? _toWrite.concat(_archivedHeld) : _toWrite;
           }
         }
       }catch(_e){
@@ -5022,7 +5142,7 @@ async function _saveRidesInner(){
       // The server now holds exactly _toWrite - including any server copies kept by the revision
       // merge and any bumped revisions - so that is what the screen must show. (v1211 did this only
       // for push copies; the revision merge makes it necessary every time.)
-      rides = _toWrite;
+      rides = _archivedHeld.length ? _toWrite.concat(_archivedHeld) : _toWrite;
       _snapshotRidesBaseline(_toWrite);
       if(_wlConflicts.length){
         var _w = _wlConflicts.length===1 ? ('\u201C'+(_wlConflicts[0].client||'A ride')+'\u201D was') : (_wlConflicts.length+' rides were');
@@ -5045,21 +5165,136 @@ let savedQuotes = [];
 async function saveSavedQuotes(){ await storageSetArray('kat:savedQuotes', savedQuotes); }
 
 // ── RIDE ARCHIVE SYSTEM ───────────────────────────────────────────────────
-// To keep the live app fast as data grows, rides older than a cutoff can be moved
-// to a separate 'kat:ridesArchive' node that is NOT loaded on startup. The live
-// `rides` array only holds recent rides. Nothing is ever deleted — archiving just
-// moves records between two Firebase nodes. History can be loaded on demand.
+// To keep the live app fast, SETTLED rides older than ARCHIVE_DAYS move to a separate
+// 'kat:ridesArchive' node that is NOT loaded on startup. Nothing is ever deleted - archiving just moves
+// records between two Firebase nodes - and the archive comes back on demand: search, Income and Year-End
+// ranges that reach back past the window, the Clients page, opening an archived ride, calendar navigation
+// to an old month. Loaded history is VIEW-ONLY (v1260) and never written back to the live rides.
 //
-// ARCHIVE_MONTHS = how many months of rides stay "live". 13 keeps the current
-// year plus a rolling buffer so year-over-year and recent history stay instant.
-const ARCHIVE_MONTHS = 13;
+// v1261, Chase's call: 60 days (was 13 months), and "still available if searched for or called".
+// What was deliberately NOT done from the first idea (everything older than today, everything more than a
+// week out): archiving FUTURE rides would hide bookings from the scheduling-text reminders, next month's
+// calendar and round-trip return legs, and archiving unsettled PAST rides would hide anything still unpaid
+// or still owed a fee. So only a ride that is genuinely finished moves: see _isRideArchivable().
+const ARCHIVE_DAYS = 60;
 
-// The cutoff date (YYYY-MM-DD). Rides on/after this stay live; older ones archive.
+// The cutoff date (YYYY-MM-DD). Settled rides dated BEFORE this are archivable; this date itself stays live.
 function _archiveCutoffStr(){
   const d = nowET();
-  d.setMonth(d.getMonth() - ARCHIVE_MONTHS);
-  d.setDate(1);
+  d.setDate(d.getDate() - ARCHIVE_DAYS);
   return toDateStr(d);
+}
+
+// A ride may be archived only when nothing about it is still open. Anything unsettled stays live at any age.
+//  - dated before the cutoff (never today, never the future)
+//  - paid or cancelled (a completed-but-unpaid ride is still on the wrap-up list; a scheduled one is upcoming)
+//  - not awaiting an invoice payment
+//  - its finder's fee, if one applies, is settled (paid, waived, legacy-covered or auto-settled) - the same
+//    feeSettledForRide() the dashboard fee cards use, so what is still owed never disappears from them
+//  - not a read-only copy (push copy or already-loaded archive entry)
+function _isRideArchivable(r, cutoff){
+  if(!r || !r.date || !(r.date < cutoff)) return false;
+  if(r._archived || r._fromPush) return false;
+  if(r.status !== 'paid' && r.status !== 'cancelled') return false;
+  if(r.awaitingInvoice) return false;
+  if(r.status === 'paid' && (parseFloat(r.price)||0) > 0){
+    try{
+      var owner = _rideFeeOwner(r), driver = r.driver || null;
+      if(owner && driver && owner !== driver){
+        var fp = feePayments[owner+':recv:'+driver] || {};
+        if(!feeSettledForRide(fp, r)) return false;
+      }
+    }catch(e){ return false; }     // can't tell whether a fee is still owed -> leave it live
+  }
+  return true;
+}
+// The rides that would move right now: live rides only, and a ride travels with its partner - if one leg of a
+// pair (pairId / linkedRide) can't be archived, neither can the other.
+function _ridesToArchive(cutoff){
+  cutoff = cutoff || _archiveCutoffStr();
+  var live = (rides||[]).filter(function(r){ return r && !r._archived; });
+  var cand = live.filter(function(r){ return _isRideArchivable(r, cutoff); });
+  var ok = {}; cand.forEach(function(r){ ok[String(r.id)] = true; });
+  var byId = {}, byPair = {};
+  live.forEach(function(r){
+    byId[String(r.id)] = r;
+    if(r.pairId != null){ (byPair[String(r.pairId)] = byPair[String(r.pairId)] || []).push(r); }
+  });
+  var changed = true;
+  while(changed){
+    changed = false;
+    cand.forEach(function(r){
+      if(!ok[String(r.id)]) return;
+      var partners = [];
+      if(r.pairId != null) partners = partners.concat(byPair[String(r.pairId)] || []);
+      if(r.linkedRide != null && byId[String(r.linkedRide)]) partners.push(byId[String(r.linkedRide)]);
+      for(var i=0;i<partners.length;i++){
+        if(partners[i] !== r && !ok[String(partners[i].id)]){ ok[String(r.id)] = false; changed = true; break; }
+      }
+    });
+  }
+  return cand.filter(function(r){ return ok[String(r.id)]; });
+}
+
+// ---- bringing history back on demand (v1261) ----
+// Does an archive probably exist? globalSettings.ridesArchive is a tiny marker written when rides are archived,
+// so this costs no read. No marker = unknown (archives made before it existed), which counts as "may exist".
+function _historyMayExist(){
+  try{ var m = (typeof globalSettings!=='undefined' && globalSettings) ? globalSettings.ridesArchive : null; return !m || (m.count||0) > 0; }
+  catch(e){ return true; }
+}
+function _historyPending(){ return !_archiveLoaded && !window._archiveChecked && _historyMayExist(); }
+var _historyLoadPromise = null;
+// Loads the archive into memory ONCE per session, view-only, and returns true if there is history to show.
+async function ensureHistoryLoaded(){
+  if(_archiveLoaded) return true;
+  if(window._archiveChecked) return false;
+  if(_historyLoadPromise) return _historyLoadPromise;
+  _historyLoadPromise = (async function(){
+    try{
+      var _t0 = (window._storageTimeouts||[]).length;
+      var raw = (await storageGet('kat:ridesArchive')) || [];
+      var archived = Array.isArray(raw) ? raw : Object.values(raw||{});
+      var timedOut = (window._storageTimeouts||[]).slice(_t0).indexOf('kat:ridesArchive') >= 0;
+      if(!archived.length){
+        // A read that TIMED OUT also looks empty - don't conclude "no history" from that, or older rides
+        // would stay hidden for the rest of the session while the app believed it had checked.
+        if(timedOut){ try{ showToast('Couldn\u2019t load older rides right now \u2014 check your connection and try again','error'); }catch(e){} return false; }
+        window._archiveChecked = true; return false;
+      }
+      var liveIds = new Set(rides.map(function(r){ return r && r.id; }));
+      var toAdd = archived.filter(function(r){ return r && !liveIds.has(r.id); });
+      // View-only: tagged so no save can write them back (v1260), snapshotted so an edit is caught, not lost.
+      toAdd.forEach(function(r){ try{ r._archSnap = JSON.stringify(r); r._archived = true; }catch(e){} });
+      rides = rides.concat(toAdd);
+      window._archivedHeldList = toAdd;     // carried across live updates by the rides listener
+      _archiveLoaded = true;
+      _afterHistoryLoaded();
+      return true;
+    }catch(e){
+      console.error('ensureHistoryLoaded error:', e);
+      try{ showToast('Could not load older rides','error'); }catch(_e){}
+      return false;
+    }finally{ _historyLoadPromise = null; }
+  })();
+  return _historyLoadPromise;
+}
+// Re-draw whatever is on screen that reads rides, now that history is in memory.
+function _afterHistoryLoaded(){
+  try{ if(typeof renderCal==='function') renderCal(); }catch(e){}
+  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+  try{ var sb=document.getElementById('cal-search'); if(sb && sb.value.trim() && typeof calSearch==='function') calSearch(); }catch(e){}
+  try{ var pi=document.getElementById('page-income'); if(pi && pi.classList.contains('active') && typeof renderIncome==='function') renderIncome(); }catch(e){}
+  try{ var pc=document.getElementById('page-clients'); if(pc && pc.classList.contains('active') && typeof renderClients==='function') renderClients(); }catch(e){}
+}
+// Call from anything that is about to show a date: if it reaches back past the live window, bring history in.
+function _ensureHistoryForDate(dateStr){
+  try{
+    if(!dateStr || _archiveLoaded || window._archiveChecked) return;
+    if(!(dateStr < _archiveCutoffStr())) return;
+    if(!_historyMayExist()) return;
+    ensureHistoryLoaded();
+  }catch(e){}
 }
 
 // Move rides older than the cutoff into the archive node. Non-destructive:
@@ -5067,10 +5302,10 @@ function _archiveCutoffStr(){
 async function archiveOldRides(){
   if(!isAdmin()){ showToast('Only admins can archive rides','error'); return; }
   const cutoff = _archiveCutoffStr();
-  const toArchive = rides.filter(r=>r && r.date && r.date < cutoff);
-  if(!toArchive.length){ showToast('No rides old enough to archive'); return; }
-  if(!confirm('Archive '+toArchive.length+' ride(s) dated before '+cutoff+'?\n\nThey will be moved out of the live app to keep it fast, but NOT deleted — you can view them anytime via "Load history".'+(_twoAdminRequired()?'\n\nA second admin must approve before it takes effect.':''))) return;
-  await queueAdminAction('rides_archive', {cutoff:cutoff}, 'Archive '+toArchive.length+' ride(s) dated before '+cutoff);
+  const toArchive = _ridesToArchive(cutoff);
+  if(!toArchive.length){ showToast('No settled rides older than '+ARCHIVE_DAYS+' days to archive'); return; }
+  if(!confirm('Archive '+toArchive.length+' settled ride(s) dated before '+cutoff+'?\n\nOnly rides that are finished move: paid or cancelled, with nothing still owed. Nothing is deleted - they stay available whenever you search for them or look back that far.')) return;
+  await queueAdminAction('rides_archive', {cutoff:cutoff}, 'Archive '+toArchive.length+' settled ride(s) dated before '+cutoff);
 }
 
 // One-time cleanup for rides that already went through the old, buggy splitApRoundTripRide -
@@ -5216,26 +5451,13 @@ async function sweepManualAdjTrailEntries(){
   try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
 }
 
-// Load the archive and merge it into the live `rides` array so history is visible.
-// This is temporary for the session (until reload); it does not re-save the live node.
+// The "Load history" button: same shared loader the on-demand paths use.
 async function loadRideHistory(){
   if(_archiveLoaded){ showToast('History already loaded'); return; }
-  try{
-    const archived = (await storageGet('kat:ridesArchive')) || [];
-    if(!archived.length){ showToast('No archived rides yet'); return; }
-    const liveIds = new Set(rides.map(r=>r&&r.id));
-    const toAdd = archived.filter(r=>r && !liveIds.has(r.id));
-    rides = rides.concat(toAdd);
-    _archiveLoaded = true;
-    if(typeof renderCal==='function') renderCal();
-    
-    if(typeof refreshDash==='function') refreshDash();
-    if(typeof renderIncome==='function' && document.getElementById('page-income')?.classList.contains('active')) renderIncome();
-    showToast('Loaded '+toAdd.length+' archived ride(s). Reload the app to return to the fast view.');
-  }catch(e){
-    console.error('loadRideHistory error:', e);
-    showToast('Could not load history','error');
-  }
+  window._archiveChecked = false;     // an explicit ask always re-checks
+  var ok = await ensureHistoryLoaded();
+  if(ok){ showToast('Loaded '+(window._archivedHeldList||[]).length+' archived ride(s) \u2014 view only.'); }
+  else if(window._archiveChecked){ showToast('No archived rides yet'); }
 }
 // Which drivers' notification lists have actually changed since the last save (v869).
 //
@@ -5992,7 +6214,13 @@ function _geoLoadPersistent(){
   try{ var raw=localStorage.getItem('nda_geo_cache'); if(raw) _geoCache=JSON.parse(raw)||{}; }catch(e){ _geoCache={}; }
 }
 function _geoSavePersistent(){
-  try{ localStorage.setItem('nda_geo_cache', JSON.stringify(_geoCache)); }catch(e){}
+  try{
+    // v1262: this cache is kept "permanently" and had NO limit - every address ever looked up, forever. Past the cap the
+    // OLDEST (first-inserted) entries go; a dropped one just costs one geocode the next time it's needed.
+    var keys=Object.keys(_geoCache);
+    if(keys.length>_GEO_CACHE_MAX){ keys.slice(0, keys.length-_GEO_CACHE_MAX).forEach(function(k){ delete _geoCache[k]; }); }
+    localStorage.setItem('nda_geo_cache', JSON.stringify(_geoCache));
+  }catch(e){}
 }
 function _geoKey(addr){ return String(addr||'').trim().toLowerCase().replace(/\s+/g,' '); }
 
@@ -10854,6 +11082,13 @@ function calSearch(){
   if(grid) grid.style.display='none';
   if(controls) controls.style.display='none';
   results.style.display='';
+  // v1261: this promised "all rides (any date)". Older settled rides live in the archive now, so a search also
+  // brings them in - results show immediately from what is loaded, then refresh once history arrives.
+  var _histNote='';
+  if(_historyPending()){
+    _histNote='<div style="font-size:.74rem;color:var(--mid);margin-bottom:.5rem;">\u23F3 Searching older rides too\u2026</div>';
+    ensureHistoryLoaded().then(function(ok){ if(!ok) calSearch(); });
+  }
   let list=rides.filter(r=>{
     const txt=`${r.client||''} ${r.driver||''} ${r.type||''} ${r.vehicle||''} ${r.phone||''}`.toLowerCase();
     return txt.includes(q) && canSeeRide(r);
@@ -10861,10 +11096,10 @@ function calSearch(){
   if(calDriverFilter && calDriverFilter!=='group') list=list.filter(r=>r.driver===calDriverFilter);
   list.sort((a,b)=>(a.date||'').localeCompare(b.date||'')||(a.time||'').localeCompare(b.time||''));
   if(!list.length){
-    results.innerHTML='<p style="color:var(--mid);font-size:.9rem;">No rides match "'+escHtml(q)+'".</p>';
+    results.innerHTML=_histNote+'<p style="color:var(--mid);font-size:.9rem;">No rides match "'+escHtml(q)+'".</p>';
     return;
   }
-  results.innerHTML='<div style="font-size:.78rem;color:var(--mid);margin-bottom:.6rem;">'+list.length+' result'+(list.length===1?'':'s')+'</div>'
+  results.innerHTML=_histNote+'<div style="font-size:.78rem;color:var(--mid);margin-bottom:.6rem;">'+list.length+' result'+(list.length===1?'':'s')+'</div>'
     +list.map(r=>{
       const c=rideColor(r);
       const check=r.confirmSent?'<span style="color:var(--green);font-weight:900;">✓ </span>':'';
@@ -10894,9 +11129,10 @@ function calSearch(){
 function calJumpToWeek(ds){
   calWeekStart=getWeekStart(new Date(ds+'T12:00:00'));
   setCalView('week');
+  _ensureHistoryForDate(toDateStr(calWeekStart));
 }
 function setCalView(v){ calView=v; renderCal(); }
-function calPrev(){ if(calView==='month'){calMonthDate=new Date(calMonthDate.getFullYear(),calMonthDate.getMonth()-1,1);} else {calWeekStart=addDays(calWeekStart,-7);} renderCal(); }
+function calPrev(){ if(calView==='month'){calMonthDate=new Date(calMonthDate.getFullYear(),calMonthDate.getMonth()-1,1);} else {calWeekStart=addDays(calWeekStart,-7);} renderCal(); _ensureHistoryForDate(calView==='month' ? toDateStr(new Date(calMonthDate.getFullYear(),calMonthDate.getMonth(),1)) : toDateStr(calWeekStart)); }
 function calNext(){ if(calView==='month'){calMonthDate=new Date(calMonthDate.getFullYear(),calMonthDate.getMonth()+1,1);} else {calWeekStart=addDays(calWeekStart,7);} renderCal(); }
 function calToday(){ calWeekStart=getWeekStart(nowET()); calMonthDate=nowET(); renderCal(); }
 // Topbar quick-link → all-drivers calendar
@@ -12599,7 +12835,12 @@ function _renderPrepaidSlot(r, _canDispatch){
 }
 function openRideModal(id){
   activeRideId=id;
-  const r=_rideById(id); if(!r) return;
+  const r=_rideById(id);
+  if(!r){
+    // v1261: may be an archived ride (a notification, a fee-ledger row, a comment link) - bring history in, then open it.
+    if(_historyPending()){ ensureHistoryLoaded().then(function(ok){ if(ok && _rideById(id)) openRideModal(id); else { try{ showToast('Ride not found'); }catch(e){} } }); }
+    return;
+  }
   if(!canSeeRide(r)){ activeRideId=null; showToast('This ride is private','error'); return; }
   if(r.status==='placeholder'){ openPlaceholderViewModal(id); return; }
   if(r.driver) warmDriverCardImage((r.driver||"").trim());
@@ -17414,6 +17655,7 @@ async function _retryRidesLoad(){
   try{ fresh = await storageGet('kat:rides'); }catch(e){}
   if(fresh){
     rides = fresh;
+    _archiveLoaded = false; window._archivedHeldList = null;     // history is not in a freshly loaded list
     _snapshotRidesBaseline(rides);
     window._ridesLoadFailed = false;
     showToast('\u2705 Loaded your rides');
@@ -26794,7 +27036,8 @@ function renderCrashLogSection(){
     + '<div style="font-size:.8rem;font-weight:700;color:var(--black);margin-bottom:.25rem;">\uD83D\uDEA8 Crash log</div>'
     + '<div style="font-size:.72rem;color:var(--mid);line-height:1.5;margin-bottom:.6rem;">'+summaryLine+'</div>'
     + '<button type="button" onclick="exportCrashLog()" style="padding:.45rem .8rem;border-radius:8px;border:none;background:#b91c1c;color:#fff;font-family:inherit;font-size:.78rem;font-weight:700;cursor:pointer;margin-right:.4rem;">\u2B07 Export</button>'
-    + '<button type="button" onclick="_showCrashLogModal()" style="padding:.45rem .8rem;border-radius:8px;border:1.5px solid #b91c1c;background:none;color:#b91c1c;font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.76rem;cursor:pointer;">View full log</button>'
+    + '<button type="button" onclick="_showCrashLogModal()" style="padding:.45rem .8rem;border-radius:8px;border:1.5px solid #b91c1c;background:none;color:#b91c1c;font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.76rem;cursor:pointer;margin-right:.4rem;">View full log</button>'
+    + '<button type="button" onclick="showStorageCheck()" style="padding:.45rem .8rem;border-radius:8px;border:1.5px solid var(--accent);background:none;color:var(--accent);font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.76rem;cursor:pointer;">\uD83D\uDCBE Check storage</button>'
     + '</div>';
 }
 function renderAccessControl(){
@@ -27050,6 +27293,8 @@ function buildDriverDocHTML(fullName){
 // Download the driver's documentation file and open a pre-addressed email draft.
 function emailDriverDocOnRemoval(loginName){
   if(!requireAdmin('email driver documentation')) return;
+  // v1261: the documentation file is income + receipts across the year - it must include archived rides.
+  if(_historyPending()){ ensureHistoryLoaded().then(function(){ emailDriverDocOnRemoval(loginName); }); return; }
   const fullName = USER_DRIVER_MAP[loginName] || loginName;
 
   // Resolve an email address: stored profile email, else prompt and save.
@@ -29716,7 +29961,7 @@ function renderIncome(){
   // pattern already established everywhere else here. Now matches it: hidden unless there's
   // genuinely at least one ride past the cutoff, same isAdmin()-and-something-to-do gate the
   // others already use.
-  if(_arBtn) _arBtn.style.display=(isAdmin() && (rides||[]).some(function(r){return r && r.date && r.date < _archiveCutoffStr();}))?'inline-block':'none';
+  if(_arBtn) _arBtn.style.display=(isAdmin() && _ridesToArchive().length>0)?'inline-block':'none';
   var _sweepBtn=document.getElementById('sweep-rt-notes-btn');
   if(_sweepBtn) _sweepBtn.style.display=(isAdmin() && _ridesNeedingLegNotesCleanup().length>0)?'inline-block':'none';
   var _adjBtn=document.getElementById('scan-adj-btn');
@@ -29733,6 +29978,8 @@ function renderIncome(){
   // True for any non-admin, and for an admin viewing their OWN income.
   const personalView = (!admin && !!myName) || (admin && !!dName && dName===myName);
   const {start,end,label} = getIncomeDateRange();
+  // v1261: a range that reaches back past the live window needs the archive, or it would silently show less.
+  try{ if(start) _ensureHistoryForDate(toDateStr(start)); }catch(e){}
 
   document.getElementById('income-subtitle').textContent =
     (dName||'All Drivers') + (label?' · '+label:'');
@@ -30993,25 +31240,52 @@ registerAdminAction('access_toggle', async function(p){
 });
 
 // ── Registered actions: RIDES (non-dispatch) ──
-registerAdminAction('rides_archive', async function(p){
-  var cutoff=p.cutoff; if(!cutoff) return;
-  var toArchive=rides.filter(function(r){ return r && r.date && r.date < cutoff; });
-  if(!toArchive.length){ showToast('No rides old enough to archive'); return; }
+// Moves settled rides into the archive. Hardened for v1261 because this is the one step that relocates real data:
+//  - the list is recomputed FRESH here, not trusted from submission time (rides may have been paid, edited or
+//    had a fee change in the gap before the second admin approved it)
+//  - it only ever moves what _ridesToArchive() allows: settled, past the window, partner legs together
+//  - the archive is read back straight from Firebase and every moved ride must be THERE before anything is
+//    removed from the live rides - if the copy didn't land, nothing is deleted
+async function _executeRidesArchive(p){
+  var cutoff = p && p.cutoff; if(!cutoff) return;
+  var toArchive = _ridesToArchive(cutoff);
+  if(!toArchive.length){ showToast('No settled rides older than '+ARCHIVE_DAYS+' days to archive'); return; }
   try{
-    var existing=(await storageGet('kat:ridesArchive'))||[];
-    var archivedIds=new Set(existing.map(function(r){ return r&&r.id; }));
-    var merged=existing.concat(toArchive.filter(function(r){ return !archivedIds.has(r.id); }));
-    await storageSetArray('kat:ridesArchive', merged);
-    var keepIds=new Set(toArchive.map(function(r){ return r.id; }));
-    rides=rides.filter(function(r){ return !(r && r.date && r.date < cutoff && keepIds.has(r.id)); });
+    var raw = (await storageGet('kat:ridesArchive')) || [];
+    var existing = Array.isArray(raw) ? raw : Object.values(raw||{});
+    var archivedIds = new Set(existing.map(function(r){ return r && r.id; }));
+    var merged = existing.concat(toArchive.filter(function(r){ return !archivedIds.has(r.id); }));
+    var wrote = await storageSetArray('kat:ridesArchive', merged);
+    if(wrote === false){ showToast('Couldn\u2019t save the archive \u2014 nothing was removed from your rides','error'); return; }
+    // VERIFY against the server itself (not the local mirror, which would happily "confirm" a write that never landed)
+    if(fbDB){
+      var landed = null;
+      try{
+        var snap = await Promise.race([ fbRef('nda/kat/ridesArchive').once('value'), new Promise(function(_, rej){ setTimeout(function(){ rej(new Error('verify timeout')); }, 10000); }) ]);
+        var v = snap && snap.val ? snap.val() : null;
+        landed = new Set((Array.isArray(v) ? v : Object.values(v||{})).map(function(r){ return r && r.id; }));
+      }catch(e){ landed = null; }
+      if(!landed || toArchive.some(function(r){ return !landed.has(r.id); })){
+        showToast('Archive check failed \u2014 nothing was removed from your rides','error'); return;
+      }
+    }
+    var moved = new Set(toArchive.map(function(r){ return r.id; }));
+    rides = rides.filter(function(r){ return !(r && !r._archived && moved.has(r.id)); });
     await saveRides();
-    _archiveLoaded=false;
+    // marker so the app knows an archive exists without having to read it
+    try{
+      globalSettings.ridesArchive = { count: merged.length, through: cutoff, at: Date.now() };
+      await saveGlobalSettings();
+    }catch(e){ console.warn('archive marker not saved', e); }
+    // loaded history (if any) no longer matches what is archived - drop it, it reloads on demand
+    rides = rides.filter(function(r){ return !(r && r._archived); });
+    _archiveLoaded = false; window._archivedHeldList = null; window._archiveChecked = false;
     try{ if(typeof renderCal==='function') renderCal(); }catch(e){}
-    
     try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
-    showToast('Archived '+toArchive.length+' ride(s) \u2713');
+    showToast('Archived '+toArchive.length+' ride(s) \u2713 \u2014 still searchable anytime');
   }catch(e){ console.error('archive exec',e); showToast('Could not archive rides','error'); }
-});
+}
+registerAdminAction('rides_archive', _executeRidesArchive);
 
 registerAdminAction('ride_delete', async function(p){
   rides=rides.filter(function(r){ return !(r && (r.id===p.id || String(r.id)===String(p.id))); });
@@ -33546,6 +33820,8 @@ function _auditBaseBreakdown(r){
 
 function generateRidesReport(){
   if(!isAdmin()){ showToast('Admins only','error'); return; }
+  // v1261: counts rides per month across every year - archived ones included.
+  if(_historyPending()){ try{ showToast('Loading ride history\u2026'); }catch(e){} ensureHistoryLoaded().then(function(){ generateRidesReport(); }); return; }
   // Count rides scheduled per month, grouped by year (cancelled excluded).
   var byYM={}, years={};
   (rides||[]).forEach(function(r){
@@ -34209,6 +34485,8 @@ async function generateYearEndPL(){
   // is handled the same way the Income page does it (via the linked partner).
   const dName = myName;
   if(!dName){ showToast('Could not determine driver','error'); return; }
+  // v1261: a year always reaches back past the 60-day window - this report must include archived rides.
+  if(_historyPending()){ try{ showToast('Loading ride history\u2026'); }catch(e){} try{ await ensureHistoryLoaded(); }catch(e){} }
 
   const defYear = nowET().getFullYear();
   const year = parseInt(prompt('Year for the P&L / tax summary:', defYear)) || defYear;
@@ -35787,6 +36065,8 @@ let selectedClients  = new Set();
 
 function setProxyListMode(m){ window._proxyListMode=(m==='mine')?'mine':'owner'; try{ renderClients(); }catch(e){} }
 function renderClients(){
+  // v1261: ride counts and totals billed per client need older rides too (it re-renders itself once they arrive).
+  try{ if(_historyPending()) ensureHistoryLoaded(); }catch(e){}
   if(!document.getElementById('client-list')) return;
   const admin    = isAdmin();
   const myDriver = getMyDriverName();
@@ -37886,8 +38166,23 @@ function _readDriverPhotoOverrideCache(){
 function _writeDriverPhotoOverrideCacheEntry(name, dataURL){
   try{
     var cache = _readDriverPhotoOverrideCache();
+    // v1258: a photo is a base64 string - often 100K+ characters each - and this cache had NO size limit,
+    // holding one for every driver this device had ever looked at. On an admin's device (which views all
+    // of them) that is millions of characters of a ~5M quota, for something re-checked against Firebase
+    // every 24 hours anyway. One huge photo is simply not cached; otherwise the OLDEST entries are dropped
+    // until it fits inside the budget alongside everything else stored.
+    if(dataURL && String(dataURL).length > 400000) return;
     cache[name] = { v: dataURL||null, ts: Date.now() };
-    localStorage.setItem('kat:driverPhotoOverrideCache', JSON.stringify(cache));
+    var _ownLen = 'kat:driverPhotoOverrideCache'.length + (localStorage.getItem('kat:driverPhotoOverrideCache')||'').length;
+    var _others = _lsUsedChars() - _ownLen;
+    var _json = JSON.stringify(cache);
+    while(((_others >= 0 && _others + _json.length > _LS_BUDGET) || _json.length > _PHOTO_CACHE_MAX_CHARS) && Object.keys(cache).length > 1){
+      var _oldest = Object.keys(cache).filter(function(k){ return k!==name; }).sort(function(a,b){ return (cache[a].ts||0)-(cache[b].ts||0); })[0];
+      if(!_oldest) break;
+      delete cache[_oldest]; _json = JSON.stringify(cache);
+    }
+    if((_others >= 0 && _others + _json.length > _LS_BUDGET) || _json.length > _PHOTO_CACHE_MAX_CHARS){ localStorage.removeItem('kat:driverPhotoOverrideCache'); return; }
+    localStorage.setItem('kat:driverPhotoOverrideCache', _json);
   }catch(e){ /* quota or serialization - never worth breaking the app over a cache write */ }
 }
 // Fetches ONE driver's live Firebase override directly, by path - not the whole
