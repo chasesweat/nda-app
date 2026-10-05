@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191256">
+<meta name="version" content="202608191257">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2626,6 +2626,10 @@ async function initFirebase(){
     firebase.initializeApp(firebaseConfig);
     fbDB  = firebase.database();
     fbRef = (path) => fbDB.ref(path);
+    // v1257: start watching connection state immediately. It used to start only inside
+    // setupRealtimeListeners() - the last step of loading - so a load that stalled never knew
+    // whether the database was even reachable, and the banner could not say.
+    try{ _watchConnection(); }catch(_e){}
     // Sign in anonymously so the database can require an authenticated client
     // (lets us lock the security rules to "auth != null" instead of fully public).
     if(firebase.auth){
@@ -2716,7 +2720,22 @@ async function storageGet(key) {
         new Promise(function(_, reject){ setTimeout(function(){ reject(new Error('storageGet timeout: '+key)); }, 8000); })
       ]);
       if(snap.exists()) return _seed(snap.val());
-    } catch(e){}
+    } catch(e){
+      // v1257: a timeout used to vanish right here. The read then quietly fell through to the
+      // localStorage mirror below - an OLD copy - and nothing anywhere recorded that the live
+      // read had failed. Recorded now, and the first few are written to the crash log with the
+      // database's own connection state, so a stall names its real cause instead of just
+      // reading "app load exceeded 15s".
+      try{
+        if(e && /storageGet timeout/.test(e.message||'')){
+          var _t = (window._storageTimeouts = window._storageTimeouts || []);
+          _t.push(key);
+          if(_t.length <= 3 && typeof _logCrash==='function'){
+            _logCrash('storage-read-timeout', key+' did not answer in 8s - database '+(window._fbConnected===false?'is NOT reachable':(window._fbConnected===true?'reports connected':'connection state unknown'))+' - falling back to the old saved copy', '');
+          }
+        }
+      }catch(_e){}
+    }
   }
   // Fallback to localStorage
   try {
@@ -2997,6 +3016,13 @@ function _renderOfflineBar(){
 }
 function setupRealtimeListeners(){
   if(!fbDB) return;
+  // Idempotent (v1257): this used to be called from exactly one place - the very last line of
+  // _loadAppData() - so ANY earlier step stalling or throwing meant the live listeners never
+  // attached at all. Those listeners are what deliver real rides and clear the red banner, so a
+  // device stuck behind one bad housekeeping step stayed on an old copy for the whole session.
+  // Now also called from the failure paths, so it needs to be safe to reach twice.
+  if(window._rtListenersAttached) return;
+  window._rtListenersAttached = true;
   // Listen for ride changes
   try{ _watchConnection(); }catch(e){}
   fbRef('nda/kat/rides').on('value', snap=>{
@@ -3482,7 +3508,12 @@ function _showStaleDataBanner(){
   b.id='nda-stale-banner';
   b.style.cssText='position:fixed;left:0;right:0;top:0;z-index:20000;background:#b91c1c;color:#fff;padding:.7rem 1rem;font-size:.85rem;font-weight:700;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;box-shadow:0 2px 10px rgba(0,0,0,.3);';
   var _asOf=''; try{ _asOf = (typeof _ridesAsOfLabel==='function') ? _ridesAsOfLabel() : ''; }catch(e){}
-  b.innerHTML='<span style="flex:1;min-width:0;">\u26a0\ufe0f Couldn\u2019t load the latest rides \u2014 '+(_asOf ? 'showing your saved copy from '+_asOf+'.' : 'you may be seeing old information.')+' Changes are paused so nothing gets overwritten.</span>'
+  var _why=''; try{
+    if(window._fbConnected===false) _why=' The database isn\u2019t reachable right now.';
+    else if(window._storageTimeouts && window._storageTimeouts.length) _why=' '+window._storageTimeouts.length+' read'+(window._storageTimeouts.length>1?'s':'')+' timed out'+(window._loadStep?' (stuck at: '+window._loadStep+')':'')+'.';
+    else if(window._loadStep) _why=' (stuck at: '+window._loadStep+')';
+  }catch(e){}
+  b.innerHTML='<span style="flex:1;min-width:0;">\u26a0\ufe0f Couldn\u2019t load the latest rides \u2014 '+(_asOf ? 'showing your saved copy from '+_asOf+'.' : 'you may be seeing old information.')+_why+' Changes are paused so nothing gets overwritten.</span>'
     +'<button onclick="location.reload()" style="background:#fff;color:#b91c1c;border:none;border-radius:8px;padding:.45rem .85rem;font-family:inherit;font-weight:800;font-size:.8rem;cursor:pointer;white-space:nowrap;">Reload</button>';
   document.body.appendChild(b);
 }
@@ -3518,6 +3549,7 @@ async function _ensureFresh(){
 
 async function _loadAppData() {
   try {
+    window._loadStep = 'loading rides'; window._storageTimeouts = [];
     const [storedRides, storedComments, storedNotifs, storedColors] = await Promise.all([
       storageGet('kat:rides'),
       storageGet('kat:comments'),
@@ -3548,11 +3580,21 @@ async function _loadAppData() {
     // save correctly diffs to "nothing changed" rather than uploading seed data as if it were
     // real. A genuine first ride changes the array length, which falls back to a full write.
     _snapshotRidesBaseline(rides);
+    // v1257: if the live read of the rides timed out, what's in `rides` right now came from the
+    // localStorage mirror - an OLD copy, e.g. a list showing ~170 unpaid rides when the real
+    // number was 7. That used to pass straight through as if it were current, with writes enabled.
+    // It's treated as a failed load now: banner up, changes paused, and the live rides listener
+    // (attached below, and again from the failure paths) clears it the moment real data lands.
+    if(window._storageTimeouts && window._storageTimeouts.indexOf('kat:rides')>=0){
+      window._dataLoadFailed = true; window._dataFresh = false;
+      try{ _showStaleDataBanner(); }catch(e){}
+    }
     comments     = storedComments || {};
     notifications= storedNotifs   || {};
     if(storedColors) driverColors = storedColors;
     // Preamble loads run in PARALLEL. The profiles -> added-drivers -> photo-override ORDER
     // matters (an edited photo must win), so those three stay one chain; the rest run alongside.
+    window._loadStep = 'loading settings and profiles';
     await Promise.all([
       (async()=>{ try{ var _sq=await storageGet('kat:savedQuotes'); if(Array.isArray(_sq)) savedQuotes=_sq; }catch(e){} })(),
       (async()=>{ try{ var _fwr=await storageGet('kat:feeWaiveRequests'); if(_fwr && typeof _fwr==='object') feeWaiveRequests=_fwr; }catch(e){} })(),
@@ -3589,6 +3631,7 @@ async function _loadAppData() {
   // Firebase round-trips with one batch (major boot speedup). loadBiometricCreds writes
   // back, so it stays sequential after the batch. The driver-photo chain, the client-request
   // recovery cluster, and the proxy migration all keep their original order (above/below).
+  window._loadStep = 'loading passwords, clients and fees';
   await Promise.all([
     loadPasswords(),
     loadSubscriptions(),
@@ -3617,6 +3660,7 @@ async function _loadAppData() {
     loadFeePayments(),
     loadFwApprovedDuplicates(),
   ]);
+  window._loadStep = 'one-time template migrations';
   try{ await _migrateLegacyProfileTemplates(); }catch(e){ console.warn('legacy template migration', e); }
   try{ await _promoteChaseTemplatesToGlobalDefault(); }catch(e){ console.warn('Chase default promotion', e); }
   try{ await _clearChasePersonalDuplicates(); }catch(e){ console.warn('Chase personal duplicate cleanup', e); }
@@ -3631,12 +3675,16 @@ async function _loadAppData() {
   // no-op on every boot after their first run (flag-guarded), but with no reader left for what
   // they wrote, running them at all served no purpose - removed rather than leave dead work
   // happening silently on every single app load.
-  await loadBiometricCreds();
+  window._loadStep = 'passkeys and ride-id repair';
+  // Both of these used to be bare awaits. A throw from either skipped everything below - including
+  // setupRealtimeListeners() - so the session ran on a frozen copy with no live updates and, with
+  // nothing marked failed, no banner either.
+  try{ await loadBiometricCreds(); }catch(e){ console.warn('passkey load', e); }
     // Repair ride IDs: every ride must have a UNIQUE numeric id. Duplicate or
     // non-numeric ids (e.g. from a NaN nextId or repeated imports) caused clicking one
     // ride to open a different one, because find() returned the first matching id.
     // Reassign any colliding/invalid ids, carry that ride's comments to the new id.
-    await _repairDuplicateIds();
+    try{ await _repairDuplicateIds(); }catch(e){ console.warn('ride id repair', e); }
     // Migrate clients stored under proxy logins into their owner's list (one-time).
     // Morgan dispatches on Kat's behalf: any client record saved under 'Morgan' belongs
     // on Kat's list. Merge by name (case-insensitive); fill blanks from the moved record.
@@ -3673,9 +3721,15 @@ async function _loadAppData() {
       });
       if(migrated){ try{ await saveImportedClients(); }catch(e){ console.warn('proxy client migration save failed', e); } }
     }
+    window._loadStep = '';
     setupRealtimeListeners();
   } catch(err){
     console.error('initApp load error:', err);
+    // v1257: this used to swallow the error with only a console line nobody driving a car will
+    // ever see. Written to the crash log with the step it died in, and the live listeners are
+    // attached anyway - they're what deliver real data, and nothing here should be able to stop them.
+    try{ _logCrash('load-error', 'Load failed at: '+(window._loadStep||'unknown step')+' - '+((err && err.message)||String(err)), err && err.stack); }catch(_e){}
+    try{ setupRealtimeListeners(); }catch(_e){}
     // Still try to show the app with defaults
     rides = rides.length ? rides : SEED_RIDES;
   }
@@ -3780,7 +3834,11 @@ async function initApp() {
       new Promise(function(r){ try{ window.addEventListener('offline', function(){ r(true); }, { once:true }); }catch(e){} })
     ]);
     if(_coldTimedOut){
-      if(!_offlineAtOpen){ try{ _logCrash('cold-load-timeout', 'Initial app load exceeded 15s - revealing with whatever data is available', ''); }catch(e){} }
+      if(!_offlineAtOpen){ try{ _logCrash('cold-load-timeout', 'Initial app load exceeded 15s - stuck at: '+(window._loadStep||'unknown step')+' - database '+(window._fbConnected===false?'NOT reachable':(window._fbConnected===true?'reports connected':'state unknown'))+' - '+((window._storageTimeouts||[]).length)+' read(s) timed out - revealing with whatever data is available', ''); }catch(e){} }
+      // The slow step may never finish. The live listeners don't depend on it, and they're what
+      // actually replace an old copy with real data - start them now rather than waiting on a step
+      // that might be the thing that's hung.
+      try{ setupRealtimeListeners(); }catch(e){ console.warn('early listeners failed', e); }
       // NO FRESH DATA TO BE HAD - fall back to the saved copy (v1221). Without this, a driver in a dead zone
       // would open to NO rides - no pickup address, no client phone. It's shown under the red "couldn't load
       // the latest" banner and changes stay paused (v1196) until live data arrives, which replaces it.
