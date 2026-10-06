@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191274">
+<meta name="version" content="202608191275">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2115,6 +2115,10 @@ function _dismissAdminPromo(){
   var ov=document.getElementById('admin-promo-overlay'); if(ov) ov.remove();
 }
 function isAdmin(){ return currentUser?.role==='admin'; }
+// The people who look after FamilyWall imports (the cleanup tool, and fixing a wrongly-imported ride): Chase and Morgan. v1275: three
+// functions spelled this check out by hand.
+function _isFamilyWallFixer(){ return !!(currentUser && (currentUser.name==='Chase' || currentUser.name==='Morgan')); }
+function _requireFamilyWallFixer(){ if(_isFamilyWallFixer()) return true; showToast('Chase or Morgan only','error'); return false; }
 
 // ── WHO IS WHO ──────────────────────────────────────────────────────────────
 // One place to answer "is this person an admin / the owner / a reviewer". These used to be
@@ -15664,7 +15668,7 @@ async function saveRideEdits(){
   // details even if they don't own the client relationship. This is the real, authoritative
   // check a save is gated on - the same shared function the Edit button's own visibility now
   // calls too, so the two can never disagree with each other again.
-  if(!canEditRide(r)){ showToast('Only the client owner or assigned driver can edit this ride','error'); return; }
+  if(!canEditRide(r)){ showToast('Only the client owner or assigned driver can edit this ride (FamilyWall imports: any admin, Chase or Morgan)','error'); return; }
   if(!(await _confirmIfSameAddress('edit'))) return;
   // Reported directly, with a real screenshot: an address change correctly updated mileage, but
   // the price silently stayed at whatever it was before - by design, per the comment on r.price
@@ -20382,7 +20386,11 @@ function canEditRide(ride){
   const myResolvedIdentity = (typeof PROXY_MAP!=='undefined' && PROXY_MAP[myLogin]) || myDriverName;
   const owner = _rideClientOwner(ride);
   const isOwner = !!(owner && owner===myResolvedIdentity);
-  return isOwner || isDriver;
+  // A FamilyWall import has no real creator ("Created by FamilyWall"), and a client name the import couldn't read cleanly leaves no
+  // owner either - so nobody qualified as owner OR driver, and the Edit button never appeared on a ride whose date was simply wrong.
+  // Any admin, and Chase/Morgan (who run the imports), may edit a ride that came from FamilyWall (r.fwUID is the marker every import sets).
+  const isImportFixer = !!(ride.fwUID && (isAdmin() || _isFamilyWallFixer()));
+  return isOwner || isDriver || isImportFixer;
 }
 function canSeeGateCode(ride){
   try{
@@ -25024,7 +25032,7 @@ async function _applySavedQuotePriceFixes(indices){
   return fixed;
 }
 async function _showSavedQuotePriceReviewModal(){
-  if(!currentUser || (currentUser.name!=='Chase' && currentUser.name!=='Morgan')){ showToast('Chase or Morgan only','error'); return; }
+  if(!_requireFamilyWallFixer()) return;
   const mismatches = _findMispricedSavedQuotes();
   var back=document.createElement('div'); back.id='quote-price-review-back';
   back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13600;display:flex;align-items:center;justify-content:center;padding:1rem;';
@@ -26332,7 +26340,7 @@ function _fwReviewEditRide(id){
   try{ openRideModal(id); }catch(e){ showToast('Couldn\u2019t open that ride','error'); }
 }
 async function _showFamilyWallReviewModal(){
-  if(!currentUser || (currentUser.name!=='Chase' && currentUser.name!=='Morgan')){ showToast('Chase or Morgan only','error'); return; }
+  if(!_requireFamilyWallFixer()) return;
   const matches = _findSuspiciousFamilyWallRides();
   const dupGroups = _findDuplicateRideGroups();
   var back=document.createElement('div'); back.id='fw-review-modal-back';
@@ -26391,7 +26399,7 @@ async function _showFamilyWallReviewModal(){
 }
 
 async function _applyFamilyWallReview(){
-  if(!currentUser || (currentUser.name!=='Chase' && currentUser.name!=='Morgan')){ showToast('Chase or Morgan only','error'); return; }
+  if(!_requireFamilyWallFixer()) return;
   const checkedEls = Array.from(document.querySelectorAll('.fw-review-check:checked'));
   const checkedIds = checkedEls.map(function(c){ return String(c.value); });
 
@@ -34734,6 +34742,12 @@ function parseICSEvents(icsText, cutoffDate, skipKat){
     // real client name instead of falling back to the entire summary line.
     const clientMatch = summary.match(/[-\u2013]\s*([A-Z0-9][^()\n]+?)\s*\(|(?:run|pick.?up|pickup)\s*[-\u2013]?\s*([A-Z0-9][^()\n]+?)\s*\(/i);
     if(clientMatch) client = (clientMatch[1]||clientMatch[2]||'').trim();
+    // No "(owner)" in the summary (so neither pattern above matched), e.g. "AP PICKUP-Kathleen Herringdine": the whole summary used to
+    // become the client name, ride-type label included. Strip a leading ride-type label (and its dash/colon) and keep the rest.
+    if(!client){
+      var _stripped = summary.replace(/^\s*(?:ap.?round.?trip|ap.?run|a\/p.?run|airport.?run|ap.?pick.?up|airport.?pick.?up|round.?trip|one.?way|local)\s*[-\u2013:]?\s*/i,'').trim();
+      if(_stripped && _stripped!==summary.trim()) client = _stripped;
+    }
     // Remove emojis and cleanup
     client = client.replace(/[\u{1F300}-\u{1FFFF}]|[\u2600-\u27FF]|✅|🦦|❌|🔴|🐥|✈️/gu,'').trim();
     if(!client) client = summary.replace(/[\u{1F300}-\u{1FFFF}]|[\u2600-\u27FF]|✅|🦦|❌|🔴|🐥|✈️/gu,'').trim();
