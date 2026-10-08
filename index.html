@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191293">
+<meta name="version" content="202608191295">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -5854,10 +5854,10 @@ async function resetAllOnboarding(){
     showToast('\u2713 All drivers will be asked to review their info at next login');
   }catch(e){ console.warn('reset onboarding', e); showToast('Could not save the reset','error'); }
 }
-let extraStops = 0; // extra pickups at $10 each
+// v1295: there is no separate "billed stop count" any more - the Quote bills the stop ROWS that are on screen (stopRows('q').length), the same thing it saves.
 
 // changeStops()/setStops() drove the retired #stops-count number box - removed in v662, since
-// getStopAddresses('q').length (set in _stopsChanged) is now the only thing that sets extraStops.
+// the stop rows themselves (stopRows) are what the Quote bills.
 // toggleXstopAddr() is UNCHANGED and still live: the Fee Editor's #fee-edit-xstop mini-tool (a
 // narrower, already-correctly-priced, post-creation fee adjustment - separate from this change,
 // out of scope) still uses it.
@@ -5972,7 +5972,7 @@ function _priceRide(inp){
       const L=[];
       L.push({kind:'base', label:`Base rate (${vehicle}) — incl. ${includedMiles()} mi`, val:base});
       if(miles > 0 && miles <= mileageTrigger()) L.push({kind:'mileage', label:`Mileage (${miles} mi — within radius)`, val:0, note:'No overage'});
-      if(overage > 0) L.push({kind:'mileage', label:'Mileage overage', val:overage, note:`(${miles} − ${includedMiles()}) = ${overMiles} mi × $${mileageRate().toFixed(2)}`});
+      if(overage > 0) L.push({kind:'mileage', label:`Mileage overage (${overMiles} mi × $${mileageRate().toFixed(2)})`, val:overage});   // v1295: the (9 mi × $2.50) in the label is all the detail shown - no second math line
       // Double Vehicle rides on BOTH legs - each leg is its own independently-charged fare.
       if(isXXL && price2>0) L.push({kind:'veh2', label:`2nd vehicle (${vehicle2})`, val:price2});
       return L;
@@ -6012,7 +6012,7 @@ function _priceRide(inp){
   } else {
     lines.push({kind:'base', label:`Base rate (${vehicle}) — includes up to ${includedMiles()} mi`, val:tm.base});
     if(tm.apType && miles > 0 && miles <= mileageTrigger()) lines.push({kind:'mileage', label:`Mileage (${miles} mi — within free radius)`, val:0, note:'No overage — within '+mileageTrigger()+' mi grace buffer'});
-    if(tm.overage > 0) lines.push({kind:'mileage', label:'Mileage overage', val:tm.overage, note:`(${miles} mi − ${includedMiles()}) = ${tm.overMiles} mi × $${mileageRate().toFixed(2)}/mi`});
+    if(tm.overage > 0) lines.push({kind:'mileage', label:`Mileage overage (${tm.overMiles} mi × $${mileageRate().toFixed(2)})`, val:tm.overage});
   }
   if(isXXL && price2>0){
     lines.push({kind:'veh2', label:`2nd vehicle (${vehicle2})`, val:price2});
@@ -6164,7 +6164,7 @@ function calcQuote() {
     miles:   document.getElementById('q-miles').value,
     sprinterHours: (document.getElementById('q-sprinter-hours')||{}).value,
     wait:    document.getElementById('q-wait').value,
-    stops:   extraStops,
+    stops:   stopRows('q').length,   // v1295: was a separate global that could go stale and bill a stop the saved quote did not have ($180 quote scheduled as $191)
     xxl:     isXXL,
     vehicle2:document.getElementById('q-vehicle2')?.value,
     price2:  document.getElementById('q-price2')?.value,
@@ -6551,17 +6551,13 @@ function _syncRouteBtn(){
 function _stopsChanged(prefix){
   if(prefix==='q') _syncRouteBtn();
   if(prefix==='q'){
-    // extraStops is the pre-existing global calcQuote()'s pricing already reads (getSurchargeLines,
-    // the AP Round Trip leg builder, _gatherQuoteRide). Deriving it from the real rows here - rather
-    // than changing every place that reads it - is what makes this the actual bug fix: the count
-    // now genuinely reflects what's on screen, address rows included.
+    // calcQuote() bills stopRows('q').length directly (v1295), so the count always reflects what's on screen, address rows included.
     // FEE counts ROWS, not addresses-with-text: a stop that's been added but not typed into
     // yet still costs $10, exactly like the old count box did (you could set the count before
     // knowing the addresses). getStopAddresses() deliberately filters blanks - it's for the
     // SAVED text and the mileage route, where an empty stop genuinely has nothing to route
     // through. Using it for the fee too was the bug: adding a stop and not immediately typing
     // into it silently charged nothing.
-    extraStops = stopRows('q').length;
     // v1280: this used to call resetMileage() here, left over from when stops changed the route. Since v1266 the
     // route is always pickup -> destination, so adding a stop zeroed q-miles with nothing to re-fetch it: the quote
     // fell back to "Enter miles above" while the Distance box still showed the old miles.
@@ -6615,9 +6611,6 @@ function restoreStopRows(prefix, xstop, xstopAddr){
   // never touched, leaving the previous quote's button state on screen. Sync explicitly.
   if(prefix==='q'){
     _syncRouteBtn();
-    // v1287: with a count of 0 nothing above touched the billed stop count, so after Clear (or opening a quote with no stops)
-    // the previous quote's stops were still being charged - invisibly, with no stop rows on screen.
-    extraStops = stopRows('q').length;
   }
 }
 function _attachStopAutocomplete(prefix, sid){
@@ -14404,7 +14397,6 @@ function _terminalPhrase(t){
 function _receiptLine(l, tm){
   var label = l.label, m;
   if((m = /^Base rate \((.+)\) — (?:includes up to|incl\.) (\d+) mi$/.exec(label))) label = 'Base rate ('+m[1]+', incl. '+m[2]+' mi)';
-  else if(label==='Mileage overage') label = 'Mileage overage ('+tm.overMiles+' mi × $'+mileageRate().toFixed(2)+')';
   else if((m = /^Additional pickups? \((\d+) × (\$[\d.]+)\)$/.exec(label))) label = 'Extra stop'+(parseInt(m[1])>1?'s':'')+' ('+m[1]+' × '+m[2]+')';
   var o = {label:label, val:l.val};
   if(l.note && l.note!=='No overage' && l.note!=='Enter miles above') o.note = l.note;
@@ -28124,10 +28116,10 @@ function renderAvailCalendar(driverName){
     var st = driverAvailabilityStatus(driverName, dateStr, null);
     var isToday = dateStr===todayStr;
     var partialBlock = st.available && _hasHoursBlockOnDate(driverName, dateStr);
-    var bg = !st.available ? '#fdecea' : (partialBlock ? '#fef6e0' : 'var(--white)');
-    var border = isToday ? '1.5px solid var(--accent)' : (!st.available ? '1px solid #f3c4bd' : (partialBlock ? '1px solid #f0dca0' : '1px solid var(--light)'));
-    var color = !st.available ? '#b03a2e' : (partialBlock ? '#8a6d1f' : 'var(--black)');
-    var dotColor = !st.available ? '#b03a2e' : '#c9971f';
+    var bg = !st.available ? '#d9483b' : (partialBlock ? '#fcd34d' : 'var(--white)');   // v1294: solid red vs solid amber so a whole day off and part of a day off can't be mistaken
+    var border = isToday ? '1.5px solid var(--accent)' : (!st.available ? '1px solid #b03226' : (partialBlock ? '1px solid #d9a606' : '1px solid var(--light)'));
+    var color = !st.available ? '#fff' : (partialBlock ? '#5c3b00' : 'var(--black)');
+    var dotColor = !st.available ? '#fff' : '#5c3b00';
     cells += '<div onclick="openAvailDayModal(\''+driverName+'\',\''+dateStr+'\')" style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:8px;background:'+bg+';border:'+border+';color:'+color+';font-size:.78rem;font-weight:'+(isToday?'800':'600')+';cursor:pointer;position:relative;">'
       + day
       + ((!st.available || partialBlock) ? '<span style="position:absolute;bottom:2px;width:4px;height:4px;border-radius:50%;background:'+dotColor+';"></span>' : '')
@@ -28143,8 +28135,8 @@ function renderAvailCalendar(driverName){
     + '<div style="text-align:center;margin-bottom:.5rem;"><button onclick="availCalToday(\''+driverName+'\')" class="btn-secondary" style="padding:.25rem .6rem;font-size:.72rem;">Today</button></div>'
     + '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;">' + dowHeader + cells + '</div>'
     + '<div style="display:flex;flex-direction:column;gap:.3rem;margin-top:.5rem;font-size:.68rem;color:var(--mid);">'
-    + '<div style="display:flex;align-items:center;gap:.4rem;"><span style="width:8px;height:8px;border-radius:50%;background:#fdecea;border:1px solid #f3c4bd;display:inline-block;"></span>Blocked all day</div>'
-    + '<div style="display:flex;align-items:center;gap:.4rem;"><span style="width:8px;height:8px;border-radius:50%;background:#fef6e0;border:1px solid #f0dca0;display:inline-block;"></span>Blocked part of the day</div>'
+    + '<div style="display:flex;align-items:center;gap:.4rem;"><span style="width:12px;height:12px;border-radius:3px;background:#d9483b;border:1px solid #b03226;display:inline-block;"></span>Blocked all day</div>'
+    + '<div style="display:flex;align-items:center;gap:.4rem;"><span style="width:12px;height:12px;border-radius:3px;background:#fcd34d;border:1px solid #d9a606;display:inline-block;"></span>Blocked part of the day</div>'
     + '<div>Tap any day for details</div>'
     + '</div>'
     + '<button onclick="openAvailStandingHoursModal(\''+driverName+'\')" style="width:100%;margin-top:.7rem;padding:.55rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer;">\u23f0 Set standing unavailable hours (e.g. 8\u20135, Mon\u2013Fri)</button>';
