@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191296">
+<meta name="version" content="202608191300">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -515,7 +515,15 @@ input,select,textarea{font-size:16px;}
 @keyframes sosFadeIn{from{opacity:0;}to{opacity:1;}}
 .sos-box{background:#1a0000;border:3px solid #ff4444;border-radius:18px;max-width:440px;width:100%;padding:1.5rem;box-shadow:0 0 60px rgba(255,60,60,.6);}
 .sos-pulse{animation:sosPulse 1.2s ease-in-out infinite;}
-@keyframes sosPulse{0%,100%{transform:scale(1);}50%{transform:scale(1.08);}}</style>
+@keyframes sosPulse{0%,100%{transform:scale(1);}50%{transform:scale(1.08);}}
+/* v1298: on a computer (mouse) the browser's own time-picker popup is replaced by the app's picker (see _tpInit); the browser's clock icon is hidden and ours is drawn instead. Phones keep their native pickers. */
+html.tp-fine input[type="time"]::-webkit-calendar-picker-indicator,html.tp-touch input[type="time"]::-webkit-calendar-picker-indicator{display:none !important;}
+html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2.2rem !important;background-repeat:no-repeat !important;background-position:right .7rem center !important;background-size:16px 16px !important;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7v5l3 2'/%3E%3C/svg%3E") !important;}
+#tp-pop{position:fixed;z-index:100000;background:#fff;border:1.5px solid var(--light);border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,.28);padding:.7rem;display:none;font-family:'DM Sans',sans-serif;}
+#tp-pop.tp-sheet{left:50% !important;top:9% !important;transform:translateX(-50%);width:min(92vw,340px);box-sizing:border-box;}
+#tp-pop input[type=text]{width:100%;box-sizing:border-box;padding:.5rem .6rem !important;min-height:0 !important;font-size:16px !important;border:1.5px solid var(--light);border-radius:8px;}
+#tp-pop select{padding:.45rem .5rem !important;min-height:0 !important;font-size:1rem !important;border:1.5px solid var(--light);border-radius:8px;background:#fff;}
+</style>
 </head>
 <body>
 
@@ -1596,7 +1604,7 @@ input,select,textarea{font-size:16px;}
     </div>
     <div style="padding:.25rem;">
       <div style="background:#fff8ec;border:1.5px solid #f5d98a;border-radius:10px;padding:.75rem .85rem;margin-bottom:.8rem;font-size:.76rem;line-height:1.5;color:var(--black);">
-        &#9888;&#65039; Enter your Venmo username <b>exactly as it is spelled on your Venmo profile &mdash; uppercase letters and all</b>. Capitalization matters: <b>Kathleen-Herringdine</b> works, but <b>kathleen-herringdine</b> splits the payment. Tap <b>Test</b> to open Venmo and confirm it goes to <b>one</b> person before saving.
+        &#9888;&#65039; Enter your Venmo username <b>exactly as it is spelled on your Venmo profile &mdash; uppercase letters and all</b>. Capitalization matters: <b>John-Smith</b> works, but <b>john-smith</b> splits the payment. Tap <b>Test</b> to open Venmo and confirm it goes to <b>one</b> person before saving.
       </div>
       <div style="display:flex;gap:.4rem;align-items:center;margin-bottom:.7rem;">
         <input type="text" id="venmo-modal-input" placeholder="@venmohandle" style="flex:1;padding:.5rem .7rem;border:1.5px solid var(--light);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.9rem;" />
@@ -20570,6 +20578,177 @@ function _tintColor(hex, amount){
   return '#'+[rr,gg,bb].map(function(v){ return v.toString(16).padStart(2,'0'); }).join('');
 }
 
+// ── TIME PICKER (v1298) ──
+// The browser's own time popup (Chrome on a computer) draws a blank row between minute 00 and 01 where its wheel wraps, and the app cannot change
+// it. On a computer, clicking the clock icon at the right edge of any <input type="time"> now opens this picker instead: hour 1-12, minute
+// 00-59 (one unbroken list), AM/PM. It writes the same 24-hour "HH:MM" value the field always held and fires input + change, so every
+// existing handler works unchanged. Typing into the field still works as before. Phones/tablets (touch) keep their native pickers.
+function _tpValue(hh, mm){ return (hh<10?'0':'')+hh+':'+(mm<10?'0':'')+mm; }
+function _tpClose(){ var p=document.getElementById('tp-pop'); if(p){ p.style.display='none'; p._target=null; } }
+function _tpOpen(inp, touch){
+  var p=document.getElementById('tp-pop');
+  if(!p){
+    p=document.createElement('div'); p.id='tp-pop';
+    var hOpts='', mOpts='';
+    for(var h=1;h<=12;h++) hOpts+='<option value="'+h+'">'+h+'</option>';
+    for(var m=0;m<60;m++) mOpts+='<option value="'+m+'">'+(m<10?'0':'')+m+'</option>';
+    p.innerHTML='<input type="text" id="tp-txt" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Type a time, e.g. 1830 or 6:30pm" />'
+      +'<div id="tp-prev" style="min-height:1.3rem;font-size:.85rem;font-weight:700;color:var(--mid);margin:.25rem 0 .35rem;"></div>'
+      +'<div style="display:flex;align-items:center;gap:.35rem;">'
+      +'<select id="tp-h">'+hOpts+'</select><span style="font-weight:800;">:</span><select id="tp-m">'+mOpts+'</select>'
+      +'<select id="tp-ap"><option value="AM">AM</option><option value="PM">PM</option></select></div>'
+      +'<div style="display:flex;gap:.4rem;margin-top:.6rem;">'
+      +'<button type="button" id="tp-clear" style="flex:1;padding:.45rem;background:none;border:1.5px solid var(--light);border-radius:8px;color:var(--mid);font-weight:700;cursor:pointer;">Clear</button>'
+      +'<button type="button" id="tp-ok" style="flex:2;padding:.45rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">Set time</button></div>';
+    document.body.appendChild(p);
+    p.addEventListener('mousedown', function(e){ e.stopPropagation(); });
+    p.querySelector('#tp-ok').onclick=function(){
+      var t=p._target; if(!t) return _tpClose();
+      var h=parseInt(p.querySelector('#tp-h').value,10), m=parseInt(p.querySelector('#tp-m').value,10), ap=p.querySelector('#tp-ap').value;
+      var h24=(h%12)+(ap==='PM'?12:0);
+      var typed=_tpParse(p.querySelector('#tp-txt').value, t.value);          // a typed time (24-hour or standard) wins over the lists when it is valid
+      t.value = typed || _tpValue(h24,m);
+      t.dispatchEvent(new Event('input',{bubbles:true})); t.dispatchEvent(new Event('change',{bubbles:true}));
+      _tpClose();
+    };
+    var tx=p.querySelector('#tp-txt');
+    tx.addEventListener('input', function(){
+      var v=_tpParse(tx.value, p._target?p._target.value:'');
+      p.querySelector('#tp-prev').textContent = tx.value ? (v ? '\u2192  '+_tpFmt(v) : '\u2026') : '';
+      if(v){ var q=v.split(':'), hh=parseInt(q[0],10); p.querySelector('#tp-h').value=String((hh%12)||12); p.querySelector('#tp-m').value=String(parseInt(q[1],10)); p.querySelector('#tp-ap').value=hh>=12?'PM':'AM'; }
+    });
+    tx.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); p.querySelector('#tp-ok').click(); } e.stopPropagation(); });
+    p.addEventListener('touchstart', function(e){ e.stopPropagation(); }, {passive:true});
+    p.querySelector('#tp-clear').onclick=function(){
+      var t=p._target; if(!t) return _tpClose();
+      t.value='';
+      t.dispatchEvent(new Event('input',{bubbles:true})); t.dispatchEvent(new Event('change',{bubbles:true}));
+      _tpClose();
+    };
+    var _outside=function(e){ if(p.style.display!=='none' && p._target && e.target!==p._target && !p.contains(e.target)) _tpClose(); };
+    document.addEventListener('mousedown', _outside);
+    document.addEventListener('touchstart', _outside, {passive:true});
+    document.addEventListener('keydown', function(e){ if(e.key==='Escape') _tpClose(); });
+  }
+  var v=(inp.value||'').split(':'), h24=parseInt(v[0],10), mi=parseInt(v[1],10);
+  if(isNaN(h24)||isNaN(mi)){ h24=9; mi=0; }
+  p.querySelector('#tp-h').value=String((h24%12)||12);
+  p.querySelector('#tp-m').value=String(mi);
+  p.querySelector('#tp-ap').value=h24>=12?'PM':'AM';
+  p.querySelector('#tp-txt').value=''; p.querySelector('#tp-prev').textContent='';
+  p._target=inp; p.style.display='block';
+  p.classList.toggle('tp-sheet', !!touch);                       // phones: a centered card near the top; computers: anchored under the field
+  if(touch){ p.style.left=''; p.style.top=''; return; }
+  var r=inp.getBoundingClientRect(), pw=p.offsetWidth||230, ph=p.offsetHeight||110;
+  var left=Math.max(8, Math.min(r.left, window.innerWidth-pw-8));
+  var top=r.bottom+6; if(top+ph>window.innerHeight-8) top=Math.max(8, r.top-ph-6);
+  p.style.left=left+'px'; p.style.top=top+'px';
+}
+// ── Typing a time (v1298) ──
+// On a computer, digits typed into a time field are read as a whole time instead of one segment at a time, so 24-hour ("military") entry just works:
+// 1830 or 18:30 -> 6:30 PM, 0600 -> 6:00 AM, 1200 -> 12:00 PM, 0000 -> 12:00 AM; "6:30p", "630 pm", "6pm" work too. One or two digits set only the HOUR
+// (the minutes already in the field stay). Without am/pm, 3-4 digits are read as 24-hour; 1-2 digits and h:mm keep the field's current AM/PM (AM if empty;
+// 12:xx on an empty field is noon). It commits after a short pause, on Enter, Tab or leaving the field, and a small bubble shows the standard time it will use.
+function _tpFmt(v){ var a=String(v||'').split(':'), h=parseInt(a[0],10), m=parseInt(a[1],10); if(isNaN(h)||isNaN(m)) return ''; return ((h%12)||12)+':'+(m<10?'0':'')+m+' '+(h>=12?'PM':'AM'); }
+function _tpParse(str, cur){
+  var t=String(str||'').toLowerCase().replace(/\s+/g,''), m=/^(\d{1,4}|\d{1,2}:\d{1,2})([ap]m?|)$/.exec(t);
+  if(!m) return null;
+  var body=m[1], suf=m[2]?m[2].charAt(0):'', h, mi, hourOnly=false, colon=body.indexOf(':')>-1, digits=body.replace(':','');
+  var cv=String(cur||'').split(':'), ch=parseInt(cv[0],10), cm=parseInt(cv[1],10), hasCur=!isNaN(ch)&&!isNaN(cm);
+  if(colon){ var p=body.split(':'); h=parseInt(p[0],10); mi=parseInt(p[1],10); if(p[1].length<2) return null; }
+  else if(digits.length<=2){ h=parseInt(digits,10); mi=hasCur?cm:0; hourOnly=true; }
+  else { h=parseInt(digits.slice(0,digits.length-2),10); mi=parseInt(digits.slice(-2),10); }
+  if(isNaN(h)||isNaN(mi)||mi>59||h>23) return null;
+  var h24;
+  if(suf){
+    if(h<1||h>12) return null;
+    h24=(h%12)+(suf==='p'?12:0);
+  } else if(!colon && digits.length>=3){
+    h24=h;                                            // 1830, 0600, 1200: 24-hour
+  } else if(h>=13 || h===0){
+    h24=h;                                            // 18, 18:30, 0:15: obviously 24-hour
+  } else {
+    var pm = hasCur ? ch>=12 : (h===12);              // keep the field's AM/PM; empty field: 12 is noon, everything else AM
+    h24=(h%12)+(pm?12:0);
+  }
+  return (h24<10?'0':'')+h24+':'+(mi<10?'0':'')+mi;
+}
+function _tpHint(inp, text){
+  var b=document.getElementById('tp-hint');
+  if(!text){ if(b) b.style.display='none'; return; }
+  if(!b){ b=document.createElement('div'); b.id='tp-hint'; b.style.cssText='position:fixed;z-index:100001;background:#1a0d2e;color:#fff;border-radius:8px;padding:.3rem .6rem;font:700 .85rem \'DM Sans\',sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.3);pointer-events:none;'; document.body.appendChild(b); }
+  var r=inp.getBoundingClientRect(); b.textContent=text; b.style.display='block';
+  b.style.left=Math.max(8,r.left)+'px'; b.style.top=Math.max(8,r.top-34)+'px';
+}
+function _tpCommit(inp){
+  var buf=inp._tpBuf||''; inp._tpBuf=''; clearTimeout(inp._tpTimer); _tpHint(inp,'');
+  if(!buf) return;
+  var v=_tpParse(buf, inp.value);
+  if(!v) return;
+  if(v!==inp.value){ inp.value=v; inp.dispatchEvent(new Event('input',{bubbles:true})); inp.dispatchEvent(new Event('change',{bubbles:true})); }
+}
+function _tpKeydown(e){
+  var t=e.target;
+  if(!t || t.tagName!=='INPUT' || t.type!=='time' || t.disabled || t.readOnly || e.ctrlKey || e.metaKey || e.altKey) return;
+  var k=e.key, buf=t._tpBuf||'';
+  if(/^[0-9]$/.test(k) || k===':' || /^[apm]$/i.test(k)){
+    e.preventDefault();
+    if(/^[ap]$/i.test(k) && !buf){                     // a bare "a"/"p" flips AM/PM of the time already in the field
+      if(t.value){ var q=t.value.split(':'), hh=parseInt(q[0],10); hh=(hh%12)+(/p/i.test(k)?12:0); t.value=(hh<10?'0':'')+hh+':'+q[1]; t.dispatchEvent(new Event('input',{bubbles:true})); t.dispatchEvent(new Event('change',{bubbles:true})); }
+      return;
+    }
+    if(/^m$/i.test(k) && !/[ap]$/i.test(buf)) return;   // a stray m (e.g. the m of "pm" after it already committed) is ignored
+    buf+=k; t._tpBuf=buf; clearTimeout(t._tpTimer);
+    var pv=_tpParse(buf, t.value);
+    _tpHint(t, buf+(pv?'  →  '+_tpFmt(pv):'  …'));
+    var complete=/^\d{4}$/.test(buf) || /^\d{1,2}:\d{2}$/.test(buf) || /[ap]m$/i.test(buf);
+    if(complete && pv){ _tpCommit(t); } else { t._tpTimer=setTimeout(function(){ _tpCommit(t); }, /[ap]$/i.test(buf)?500:1200); }   // a lone a/p waits half a second for the m
+  } else if(buf && k==='Backspace'){
+    e.preventDefault(); buf=buf.slice(0,-1); t._tpBuf=buf; clearTimeout(t._tpTimer);
+    if(buf){ var pv2=_tpParse(buf, t.value); _tpHint(t, buf+(pv2?'  →  '+_tpFmt(pv2):'  …')); t._tpTimer=setTimeout(function(){ _tpCommit(t); },1200); } else _tpHint(t,'');
+  } else if(buf && k==='Enter'){
+    e.preventDefault(); _tpCommit(t);
+  } else if(buf && k==='Escape'){
+    t._tpBuf=''; clearTimeout(t._tpTimer); _tpHint(t,'');
+  } else if(buf && k==='Tab'){
+    _tpCommit(t);
+  }
+}
+function _tpInit(){
+  var fine=false, touch=false;
+  try{ fine=!!(window.matchMedia && window.matchMedia('(pointer:fine)').matches); }catch(e){}
+  try{ touch=('ontouchstart' in window) || (navigator.maxTouchPoints>0); }catch(e){}
+  if(!fine && !touch) return;
+  if(fine) document.documentElement.classList.add('tp-fine');
+  if(touch) document.documentElement.classList.add('tp-touch');
+  if(fine){
+    document.addEventListener('keydown', _tpKeydown, true);
+    document.addEventListener('focusout', function(e){ var t=e.target; if(t && t.tagName==='INPUT' && t.type==='time' && t._tpBuf) _tpCommit(t); }, true);
+    // The clock icon is drawn at the right edge of the field; a click there opens the app's picker (capture phase, before the browser's own).
+    document.addEventListener('click', function(e){
+      var t=e.target;
+      if(!t || t.tagName!=='INPUT' || t.type!=='time' || t.disabled || t.readOnly) return;
+      var r=t.getBoundingClientRect();
+      if(e.clientX >= r.right-38){ e.preventDefault(); e.stopPropagation(); _tpOpen(t); }
+    }, true);
+  }
+  if(touch){
+    // A TAP (not a scroll) on a time field opens the app's picker instead of the phone's own; the picker has a "type a time" box that uses the phone's
+    // keyboard, plus hour / minute / AM-PM lists. If opening it ever fails, the tap is left alone so the phone's own picker still works.
+    var st={x:0,y:0,moved:false};
+    document.addEventListener('touchstart', function(e){ var q=e.touches&&e.touches[0]; if(q){ st.x=q.clientX; st.y=q.clientY; st.moved=false; } }, {capture:true, passive:true});
+    document.addEventListener('touchmove', function(e){ var q=e.touches&&e.touches[0]; if(q && (Math.abs(q.clientX-st.x)>10 || Math.abs(q.clientY-st.y)>10)) st.moved=true; }, {capture:true, passive:true});
+    document.addEventListener('touchend', function(e){
+      var t=e.target;
+      if(!t || t.tagName!=='INPUT' || t.type!=='time' || t.disabled || t.readOnly || st.moved) return;
+      try{ _tpOpen(t, true); }catch(err){ return; }
+      if(e.cancelable) e.preventDefault();
+      try{ t.blur(); }catch(err){}
+    }, {capture:true, passive:false});
+  }
+}
+_tpInit();
+
 function _pickAndReadImage(opts){
   opts = opts || {};
   var resize = !!opts.resize;
@@ -27368,7 +27547,7 @@ function buildMemberCard(d, opts){
           +'<input type="text" id="venmo-'+dk+'" value="'+venmo+'" placeholder="@venmohandle" style="flex:1;padding:.35rem .65rem;border:1.5px solid var(--light);border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.8rem;" />'
           +'<button type="button" onclick="_venmoTestField(\'venmo-'+dk+'\')" style="flex-shrink:0;padding:.35rem .65rem;background:none;border:1.5px solid #3d95ce;color:#3d95ce;border-radius:6px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;">Test \u2197</button>'
           +'</div>'
-          +'<div style="font-size:.68rem;color:var(--mid);margin-top:.3rem;line-height:1.45;">\u26A0\uFE0F Enter your Venmo username <b>exactly as it is spelled on your Venmo profile \u2014 uppercase letters and all</b>. Capitalization matters: <b>Kathleen-Herringdine</b> works, but <b>kathleen-herringdine</b> splits the payment. Tap <b>Test</b> to open Venmo and confirm it goes to <b>one</b> person before saving.</div>'
+          +'<div style="font-size:.68rem;color:var(--mid);margin-top:.3rem;line-height:1.45;">\u26A0\uFE0F Enter your Venmo username <b>exactly as it is spelled on your Venmo profile \u2014 uppercase letters and all</b>. Capitalization matters: <b>John-Smith</b> works, but <b>john-smith</b> splits the payment. Tap <b>Test</b> to open Venmo and confirm it goes to <b>one</b> person before saving.</div>'
           +'<button onclick="saveDriverProfile(\''+d+'\')" style="width:100%;margin-top:.6rem;padding:.5rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:600;font-size:.82rem;cursor:pointer;">Save My Info</button>')
         :(canEdit?('<button onclick="saveDriverProfile(\''+d+'\')" style="width:100%;margin-top:.6rem;padding:.5rem;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-weight:600;font-size:.82rem;cursor:pointer;">Save My Info</button>'):'')}
       </div>
