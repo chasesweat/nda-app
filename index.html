@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191304">
+<meta name="version" content="202608191308">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -906,8 +906,6 @@ html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;justify-content:center;">
         <button id="cal-familywall-btn" onclick="manualICSPaste()" style="background:var(--accent);border:1.5px solid var(--accent);color:#fff;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">⬆ Import from FamilyWall</button>
         <button id="cal-feed-btn" onclick="_showCalendarFeedModal()" style="background:var(--accent);border:1.5px solid var(--accent);color:#fff;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">📅 Subscribe my calendar</button>
-        <button id="fw-search-btn" onclick="_showParenSearchModal('FamilyWall')" class="tb-btn" style="display:none;" title="Find rides that have FamilyWall in (parentheses) anywhere on the ride">🔎 Find (FamilyWall) rides</button>
-        <button id="fw-review-btn" onclick="_showFamilyWallReviewModal()" style="display:none;background:var(--accent);border:1.5px solid var(--accent);color:#fff;border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">🧹 Review imports &amp; duplicates</button>
         <button id="cal-quickadd-btn" onclick="openQuickAddModal()" style="background:var(--accent);color:#fff;border:1.5px solid var(--accent);border-radius:8px;padding:.55rem 1rem;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;">+ Add Ride</button>
       </div>
     </div>
@@ -1120,7 +1118,7 @@ html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2
       <button onclick="loadRideHistory()" title="Load archived older rides into view" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">🗄 Load history</button>
       <button id="archive-rides-btn" onclick="archiveOldRides()" title="Move old rides out of the live app to keep it fast (admin)" style="display:none;background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">📦 Archive old</button>
       <button id="onetime-fixes-btn" onclick="_showOneTimeFixes()" title="One-time cleanups that only appear while there is something left to fix" style="display:none;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">🧹 One-time fixes</button>
-      <button id="price-checks-btn" onclick="_showPriceChecks()" title="Rides and saved quotes whose price differs from the formula, and the pricing audit report" style="display:none;background:none;border:1.5px solid #d97706;color:#d97706;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">💲 Price checks</button>
+      <button id="price-checks-btn" onclick="_showPriceChecks()" title="Saved quotes whose price differs from the formula, and the pricing audit report" style="display:none;background:none;border:1.5px solid #d97706;color:#d97706;border-radius:8px;padding:.5rem 1rem;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">💲 Price checks</button>
     </div>
     <div id="income-type-filter-bar" style="margin:.2rem 0 0;"></div>
     <div id="pay-filter-bar" style="margin:.2rem 0 0;"></div>
@@ -5412,23 +5410,6 @@ async function archiveOldRides(){
 // already cleaned simply won't match the pattern again, so nothing happens to it the second
 // time. Purely cosmetic text; the actual per-leg PRICING was already correct before this
 // cleanup and remains untouched - see the handoff notes for why.
-var _RT_LEG_NOTES_TEST_PATTERN = /Leg [12] \((AP RUN|AP PICK UP)\) \u2014 AP Round Trip \d{4}-\d{2}-\d{2}/;
-var _RT_LEG_NOTES_STRIP_PATTERN = /\s*Leg [12] \((AP RUN|AP PICK UP)\) \u2014 AP Round Trip \d{4}-\d{2}-\d{2}\s*/g;
-function _ridesNeedingLegNotesCleanup(){
-  return (rides||[]).filter(function(r){ return r && r.notes && _RT_LEG_NOTES_TEST_PATTERN.test(r.notes); });
-}
-async function sweepRoundTripLegNotes(){
-  if(!isAdmin()){ showToast('Only admins can run this','error'); return; }
-  var affected = _ridesNeedingLegNotesCleanup();
-  if(!affected.length){ showToast('No rides need cleaning up'); return; }
-  if(!confirm('Clean up the auto-added "Leg N \u2014 AP Round Trip" text from '+affected.length+' ride note'+(affected.length===1?'':'s')+'? Any other notes on those rides are left exactly as they are.')) return;
-  affected.forEach(function(r){ r.notes = r.notes.replace(_RT_LEG_NOTES_STRIP_PATTERN, ' ').trim().replace(/\s+/g,' '); });
-  try{ await saveRides(); }catch(e){}
-  showToast('\u2705 Cleaned up '+affected.length+' ride note'+(affected.length===1?'':'s'));
-  try{ _refreshMaintenanceButtons(); }catch(e){}
-  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
-}
-
 // Finds every ride created by Kat, Chase, or Morgan where the saved price genuinely differs
 // from what _computeFeeRebuild would compute fresh from the ride's own current fields right
 // now - the exact same "Manual adjustment" gap the ride modal's own Fee Breakdown already
@@ -5436,104 +5417,18 @@ async function sweepRoundTripLegNotes(){
 // it. A ride already reviewed once (r.adjReviewed) is skipped on every future scan, whether it
 // was fixed or explicitly accepted as-is - review is a one-time decision per ride, not
 // something that should keep resurfacing.
-function _scanManualAdjustmentRides(){
-  var creators = {'Kat':1,'Chase':1,'Morgan':1};
-  var out = [];
-  (rides||[]).forEach(function(r){
-    if(!r || !creators[r.createdBy] || r.adjReviewed) return;
-    var price = parseFloat(r.price)||0;
-    if(!price) return;
-    var rebuild; try{ rebuild = _computeFeeRebuild(r); }catch(e){ return; }
-    var diff = Math.round((price - rebuild.total)*100)/100;
-    if(Math.abs(diff) < 0.01) return;
-    out.push({ ride:r, rebuiltTotal:rebuild.total, diff:diff });
-  });
-  return out;
-}
-
 // "Fix" sets the saved price to match the fresh, correct formula total - genuinely changing
 // what's on file for that ride, which is why this asks for confirmation individually rather
 // than as a bulk action. "Accept" leaves the price exactly as it is, permanently, and simply
 // records that this specific gap was reviewed and is fine - most real cases from before the
 // AP ROUND TRIP pricing redesign, where a leg's price was always a deliberate share of a
 // combined total, not an error.
-async function _fixManualAdjustmentRide(rideId){
-  var r=_rideById(rideId); if(!r) return;
-  var rebuild; try{ rebuild = _computeFeeRebuild(r); }catch(e){ showToast('Couldn\u2019t recompute this ride','error'); return; }
-  var oldPrice = parseFloat(r.price)||0;
-  if(!confirm('Change '+(r.client||'this ride')+'\u2019s saved price from $'+oldPrice.toFixed(2)+' to $'+rebuild.total.toFixed(2)+'? This is a real change to what\u2019s on file for this ride.')) return;
-  r.price = rebuild.total;
-  // Deliberately does NOT touchRide() - this is a background admin-review action, not
-  // something meaningful that happened to the ride itself, and per Chase's own call it
-  // doesn't belong in the ride's visible trail/history. adjReviewed still tracks that this
-  // was reviewed (so it isn't flagged again), just silently, not as a "Last: ..." entry.
-  r.adjReviewed = true;
-  try{ await saveRides(); }catch(e){}
-  showToast('\u2705 Fixed \u2014 '+(r.client||'ride')+' now $'+rebuild.total.toFixed(2));
-  try{ _renderManualAdjustmentScan(); }catch(e){}
-}
-async function _acceptManualAdjustmentRide(rideId){
-  var r=_rideById(rideId); if(!r) return;
-  // Same reasoning as _fixManualAdjustmentRide above, even more so here - nothing about the
-  // ride actually changed at all, so there's genuinely nothing worth surfacing in its trail.
-  r.adjReviewed = true;
-  try{ await saveRides(); }catch(e){}
-  showToast('\u2713 Accepted \u2014 won\u2019t be flagged again');
-  try{ _renderManualAdjustmentScan(); }catch(e){}
-}
-function _renderManualAdjustmentScan(){
-  var box=document.getElementById('adj-scan-list'); if(!box) return;
-  var items = _scanManualAdjustmentRides();
-  var countEl=document.getElementById('adj-scan-count'); if(countEl) countEl.textContent=items.length;
-  if(!items.length){
-    box.innerHTML='<div style="text-align:center;padding:2rem 1rem;color:var(--mid);font-size:.88rem;">\u2705 Nothing left to review.</div>';
-    try{ _refreshMaintenanceButtons(); }catch(e){}
-    return;
-  }
-  box.innerHTML = items.map(function(it){
-    var r=it.ride;
-    return '<div style="border:1.5px solid var(--light);border-radius:10px;padding:.75rem .85rem;margin-bottom:.6rem;">'
-      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem;margin-bottom:.4rem;">'
-        +'<div><div style="font-weight:700;font-size:.9rem;">'+escHtml(r.client||'Ride')+'</div>'
-        +'<div style="font-size:.74rem;color:var(--mid);">'+escHtml(r.type||'')+' \u00b7 '+fmtDateShort(r.date)+' \u00b7 created by '+escHtml(r.createdBy||'')+'</div></div>'
-        +'<button onclick="openRideModal('+r.id+')" style="flex-shrink:0;background:none;border:1.5px solid var(--light);border-radius:8px;padding:.3rem .6rem;font-family:inherit;font-size:.72rem;cursor:pointer;color:var(--mid);">View ride</button>'
-      +'</div>'
-      +'<div style="font-size:.82rem;margin-bottom:.6rem;">Saved: <strong>$'+(parseFloat(r.price)||0).toFixed(2)+'</strong> \u2192 formula says <strong>$'+it.rebuiltTotal.toFixed(2)+'</strong> <span style="color:'+(it.diff>0?'#b45309':'#0369a1')+';">('+(it.diff>0?'+':'')+'$'+it.diff.toFixed(2)+')</span></div>'
-      +'<div style="display:flex;gap:.5rem;">'
-        +'<button onclick="_fixManualAdjustmentRide('+r.id+')" style="flex:1;padding:.45rem;background:#15803d;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;">Fix \u2192 $'+it.rebuiltTotal.toFixed(2)+'</button>'
-        +'<button onclick="_acceptManualAdjustmentRide('+r.id+')" style="flex:1;padding:.45rem;background:none;border:1.5px solid var(--light);border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;color:var(--black);">Accept as-is</button>'
-      +'</div></div>';
-  }).join('');
-}
-function openManualAdjustmentScan(){
-  if(!isAdmin()){ showToast('Only admins can run this','error'); return; }
-  var back=document.createElement('div');
-  back.id='adj-scan-overlay';
-  back.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:16500;display:flex;align-items:center;justify-content:center;padding:1.1rem;';
-  back.innerHTML='<div style="background:#fff;border-radius:14px;max-width:520px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;">'
-    +'<div style="padding:1rem 1.1rem;border-bottom:1px solid var(--light);display:flex;justify-content:space-between;align-items:center;">'
-      +'<div style="font-weight:800;font-size:1rem;">\u2696\ufe0f Manual adjustments to review (<span id="adj-scan-count">0</span>)</div>'
-      +'<button onclick="document.getElementById(\'adj-scan-overlay\').remove()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--mid);line-height:1;">\u00d7</button>'
-    +'</div>'
-    +'<div style="padding:.9rem 1.1rem;font-size:.78rem;color:var(--mid);border-bottom:1px solid var(--light);">Every ride created by Kat, Chase, or Morgan where the saved price doesn\u2019t match what today\u2019s pricing formula would compute. Fix updates the real, saved price. Accept leaves it exactly as-is and won\u2019t ask again.</div>'
-    +'<div id="adj-scan-list" style="padding:1rem 1.1rem;overflow-y:auto;flex:1;"></div>'
-  +'</div>';
-  document.body.appendChild(back);
-  _renderManualAdjustmentScan();
-}
-
 // One-time cleanup for rides that already picked up a "Manual adjustment reviewed" trail entry
 // from this tool before Chase asked for those to stop appearing - strips only entries whose
 // .action exactly matches what touchRide() used to write here (both the Fix and Accept
 // variants), leaving every other, genuine trail entry on the same ride completely untouched.
 // Safe to run more than once - a ride already cleaned simply has no more matching entries to
 // find, so nothing happens to it the second time.
-var _MANUAL_ADJ_TRAIL_PATTERN = /^Manual adjustment reviewed \u2014 /;
-function _ridesWithManualAdjTrailEntry(){
-  return (rides||[]).filter(function(r){
-    return r && Array.isArray(r.trail) && r.trail.some(function(t){ return t && _MANUAL_ADJ_TRAIL_PATTERN.test(t.action||''); });
-  });
-}
 // ── UNASSIGNED RIDES GO TO THE CLIENT OWNER (v1301) ──
 // Chase: "rides that were or are unassigned are assigned to the client owner". The screens already SHOW a blank driver as
 // the owner (_displayRideDriver); this makes it real in the data. Placeholders (no client yet), view-only archived rides and
@@ -5568,10 +5463,6 @@ async function assignUnassignedRidesToOwners(){
 // saved price with the formula (ride review, saved-quote fix, pricing audit report). Same functions underneath, nothing re-implemented.
 function _oneTimeFixList(){
   var list=[];
-  if(isAdmin()){
-    list.push({key:'trail', label:'Remove old \u201cManual adjustment reviewed\u201d lines from ride histories', count:_ridesWithManualAdjTrailEntry().length, run:sweepManualAdjTrailEntries});
-    list.push({key:'rtnotes', label:'Remove old \u201cLeg N \u2014 AP Round Trip\u201d text from ride notes', count:_ridesNeedingLegNotesCleanup().length, run:sweepRoundTripLegNotes});
-  }
   if(isTemplateAuthority()){
     list.push({key:'owner', label:'Give unassigned rides to their client owner (Chase only)', count:_ridesUnassignedWithOwner().length, run:assignUnassignedRidesToOwners});
   }
@@ -5602,7 +5493,7 @@ function _showOneTimeFixes(){
   var back=document.createElement('div'); back.id='onetime-fixes-back';
   back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13500;display:flex;align-items:center;justify-content:center;padding:1rem;';
   back.innerHTML='<div style="background:#fff;border-radius:16px;max-width:480px;width:100%;padding:1.25rem;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
-    +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\U0001F9F9 One-time fixes</div>'
+    +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\uD83E\uDDF9 One-time fixes</div>'
     +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.6rem;line-height:1.45;">Each fix asks you to confirm before it changes anything, and drops off this list once it has nothing left to do.</div>'
     +'<div id="onetime-fixes-list" style="flex:1;overflow-y:auto;margin-bottom:.7rem;"></div>'
     +'<button onclick="var b=document.getElementById(\'onetime-fixes-back\');if(b)b.remove();" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">Close</button></div>';
@@ -5612,8 +5503,7 @@ function _showOneTimeFixes(){
 function _showPriceChecks(){
   if(!isAdmin()) return;
   var old=document.getElementById('price-checks-back'); if(old) old.remove();
-  var nRides=0, nQuotes=0;
-  try{ nRides=_scanManualAdjustmentRides().length; }catch(e){}
+  var nQuotes=0;
   try{ if(canReviewData() && typeof _findMispricedSavedQuotes==='function') nQuotes=_findMispricedSavedQuotes().length; }catch(e){}
   var close="var b=document.getElementById('price-checks-back');if(b)b.remove();";
   var row=function(label,sub,fn,enabled,btn){
@@ -5623,26 +5513,13 @@ function _showPriceChecks(){
   var back=document.createElement('div'); back.id='price-checks-back';
   back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13500;display:flex;align-items:center;justify-content:center;padding:1rem;';
   back.innerHTML='<div style="background:#fff;border-radius:16px;max-width:480px;width:100%;padding:1.25rem;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
-    +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\U0001F4B2 Price checks</div>'
-    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.6rem;line-height:1.45;">Everything that compares a saved price with today\u2019s pricing formula.</div>'
-    +row('Rides to review','Rides by Kat, Chase or Morgan whose price differs from the formula \u00b7 '+nRides,'openManualAdjustmentScan()',nRides>0,'Review')
+    +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\uD83D\uDCB2 Price checks</div>'
+    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.6rem;line-height:1.45;">Saved quotes priced differently from today\u2019s formula, and the pricing audit report.</div>'
     +(canReviewData()?row('Saved quotes to fix','Saved quotes priced differently from the formula \u00b7 '+nQuotes,'_showSavedQuotePriceReviewModal()',nQuotes>0,'Fix'):'')
     +row('Pricing audit report','Downloads the full audit (CSV)','generatePricingAudit()',true,'Download')
     +'<button onclick="'+close+'" style="margin-top:.7rem;width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">Close</button></div>';
   document.body.appendChild(back);
 }
-async function sweepManualAdjTrailEntries(){
-  if(!isAdmin()){ showToast('Only admins can run this','error'); return; }
-  var affected = _ridesWithManualAdjTrailEntry();
-  if(!affected.length){ showToast('No rides need cleaning up'); return; }
-  if(!confirm('Remove the "Manual adjustment reviewed" entry from '+affected.length+' ride\u2019s trail'+(affected.length===1?'':'s')+'? Every other entry in each ride\u2019s history is left exactly as it is.')) return;
-  affected.forEach(function(r){ r.trail = r.trail.filter(function(t){ return !(t && _MANUAL_ADJ_TRAIL_PATTERN.test(t.action||'')); }); });
-  try{ await saveRides(); }catch(e){}
-  showToast('\u2705 Cleaned up '+affected.length+' ride\u2019s trail'+(affected.length===1?'':'s'));
-  try{ _refreshMaintenanceButtons(); }catch(e){}
-  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
-}
-
 // The "Load history" button: same shared loader the on-demand paths use.
 async function loadRideHistory(){
   if(_archiveLoaded){ showToast('History already loaded'); return; }
@@ -7063,7 +6940,7 @@ function _clearIfAutoFilledTerminalAddr(el){
 // the actual curb can fix it in the field and have it sync to everyone.
 const TERMINAL_COORDS_BUILTIN = {
   'North Domestic':  '33.641718,-84.448644',
-  'South Domestic':  '33.637419,-84.443575',   // set by Chase Oct 6, 2026 (was 33.638882,-84.442656)
+  'South Domestic':  '33.637419,-84.443575',   // set by Chase Oct 6, 2026 - the earlier South point is deliberately NOT recorded anywhere (it routed to a business of the same name)
   'International':    '33.641312,-84.419636',
 };
 // Live view: saved overrides win over the built-ins, per terminal. Anything malformed in saved
@@ -7806,7 +7683,7 @@ function onDateChange(){
   const notice=document.getElementById('holiday-notice');
   if(notice){
     const name=(dv && typeof HOLIDAY_NAMES!=='undefined') ? HOLIDAY_NAMES[dv.slice(5)] : '';
-    if(name){ notice.style.display='block'; notice.textContent='\U0001F4C5 '+name+' \u2014 holiday surcharge applied automatically.'; }
+    if(name){ notice.style.display='block'; notice.textContent='\uD83D\uDCC5 '+name+' \u2014 holiday surcharge applied automatically.'; }
     else { notice.style.display='none'; }
   }
   renderAddons('q'); // outside the date check so clearing the date still repaints the chips
@@ -18313,8 +18190,8 @@ async function toggleInterest(id){
 
 // The core "what SHOULD this ride's fare be, computed fresh from its own current fields"
 // math - shared by buildFeeMathHTML (the ride modal's own Fee Breakdown) and
-// _scanManualAdjustmentRides (the review tool below), so the two always agree exactly on what
-// counts as a manual adjustment, rather than two separate copies of this logic drifting apart.
+// the buildFeeBreakdown / recalcFeeEdit paths, so they all agree exactly on what the fare should be, rather than separate
+// copies of this logic drifting apart. (The separate manual-adjustment review scan was removed in v1306.)
 function _computeFeeRebuild(r){
   // v1288: the ride card's fee breakdown comes from the SAME pricing function as the Quote (and the receipts): the ride's own saved
   // toggles are honored (a waived surcharge stays waived - nothing is re-derived from the date/time any more), an AP Round Trip shows both
@@ -25596,7 +25473,8 @@ function _buildTerminalCoordCardHtml(){
   var ov = (typeof globalSettings!=='undefined' && globalSettings && globalSettings.terminalCoordOverrides) || {};
   var canEdit = (typeof isAdmin==='function') ? isAdmin() : false;
   var rows = ['North Domestic','South Domestic','International'].map(function(k){
-    var custom = !!((ov[k]||'').trim() && _isValidLatLng((ov[k]||'').trim()));
+    var _ovv = (ov[k]||'').trim();
+    var custom = !!(_ovv && _isValidLatLng(_ovv) && _latLngMilesApart(_ovv, TERMINAL_COORDS_BUILTIN[k]||'') > 0.0005);   // a saved value that is the same point as the built-in is just the built-in
     var id = 'tcoord-'+k.replace(/[^A-Za-z]/g,'');
     return '<div style="margin-bottom:.7rem;">'
       +'<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.25rem;">'
@@ -25611,7 +25489,6 @@ function _buildTerminalCoordCardHtml(){
           +'style="flex:1;min-width:0;padding:.4rem .55rem;border:1.5px solid var(--light);border-radius:8px;font-family:inherit;font-size:.8rem;box-sizing:border-box;'+(canEdit?'':'background:var(--surface);color:var(--mid);')+'">'
         +'<button onclick="event.stopPropagation();_previewTerminalCoord(\''+id+'\')" title="Open this coordinate in your own Maps app, without saving it" style="flex-shrink:0;padding:.4rem .6rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;">\ud83d\udccd Preview</button>'
         +(canEdit?'<button onclick="_saveTerminalCoord(\''+k+'\',\''+id+'\')" style="flex-shrink:0;padding:.4rem .7rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">Save</button>':'')
-        +(canEdit&&custom?'<button onclick="_resetTerminalCoord(\''+k+'\')" style="flex-shrink:0;padding:.4rem .6rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">Reset</button>':'')
       +'</div></div>';
   }).join('');
   // A saved-but-ignored override is the single most dangerous state this card can be in: it
@@ -25627,7 +25504,7 @@ function _buildTerminalCoordCardHtml(){
           +(b.miles!=null ? ' \u2014 about '+Math.round(b.miles)+' miles from the real terminal' : ' \u2014 not valid coordinates')
           +'</div>';
       }).join('')
-      +'<div style="font-size:.72rem;color:#7f1d1d;margin-top:.35rem;line-height:1.5;">Drivers are being routed to the built-in point instead. Press Reset on the affected terminal to clear this, or paste the correct curb coordinates.</div>'
+      +'<div style="font-size:.72rem;color:#7f1d1d;margin-top:.35rem;line-height:1.5;">Drivers are being routed to the built-in point instead. Paste the correct curb coordinates over it and press Save.</div>'
       +'</div>'
     : '';
   return '<div style="background:var(--surface);border-radius:12px;padding:1.1rem;border:1.5px solid var(--light);margin-bottom:1.25rem;">'
@@ -25681,15 +25558,6 @@ async function _saveTerminalCoord(term, inputId){
   globalSettings.terminalCoordOverrides[term] = v;
   try{ await storageSet('kat:globalSettings', globalSettings); }catch(e){ console.warn(e); }
   showToast('\u2705 '+term+' pickup point updated');
-  try{ renderMessageTemplates(); }catch(e){}
-}
-async function _resetTerminalCoord(term){
-  if(!confirm('Put '+term+' back to the built-in pickup point?')) return;
-  try{
-    if(globalSettings && globalSettings.terminalCoordOverrides) delete globalSettings.terminalCoordOverrides[term];
-    await storageSet('kat:globalSettings', globalSettings);
-  }catch(e){ console.warn(e); }
-  showToast('\u21a9\ufe0f '+term+' reset to the built-in point');
   try{ renderMessageTemplates(); }catch(e){}
 }
 function renderMessageTemplates(){
@@ -26016,23 +25884,6 @@ async function clearTemplateField(scope, key){
 // Chase-or-Morgan cleanup tool for FamilyWall-imported non-ride calendar noise. See its own
 // v886/v887 handoff entries for the full filter-design reasoning. Independent of both import
 // features — deleting this doesn't affect either import flow, and vice versa.
-function _findSuspiciousFamilyWallRides(){
-  // RT and OW checked case-sensitively as whole uppercase words — lowercase "rt"/"ow" show up
-  // inside ordinary text far too often (e.g. "restart", "own") to use as a reliable signal at
-  // that length; every real example seen in this data uses them as deliberate uppercase tags.
-  const wordRe = /\brun\b|\bpickup\b|\bround\s*trip\b|\bone\s*way\b/i;
-  const abbrevRe = /\bRT\b|\bOW\b/;
-  return rides.filter(function(r){
-    if(!r || !r.fwUID) return false;
-    const client = r.client || '';
-    const hasKeyword = wordRe.test(client) || abbrevRe.test(client);
-    if(hasKeyword) return false;
-    const hasAddress = !!(r.pickup || r.home);
-    const hasRealPrice = !!(r.price && Number(r.price) !== 0);
-    if(hasAddress || hasRealPrice) return false;
-    return true;
-  });
-}
 // Same name, same date, same time - direct request. Groups every active ride by that key
 // (client normalized to lowercase/trimmed, since a real duplicate might only differ in casing
 // or stray whitespace; date/time compared exactly, since both are already machine-normalized
@@ -26066,12 +25917,7 @@ function _findDuplicateRideGroups(){
 // Marks a duplicate group as reviewed and genuinely fine - two real, separate rides, not an
 // accidental double-booking. No approval step of its own to click anymore, per direct follow-up
 // request - a group is approved implicitly, by having been shown in the review and left alone
-// (see _applyFamilyWallReview below), rather than needing a separate confirmation action.
-async function _approveDuplicateGroup(key){
-  fwApprovedDuplicates[key] = {approvedBy: currentUser.name, at: Date.now()};
-  try{ await storageSetOne('kat:fwApprovedDuplicates', key, fwApprovedDuplicates[key], fwApprovedDuplicates); }catch(e){}
-}
-
+// (v1306: that review screen was folded into the FamilyWall import itself; only the duplicate finder remains, for the dispatch-invoice diagnostic).
 // Direct request: users reporting the app freezing/going white with no pattern found - this is
 // the actual, visible way to see what _logCrash() (see near the top of this script, right after
 // currentUser is declared) has been capturing since that was added. Merges this device's own
@@ -26184,183 +26030,11 @@ async function _showCrashLogModal(){
   document.body.appendChild(back);
 }
 // Open a flagged import in the normal ride editor. The cleanup list is closed first: the ride editor sits below it and would open hidden.
-function _fwReviewEditRide(id){
-  var m=document.getElementById('fw-review-modal-back'); if(m) m.remove();
-  try{ openRideModal(id); }catch(e){ showToast('Couldn\u2019t open that ride','error'); }
-}
-// ── FIND RIDES WITH TEXT IN (PARENTHESES) (v1302) ──
+// ── (v1307: the "Find (FamilyWall) rides" search that lived here was removed - the app has no FamilyWall-created rides and the import can no longer make any) ──
 // Chase: "a way to search for rides that have FamilyWall in () on the ride". Looks at every text field on each ride (client, notes,
 // addresses, createdBy, driver, flight, phone ... and every history line), so it finds the "(FamilyWall)" wherever it is. Read-only.
-function _findRidesWithParenText(term){
-  var t=String(term||'').trim().toLowerCase(); if(!t) return [];
-  var re=new RegExp('\\([^()]*'+t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'[^()]*\\)','i');
-  var out=[];
-  (rides||[]).forEach(function(r){
-    if(!r) return;
-    var hit=null;
-    Object.keys(r).some(function(k){
-      var v=r[k]; if(typeof v!=='string' || k.charAt(0)==='_') return false;
-      var m=re.exec(v); if(m){ hit={field:k, snippet:m[0]}; return true; } return false;
-    });
-    if(!hit && Array.isArray(r.trail)){
-      r.trail.some(function(e){
-        var v=(e&&((e.action||'')+' '+(e.by||'')))||''; var m=re.exec(v);
-        if(m){ hit={field:'history', snippet:m[0]}; return true; } return false;
-      });
-    }
-    if(hit) out.push({ride:r, field:hit.field, snippet:hit.snippet});
-  });
-  out.sort(function(a,b){ return String(a.ride.date||'').localeCompare(String(b.ride.date||'')); });
-  return out;
-}
-function _parenSearchRender(){
-  var inp=document.getElementById('paren-search-term'), box=document.getElementById('paren-search-list'), cnt=document.getElementById('paren-search-count');
-  if(!inp||!box) return;
-  var res=_findRidesWithParenText(inp.value);
-  if(cnt) cnt.textContent=res.length+' ride'+(res.length===1?'':'s')+' found';
-  box.innerHTML=res.length?res.map(function(x){
-    var r=x.ride, tm=r.time?' '+fmtTime12(r.time):'';
-    return '<div style="display:flex;align-items:flex-start;gap:.5rem;padding:.5rem;border-bottom:1px solid var(--light);">'
-      +'<div style="flex:1;min-width:0;"><div style="font-size:.85rem;font-weight:700;color:var(--black);">'+escHtml(r.client||'(no client name)')+'</div>'
-      +'<div style="font-size:.72rem;color:var(--mid);">'+escHtml(r.type||'')+' \u00b7 '+(r.date?fmtDateShort(r.date):'(no date)')+tm+' \u00b7 driver: '+escHtml(r.driver||'(unassigned)')+'</div>'
-      +'<div style="font-size:.72rem;color:#92400e;margin-top:.15rem;">in <b>'+escHtml(x.field)+'</b>: '+escHtml(x.snippet)+'</div></div>'
-      +'<button type="button" onclick="_parenSearchOpen('+r.id+')" style="flex-shrink:0;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;padding:.2rem .6rem;font-family:inherit;font-size:.74rem;font-weight:600;cursor:pointer;">Open</button></div>';
-  }).join(''):'<div style="padding:1rem;text-align:center;color:var(--mid);font-size:.85rem;">No rides have that in (parentheses).</div>';
-}
-function _parenSearchOpen(id){
-  var m=document.getElementById('paren-search-back'); if(m) m.remove();
-  try{ openRideModal(id); }catch(e){ showToast('Couldn\u2019t open that ride','error'); }
-}
-function _showParenSearchModal(term){
-  if(!canReviewData()){ showToast('Chase or Morgan only','error'); return; }
-  var old=document.getElementById('paren-search-back'); if(old) old.remove();
-  var back=document.createElement('div'); back.id='paren-search-back';
-  back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13500;display:flex;align-items:center;justify-content:center;padding:1rem;';
-  back.innerHTML='<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;padding:1.25rem;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
-    +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\U0001F50E Find rides with text in ( )</div>'
-    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.6rem;line-height:1.45;">Shows every ride that has the word below inside parentheses anywhere on it (name, notes, addresses, history). Change the word to search for something else. Archived rides are only included after \u201cLoad history\u201d.</div>'
-    +'<input type="text" id="paren-search-term" value="'+escAttr(term||'')+'" oninput="_parenSearchRender()" style="width:100%;box-sizing:border-box;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-size:16px;margin-bottom:.4rem;" />'
-    +'<div id="paren-search-count" style="font-size:.72rem;font-weight:700;color:var(--mid);margin-bottom:.3rem;"></div>'
-    +'<div id="paren-search-list" style="flex:1;overflow-y:auto;margin-bottom:.7rem;"></div>'
-    +'<button onclick="var b=document.getElementById(\'paren-search-back\');if(b)b.remove();" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">Close</button></div>';
-  document.body.appendChild(back);
-  _parenSearchRender();
-}
-async function _showFamilyWallReviewModal(){
-  if(!_requireFamilyWallFixer()) return;
-  const matches = _findSuspiciousFamilyWallRides();
-  const dupGroups = _findDuplicateRideGroups();
-  var back=document.createElement('div'); back.id='fw-review-modal-back';
-  back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13500;display:flex;align-items:center;justify-content:center;padding:1rem;';
-  const rowsHtml = matches.length ? matches.map(function(r){
-    const dateStr = r.date ? fmtDateShort(r.date) : '(no date)';
-    const timeStr = r.time ? fmtTime12(r.time) : '';
-    return '<label style="display:flex;align-items:flex-start;gap:.5rem;padding:.5rem;border-bottom:1px solid var(--light);cursor:pointer;">'
-      + '<input type="checkbox" class="fw-review-check" data-fw="1" value="'+r.id+'" style="margin-top:.2rem;accent-color:#f0997b;">'
-      + '<div style="flex:1;min-width:0;">'
-      + '<div style="font-size:.85rem;font-weight:700;color:var(--black);">'+escHtml(r.client||'(no client name)')+'</div>'
-      + '<div style="font-size:.72rem;color:var(--mid);">'+escHtml(r.type||'')+' \u00b7 '+dateStr+(timeStr?' '+timeStr:'')+' \u00b7 $'+(r.price!==undefined?r.price:'?')+' \u00b7 driver: '+escHtml(r.driver||'(unassigned)')+'</div>'
-      + '</div>'
-      + '<button type="button" onclick="event.preventDefault();event.stopPropagation();_fwReviewEditRide('+r.id+')" style="flex-shrink:0;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;padding:.2rem .6rem;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">Edit</button>'
-      + '</label>';
-  }).join('') : '<div style="padding:1rem;text-align:center;color:var(--mid);font-size:.85rem;">No suspicious FamilyWall imports found \u2014 everything on record mentions a ride-type word in the client name.</div>';
-  const dupHtml = dupGroups.length ? dupGroups.map(function(g){
-    const first=g.rides[0];
-    const dateStr = fmtDateShort(first.date), timeStr = fmtTime12(first.time);
-    return '<div style="border:1.5px solid #fcd34d;border-radius:10px;padding:.5rem;margin-bottom:.5rem;background:#fffbeb;">'
-      + '<div style="font-size:.72rem;font-weight:700;color:#92400e;margin-bottom:.3rem;">'+escHtml(first.client)+' \u00b7 '+dateStr+' '+timeStr+' \u2014 '+g.rides.length+' matching rides</div>'
-      + g.rides.map(function(r){
-          // Who created this specific ride matters here: only a ride with createdBy==='Morgan'
-          // counts toward her dispatch invoice, so whoever resolves this duplicate needs to be
-          // able to tell which copy is hers before checking one to delete - otherwise the wrong
-          // one could get kept, silently costing her credit for a real ride.
-          var creatorLabel = r.createdBy==='Morgan'
-            ? '<span style="color:#0d9488;font-weight:700;">created by Morgan\u00a0\u00b7\u00a0</span>'
-            : (r.createdBy ? 'created by '+escHtml(r.createdBy)+'\u00a0\u00b7\u00a0' : '');
-          return '<label style="display:flex;align-items:flex-start;gap:.5rem;padding:.3rem .2rem;cursor:pointer;">'
-            + '<input type="checkbox" class="fw-review-check fw-dup-check" data-group="'+escAttr(g.key)+'" data-fw="'+(r.fwUID?'1':'0')+'" value="'+r.id+'" style="margin-top:.2rem;accent-color:#f0997b;">'
-            + '<div style="flex:1;min-width:0;font-size:.76rem;color:var(--black);">'
-            + (r.fwUID?'<span style="color:#f0997b;font-weight:700;">FamilyWall\u00a0\u00b7\u00a0</span>':'')
-            + creatorLabel
-            + escHtml(r.type||'')+' \u00b7 $'+(r.price!==undefined?r.price:'?')+' \u00b7 driver: '+escHtml(r.driver||'(unassigned)')+' \u00b7 status: '+escHtml(r.status||'scheduled')
-            + '</div>'
-            + '<button type="button" onclick="event.preventDefault();event.stopPropagation();_fwReviewEditRide('+r.id+')" style="flex-shrink:0;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;padding:.2rem .6rem;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">Edit</button>'
-            + '</label>';
-        }).join('')
-      + '</div>';
-  }).join('') : '';
-  const totalFlagged = matches.length + dupGroups.reduce(function(a,g){ return a+g.rides.length; },0);
-  back.innerHTML='<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;padding:1.25rem;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
-    +'<div style="font-size:1rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">\uD83E\uDDF9 Review imports &amp; duplicates</div>'
-    +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.7rem;line-height:1.45;">Checked for two things: possible duplicate bookings (same client, date, and time), and likely non-ride calendar noise (holiday fees, concerts, notes) with no ride-type word, address, or real price. Check anything to delete it \u2014 immediately, no second-admin approval, no undo. Any duplicate you leave unchecked is treated as reviewed and fine, and won\u2019t be flagged again.</div>'
-    +(totalFlagged ? '<label style="display:flex;align-items:center;gap:.5rem;padding:.4rem .5rem;font-size:.78rem;font-weight:700;color:var(--black);border-bottom:2px solid var(--light);"><input type="checkbox" id="fw-review-selectall" onchange="document.querySelectorAll(\'.fw-review-check[data-fw=&quot;1&quot;]\').forEach(function(c){c.checked=this.checked}.bind(this))" style="accent-color:#f0997b;">Select all FamilyWall imports</label>' : '')
-    +'<div style="flex:1;overflow-y:auto;margin-bottom:.7rem;">'
-    +(dupGroups.length ? '<div style="font-size:.72rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#92400e;margin:.3rem 0 .4rem;">\u26a0\ufe0f Possible duplicates \u00b7 '+dupGroups.length+'</div>'+dupHtml : '')
-    +'<div style="font-size:.72rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin:.5rem 0 .3rem;">Likely calendar noise \u00b7 '+matches.length+'</div>'
-    +rowsHtml
-    +'</div>'
-    +(totalFlagged ? '<button type="button" onclick="_applyFamilyWallReview()" style="width:100%;padding:.6rem;background:#f0997b;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:\'DM Sans\',sans-serif;font-size:.85rem;margin-bottom:.5rem;">Apply \u2014 delete checked, approve the rest</button>' : '')
-    +'<button onclick="var b=document.getElementById(\'fw-review-modal-back\');if(b)b.remove();" style="width:100%;padding:.55rem;background:none;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;font-family:\'DM Sans\',sans-serif;">Close</button>'
-    +'</div>';
-  document.body.appendChild(back);
-}
-
-async function _applyFamilyWallReview(){
-  if(!_requireFamilyWallFixer()) return;
-  const checkedEls = Array.from(document.querySelectorAll('.fw-review-check:checked'));
-  const checkedIds = checkedEls.map(function(c){ return String(c.value); });
-
-  // Any duplicate group with nothing checked in it is treated as reviewed and fine - left
-  // alone on purpose, not overlooked. A group with at least one ride checked skips approval
-  // entirely, since deleting from it is what actually resolves the duplicate.
-  const dupGroups = _findDuplicateRideGroups();
-  const groupsToApprove = dupGroups.filter(function(g){
-    return !g.rides.some(function(r){ return checkedIds.indexOf(String(r.id))>-1; });
-  });
-
-  if(!checkedIds.length){
-    for(const g of groupsToApprove){ await _approveDuplicateGroup(g.key); }
-    showToast(groupsToApprove.length ? ('\u2713 '+groupsToApprove.length+' duplicate group'+(groupsToApprove.length===1?'':'s')+' approved') : 'Nothing to review');
-    const back=document.getElementById('fw-review-modal-back'); if(back) back.remove();
-    _showFamilyWallReviewModal();
-    return;
-  }
-
-  // Direct follow-up: a ride created by Morgan is the one that counts toward her dispatch
-  // invoice, so deleting it specifically - keeping someone else's duplicate instead - would
-  // silently cost her credit for a real ride. Warns explicitly right here, at the actual,
-  // irreversible moment, on top of the creator label already shown in the list itself.
-  const deletingMorgans = checkedIds.some(function(id){ const r=_rideById(id); return r && r.createdBy==='Morgan'; });
-  const _ok = await showConfirmModal({
-    icon:'\uD83E\uDDF9', iconColor:'#f0997b', iconBg:'#3a1a1a',
-    title:'Delete '+checkedIds.length+' ride'+(checkedIds.length===1?'':'s')+'?',
-    message:'This permanently removes '+checkedIds.length+' ride'+(checkedIds.length===1?'':'s')+' and cannot be undone.'+(groupsToApprove.length?' Every other duplicate you left unchecked will be marked reviewed and won\u2019t be flagged again.':'')+(deletingMorgans?' \u26a0\ufe0f At least one of these was created by Morgan and counts toward her dispatch invoice \u2014 deleting it removes that credit.':''),
-    buttons:[
-      {label:'Cancel', style:'neutral', value:false},
-      {label:'Delete '+checkedIds.length, style:'danger', value:true}
-    ]
-  });
-  if(!_ok) return;
-  for(const id of checkedIds){
-    const r=_rideById(id);
-    // noApproval:true — this is deliberate cleanup of a recognized duplicate or import noise,
-    // not a normal operational ride deletion, so it's exempt from the usual "someone else's
-    // ride needs a second admin" rule (see deleteRide() above for the normal path this
-    // intentionally bypasses). Reuses the exact same registered ride_delete handler either way,
-    // so the actual deletion logic itself can never drift out of sync between the two paths.
-    await queueAdminAction('ride_delete', {id: id}, 'Duplicate/import cleanup: delete '+((r&&r.client)||'a ride'), {noApproval: true});
-  }
-  for(const g of groupsToApprove){ await _approveDuplicateGroup(g.key); }
-  showToast('\u2713 Deleted '+checkedIds.length+' ride'+(checkedIds.length===1?'':'s')+(groupsToApprove.length?(', approved '+groupsToApprove.length+' more'):''));
-  const back=document.getElementById('fw-review-modal-back'); if(back) back.remove();
-  _showFamilyWallReviewModal();
-}
 // ── REVIEW FAMILYWALL IMPORTS TOOL — END ──
-// To fully remove this feature later: delete this block AND the two functions above it
-// (search "REVIEW FAMILYWALL IMPORTS TOOL — START"), and remove the "🧹 Review FamilyWall
-// imports" button in the Calendar page toolbar (search "fw-review-btn"). Independent of both
-// FamilyWall import features — it only reads rides already in the system via r.fwUID, it
-// doesn't call either import function.
+// (v1306/v1307: the old "Review imports & duplicates" button and the "Find (FamilyWall) rides" search are gone - the duplicate / non-ride checks run inside the FamilyWall import; this block keeps the duplicate finder used by the dispatch-invoice diagnostic.)
 
 async function _showCalendarFeedModal(){
   if(!currentUser){ showToast('Sign in first','error'); return; }
@@ -34947,14 +34621,50 @@ function _icsFieldsHtml(d, i){
     +_icsField(i,'notes','Notes','<textarea rows="2" '+a('notes')+' '+st+'>'+escHtml(d.notes||'')+'</textarea>',true)
     +'</div>';
 }
+// ── FAMILYWALL IMPORT: DUPLICATE + NON-RIDE CHECK (v1306) ──
+// Used to be a separate "Review imports & duplicates" button run AFTER rides were already on the schedule. Now each ride the import
+// found is checked BEFORE it is added, and whoever pressed Import has to approve any flagged one (flagged rides start unticked).
+//   duplicate  = same client + date + time as a ride already on the schedule, or as an earlier ride in this same paste (a cancelled ride,
+//                and the second vehicle of a two-vehicle booking, do not count - same rule the old tool used)
+//   non-ride   = no ride word in the name (run / pickup / round trip / one way / RT / OW), no address and no price - holiday fees, concerts, notes
+function _looksLikeNonRide(client, hasAddress, hasPrice){
+  // RT and OW only as deliberate uppercase tags - lowercase "rt"/"ow" turn up inside ordinary words.
+  var c=client||'';
+  if(/\brun\b|\bpickup\b|\bround\s*trip\b|\bone\s*way\b/i.test(c) || /\bRT\b|\bOW\b/.test(c)) return false;
+  return !(hasAddress || hasPrice);
+}
+function _icsFlagsFor(d, idx, drafts){
+  var flags=[];
+  try{
+    if(_looksLikeNonRide(d.client, !!(d.pickup||d.home), !!(d.price && Number(d.price)!==0))){
+      flags.push({kind:'nonride', text:'Looks like a calendar note, not a ride (no ride word in the name, no address, no price).'});
+    }
+    var cl=(d.client||'').toLowerCase().trim();
+    if(cl && d.date && d.time){
+      var hit=(rides||[]).find(function(r){ return r && !r._archived && r.status!=='cancelled' && !r.xxlPair && (r.client||'').toLowerCase().trim()===cl && r.date===d.date && r.time===d.time; });
+      if(hit) flags.push({kind:'dup', text:'Possible duplicate: '+(hit.client||'')+' is already on the schedule '+fmtDateShort(hit.date)+' at '+fmtTime12(hit.time)+(hit.createdBy?' (created by '+hit.createdBy+')':'')+'.'});
+      else {
+        var first=-1; (drafts||[]).some(function(o,j){ if(j>=idx) return true; if(o && (o.client||'').toLowerCase().trim()===cl && o.date===d.date && o.time===d.time){ first=j; return true; } return false; });
+        if(first>=0) flags.push({kind:'dup', text:'Possible duplicate: same client, date and time as an earlier ride in this import.'});
+      }
+    }
+  }catch(e){}
+  return flags;
+}
+function _icsReflag(i){
+  var rv=_icsRv; if(!rv) return;
+  rv.flags[i]=_icsFlagsFor(rv.parsed.drafts[i], i, rv.parsed.drafts);
+}
+function _icsFlagCount(){ return _icsRv.flags.reduce(function(a,f){ return a+(f.length?1:0); },0); }
 function _icsCardHtml(i){
-  var d=_icsRv.parsed.drafts[i], on=_icsRv.sel[i], open=_icsRv.open[i];
-  return '<div data-card="'+i+'" style="border:1.5px solid '+(on?'var(--light)':'#e5e5e5')+';border-radius:10px;margin-bottom:.5rem;padding:.55rem .65rem;background:'+(on?'#fff':'#f7f7f7')+';opacity:'+(on?'1':'.6')+';">'
+  var d=_icsRv.parsed.drafts[i], on=_icsRv.sel[i], open=_icsRv.open[i], fl=_icsRv.flags[i]||[];
+  return '<div data-card="'+i+'" style="border:1.5px solid '+(fl.length?'#f59e0b':(on?'var(--light)':'#e5e5e5'))+';border-radius:10px;margin-bottom:.5rem;padding:.55rem .65rem;background:'+(on?'#fff':'#f7f7f7')+';opacity:'+(on?'1':'.6')+';">'
     +'<div style="display:flex;align-items:center;gap:.6rem;">'
       +'<input type="checkbox" data-sel="'+i+'" '+(on?'checked ':'')+'aria-label="Import this ride" style="width:18px;height:18px;flex-shrink:0;accent-color:var(--accent);cursor:pointer;">'
       +'<div data-toggle="'+i+'" style="flex:1;min-width:0;font-size:.82rem;line-height:1.35;cursor:pointer;" class="ics-rv-line">'+_icsLine(d)+'</div>'
       +'<button type="button" data-toggle="'+i+'" style="background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:8px;padding:.25rem .65rem;font-family:inherit;font-size:.74rem;font-weight:700;cursor:pointer;">'+(open?'Done':'Edit')+'</button>'
     +'</div>'
+    +fl.map(function(f){ return '<div style="margin:.35rem 0 0 1.7rem;font-size:.74rem;line-height:1.35;color:#92400e;background:#fffbeb;border-radius:6px;padding:.3rem .5rem;">\u26a0\ufe0f '+escHtml(f.text)+(on?' <b>Ticked = you approve adding it.</b>':' Tick it to approve adding it anyway.')+'</div>'; }).join('')
     +(open?_icsFieldsHtml(d,i):'')
     +'</div>';
 }
@@ -34964,7 +34674,8 @@ function _icsPaintFoot(){
 }
 function _openICSReview(parsed, skipKat){
   var old=document.getElementById('ics-review-overlay'); if(old) old.remove();
-  _icsRv = { parsed:parsed, skipKat:skipKat, sel:parsed.drafts.map(function(){return true;}), open:parsed.drafts.map(function(){return false;}) };
+  _icsRv = { parsed:parsed, skipKat:skipKat, flags:[], sel:[], open:parsed.drafts.map(function(){return false;}) };
+  parsed.drafts.forEach(function(d,i){ _icsRv.flags[i]=_icsFlagsFor(d,i,parsed.drafts); _icsRv.sel[i]=!_icsRv.flags[i].length; });   // flagged rides start unticked: the person pressing Import must approve them
   var ov=document.createElement('div'); ov.id='ics-review-overlay';
   ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:16200;display:flex;align-items:center;justify-content:center;padding:.75rem;';
   var skippedBits=[]; var p=parsed;
@@ -34977,7 +34688,7 @@ function _openICSReview(parsed, skipKat){
     +'<div style="padding:1rem 1.1rem .5rem;">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;"><div style="font-size:1.05rem;font-weight:800;color:#0f172a;">Review before importing</div>'
       +'<button type="button" id="ics-rv-cancel" class="btn-secondary" style="font-size:.78rem;padding:.35rem .8rem;">Cancel</button></div>'
-      +'<div style="font-size:.78rem;color:var(--mid);line-height:1.45;margin:.35rem 0 .5rem;">'+p.drafts.length+' ride'+(p.drafts.length===1?'':'s')+' found. Tap <b>Edit</b> to fix anything the import read wrong (client, type, vehicle, driver, price, addresses\u2026), or untick a ride to leave it out. Nothing is added until you tap Import.</div>'
+      +'<div style="font-size:.78rem;color:var(--mid);line-height:1.45;margin:.35rem 0 .5rem;">'+p.drafts.length+' ride'+(p.drafts.length===1?'':'s')+' found.'+(_icsFlagCount()?' <b style="color:#92400e;">'+_icsFlagCount()+' flagged (possible duplicate or not a ride) \u2014 they start unticked; tick the ones you want added.</b>':'')+' Tap <b>Edit</b> to fix anything the import read wrong (client, type, vehicle, driver, price, addresses\u2026), or untick a ride to leave it out. Nothing is added until you tap Import.</div>'
       +'<div style="display:flex;gap:.9rem;font-size:.76rem;margin-bottom:.2rem;"><a href="#" id="ics-rv-all" style="color:var(--accent);font-weight:700;">Select all</a><a href="#" id="ics-rv-none" style="color:var(--accent);font-weight:700;">Select none</a></div>'
     +'</div>'
     +'<div id="ics-rv-list" style="padding:.2rem 1.1rem;overflow-y:auto;flex:1;">'+p.drafts.map(function(d,i){return _icsCardHtml(i);}).join('')+'</div>'
@@ -35005,6 +34716,7 @@ function _openICSReview(parsed, skipKat){
     else if(f==='phone' && e.type==='change'){ d.phone=v?formatPhoneUS(v):''; t.value=d.phone; }
     else d[f]=(f==='notes')?v:v.trim?v.trim():v;
     var line=ov.querySelector('[data-card="'+i+'"] .ics-rv-line'); if(line) line.innerHTML=_icsLine(d);
+    if(e.type==='change' && (f==='client'||f==='date'||f==='time'||f==='pickup'||f==='home'||f==='price')){ var _before=(_icsRv.flags[i]||[]).length; _icsReflag(i); if((_icsRv.flags[i]||[]).length!==_before){ repaint(i); } }
   };
   ov.addEventListener('input', onEdit); ov.addEventListener('change', onEdit);
 }
@@ -35023,6 +34735,8 @@ function _icsRvImport(){
     chosen.push(d);
   }
   if(!chosen.length) return;
+  var _flagged=chosen.filter(function(d){ var k=rv.parsed.drafts.indexOf(d); return (rv.flags[k]||[]).length>0; }).length;
+  if(_flagged && !confirm(_flagged+' ride'+(_flagged===1?' is':'s are')+' flagged as a possible duplicate or not a ride and '+(_flagged===1?'is':'are')+' ticked. Add '+(_flagged===1?'it':'them')+' to the schedule anyway?')) return;
   var added=commitICSDrafts(chosen);
   Promise.all([saveRides(), saveClientOwners()]).then(function(){ refreshDash(); renderCal(); });
   var ov=document.getElementById('ics-review-overlay'); if(ov) ov.remove();
@@ -35145,17 +34859,6 @@ function enterApp(){
   // Access Control tab — admins only
   const accessTab = document.getElementById('mptab-access');
   if(accessTab) accessTab.style.display = admin ? 'inline-block' : 'none';
-  const fwReviewBtn = document.getElementById('fw-review-btn');
-  // Same bug class as Archive old (see that fix's own comment): this used to show for Chase
-  // regardless of whether _findSuspiciousFamilyWallRides() would actually find anything -
-  // found during a full pass over every button in the app checking for exactly this pattern.
-  // Chase-or-Morgan, not admin-only - the same currentUser.name check pattern already used for
-  // the quote price-review tool, not isAdmin() (which also covers Kat). Deliberate: this
-  // deletes data immediately with no approval and no undo, scoped tighter than the rest of the
-  // admin surface on purpose.
-  if(fwReviewBtn) fwReviewBtn.style.display = (canReviewData() && typeof _findSuspiciousFamilyWallRides==='function' && typeof _findDuplicateRideGroups==='function' && (_findSuspiciousFamilyWallRides().length>0 || _findDuplicateRideGroups().length>0)) ? 'inline-block' : 'none';
-  const fwSearchBtn = document.getElementById('fw-search-btn');
-  if(fwSearchBtn) fwSearchBtn.style.display = canReviewData() ? '' : 'none';
   const archivedTab2=document.getElementById('mptab-archived'); if(archivedTab2) archivedTab2.style.display=admin?'inline-block':'none';
   const pricingTab2=document.getElementById('mptab-pricing'); if(pricingTab2) pricingTab2.style.display=admin?'inline-block':'none';
   const templatesTab=document.getElementById('mptab-templates');
