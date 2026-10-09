@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191332">
+<meta name="version" content="202608191333">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -492,9 +492,6 @@ input,select,textarea{font-size:16px;}
 /* Button-embedded variant: sits inside a full-width button's right edge (the button's
    wrapper needs position:relative) instead of wrapping onto its own line below the
    button, which is what a plain .mtip-dot does after a width:100% element. */
-.mtip-btn-wrap{position:relative;}
-.mtip-dot-btn{position:absolute;top:50%;right:.65rem;transform:translateY(-50%);background:rgba(255,255,255,.18);color:inherit;}
-@media (hover:hover){.mtip-dot-btn:hover,.mtip-dot-btn.on{background:#7c3aed;color:#fff;}}
 /* Badge variant: for compact auto-width buttons that sit in a row (Import CSV, Outside
    Ride, etc.) — a small badge pinned to the button's corner instead of a separate dot
    trailing after it, so every action button carries its tooltip the same consistent way. */
@@ -2287,6 +2284,18 @@ function _nameEarlyCrashes(){
 // v1328 (Chase): crash-log entries 30 days old or older are deleted automatically - from this phone's copy and from the shared
 // log. Runs after login, at most once a day per device; a failure is only noted in the console.
 var CRASH_LOG_KEEP_DAYS = 30;
+// v1333: the routine "cleared the driver-photo cache" storage notices (v1332 stopped writing them) are removed from the
+// existing log too. Kept: any notice where the saved-copy snapshot was cleared or the phone was over 4.5M before the clean-up.
+function _isRoutineStorageNotice(e){
+  try{
+    if(!e || e.kind!=='storage-headroom') return false;
+    var m=String(e.msg||'');
+    if(m.indexOf('nda-cache-v1')>=0 || m.indexOf('saved-copy cache')>=0) return false;
+    var n=/was ([\d.]+)M characters/.exec(m);
+    if(!n) return false;
+    return parseFloat(n[1])<=4.5;
+  }catch(x){ return false; }
+}
 async function _pruneCrashLog(){
   try{
     var DAY=86400000;
@@ -2295,7 +2304,7 @@ async function _pruneCrashLog(){
     var cutoff=Date.now()-CRASH_LOG_KEEP_DAYS*DAY;
     try{
       var loc=JSON.parse(localStorage.getItem('nda-crashlog')||'[]');
-      var keep=loc.filter(function(e){ return e && (e.ts||0) > cutoff; });
+      var keep=loc.filter(function(e){ return e && (e.ts||0) > cutoff && !_isRoutineStorageNotice(e); });
       if(keep.length!==loc.length) localStorage.setItem('nda-crashlog', JSON.stringify(keep));
     }catch(e){}
     if(fbDB){
@@ -2303,7 +2312,7 @@ async function _pruneCrashLog(){
       var snap=await fbRef('nda/kat/crashLog').once('value');
       var d=snap.val()||{};
       var upd={}, n=0;
-      Object.keys(d).forEach(function(k){ var v=d[k]; if(!v || !((v.ts||0) > cutoff)){ upd[k]=null; n++; } });
+      Object.keys(d).forEach(function(k){ var v=d[k]; if(!v || !((v.ts||0) > cutoff) || _isRoutineStorageNotice(v)){ upd[k]=null; n++; } });
       if(n) await fbRef('nda/kat/crashLog').update(upd);
     }
     try{ localStorage.setItem('nda-crashlog-pruned', String(Date.now())); }catch(e){}
@@ -7365,7 +7374,6 @@ function applyAirportFieldVisibility(prefix){
 function updateTripFields(){
   if(!document.getElementById('q-type')) return;
   const type    = document.getElementById('q-type').value;
-  const isAP    = type==='AP RUN'||type==='AP PICK UP'||type==='AP ROUND TRIP';
   const isAPRT  = type==='AP ROUND TRIP';
   const isRT    = type==='ROUND TRIP';
   const isOneWay= type==='ONE WAY';
