@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191312">
+<meta name="version" content="202608191313">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -8659,7 +8659,7 @@ function buildQuoteHTML(q, cmp, logoOverride){
   // the judge instead of trying to replicate it - swaps to the app's own logo the moment
   // rendering actually fails, for any reason, rather than showing a broken image icon.
   const logoHtml = _logoImgHtml(shownLogo, appLogo);
-  const orgName = logoOverride ? (logoOverride.businessName||'Your Driver') : (((_ownerProf.businessName||'').trim()) || ((!_ownerLogoOk && _isValidLogoDataUri(_senderProf.logo||'') && (_senderProf.businessName||'').trim()) || '') || 'Your Driver');
+  const orgName = logoOverride ? (logoOverride.businessName||'') : (((_ownerProf.businessName||'').trim()) || ((!_ownerLogoOk && _isValidLogoDataUri(_senderProf.logo||'') && (_senderProf.businessName||'').trim()) || ''));   // v1313: no business name = show nothing (was "Your Driver")
   const ownerPhone = (_ownerProf.phone||'').trim();
   // Reported with a screenshot: a client quote showed "Late night surcharge x2 $40" and then a
   // "Discount -$21.00" nobody applied. Both come from buildRideBreakdown() - the RECEIPT
@@ -8746,7 +8746,7 @@ function buildQuoteHTML(q, cmp, logoOverride){
     +'<div style="max-width:640px;margin:0 auto 18px;background:#fff;border-radius:14px;padding:28px;box-shadow:0 6px 24px rgba(0,0,0,.08);">'
       +'<div style="text-align:center;border-bottom:2px solid #eee;padding-bottom:18px;margin-bottom:18px;">'
         +logoHtml
-        +'<div style="font-size:19px;font-weight:800;color:'+_docAccent+';">'+escAttr(orgName)+'</div>'
+        +(orgName?'<div style="font-size:19px;font-weight:800;color:'+_docAccent+';">'+escAttr(orgName)+'</div>':'')
         +(ownerPhone?'<div style="font-size:13px;color:#777;margin-top:3px;">'+escAttr(ownerPhone)+'</div>':'')
         +'<div style="display:inline-block;margin-top:12px;background:'+_tintColor(_docAccent)+';color:'+_docAccent+';border:1px solid '+_tintColor(_docAccent,0.65)+';border-radius:20px;padding:5px 16px;font-size:12px;font-weight:800;letter-spacing:1px;">QUOTE</div>'
       +'</div>'
@@ -14452,7 +14452,7 @@ function buildReceiptText(r){
   const _rprof = (typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[driver]) ? DRIVER_PROFILES[driver] : {};
   const _ownerName = (typeof getClientOwner==='function') ? getClientOwner(r.client) : null;
   const _ownerProf = (_ownerName && typeof DRIVER_PROFILES!=='undefined' && DRIVER_PROFILES[_ownerName]) ? DRIVER_PROFILES[_ownerName] : {};
-  const orgName = ((_ownerProf.businessName||'').trim()) || ((_rprof.businessName||'').trim()) || 'Your Driver';
+  const orgName = ((_ownerProf.businessName||'').trim()) || ((_rprof.businessName||'').trim()) || '';   // v1313: blank, not "Your Driver"
   const rn = _receiptNumber(r);
   const dateStr = _receiptDate(r.date);
 
@@ -14467,7 +14467,7 @@ function buildReceiptText(r){
   const amt = bd.total;
 
   const L = [];
-  L.push(orgName);
+  if(orgName) L.push(orgName);
   L.push('Transportation Service Receipt');
   L.push('');
   L.push('Receipt #: '+rn);
@@ -14492,7 +14492,7 @@ function buildReceiptText(r){
   // then hardcoded (v812) - consistent with which name's business info the receipt already uses.
   const _closingOwnerSettings = (typeof driverSettings!=='undefined' && driverSettings[_ownerName||driver]) || {};
   const _closingTpl = _closingOwnerSettings.receiptClosingLine || (globalSettings && globalSettings.defaultReceiptClosingLine) || '';
-  L.push(_closingTpl ? _closingTpl.replace(/\{org\}/g, orgName) : 'Thank you for riding with '+orgName+'!');
+  L.push(_closingTpl ? _closingTpl.replace(/\{org\}/g, orgName||'us') : 'Thank you for riding with '+(orgName||'us')+'!');
   return L.join('\n');
 }
 
@@ -14525,7 +14525,7 @@ function buildReceiptHTML(r, logoOverride){
   const _rtipVia = r.tipPayment||r.payment||'';
 
   // Header identity: business name if set, else NWDA; driver always shown as provider.
-  const orgName = ((_ownerProf.businessName||'').trim()) || bizName || 'Your Driver';
+  const orgName = ((_ownerProf.businessName||'').trim()) || bizName || '';   // v1313
   // Receipt logo: the driver's uploaded business logo, or the app's standard logo if they haven't set one.
   // FOUND, MAJOR BUG: two elements share alt="NWDA Logo" - a hidden menu-drawer placeholder
   // with src="" (which appears FIRST in the document and was always the one matched) and the
@@ -14551,7 +14551,7 @@ function buildReceiptHTML(r, logoOverride){
     // Header band
     + '<div style="background:'+_docAccent+';color:'+_docAccentText+';padding:26px 30px;">'
     +   logoHtml
-    +   '<div style="font-size:22px;font-weight:800;letter-spacing:.2px;">'+escAttr(orgName)+'</div>'
+    +   (orgName?'<div style="font-size:22px;font-weight:800;letter-spacing:.2px;">'+escAttr(orgName)+'</div>':'')
     +   '<div style="font-size:13px;opacity:.85;margin-top:3px;">Transportation Service Receipt</div>'
     + '</div>'
     // Meta
