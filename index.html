@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191333">
+<meta name="version" content="202608191334">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -9922,7 +9922,7 @@ function showTomorrowConfirmPrompt(ride){
   function refresh(){
     sel.innerHTML=driverOptionsHTML(ride.driver||'', ride.date, ride.time);
     const o=sel.querySelector('option[value="__outside__"]'); if(o) o.remove();
-    txt.textContent=buildConfirmationText(ride);
+    txt.textContent=confirmationFullText(ride);
     const nums=confirmationRecipients(ride).map(function(r){return r.phone;}).filter(Boolean);
     sendB.disabled=!nums.length; sendB.style.opacity=nums.length?'1':'.5'; sendB.textContent=nums.length?'\uD83D\uDCAC Send confirmation text':'No phone on file';
     const bad = ride.driver && !isDriverAvailable(ride.driver, ride.date, ride.time);
@@ -9935,7 +9935,7 @@ function showTomorrowConfirmPrompt(ride){
   sendB.addEventListener('click', async function(){
     const nums=confirmationRecipients(ride).map(function(r){return r.phone;}).filter(Boolean);
     if(!nums.length) return;
-    const smsUrl='sms:'+nums.join(',')+(isiOS?'&':'?')+'body='+encodeURIComponent(buildConfirmationText(ride));
+    const smsUrl='sms:'+nums.join(',')+(isiOS?'&':'?')+'body='+encodeURIComponent(confirmationFullText(ride));
     // Marked sent and saved BEFORE handing off to Messages (switching apps can interrupt the save).
     _protectRide(ride.id);
     _markRideConfirmed(ride);
@@ -12361,6 +12361,17 @@ function _buildRawConfirmDefaults(r, ctx){
   return { message, instructions };
 }
 
+// The full confirmation text as ONE string (message + pickup instructions, honoring the client owner's Send-parts
+// toggles exactly like textClient()). buildConfirmationText() returns {message, instructions}, NOT a string - using it
+// directly in a text link produced "[object Object]" (reported Oct 13, tomorrow-ride window; same mistake in
+// _sendConfirmationNow since v1238).
+function confirmationFullText(r){
+  const _conf=buildConfirmationText(r)||{};
+  const _sp=(driverSettings[feeOwnerFor(r.createdBy)||(r.driver||'').trim()]||{}).sendParts||{};
+  const _msgPart=(_sp.message!==false)?(_conf.message||''):'';
+  const _instPart=(_sp.instructions!==false&&_conf.instructions)?_conf.instructions:'';
+  return _msgPart+((_msgPart&&_instPart)?'\n\n':'')+_instPart;
+}
 function buildConfirmationText(r){
   // The confirmation is sent BY whoever is logged in and signed with their name — not
   // hardcoded to Kat. "I will be driving you" is used only when that same person is also
@@ -23292,7 +23303,7 @@ function _dashSendSchedulingText(id){
 async function _sendConfirmationNow(rideId){
   const r=_rideById(rideId); if(!r) return;
   if(r.confirmSent){ showToast('Already confirmed'); return; }
-  const confText=buildConfirmationText(r);
+  const confText=confirmationFullText(r);
   const recips=confirmationRecipients(r);
   const nums=recips.map(function(x){ return x.phone; }).filter(Boolean);
   if(!nums.length){ showToast('No phone number on file for this client','error'); return; }
