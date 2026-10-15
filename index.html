@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191334">
+<meta name="version" content="202608191337">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2288,6 +2288,7 @@ var CRASH_LOG_KEEP_DAYS = 30;
 // existing log too. Kept: any notice where the saved-copy snapshot was cleared or the phone was over 4.5M before the clean-up.
 function _isRoutineStorageNotice(e){
   try{
+    if(e && e.kind==='storage-read-timeout' && String(e.msg||'').indexOf('kat:quoteDrafts')===0) return true;   // v1337
     if(!e || e.kind!=='storage-headroom') return false;
     var m=String(e.msg||'');
     if(m.indexOf('nda-cache-v1')>=0 || m.indexOf('saved-copy cache')>=0) return false;
@@ -2660,6 +2661,7 @@ function _qdSaveNow(){
     if(!who) return;
     if(!_qdActiveId) _qdActiveId = _qdNewId();
     var rec = { id:_qdActiveId, ts:Date.now(), by:(currentUser&&currentUser.name)||'', fields:fields };
+    _qdDrop();
     storageSet('kat:quoteDrafts/'+_qdUserKey()+'/'+_qdActiveId, rec).catch(function(){});
   }catch(e){}
 }
@@ -2672,12 +2674,28 @@ function _qdSaveDebounced(){
 function _qdClearActive(){
   clearTimeout(_qdSaveTimer);
   var id = _qdActiveId; _qdActiveId = null;
+  _qdDrop();
   if(!id) return;
   try{ storageSet('kat:quoteDrafts/'+_qdUserKey()+'/'+id, null).catch(function(){}); }catch(e){}
 }
+// v1337: the dashboard asked the database for the drafts on EVERY refresh; on a slow connection each ask sat 8 seconds and logged a
+// timeout. Now one read is shared (an ask while one is running joins it) and the answer is reused for 5 minutes. Anything that
+// changes drafts on this phone (_qdSaveNow, _qdClearActive, prune, dismiss/restore) drops the saved answer first.
+var _qdCache = null;      // {key, ts, all}
+var _qdInflight = null;   // {key, p}
+function _qdDrop(){ _qdCache = null; }
+function _qdRead(){
+  var key = 'kat:quoteDrafts/'+_qdUserKey();
+  if(_qdCache && _qdCache.key===key && Date.now()-_qdCache.ts < 300000) return Promise.resolve(_qdCache.all);
+  if(_qdInflight && _qdInflight.key===key) return _qdInflight.p;
+  var p = storageGet(key).then(function(all){ if(_qdInflight && _qdInflight.p===p){ _qdInflight=null; _qdCache={key:key, ts:Date.now(), all:all}; } return all; },
+                               function(e){ if(_qdInflight && _qdInflight.p===p) _qdInflight=null; throw e; });
+  _qdInflight = {key:key, p:p};
+  return p;
+}
 async function _qdList(){
   try{
-    var all = await storageGet('kat:quoteDrafts/'+_qdUserKey());
+    var all = await _qdRead();
     if(!all || typeof all!=='object') return [];
     var out = Object.keys(all).map(function(k){ return all[k]; })
       .filter(function(r){ return r && r.fields && r.ts && !r.dismissed; });
@@ -2691,7 +2709,7 @@ async function _qdList(){
 // different clocks - and deletion is warned about beforehand by renderDashExpiring().
 async function _qdPrune(){
   try{
-    var all = await storageGet('kat:quoteDrafts/'+_qdUserKey());
+    var all = await _qdRead();
     if(!all || typeof all!=='object') return;
     var cutoff = (typeof _retentionCutoff==='function') ? _retentionCutoff() : (Date.now() - 30*24*60*60*1000);
     await Promise.all(Object.keys(all).filter(function(k){
@@ -2699,6 +2717,7 @@ async function _qdPrune(){
     }).map(function(k){
       return storageSet('kat:quoteDrafts/'+_qdUserKey()+'/'+k, null).catch(function(){});
     }));
+    _qdDrop();
   }catch(e){}
 }
 function _qdApply(rec){
@@ -2775,13 +2794,14 @@ async function _qdMaybeOffer(){
         list.forEach(function(rec){
           try{
             rec.dismissed = true;
-            storageSet('kat:quoteDrafts/'+_qdUserKey()+'/'+rec.id, rec).catch(function(){});
+            _qdDrop(); storageSet('kat:quoteDrafts/'+_qdUserKey()+'/'+rec.id, rec).catch(function(){});
           }catch(_e){}
         });
         return;
       }
       if(e.target.id==='qd-delete-all'){
         ov.remove();
+        _qdDrop();
         list.forEach(function(r){ try{ storageSet('kat:quoteDrafts/'+_qdUserKey()+'/'+r.id, null).catch(function(){}); }catch(e){} });
         return;
       }
@@ -3014,7 +3034,7 @@ async function storageGet(key) {
         if(e && /storageGet timeout/.test(e.message||'')){
           var _t = (window._storageTimeouts = window._storageTimeouts || []);
           _t.push(key);
-          if(_t.length <= 3 && typeof _logCrash==='function'){
+          if(_t.length <= 3 && typeof _logCrash==='function' && String(key).indexOf('kat:quoteDrafts')!==0){   // v1337: unfinished-quote drafts are scratch space with a phone copy - a slow read of them is not worth a crash-log line
             _logCrash('storage-read-timeout', key+' did not answer in 8s - database '+(window._fbConnected===false?'is NOT reachable':(window._fbConnected===true?'reports connected':'connection state unknown'))+' - falling back to the old saved copy', '');
           }
         }
@@ -5369,6 +5389,7 @@ function _ridesToArchive(cutoff){
   var byId = {}, byPair = {};
   live.forEach(function(r){
     byId[String(r.id)] = r;
+    if(r.xxlGroup != null){ (byPair['g:'+r.xxlGroup] = byPair['g:'+r.xxlGroup] || []).push(r); }
     if(r.pairId != null){ (byPair[String(r.pairId)] = byPair[String(r.pairId)] || []).push(r); }
   });
   var changed = true;
@@ -5378,6 +5399,7 @@ function _ridesToArchive(cutoff){
       if(!ok[String(r.id)]) return;
       var partners = [];
       if(r.pairId != null) partners = partners.concat(byPair[String(r.pairId)] || []);
+      if(r.xxlGroup != null) partners = partners.concat(byPair['g:'+r.xxlGroup] || []);
       if(r.linkedRide != null && byId[String(r.linkedRide)]) partners.push(byId[String(r.linkedRide)]);
       for(var i=0;i<partners.length;i++){
         if(partners[i] !== r && !ok[String(partners[i].id)]){ ok[String(r.id)] = false; changed = true; break; }
@@ -5515,6 +5537,79 @@ async function assignUnassignedRidesToOwners(){
   try{ _refreshMaintenanceButtons(); }catch(e){}
   try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
 }
+// ── TWO-CAR AIRPORT ROUND TRIPS BOOKED BEFORE v1336 (one-time repair) ──
+// Before v1336 a Double Vehicle + AP Round Trip booking came out as three rides sharing one pairId: car 1's outbound and return, plus
+// car 2 as ONE unsplit "AP ROUND TRIP" with no return. Car 2's return never existed and the badges counted wrong ("2 of 2" on car 1's return).
+// This finds those sets and rebuilds them the way new bookings now come out: four rides, car 2 gets its own return ride, and each car's
+// legs link as outbound/return while the two cars link with xxlGroup/xxlVeh. The booking total never changes. Price2 is charged on each
+// leg (that is how the formula works), so car 2's two legs get car 2's saved price each and car 1's two legs share what is left.
+function _findBrokenXxlRoundTrips(){
+  var by={};
+  (rides||[]).forEach(function(r){
+    if(r && r.xxlPair && r.pairId && !r._archived) (by[r.pairId]=by[r.pairId]||[]).push(r);
+  });
+  var out=[];
+  Object.keys(by).forEach(function(k){
+    var g=by[k]; if(g.length!==3) return;
+    var v2=g.filter(function(r){ return r.type==='AP ROUND TRIP' && !r.rtLegNumber; });
+    var l1=g.filter(function(r){ return r.rtLegNumber===1; }), l2=g.filter(function(r){ return r.rtLegNumber===2; });
+    if(v2.length!==1 || l1.length!==1 || l2.length!==1) return;
+    var p2=parseFloat(v2[0].price)||0, a=parseFloat(l1[0].price)||0, b=parseFloat(l2[0].price)||0;
+    out.push({pairId:k, v2:v2[0], leg1:l1[0], leg2:l2[0], ok:(p2>0 && a>0 && b>0 && (a+b-p2)>0)});
+  });
+  return out;
+}
+function _xxlRtRepairPlan(f){
+  var p2=parseFloat(f.v2.price)||0, a=parseFloat(f.leg1.price)||0, b=parseFloat(f.leg2.price)||0;
+  var left=Math.round((a+b-p2)*100)/100;
+  var n1=Math.floor(left*a/(a+b)); var n2=Math.round((left-n1)*100)/100;
+  return {price2:p2, n1:n1, n2:n2, total:Math.round((a+b+p2)*100)/100};
+}
+function _ridesBrokenXxlCount(){ try{ return _findBrokenXxlRoundTrips().filter(function(f){return f.ok;}).length; }catch(e){ return 0; } }
+async function fixTwoCarRoundTrips(){
+  if(!isTemplateAuthority()){ showToast('Only Chase can run this','error'); return; }
+  var all=_findBrokenXxlRoundTrips(), todo=all.filter(function(f){return f.ok;});
+  var skipped=all.length-todo.length;
+  if(!todo.length){ showToast(skipped?('Found '+skipped+' two-car round trip(s) with odd prices — fix those by hand'):'No two-car round trips to repair'); return; }
+  var lines=todo.slice(0,6).map(function(f){
+    var pl=_xxlRtRepairPlan(f);
+    return '• '+f.leg1.client+' '+f.leg1.date+' / '+f.leg2.date+': adds car 2’s return ($'+pl.price2+'), car 1 legs $'+f.leg1.price+' / $'+f.leg2.price+' → $'+pl.n1+' / $'+pl.n2+', total stays $'+pl.total;
+  }).join('\n')+(todo.length>6?'\n…and '+(todo.length-6)+' more':'');
+  if(!await askConfirm('Repair '+todo.length+' two-car airport round trip'+(todo.length===1?'':'s')+'?\n\n'+lines+'\n\nNobody is notified; each ride’s history records the change.')) return;
+  var changed=[], added=[];
+  todo.forEach(function(f){
+    var pl=_xxlRtRepairPlan(f), v2=f.v2, l1=f.leg1, l2=f.leg2;
+    var group='xxl_'+l1.id;
+    var v2b=Object.assign({}, v2, {
+      id: nextId++, type:l2.type, date:l2.date, time:l2.time, flight:l2.flight||'', terminal:l2.terminal||'',
+      pickup:l2.pickup||'', home:l2.home||'', rtLegNumber:2, price:pl.price2, trail:[],
+      fuel:l2.fuel, traffic:l2.traffic, premium:l2.premium, holiday:l2.holiday, christmas:l2.christmas, late:l2.late
+    });
+    try{ customSurchargeList().forEach(function(c){ if(l2[c.key]!==undefined) v2b[c.key]=l2[c.key]; }); }catch(e){}
+    [v2, v2b].forEach(function(x){
+      ['rtDateAP','rtTime','rtFlight','rtTerminal','rtFirstLeg','rt_fuel','rt_traffic','rt_premium','rt_holiday','rt_christmas','rt_late'].forEach(function(k){ delete x[k]; });
+    });
+    var nv2='pair_'+v2.id;    // car 1's legs keep their pairId; car 2's two legs get their own
+    v2.type=l1.type; v2.rtLegNumber=1; v2.pairId=nv2; v2b.pairId=nv2;
+    [l1,l2].forEach(function(x){ x.xxlGroup=group; x.xxlVeh=1; delete x.xxlPair; });
+    [v2,v2b].forEach(function(x){ x.xxlGroup=group; x.xxlVeh=2; delete x.xxlPair; });
+    _protectRide(l1.id); _protectRide(l2.id); _protectRide(v2.id);
+    var oldA=l1.price, oldB=l2.price;
+    l1.price=pl.n1; l2.price=pl.n2;
+    touchRide(l1,'two-car round trip repaired (price $'+oldA+' → $'+pl.n1+')');
+    touchRide(l2,'two-car round trip repaired (price $'+oldB+' → $'+pl.n2+')');
+    touchRide(v2,'two-car round trip repaired (now its own outbound ride)');
+    touchRide(v2b,'created (missing car 2 return, added by the two-car repair)');
+    rides.push(v2b); _protectRide(v2b.id);
+    changed.push(l1,l2,v2); added.push(v2b);
+  });
+  var ok=false; try{ ok=await saveRides(); }catch(e){}
+  if(ok){ changed.concat(added).forEach(function(r){ window._pendingUnsavedRideIds.delete(r.id); }); }
+  showToast(ok?('✅ Repaired '+todo.length+' two-car round trip'+(todo.length===1?'':'s')):'⚠️ Repaired on screen but the save didn’t land — check your connection and tap again','error');
+  try{ _refreshMaintenanceButtons(); }catch(e){}
+  try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+  try{ if(typeof renderCal==='function') renderCal(); }catch(e){}
+}
 // ── ONE-TIME FIXES + PRICE CHECKS: two buttons instead of seven (v1303) ──
 // "One-time fixes" lists the self-hiding cleanups (old adjustment-trail lines, old round-trip notes, unassigned rides -> client owner)
 // with a Run button each; it only appears while at least one has something left. "Price checks" gathers the three tools that compare a
@@ -5523,6 +5618,7 @@ function _oneTimeFixList(){
   var list=[];
   if(isTemplateAuthority()){
     list.push({key:'owner', label:'Give unassigned rides to their client owner (Chase only)', count:_ridesUnassignedWithOwner().length, run:assignUnassignedRidesToOwners});
+    list.push({key:'xxlrt', label:'Repair two-car airport round trips (adds the missing return for car 2)', count:_ridesBrokenXxlCount(), run:fixTwoCarRoundTrips});
   }
   return list;
 }
@@ -8559,7 +8655,7 @@ function _scheduleSeries(ride,repeat,count,spill){
       if(rtGap!==null && !isNaN(rtGap)) inst.rtDate=_addDaysStr(inst.date,rtGap);
       inst.recurringId=seriesId;
       rides.push(inst); made.push(inst);
-      var xl=_xxlSplitNew(inst); if(xl) made.push(xl);
+      _xxlSplitNew(inst).forEach(function(x){ made.push(x); });
     }
   }catch(e){
     made.forEach(function(x){ var xi=rides.indexOf(x); if(xi>-1) rides.splice(xi,1); });
@@ -8570,17 +8666,31 @@ function _scheduleSeries(ride,repeat,count,spill){
 // A brand-new Double Vehicle ride becomes two independent rides (one per vehicle) the moment it is created.
 // Shared by Quick Add and the Quote page. Returns the 2nd ride (already added and notified) or null when there is
 // nothing to split; if the split fails it puts the ride back the way it was and throws.
-function _xxlSplitNew(ride){
-  if(!(ride && ride.xxl && ride.driver2)) return null;
-  var preP=ride.price, prePair=ride.pairId, leg2=null;
+function _xxlSplitNew(ride, leg2){
+  // Returns the NEW rides it made ([] when there is nothing to split). v1336: pass the return leg of an airport round trip
+  // (already split from `ride`) and each leg gets its own second-vehicle ride, so both cars have an outbound and a return.
+  if(!(ride && ride.xxl && ride.driver2)) return [];
+  var made=[], undo=[{r:ride,price:ride.price,pairId:ride.pairId,xxlGroup:ride.xxlGroup,xxlVeh:ride.xxlVeh,xxl:ride.xxl,vehicle2:ride.vehicle2,driver2:ride.driver2,price2:ride.price2}];
+  if(leg2) undo.push({r:leg2,price:leg2.price,pairId:leg2.pairId,xxlGroup:leg2.xxlGroup,xxlVeh:leg2.xxlVeh,xxl:leg2.xxl,vehicle2:leg2.vehicle2,driver2:leg2.driver2,price2:leg2.price2});
   try{
-    leg2=splitXXLRide(ride,{vehicle2:ride.vehicle2,driver2:ride.driver2,price2:ride.price2});
-    touchRide(leg2,'created'); rides.push(leg2);
-    if(leg2.driver) _notifyCreatedRide(leg2.driver,leg2);
-    return leg2;
+    var p2=parseFloat(ride.price2)||0;
+    if(leg2 && !(p2>0)) p2=(typeof BASE!=='undefined' && BASE[ride.vehicle2])||0;   // same default the price breakdown uses
+    var info={vehicle2:ride.vehicle2,driver2:ride.driver2,price2:leg2?p2:ride.price2};
+    if(leg2){
+      var group='xxl_'+ride.id;
+      var a=splitXXLRide(ride,info,{group:group});
+      var b=splitXXLRide(leg2,info,{group:group});
+      var pid='pair_'+a.id; a.pairId=pid; b.pairId=pid;
+      [a,b].forEach(function(x){ touchRide(x,'created'); rides.push(x); made.push(x); if(x.driver) _notifyCreatedRide(x.driver,x); });
+    }else{
+      var one=splitXXLRide(ride,info);
+      touchRide(one,'created'); rides.push(one); made.push(one);
+      if(one.driver) _notifyCreatedRide(one.driver,one);
+    }
+    return made;
   }catch(e){
-    ride.price=preP; ride.pairId=prePair;
-    if(leg2){ var i=rides.indexOf(leg2); if(i>-1) rides.splice(i,1); }
+    undo.forEach(function(u){ u.r.price=u.price; u.r.pairId=u.pairId; u.r.xxlGroup=u.xxlGroup; u.r.xxlVeh=u.xxlVeh; u.r.xxl=u.xxl; u.r.vehicle2=u.vehicle2; u.r.driver2=u.driver2; u.r.price2=u.price2; });
+    made.forEach(function(x){ var i=rides.indexOf(x); if(i>-1) rides.splice(i,1); });
     throw e;
   }
 }
@@ -8715,7 +8825,7 @@ async function _saveQuoteInner(){
     showToast('AP Round Trip can\'t repeat \u2014 book each date separately', 'error');
     return;
   }
-  let _leg2=null, _xxlLeg2=null, _qMade=[];
+  let _leg2=null, _xxlLeg2=[], _qMade=[];
   if(repeat==='none'){
     rides.push(ride);
     // Wrapped (v818) - this had zero error handling between pushing the ride into memory and
@@ -8723,7 +8833,6 @@ async function _saveQuoteInner(){
     // never ran and nothing told the user why - a silent "it just didn't save." Reported
     // directly: Morgan entering an AP Round Trip.
     try{
-      _xxlLeg2=_xxlSplitNew(ride);       // v1317: Double Vehicle becomes two rides, same as Quick Add
       // AP Round Trip booked directly from the live Quote form used to save as ONE record with
       // the return leg's details tacked on as unread extra fields - no second ride, nothing on
       // the calendar for the return. Same split Add Ride has always used.
@@ -8731,11 +8840,12 @@ async function _saveQuoteInner(){
         _leg2=splitApRoundTripRide(ride);
         touchRide(_leg2,'created'); rides.push(_leg2);
       }
+      _xxlLeg2=_xxlSplitNew(ride,_leg2);       // v1317/v1336: Double Vehicle becomes extra rides (four for an airport round trip), same as Quick Add
     }catch(e){
       console.warn('saveQuote split failed', e);
       var _sqIdx = rides.indexOf(ride); if(_sqIdx>-1) rides.splice(_sqIdx,1);
       if(_leg2){ var _sqIdx2 = rides.indexOf(_leg2); if(_sqIdx2>-1) rides.splice(_sqIdx2,1); }
-      if(_xxlLeg2){ var _sqIdx3 = rides.indexOf(_xxlLeg2); if(_sqIdx3>-1) rides.splice(_sqIdx3,1); }
+      (_xxlLeg2||[]).forEach(function(x){ var _sqIdx3 = rides.indexOf(x); if(_sqIdx3>-1) rides.splice(_sqIdx3,1); });
       showToast('\u26a0\ufe0f Ride did not save \u2014 check your connection and try again', 'error');
       return;
     }
@@ -8759,7 +8869,7 @@ async function _saveQuoteInner(){
   }
 
   // v1324: a failed save asks to try again; Cancel takes the new ride(s) back out (the form keeps everything typed).
-  if(!(await _saveBookingWithRetry(_qMade.length ? _qMade : [ride,_leg2,_xxlLeg2]))) return;
+  if(!(await _saveBookingWithRetry(_qMade.length ? _qMade : [ride,_leg2].concat(_xxlLeg2||[])))) return;
   var _qAddClient=document.getElementById('q-add-client');
   if(!_qAddClient||_qAddClient.checked){ await upsertClientFromRide(ride); }
   _notifyOwnerOfForeignSchedule(ride);
@@ -9391,10 +9501,24 @@ function apRoundTripLegSplit(ride){
 // way a round-trip's two legs do, so each driver gets a real, normal ride they can manage.
 // ride.price going in is the COMBINED total for both vehicles (how it's always been entered/
 // edited); price1 is derived, not stored redundantly, same principle as the round-trip split.
-function splitXXLRide(ride, xxlInfo){
-  var pairId = 'pair_'+ride.id;
+function splitXXLRide(ride, xxlInfo, opts){
   var price2 = parseFloat(xxlInfo.price2)||0;
   var price1 = Math.round(((parseFloat(ride.price)||0) - price2) * 100) / 100;
+  // v1336: a ride that is already one leg of an airport round trip keeps its own pairId (that link is outbound <-> return).
+  // Vehicles are tied together with xxlGroup/xxlVeh instead, so a two-car round trip is four rides: each car has its own outbound and return.
+  if((opts && opts.group) || (ride.pairId && !ride.xxlPair)){
+    var group = (opts && opts.group) || ('xxl_'+ride.id);
+    var car2 = Object.assign({}, ride, {
+      id: nextId++, xxlGroup: group, xxlVeh: 2, driver: xxlInfo.driver2, vehicle: xxlInfo.vehicle2, price: price2,
+      xxl: false, vehicle2: '', driver2: '', price2: 0, trail: [],
+    });
+    delete car2.pairId; delete car2.rtLegNumber;
+    if(ride.rtLegNumber!=null) car2.rtLegNumber = ride.rtLegNumber;
+    ride.xxlGroup = group; ride.xxlVeh = 1; ride.price = price1;
+    ride.xxl = false; ride.vehicle2 = ''; ride.driver2 = ''; ride.price2 = 0;
+    return car2;
+  }
+  var pairId = 'pair_'+ride.id;
 
   var ride2 = Object.assign({}, ride, {
     id: nextId++,
@@ -9810,7 +9934,7 @@ async function scheduleSavedQuote(qid){
   if(ride.xxl && !(_sqPick) && !(ride.driver2||'').trim()) ride.driver2=ride.driver;   // 2nd vehicle also defaults to the owner
   if(typeof touchRide==='function') touchRide(ride, 'created');
   rides.push(ride);
-  let _leg2=null, _sqXxl=null;
+  let _leg2=null, _sqXxl=[];
   // Reordered and wrapped (v818). Two separate problems, same root cause: this used to remove
   // the saved quote from savedQuotes BEFORE confirming the new ride actually saved, and the
   // save's own failure was silently swallowed (empty catch). If saveRides() failed for any
@@ -9829,13 +9953,13 @@ async function scheduleSavedQuote(qid){
       rides.push(_leg2);
       if(_leg2.driver && typeof addNotification==='function') _notifyCreatedRide(_leg2.driver,_leg2);
     }
-    _sqXxl=_xxlSplitNew(ride);        // v1327: a Double Vehicle quote becomes two rides, same as Quick Add and the Quote page
+    _sqXxl=_xxlSplitNew(ride,_leg2);        // v1327/v1336: a Double Vehicle quote becomes two rides, same as Quick Add and the Quote page
     await saveRides();
   }catch(e){
     console.warn('scheduleSavedQuote save failed', e);
     var _sqIdx1 = rides.indexOf(ride); if(_sqIdx1>-1) rides.splice(_sqIdx1,1);
     if(_leg2){ var _sqIdx2 = rides.indexOf(_leg2); if(_sqIdx2>-1) rides.splice(_sqIdx2,1); }
-    if(_sqXxl){ var _sqIdx3 = rides.indexOf(_sqXxl); if(_sqIdx3>-1) rides.splice(_sqIdx3,1); }
+    (_sqXxl||[]).forEach(function(x){ var _sqIdx3 = rides.indexOf(x); if(_sqIdx3>-1) rides.splice(_sqIdx3,1); });
     showToast('\u26a0\ufe0f Could not schedule this ride \u2014 check your connection and try again', 'error');
     return;
   }
@@ -13444,6 +13568,15 @@ function _prevPaySend(withTip){
 // answer is that nobody's been assigned to the other vehicle yet. `otherAssigned` distinguishes
 // the two so callers can say so plainly instead of showing a confusing name.
 function _xxlPairInfo(r){
+  // v1336: group mode (airport round trip legs): the number is stored (xxlVeh) and the other car is the same leg of the other vehicle.
+  if(r && r.xxlGroup && r.xxlVeh){
+    var gm = (typeof rides!=='undefined' ? rides : []).find(function(x){
+      return x && x.id!==r.id && x.xxlGroup===r.xxlGroup && x.xxlVeh!==r.xxlVeh && (x.rtLegNumber||0)===(r.rtLegNumber||0);
+    });
+    if(!gm) return null;
+    var gMine=(r.driver||'').trim(), gTheir=(gm.driver||'').trim();
+    return { n:r.xxlVeh, other:gm, otherDriver:gTheir, otherAssigned:!!gTheir && gTheir!==gMine };
+  }
   if(!r || !r.xxlPair || !r.pairId) return null;
   var mate = (typeof rides!=='undefined' ? rides : []).find(function(x){
     return x && x.id!==r.id && x.pairId===r.pairId;
@@ -13583,7 +13716,6 @@ function renderRideView(r){
   // Covers BOTH pair kinds now: a split XXL's other vehicle (previously excluded outright,
   // leaving no way to reach it at all) and an AP Round Trip's other ride. Neutral wording -
   // this is navigation between two related records, not leg labelling, which was dropped.
-  const _pairedRideForBtn=(r.pairId&&rides)?rides.find(function(x){return x.id!==r.id&&x.pairId===r.pairId;}):null;
   // Post to Offerings — creator (Kat↔Morgan treated as same), the assigned driver, or any
   // admin. This stays in the main ride card, not the Dispatch Tools panel below — it's a
   // "someone needs help" action for whoever's looking at this ride, not a reassignment
@@ -13831,7 +13963,7 @@ function renderRideView(r){
     <!-- ═══ ACTIONS ═══ -->
     ${(()=>{
       const _hasActions = !!((getMyDriverName()===r.driver) || (canSeeContact&&hasIncomeAccess()&&_slLocalType)
-        || (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP') || (_pairedRideForBtn && r.xxlPair) || shareOfferingsBtn
+        || (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP') || (_xxlInfo && _xxlInfo.other) || shareOfferingsBtn
         || canExportToFamilyWall()); // FAMILYWALL EXPORT BUTTON — remove this clause when the block goes
       if(!_hasActions) return '';
       return `<div class="detail-row" style="grid-column:1/-1;">
@@ -13843,7 +13975,7 @@ function renderRideView(r){
           ${canSeeContact&&hasIncomeAccess()&&_slLocalType?'<button onclick="shareLocationToClient('+r.id+')" style="padding:.45rem .75rem;background:#0f172a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem;">&#128205; Share Location \u2014 let the client see you coming</button>':''}
           ${((r.type==='AP PICK UP'||r.type==='AP ROUND TRIP') && getMyDriverName()===r.driver && _isRideWithinHoursSymmetric(r,6))?`<button onclick="dashSendArrival(${r.id})" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.6rem;background:none;border:1.5px solid #7c3aed;border-radius:8px;color:#7c3aed;font-weight:700;font-size:.88rem;cursor:pointer;font-family:'DM Sans',sans-serif;">\u2708\uFE0F Send arrival text to ${escHtml((r.client||'client').split(' ')[0])}</button>`:''}
           ${(r.arrivalSentAt && getMyDriverName()===r.driver)?`<div onclick="resetArrivalSent(${r.id})" style="text-align:center;font-size:.68rem;color:var(--mid);text-decoration:underline;cursor:pointer;margin-top:-.15rem;">Arrival text sent by mistake? Reset</div>`:''}
-          ${(_pairedRideForBtn && r.xxlPair)?`<button onclick="openRideModal(${_pairedRideForBtn.id})" style="width:100%;padding:.6rem;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">\uD83D\uDE90 View the other vehicle \u2192</button>`:''}
+          ${(_xxlInfo && _xxlInfo.other)?`<button onclick="openRideModal(${_xxlInfo.other.id})" style="width:100%;padding:.6rem;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">\uD83D\uDE90 View the other vehicle \u2192</button>`:''}
           ${shareOfferingsBtn}
         </div>
       </div>`;
@@ -21794,7 +21926,7 @@ async function _confirmIfPossibleDuplicate(prefix){
   if(!client || !date || !time) return true;
   var key=client.toLowerCase()+'|'+date+'|'+time;
   var existing=(rides||[]).find(function(r){
-    return r && r.status!=='cancelled' && !r.xxlPair && r.client && r.date && r.time
+    return r && r.status!=='cancelled' && !r.xxlPair && !r.xxlGroup && r.client && r.date && r.time
       && (r.client.toLowerCase().trim()+'|'+r.date+'|'+r.time)===key;
   });
   if(!existing) return true;
@@ -22167,7 +22299,7 @@ async function saveQuickAddRide(){
   // saveRideEdits() already uses, including the same preserve-then-restore-on-failure safety.
   let _qaMade=[];
   try{
-    if(_qaRepeat==='none'){ const _xl=_xxlSplitNew(ride); if(_xl) _qaMade=[_xl]; }
+    if(_qaRepeat==='none'){ /* v1336: the second-vehicle split now happens after the airport round trip split below */ }
     else{ rides.splice(rides.indexOf(ride),1); _qaMade=_scheduleSeries(ride,_qaRepeat,_qaCount,_qaSpill); }   // v1322: pushes ride + the later dates
   }
   catch(e){
@@ -22196,6 +22328,7 @@ async function saveQuickAddRide(){
       touchRide(ride2,'created'); rides.push(ride2);
       if(ride2.driver) _notifyCreatedRide(ride2.driver,ride2);
     }
+    if(_qaRepeat==='none'){ _qaMade=_xxlSplitNew(ride,ride2); }
   }catch(e){
     console.warn('Quick Add split failed', e);
     // Roll back whatever got pushed locally - a half-created round trip (one leg present, the other missing) must never sit
@@ -26306,7 +26439,7 @@ function _findDuplicateRideGroups(){
     // and time by design, not an accidental double-booking. Excluded here, not because their
     // type field says "XXL" (it doesn't - splitXXLRide() copies the original ride's own type
     // onto both legs unchanged), but because they're flagged with r.xxlPair specifically.
-    if(!r || r.status==='cancelled' || r.xxlPair || !r.client || !r.date || !r.time) return;
+    if(!r || r.status==='cancelled' || r.xxlPair || r.xxlGroup || !r.client || !r.date || !r.time) return;
     const key = r.client.toLowerCase().trim()+'|'+r.date+'|'+r.time;
     (groups[key] = groups[key]||[]).push(r);
   });
@@ -35024,7 +35157,7 @@ function _icsFlagsFor(d, idx, drafts){
     }
     var cl=(d.client||'').toLowerCase().trim();
     if(cl && d.date && d.time){
-      var hit=(rides||[]).find(function(r){ return r && !r._archived && r.status!=='cancelled' && !r.xxlPair && (r.client||'').toLowerCase().trim()===cl && r.date===d.date && r.time===d.time; });
+      var hit=(rides||[]).find(function(r){ return r && !r._archived && r.status!=='cancelled' && !r.xxlPair && !r.xxlGroup && (r.client||'').toLowerCase().trim()===cl && r.date===d.date && r.time===d.time; });
       if(hit) flags.push({kind:'dup', text:'Possible duplicate: '+(hit.client||'')+' is already on the schedule '+fmtDateShort(hit.date)+' at '+fmtTime12(hit.time)+(hit.createdBy?' (created by '+hit.createdBy+')':'')+'.'});
       else {
         var first=-1; (drafts||[]).some(function(o,j){ if(j>=idx) return true; if(o && (o.client||'').toLowerCase().trim()===cl && o.date===d.date && o.time===d.time){ first=j; return true; } return false; });
@@ -37408,6 +37541,40 @@ function closeInstallHelp(){
   if(m) m.style.display='none';
 }
 
+// v1335: a phone keeps the app alive in the background for hours, and its timers freeze there, so the hourly update
+// check never ran and Kat kept opening an old build. Now every return to the app asks for a new build (at most once a
+// minute); a new build reloads the page right away unless someone is mid-entry, in which case a tap-to-refresh bar appears.
+function _appUpdateBusy(){
+  try{
+    return !!document.querySelector('.modal-overlay.show, #log-miles-overlay, #mt-popup, #ride-modal.show')
+        || !!(document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName));
+  }catch(e){ return false; }
+}
+function _reloadForUpdate(){
+  if(window._swReloaded) return;
+  if(_appUpdateBusy()){ _showUpdateBar(); return; }
+  window._swReloaded=true; window.location.reload();
+}
+function _showUpdateBar(){
+  try{
+    if(document.getElementById('update-bar')) return;
+    var b=document.createElement('div'); b.id='update-bar';
+    b.style.cssText='position:fixed;left:.75rem;right:.75rem;bottom:.75rem;z-index:100000;background:#2d1b57;color:#fff;border-radius:12px;padding:.8rem 1rem;display:flex;align-items:center;gap:.75rem;box-shadow:0 8px 24px rgba(0,0,0,.35);font-family:inherit;font-size:.88rem;';
+    b.innerHTML='<div style="flex:1;font-weight:600;">A new version is ready.</div><button style="background:#c9a227;color:#1a0830;border:none;border-radius:8px;padding:.55rem 1rem;font-weight:800;font-family:inherit;cursor:pointer;">Update now</button>';
+    b.querySelector('button').onclick=function(){ window._swReloaded=true; window.location.reload(); };
+    document.body.appendChild(b);
+  }catch(e){}
+}
+var _lastUpdateCheck=0;
+function _checkForAppUpdate(){
+  try{
+    if(!window._swReg || Date.now()-_lastUpdateCheck<60000) return;
+    _lastUpdateCheck=Date.now();
+    window._swReg.update().catch(function(_e){});
+  }catch(e){}
+}
+document.addEventListener('visibilitychange', function(){ if(document.visibilityState==='visible') _checkForAppUpdate(); });
+window.addEventListener('pageshow', function(ev){ if(ev && ev.persisted) _checkForAppUpdate(); });
 async function registerSW(){
   if(!('serviceWorker' in navigator)) return;
   try {
@@ -37420,6 +37587,7 @@ async function registerSW(){
       // (it just tries again next hour, or on the next page load), but it was reaching the
       // global unhandledrejection handler and logging itself as if it were a real app crash.
       // .catch() here, not try/catch, actually catches it.
+      window._swReg=reg; _lastUpdateCheck=Date.now();
       reg.update().catch(function(_e){});
       setInterval(function(){ reg.update().catch(function(_e){}); }, 60*60*1000);
       reg.addEventListener('updatefound', function(){
@@ -37432,7 +37600,7 @@ async function registerSW(){
       // handler below guards on the same one — a function-scoped `var` here would be a
       // different variable, letting both paths fire and reload twice.
       if(!window._swReloadHooked){ window._swReloadHooked=true; window._swReloaded=false;
-        navigator.serviceWorker.addEventListener('controllerchange', function(){ if(window._swReloaded) return; window._swReloaded=true; window.location.reload(); });
+        navigator.serviceWorker.addEventListener('controllerchange', function(){ _reloadForUpdate(); });
       }
     // When a notification is tapped, the service worker tells us — deep-link straight
     // to the ride/chat it came from; fall back to the bell panel only if no target.
@@ -37451,7 +37619,7 @@ async function registerSW(){
           // launch, which is already cached and will be instant.
           var busy = !!document.querySelector('.modal-overlay.show, #log-miles-overlay, #mt-popup, #ride-modal.show')
                   || (document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName));
-          if(busy) return;
+          if(busy){ _showUpdateBar(); return; }
           window._swReloaded = true;
           window.location.reload();
         }catch(_e){}
