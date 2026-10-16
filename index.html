@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191337">
+<meta name="version" content="202608191339">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -875,7 +875,7 @@ html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2
         </div>
         <div id="q-final-note" style="font-size:.74rem;color:var(--mid);margin-top:.35rem;">Type a different number to change the price. The difference shows as an Adjustment line.</div>
       </div>
-        <button type="button" id="q-send-btn" onclick="openSendQuote()" style="width:100%;margin-top:1rem;padding:.85rem;min-height:44px;background:none;border:2px solid var(--accent);color:var(--accent);border-radius:10px;font-family:inherit;font-weight:700;font-size:.92rem;cursor:pointer;">&#128228; Send quote&hellip;</button><div style="font-size:.68rem;color:var(--mid);margin-top:4px;padding-left:.2rem;">Pick text, email or PDF when you tap it. The quote is saved to Saved Quotes automatically and kept up to date as you change it.</div><button id="q-schedule-btn" onclick="saveQuote()" class="btn-primary" style="width:100%;margin-top:.75rem;padding:.85rem;">Schedule</button>
+        <button type="button" id="q-send-btn" class="btn-secondary" onclick="openSendQuote()" style="width:100%;margin-top:1rem;padding:.85rem;min-height:44px;font-size:.95rem;">&#128228; Send quote&hellip;</button><div style="font-size:.68rem;color:var(--mid);margin-top:4px;padding-left:.2rem;">Pick text, email or PDF when you tap it. The quote is saved to Saved Quotes automatically and kept up to date as you change it.</div><button id="q-schedule-btn" onclick="saveQuote()" class="btn-primary" style="width:100%;margin-top:.75rem;padding:.85rem;">Schedule</button>
         <!-- Shown only when the trip has more than one pickup (at least one extra stop), per Chase.
              A plain A-to-B trip needs no route preview. Visibility is set by _syncRouteBtn(). -->
         <button id="q-route-btn" onclick="viewRouteOnMaps()" style="display:none;width:100%;margin-top:.5rem;padding:.7rem;background:none;border:1.5px solid var(--accent);border-radius:8px;color:var(--accent);font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">↗ View route in Google Maps</button>
@@ -26864,6 +26864,62 @@ function renderCrashLogSection(){
     + '<button type="button" onclick="showStorageCheck()" style="padding:.45rem .8rem;border-radius:8px;border:1.5px solid var(--accent);background:none;color:var(--accent);font-family:\'DM Sans\',sans-serif;font-weight:700;font-size:.76rem;cursor:pointer;">\uD83D\uDCBE Check storage</button>'
     + '</div>';
 }
+// v1339: people on the Team page with no login row never showed in Access control (that list is the login list). This finds them and
+// lets an admin give each one a login right here (same records the Add driver form writes).
+function _driversWithoutLogin(){
+  var has={}; Object.keys(USER_DRIVER_MAP||{}).forEach(function(k){ has[USER_DRIVER_MAP[k]]=true; });
+  return (DRIVERS||[]).filter(function(d){ return !has[d]; });
+}
+function _noLoginPanelHTML(){
+  var list=_driversWithoutLogin(); if(!list.length) return '';
+  return '<div style="border:1.5px solid #fdba74;background:#fff7ed;border-radius:10px;padding:.85rem;margin-bottom:1rem;">'
+    +'<div style="font-size:.85rem;font-weight:800;color:#9a3412;margin-bottom:.2rem;">On the team but no login yet ('+list.length+')</div>'
+    +'<div style="font-size:.72rem;color:#7c2d12;line-height:1.45;margin-bottom:.5rem;">These people are on the Team page but can’t sign in, so they aren’t in the list below. Give each one a username and temporary password.</div>'
+    +list.map(function(d){
+      return '<div style="display:flex;align-items:center;justify-content:space-between;gap:.6rem;padding:.35rem 0;border-top:1px solid #fed7aa;"><span style="font-size:.85rem;font-weight:700;color:var(--black);">'+escHtml(d)+'</span>'
+        +'<button type="button" data-d="'+escHtml(d)+'" onclick="_openCreateLogin(this.dataset.d)" style="flex-shrink:0;background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.4rem .9rem;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;">Create login</button></div>';
+    }).join('')+'</div>';
+}
+function _openCreateLogin(driverName){
+  if(!isAdmin()){ showToast('Only admins can do this','error'); return; }
+  var old=document.getElementById('create-login-back'); if(old) old.remove();
+  var back=document.createElement('div'); back.id='create-login-back';
+  back.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13600;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  var inp='width:100%;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-family:inherit;font-size:.9rem;margin-bottom:.7rem;';
+  back.innerHTML='<div style="background:#fff;border-radius:16px;max-width:400px;width:100%;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
+    +'<div style="font-size:1rem;font-weight:800;margin-bottom:.2rem;">Create login</div>'
+    +'<div style="font-size:.78rem;color:var(--mid);margin-bottom:.8rem;">'+escHtml(driverName)+'</div>'
+    +'<div style="font-size:.66rem;text-transform:uppercase;letter-spacing:1px;color:var(--mid);margin-bottom:3px;">Username</div>'
+    +'<input id="cl-user" type="text" value="'+escHtml(String(driverName).split(' ')[0])+'" style="'+inp+'" />'
+    +'<div style="font-size:.66rem;text-transform:uppercase;letter-spacing:1px;color:var(--mid);margin-bottom:3px;">Temporary password</div>'
+    +'<input id="cl-pass" type="text" placeholder="they can change it later" style="'+inp+'" />'
+    +'<div style="display:flex;gap:.5rem;"><button type="button" onclick="document.getElementById(\'create-login-back\').remove()" style="flex:1;padding:.6rem;background:none;border:1.5px solid var(--light);border-radius:8px;font-family:inherit;cursor:pointer;">Cancel</button>'
+    +'<button type="button" data-d="'+escHtml(driverName)+'" onclick="_saveCreateLogin(this.dataset.d)" style="flex:1;padding:.6rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:inherit;font-weight:700;cursor:pointer;">Save</button></div></div>';
+  document.body.appendChild(back);
+}
+async function _saveCreateLogin(driverName){
+  if(!isAdmin()) return;
+  var login=_gv('cl-user'), password=_gv('cl-pass');
+  if(!login){ showToast('Enter a username','error'); return; }
+  if(!password){ showToast('Enter a temporary password','error'); return; }
+  if(USERS.some(function(u){ return u.name.toLowerCase()===login.toLowerCase(); })){ showToast('That username is taken','error'); return; }
+  if(DRIVERS.indexOf(driverName)<0) return;
+  USER_DRIVER_MAP[login]=driverName;
+  USERS.push({ name:login, initials:driverName.split(' ').map(function(n){return n[0];}).join('').slice(0,2).toUpperCase(), password:password, role:'driver', disabled:false });
+  var ok=true;
+  try{
+    var added=await storageGet('kat:addedDrivers'); if(!Array.isArray(added)) added=[];
+    var i=added.findIndex(function(x){ return x && x.driverName===driverName; });
+    if(i>=0){ added[i]=Object.assign({}, added[i], {login:login, password:password}); }
+    else added.push({ driverName:driverName, profile:(DRIVER_PROFILES[driverName]||{}), color:(driverColors[driverName]||''), photo:'', login:login, password:password });
+    await storageSetArray('kat:addedDrivers', added);
+    await savePasswords();
+    await saveDisabled();
+  }catch(e){ ok=false; console.warn('create login', e); }
+  var b=document.getElementById('create-login-back'); if(b) b.remove();
+  showToast(ok?('✓ '+driverName.split(' ')[0]+' can now log in as “'+login+'”'):'⚠️ Saved on screen but the save didn’t land — check your connection and try again','error');
+  try{ renderAccessControl(); }catch(e){}
+}
 function renderAccessControl(){
   if(!(currentUser && currentUser.role==='admin')){
     document.getElementById('access-control-list').innerHTML='<p style="color:var(--mid);">Admins only.</p>';
@@ -26890,7 +26946,7 @@ function renderAccessControl(){
   // The fresh-data test panel goes FIRST (v1218). It used to be appended after every person's block -
   // subscription, calendar colour, surcharges and password each - so it sat at the very bottom of a long
   // page, below the whole team, and Chase couldn't find it.
-  list.innerHTML = _freshPanel + _subsIntroHTML() + USERS.map(function(u){
+  list.innerHTML = _freshPanel + _noLoginPanelHTML() + _subsIntroHTML() + USERS.map(function(u){
     const dName  = USER_DRIVER_MAP[u.name]||'';
     const color  = dName ? driverColor(dName) : '#6b6b6b';
     const isMe   = u.name === currentUser.name;
