@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191343">
+<meta name="version" content="202608191348">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -4453,7 +4453,8 @@ function _quoteAgeFrom(q){
   if(!q) return 0;
   var sent = parseFloat(q.sentAt)||0;
   var saved = parseFloat(q.savedAt)||0;
-  return Math.max(sent, saved);   // max() so a re-send always extends, never shortens
+  var kept = parseFloat(q.keptAt)||0;   // v1348: "Keep" on the dashboard warning restarts the clock
+  return Math.max(sent, saved, kept);   // max() so a re-send or a Keep always extends, never shortens
 }
 
 // Collects saved quotes AND synced drafts that are inside the warning window. Deliberately
@@ -4463,11 +4464,16 @@ async function _expiringSoon(){
   var out = [];
   try{
     var warnAt = Date.now() - (RETENTION_DAYS-EXPIRY_WARN_DAYS)*24*60*60*1000;
+    // v1348: only MY quotes. savedQuotes is one shared array, so without this the warning listed
+    // other drivers' quotes (the list on the Quote page already filtered to the creator).
+    var _me=((currentUser&&currentUser.name)||'').trim();
     (savedQuotes||[]).forEach(function(q){
       if(!q) return;
+      var _own=((q.createdBy||q.driver||'')+'').trim();
+      if(!_own || _own!==_me) return;
       var from = _quoteAgeFrom(q);
       if(!from) return;
-      if(from <= warnAt) out.push({ kind:(q.sentAt?'sent':'quote'), who:(q.client||'(no name)'), ts:from, days:_daysLeft(from) });
+      if(from <= warnAt) out.push({ kind:(q.sentAt?'sent':'quote'), id:q._quoteId, who:(q.client||'(no name)'), ts:from, days:_daysLeft(from) });
     });
   }catch(e){}
   try{
@@ -4477,7 +4483,7 @@ async function _expiringSoon(){
       var warnAt2 = Date.now() - (RETENTION_DAYS-EXPIRY_WARN_DAYS)*24*60*60*1000;
       if(d.ts <= warnAt2){
         var L = (typeof _qdLabel==='function') ? _qdLabel(d.fields) : {who:'(draft)'};
-        out.push({ kind:'draft', who:L.who, ts:d.ts, days:_daysLeft(d.ts) });
+        out.push({ kind:'draft', id:d.id, who:L.who, ts:d.ts, days:_daysLeft(d.ts) });
       }
     });
   }catch(e){}
@@ -4485,6 +4491,36 @@ async function _expiringSoon(){
   return out;
 }
 
+// v1348: open an item from the warning. A quote opens its detail card; a draft goes to the Quote page and restores.
+async function _expOpen(kind, id){
+  try{
+    if(kind==='draft'){
+      var rec=(await _qdList()).find(function(r){ return r.id===id; });
+      if(!rec) return;
+      showPage('quote');
+      setTimeout(function(){ try{ _qdApply(rec); }catch(e){} }, 150);
+    } else { openSavedQuoteDetail(id); }
+  }catch(e){ console.warn('_expOpen failed', e); }
+}
+// v1348: skip the deletion. Restarts the retention clock for one item (or every item in the warning when kind is 'all').
+async function _expKeep(kind, id){
+  try{
+    var now=Date.now(), items = kind==='all' ? await _expiringSoon() : [{kind:kind,id:id}], qChanged=false;
+    for(var i=0;i<items.length;i++){
+      var it=items[i];
+      if(it.kind==='draft'){
+        var rec=(await _qdList()).find(function(r){ return r.id===it.id; });
+        if(rec){ rec.ts=now; await storageSet('kat:quoteDrafts/'+_qdUserKey()+'/'+rec.id, rec); _qdDrop(); }
+      } else {
+        var q=(savedQuotes||[]).find(function(x){ return x && x._quoteId===it.id; });
+        if(q){ q.keptAt=now; qChanged=true; }
+      }
+    }
+    if(qChanged) await saveSavedQuotes();
+    showToast('Kept \u2014 the '+RETENTION_DAYS+'-day clock restarted');
+  }catch(e){ console.warn('_expKeep failed', e); showToast('Could not keep that one','error'); }
+  renderDashExpiring();
+}
 // Dashboard warning. Shown only when something is actually within the window, so it is silent
 // almost always and therefore worth reading when it does appear.
 async function renderDashExpiring(){
@@ -4496,16 +4532,17 @@ async function renderDashExpiring(){
     var soonest = list[0].days;
     var rows = list.slice(0,8).map(function(it){
       return '<div style="display:flex;justify-content:space-between;gap:.6rem;font-size:.8rem;font-weight:600;color:#7c2d12;padding:.2rem 0;">'
-        +'<span>'+escHtml(it.who)+' <span style="font-weight:600;opacity:.75;">\u00b7 '+(it.kind==='draft'?'unfinished draft':(it.kind==='sent'?'quote sent to client':'saved quote'))+'</span></span>'
-        +'<span style="white-space:nowrap;font-weight:800;">'+(it.days===0?'today':it.days+'d')+'</span></div>';
+        +'<span><a href="#" onclick="_expOpen(\''+it.kind+'\',\''+escAttr(it.id||'')+'\');return false;" style="color:#7c2d12;font-weight:800;text-decoration:underline;">'+escHtml(it.who)+'</a> <span style="font-weight:600;opacity:.75;">\u00b7 '+(it.kind==='draft'?'unfinished draft':(it.kind==='sent'?'quote sent to client':'saved quote'))+'</span></span>'
+        +'<span style="white-space:nowrap;font-weight:800;">'+(it.days===0?'today':it.days+'d')+' <button type="button" onclick="_expKeep(\''+it.kind+'\',\''+escAttr(it.id||'')+'\')" style="margin-left:.4rem;padding:.15rem .55rem;border:1.5px solid #9a3412;border-radius:7px;background:#fff;color:#9a3412;font-weight:800;font-size:.72rem;cursor:pointer;font-family:inherit;">Keep</button></span></div>';
     }).join('');
     var more = list.length>8 ? '<div style="font-size:.76rem;color:#7c2d12;font-weight:700;margin-top:.3rem;">+'+(list.length-8)+' more</div>' : '';
     box.innerHTML = '<div style="background:#fff7ed;border:1.5px solid #fdba74;border-radius:12px;padding:1rem 1.1rem;">'
       +'<div style="font-size:.9rem;font-weight:800;color:#9a3412;margin-bottom:.15rem;">\u23f3 '+list.length+' item'+(list.length===1?'':'s')+' will be deleted soon</div>'
       +'<div style="font-size:.78rem;color:#7c2d12;font-weight:600;margin-bottom:.6rem;">Quotes and drafts are kept for '+RETENTION_DAYS+' days. '
       +(soonest===0?'The first goes today.':'The first goes in '+soonest+' day'+(soonest===1?'':'s')+'.')
-      +' Schedule it or save the details somewhere to keep it.</div>'
+      +' Tap a name to review it, or tap Keep to skip the deletion and restart its '+RETENTION_DAYS+' days.</div>'
       + rows + more
+      + '<div style="margin-top:.6rem;"><button type="button" onclick="_expKeep(\'all\',\'\')" style="padding:.35rem .8rem;border:1.5px solid #9a3412;border-radius:8px;background:#fff;color:#9a3412;font-weight:800;font-size:.76rem;cursor:pointer;font-family:inherit;">Keep all</button></div>'
       +'</div>';
   }catch(e){ console.warn('renderDashExpiring failed', e); box.innerHTML=''; }
 }
@@ -5663,14 +5700,18 @@ function refreshVehicleButtonLabels(){
 function vehUpcharge(veh){ var d=(BASE[veh]||sedanBase())-sedanBase(); return d>0?d:0; }
 // ── EDITABLE SURCHARGE TRIGGERS (time windows / days / holiday dates) ──
 function _hm(str){ if(!str||typeof str!=='string'||str.indexOf(':')<0) return null; var p=str.split(':'); var h=parseInt(p[0],10), m=parseInt(p[1],10); return (isFinite(h)&&isFinite(m))?h*60+m:null; }
-// Premium is a time RANGE. Default 00:00–05:00. If start>end the range wraps past midnight (e.g. 22:00–05:00).
+// Premium is a time RANGE. Default 00:00–05:00 (airport pickups start at 23:15, see premiumPickupStart). If start>end the range wraps past midnight (e.g. 22:00–05:00).
 function premiumStart(){ return (globalSettings.premiumStart!=null?globalSettings.premiumStart:'00:00'); }
+function premiumPickupStart(){ return (globalSettings.premiumPickupStart!=null?globalSettings.premiumPickupStart:'23:15'); }
+function premiumPickupStartMin(){ var m=_hm(premiumPickupStart()); return m==null?1395:m; }
+// Is this leg an airport pickup? type is the ride type; for an AP Round Trip, firstLeg is 'AP RUN' (drop-off first, so leg 2 is the pickup) or 'AP PICK UP'.
+function _legIsPickup(type, firstLeg, isReturnLeg){ if(type==='AP PICK UP') return true; if(type==='AP ROUND TRIP'){ var f=firstLeg||'AP RUN'; return isReturnLeg ? f==='AP RUN' : f==='AP PICK UP'; } return false; }
 function premiumEnd(){ return (globalSettings.premiumEnd!=null?globalSettings.premiumEnd:(globalSettings.premiumBefore||'05:00')); }
 function premiumStartMin(){ var m=_hm(premiumStart()); return m==null?0:m; }
 function premiumEndMin(){ var m=_hm(premiumEnd()); return m==null?300:m; }
 // Back-compat shims (older callers/tests may still reference these)
 function premiumBefore(){ return premiumEnd(); }
-function isPremiumTime(mins){ if(mins<0) return false; var st=premiumStartMin(), en=premiumEndMin(); if(st===en) return false; if(st<en){ return mins>=st && mins<en; } return mins>=st || mins<en; }
+function isPremiumTime(mins, pickup){ if(mins<0) return false; var st=pickup?premiumPickupStartMin():premiumStartMin(), en=premiumEndMin(); if(st===en) return false; if(st<en){ return mins>=st && mins<en; } return mins>=st || mins<en; }
 function trafficDaysList(){ var d=globalSettings.trafficDays; return Array.isArray(d)?d:[1,2,3,4,5]; }
 function trafficAm(){ var w=globalSettings.trafficAm||{}; return {start:w.start||'06:30', end:w.end||'09:00'}; }
 function trafficPm(){ var w=globalSettings.trafficPm||{}; return {start:w.start||'14:30', end:w.end||'19:00'}; }
@@ -7651,7 +7692,7 @@ function applyQuoteAutoAddons(){
   if(dv && tv && !_addonTouched.late && !driverAutoOff('late')) addonState.late = _isLateNoticeRide(dv,tv);
 
   // Premium hours — needs TIME only.
-  if(tv && !_addonTouched.premium && !driverAutoOff('premium')) addonState.premium = isPremiumTime(mins);
+  if(tv && !_addonTouched.premium && !driverAutoOff('premium')) addonState.premium = isPremiumTime(mins, _legIsPickup((document.getElementById('q-type')||{}).value,'AP RUN',false));
 
   // Traffic — needs BOTH date + time, because the day of week decides.
   if(dv && tv && !_addonTouched.traffic && !driverAutoOff('traffic')){
@@ -7679,7 +7720,7 @@ function applyReturnLegAutoAddons(p){
   if(tv){ const pp=tv.split(':').map(Number); mins=(pp[0]||0)*60+(pp[1]||0); }
   if(globalSettings.fuelEnabled !== false && !T.fuel && !driverAutoOff('fuel')) S.fuel=true;
   if(dv && tv && !T.late && !driverAutoOff('late')) S.late = _isLateNoticeRide(dv,tv);   // v1288: the return leg's own date and time
-  if(tv && !T.premium && !driverAutoOff('premium')) S.premium = isPremiumTime(mins);
+  if(tv && !T.premium && !driverAutoOff('premium')) S.premium = isPremiumTime(mins, _legIsPickup((document.getElementById(p+'-type')||{}).value, (p==='qa'&&typeof qaRtFirstLegType==='function')?qaRtFirstLegType():'AP RUN', true));
   if(dv && tv && !T.traffic && !driverAutoOff('traffic')){
     const dow=new Date(dv+'T12:00:00').getDay();
     S.traffic = isTrafficTime(dow,mins);
@@ -9107,7 +9148,7 @@ function _returnLegState(r){
   if(!hasManual && w.date && w.time){
     const p=w.time.split(':').map(Number), mins=(p[0]||0)*60+(p[1]||0), dow=new Date(w.date+'T12:00:00').getDay();
     const xmas=isChristmasDate(w.date.slice(5));
-    d = { premium:isPremiumTime(mins), traffic:isTrafficTime(dow,mins), christmas:xmas, holiday:isHolidayDate(w.date) && !xmas };
+    d = { premium:isPremiumTime(mins, _legIsPickup(r.type, r.rtFirstLeg, true)), traffic:isTrafficTime(dow,mins), christmas:xmas, holiday:isHolidayDate(w.date) && !xmas };
   }
   st.fuel = hasManual ? _ON(r.rt_fuel) : _ON(r.fuel);
   Object.keys(ADDONS_FLAT).forEach(k=>{
@@ -11423,7 +11464,7 @@ function renderWeekView(containerId, weekStart, driverFilter){
                 <div style="flex:1;min-width:0;">
                   <div class="week-ride-client" style="color:${tc};">${r.confirmSent?'<span style="color:var(--green);font-weight:900;">✓ </span>':''}${r.client}</div>
                   <div class="week-ride-detail" style="color:${tc};opacity:.78;">${vehTag(r.vehicle)} · ${driverShortName(r.driver)}${ic?` · <span style="color:#e0245e;font-weight:700;">❤️${ic}</span>`:''}</div>
-                  ${r.type==='AP PICK UP'&&r.flight?`<a href="${flightTrackUrl(r.flight)}" target="_blank" rel="noopener" onclick="event.stopPropagation();_flightLinkTapped()" style="font-size:.62rem;font-weight:700;color:${tc};text-decoration:underline;opacity:.9;white-space:nowrap;">✈️ Flight Tracking</a>`:''}
+                  ${r.type==='AP PICK UP'&&r.flight?`<a href="${flightTrackUrl(r.flight)}" onclick="event.stopPropagation();_flightLinkTapped()" style="font-size:.62rem;font-weight:700;color:${tc};text-decoration:underline;opacity:.9;white-space:nowrap;">✈️ Flight Tracking</a>`:''}
                   ${r.type==='AP RUN'?'<a href="https://www.atl.com/times/" rel="noopener" onclick="event.stopPropagation()" style="font-size:.62rem;font-weight:700;color:'+tc+';text-decoration:underline;opacity:.9;white-space:nowrap;">🔒 TSA Wait Times</a>':''}  
                 </div>
                 <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
@@ -13581,7 +13622,7 @@ function renderRideView(r){
   // thumbnail for it.
   const flightRowHtml = r.flight
     ? '<div style="font-size:.88rem;margin-bottom:3px;display:flex;align-items:center;gap:.5rem;">Flight: ' + escHtml(r.flight)
-      + (_flightNum ? ' <a href="'+flightTrackUrl(_flightNum)+'" target="_blank" rel="noopener" onclick="_flightLinkTapped()" style="font-size:.72rem;font-weight:700;color:#7c3aed;text-decoration:none;border:1px solid #7c3aed;border-radius:6px;padding:1px 7px;">\u2708\uFE0F Track</a>' : '')
+      + (_flightNum ? ' <a href="'+flightTrackUrl(_flightNum)+'" onclick="_flightLinkTapped()" style="font-size:.72rem;font-weight:700;color:#7c3aed;text-decoration:none;border:1px solid #7c3aed;border-radius:6px;padding:1px 7px;">\u2708\uFE0F Track</a>' : '')
       + '</div>'
     : '';
   // Gate code — visible only to this client's owner and whoever's actually assigned to
@@ -20760,7 +20801,7 @@ function onQaDateTimeChange(){
     if(dv && tv && !_qaTouched.late && !driverAutoOff('late')) qaAddonState.late = _isLateNoticeRide(dv,tv);   // v1282
     if(tv){
       const parts=(tv||'').split(':').map(Number); const mins=(parts[0]||0)*60+(parts[1]||0);
-      if(!_qaTouched.premium && !driverAutoOff('premium')) qaAddonState.premium = isPremiumTime(mins);
+      if(!_qaTouched.premium && !driverAutoOff('premium')) qaAddonState.premium = isPremiumTime(mins, _legIsPickup((document.getElementById('qa-type')||{}).value, (typeof qaRtFirstLegType==='function')?qaRtFirstLegType():'AP RUN', false));
       if(dv){ const dow=new Date(dv+'T12:00:00').getDay(); if(!_qaTouched.traffic && !driverAutoOff('traffic')) qaAddonState.traffic = isTrafficTime(dow,mins); }
     }
     if(dv){
@@ -23003,7 +23044,7 @@ function refreshDash(){
         } else if(_isAirport && r.flight){
           var _flightNum=(r.flight||'').trim().replace(/[^A-Za-z0-9]/g,'').toUpperCase();
           var _flightUrl=flightTrackUrl(_flightNum);
-          _btns.push('<a href="'+_flightUrl+'" target="_blank" rel="noopener" onclick="event.stopPropagation();_flightLinkTapped()" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;text-decoration:none;display:flex;align-items:center;justify-content:center;text-align:center;">\u2708\ufe0f Track</a>');
+          _btns.push('<a href="'+_flightUrl+'" onclick="event.stopPropagation();_flightLinkTapped()" style="flex:1;min-width:0;padding:.4rem .5rem;border-radius:8px;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;text-decoration:none;display:flex;align-items:center;justify-content:center;text-align:center;">\u2708\ufe0f Track</a>');
           // Send Arrival Text specifically (not Track, which stays available the whole time
           // an airport ride is relevant) only makes sense for the assigned driver, and only in
           // a tight window around the actual scheduled time - a real 6-hour SYMMETRIC cutoff on
@@ -24585,7 +24626,10 @@ async function saveAddedDriver(rec){
 async function archiveDriver(name){
   if(!isAdmin()){ showToast('Only admins can archive a driver','error'); return; }
   if(!name || DRIVERS.indexOf(name)<0){ showToast('Driver not found','error'); return; }
-  if(!await askConfirm('Archive '+name.split(' ')[0]+'?\n\nThey\u2019ll disappear from every driver list and lose app access. Their profile is kept and can be restored later from Archived Drivers.'+(_twoAdminRequired()?'\n\nA second admin must approve before it takes effect.':''))) return;
+  var _pl=_driverClientRidesPlan(name);
+  var _rideLine = _pl.move.length ? '\n\n'+_pl.move.length+' ride'+(_pl.move.length===1?'':'s')+' for their clients will move off the calendar into the ride archive (still searchable, nothing deleted).' : '';
+  var _stayLine = (_pl.stayingOtherDriver||_pl.stayingUnsettled) ? '\nStaying: '+(_pl.stayingOtherDriver?_pl.stayingOtherDriver+' upcoming ride'+(_pl.stayingOtherDriver===1?'':'s')+' now driven by another driver':'')+((_pl.stayingOtherDriver&&_pl.stayingUnsettled)?' and ':'')+(_pl.stayingUnsettled?_pl.stayingUnsettled+' past ride'+(_pl.stayingUnsettled===1?'':'s')+' not settled yet':'')+'.' : '';
+  if(!await askConfirm('Archive '+name.split(' ')[0]+'?\n\nThey\u2019ll disappear from every driver list and lose app access. Their profile is kept and can be restored later from Archived Drivers.'+_rideLine+_stayLine+(_twoAdminRequired()?'\n\nA second admin must approve before it takes effect.':''))) return;
 
   // Archiving applies immediately as well - the counterpart to adding, and equally blocking
   // when someone leaves and their access needs removing now rather than after an approval.
@@ -24596,6 +24640,63 @@ async function archiveDriver(name){
 // way driver_add/driver_edit already are - matches Chase's own reasoning for those: archiving
 // disables someone's login and pulls them off every list in one action, at least as
 // consequential as editing a driver, so it gets the same second-admin requirement now.
+// v1344: when a driver is archived, the rides of THEIR clients leave the calendar too (moved to the ride archive: view-only, searchable,
+// nothing deleted). Which rides: clients this driver owns, where the ride is not on another active driver (blank or theirs). Upcoming rides
+// always move; past rides move only when settled (paid/cancelled, no fee still owed) so nothing unpaid is hidden. A ride moves together
+// with its partner legs/vehicle, or not at all. Rides for their clients that stay (another active driver, or unsettled) are counted.
+function _driverClientRidesPlan(name){
+  var today = toDateStr(nowET());
+  var live = (rides||[]).filter(function(r){ return r && !r._archived; });
+  var mine = live.filter(function(r){
+    if(!r.client) return false;
+    var owner=''; try{ owner=(_rideClientOwner(r)||'').trim(); }catch(e){}
+    if(owner!==name) return false;
+    var d=(r.driver||'').trim();
+    return !d || d===name;
+  });
+  var ok={}; var staying=[];
+  mine.forEach(function(r){
+    var future = r.date && r.date >= today;
+    var can = future || _isRideArchivable(r, '9999-12-31');
+    if(can) ok[String(r.id)]=true; else staying.push(r);
+  });
+  var byId={}, byPair={}, byGroup={};
+  live.forEach(function(r){
+    byId[String(r.id)]=r;
+    if(r.pairId!=null) (byPair[String(r.pairId)]=byPair[String(r.pairId)]||[]).push(r);
+    if(r.xxlGroup!=null) (byGroup[String(r.xxlGroup)]=byGroup[String(r.xxlGroup)]||[]).push(r);
+  });
+  var changed=true;
+  while(changed){
+    changed=false;
+    mine.forEach(function(r){
+      if(!ok[String(r.id)]) return;
+      var partners=[];
+      if(r.pairId!=null) partners=partners.concat(byPair[String(r.pairId)]||[]);
+      if(r.xxlGroup!=null) partners=partners.concat(byGroup[String(r.xxlGroup)]||[]);
+      if(r.linkedRide!=null && byId[String(r.linkedRide)]) partners.push(byId[String(r.linkedRide)]);
+      for(var i=0;i<partners.length;i++){
+        var q=partners[i];
+        if(q!==r && !ok[String(q.id)]){ ok[String(r.id)]=false; changed=true; break; }
+      }
+    });
+  }
+  var move=mine.filter(function(r){ return ok[String(r.id)]; });
+  var otherDriver=live.filter(function(r){
+    if(!r.client || move.indexOf(r)>-1) return false;
+    var owner=''; try{ owner=(_rideClientOwner(r)||'').trim(); }catch(e){}
+    var d=(r.driver||'').trim();
+    return owner===name && d && d!==name && (r.date||'')>=today;
+  });
+  return { move:move, stayingOtherDriver:otherDriver.length, stayingUnsettled:mine.filter(function(r){ return !ok[String(r.id)]; }).length };
+}
+async function _archiveDriverClientRides(name){
+  var plan=_driverClientRidesPlan(name);
+  if(!plan.move.length) return 0;
+  var through=''; try{ through=(globalSettings&&globalSettings.ridesArchive&&globalSettings.ridesArchive.through)||toDateStr(nowET()); }catch(e){ through=toDateStr(nowET()); }
+  var done=await _moveRidesToArchive(plan.move, through);
+  return done ? plan.move.length : -1;
+}
 async function _applyDriverArchive(name){
   await _ensureDriverPhotoLoaded(name);
   const loginEntry = USERS.find(function(u){ return USER_DRIVER_MAP[u.name]===name; });
@@ -24638,7 +24739,8 @@ async function _applyDriverArchive(name){
   }
 
   _stripDriverFromLiveTables(name);
-  showToast('\u2705 '+name.split(' ')[0]+' archived');
+  var _movedRides=0; try{ _movedRides=await _archiveDriverClientRides(name); }catch(e){ console.warn('archive driver client rides', e); _movedRides=-1; }
+  showToast('\u2705 '+name.split(' ')[0]+' archived'+(_movedRides>0?' \u2014 '+_movedRides+' ride'+(_movedRides===1?'':'s')+' for their clients moved off the calendar':'')+(_movedRides<0?' \u2014 but their clients\u2019 rides could NOT be moved; try again from Income > Archive':''));
   if(typeof renderAccessControl==='function') renderAccessControl();
 }
 
@@ -25248,6 +25350,7 @@ function buildSurchargeTriggersHTML(){
     +'<div style="font-size:.74rem;color:var(--mid);line-height:1.55;margin-bottom:1rem;">These are the current default hours a surcharge is suggested for on a new quote — edit them below. Whoever is scheduling can always switch any surcharge on or off per ride.</div>'
     +'<div style="font-size:.66rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Premium hours</div>'
     +'<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.4rem;font-size:.82rem;color:var(--black);">Current default premium hours are '+ti('trg-premium-start',premiumStart())+' and '+ti('trg-premium-end',premiumEnd())+'</div>'
+    +'<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.4rem;font-size:.82rem;color:var(--black);">Airport pickups start premium at '+ti('trg-premium-pickup-start',premiumPickupStart())+' (same end time)</div>'
     +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:1.1rem;">A start–end window. If the start is later than the end it wraps past midnight — e.g. 10:00 PM to 05:00 AM covers overnight rides on both sides of midnight.</div>'
     +'<div style="font-size:.66rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Traffic hours</div>'
     +'<div style="font-size:.72rem;color:var(--mid);margin-bottom:.4rem;">Days:</div><div style="display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-bottom:.6rem;">'+dayBoxes+'</div>'
@@ -25265,12 +25368,12 @@ function buildSurchargeTriggersHTML(){
 async function saveSurchargeTriggers(){
   if(typeof isAdmin==='function' && !isAdmin()){ showToast('Admins only','error'); return; }
   var ps=document.getElementById('trg-premium-start');
-  var pe=document.getElementById('trg-premium-end');
+  var pe=document.getElementById('trg-premium-end'); var pps=document.getElementById('trg-premium-pickup-start');
   var days=[]; document.querySelectorAll('.trf-day').forEach(function(c){ if(c.checked) days.push(parseInt(c.getAttribute('data-day'),10)); });
   var ams=document.getElementById('trg-am-start'), ame=document.getElementById('trg-am-end');
   var pms=document.getElementById('trg-pm-start'), pme=document.getElementById('trg-pm-end');
   await queueAdminAction('surcharge_triggers', {
-    premiumStart:(ps&&ps.value)||null, premiumEnd:(pe&&pe.value)||null, trafficDays:days,
+    premiumStart:(ps&&ps.value)||null, premiumPickupStart:(pps&&pps.value)||null, premiumEnd:(pe&&pe.value)||null, trafficDays:days,
     trafficAm:{start:(ams&&ams.value)||'06:30', end:(ame&&ame.value)||'09:00'},
     trafficPm:{start:(pms&&pms.value)||'14:30', end:(pme&&pme.value)||'19:00'}
   }, 'Change surcharge trigger hours & days');
@@ -31026,6 +31129,7 @@ registerAdminAction('surcharge_delete', async function(p){
 registerAdminAction('surcharge_triggers', async function(p){
   if(p.premiumStart) globalSettings.premiumStart=p.premiumStart;
   if(p.premiumEnd) globalSettings.premiumEnd=p.premiumEnd;
+  if(p.premiumPickupStart) globalSettings.premiumPickupStart=p.premiumPickupStart;
   delete globalSettings.premiumBefore; delete globalSettings.premiumAfter;
   globalSettings.trafficDays=p.trafficDays||[];
   if(p.trafficAm) globalSettings.trafficAm=p.trafficAm;
@@ -31063,13 +31167,17 @@ async function _executeRidesArchive(p){
   var cutoff = p && p.cutoff; if(!cutoff) return;
   var toArchive = _ridesToArchive(cutoff);
   if(!toArchive.length){ showToast('No settled rides older than '+ARCHIVE_DAYS+' days to archive'); return; }
+  await _moveRidesToArchive(toArchive, cutoff);
+}
+// The safe move itself (v1344: shared with archiving a driver). Returns true when the rides are in the archive AND out of the live list.
+async function _moveRidesToArchive(toArchive, cutoff){
   try{
     var raw = (await storageGet('kat:ridesArchive')) || [];
     var existing = Array.isArray(raw) ? raw : Object.values(raw||{});
     var archivedIds = new Set(existing.map(function(r){ return r && r.id; }));
     var merged = existing.concat(toArchive.filter(function(r){ return !archivedIds.has(r.id); }));
     var wrote = await storageSetArray('kat:ridesArchive', merged);
-    if(wrote === false){ showToast('Couldn\u2019t save the archive \u2014 nothing was removed from your rides','error'); return; }
+    if(wrote === false){ showToast('Couldn\u2019t save the archive \u2014 nothing was removed from your rides','error'); return false; }
     // VERIFY against the server itself (not the local mirror, which would happily "confirm" a write that never landed)
     if(fbDB){
       var landed = null;
@@ -31079,7 +31187,7 @@ async function _executeRidesArchive(p){
         landed = new Set((Array.isArray(v) ? v : Object.values(v||{})).map(function(r){ return r && r.id; }));
       }catch(e){ landed = null; }
       if(!landed || toArchive.some(function(r){ return !landed.has(r.id); })){
-        showToast('Archive check failed \u2014 nothing was removed from your rides','error'); return;
+        showToast('Archive check failed \u2014 nothing was removed from your rides','error'); return false;
       }
     }
     var moved = new Set(toArchive.map(function(r){ return r.id; }));
@@ -31096,7 +31204,8 @@ async function _executeRidesArchive(p){
     try{ if(typeof renderCal==='function') renderCal(); }catch(e){}
     try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
     showToast('Archived '+toArchive.length+' ride(s) \u2713 \u2014 still searchable anytime');
-  }catch(e){ console.error('archive exec',e); showToast('Could not archive rides','error'); }
+    return true;
+  }catch(e){ console.error('archive exec',e); showToast('Could not archive rides','error'); return false; }
 }
 registerAdminAction('rides_archive', _executeRidesArchive);
 
@@ -32938,7 +33047,22 @@ async function toggleSchedTextReminder(driverName){
 // Cause: these links had no target, so they navigated the APP'S OWN WINDOW to Google. They now open in a
 // separate window (target=_blank), so the app never leaves - and, as Chase asked, coming back to the app
 // afterwards lands on the dashboard. Still a Google search, deliberately (see below).
-function _flightLinkTapped(){ window._backToDashOnReturn = true; }
+// v1345: REVERTED the v1223 target=_blank. On the phones that opens an in-app browser window, which did not stop the app sitting on Google
+// when reopened AND stopped the FlightAware app handoff. Links navigate the app's own window again (Google search -> FlightAware result ->
+// FlightAware app). The flag is also kept for the case where the app comes back from the back/forward cache, so that lands on the dashboard.
+function _flightLinkTapped(){ window._backToDashOnReturn = true; try{ sessionStorage.setItem('nda-flight-tapped', String(Date.now())); }catch(e){} }
+window.addEventListener('pageshow', function(ev){
+  try{
+    var t = +sessionStorage.getItem('nda-flight-tapped') || 0;
+    if(!ev.persisted || !t || Date.now()-t > 12*3600*1000) return;
+    sessionStorage.removeItem('nda-flight-tapped');
+    var ed = document.getElementById('rm-edit-mode');
+    if(ed && ed.style.display !== 'none' && ed.offsetParent !== null) return;
+    var m = document.getElementById('ride-modal');
+    if(m && m.classList.contains('show') && typeof closeRideModal === 'function') closeRideModal();
+    if(typeof nav === 'function' && typeof currentUser!=='undefined' && currentUser) nav('dashboard');
+  }catch(e){}
+});
 document.addEventListener('visibilitychange', function(){
   if(document.visibilityState !== 'visible' || !window._backToDashOnReturn) return;
   window._backToDashOnReturn = false;
