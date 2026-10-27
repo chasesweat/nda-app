@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191349">
+<meta name="version" content="202608191351">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -775,7 +775,7 @@ html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2
           <input type="hidden" id="q-vehicles" value="" />
           <div id="q-vehicle-hint" style="font-size:.72rem;color:var(--mid);margin-top:.35rem;line-height:1.4;">No vehicle picked yet — choose one to price the trip.</div>
         </div>
-        <div class="form-group"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;"><input type="checkbox" id="q-xxl" onchange="calcQuote()" style="width:16px;height:16px;accent-color:#7c3aed;"><span style="font-size:.78rem;font-weight:600;">Double Vehicle (XXL)</span></label></div><div id="q-vehicle2-group" style="display:none;"><div class="form-group"><label>2nd Vehicle</label><select id="q-vehicle2" onchange="calcQuote()"><option>Sedan</option><option value="SUV/Van">XL</option><option>Premium</option><option>Sprinter Van</option></select></div><div class="form-group"><label>2nd Vehicle Rate ($)</label><input type="number" id="q-price2" placeholder="105" oninput="calcQuote()" /></div></div><div class="form-group">
+        <div class="form-group"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;"><input type="checkbox" id="q-xxl" onchange="_finalResetOnVehicles('q')" style="width:16px;height:16px;accent-color:#7c3aed;"><span style="font-size:.78rem;font-weight:600;">Double Vehicle (XXL)</span></label></div><div id="q-vehicle2-group" style="display:none;"><div class="form-group"><label>2nd Vehicle</label><select id="q-vehicle2" onchange="_finalResetOnVehicles('q')"><option>Sedan</option><option value="SUV/Van">XL</option><option>Premium</option><option>Sprinter Van</option></select></div><div class="form-group"><label>2nd Vehicle Rate ($)</label><input type="number" id="q-price2" placeholder="105" oninput="calcQuote()" /></div></div><div class="form-group">
           <label id="q-date-time-label">Departing Date &amp; Time</label>
           <div style="display:flex;gap:.5rem;">
             <input type="date" id="q-date" aria-label="Ride date" onchange="onDateChange();checkPriceShopping('q');updateSuggestedPickupTime('q')" style="flex:1;min-width:0;" />
@@ -1755,7 +1755,7 @@ html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2
           <select id="qa-driver2"></select>
         </div>
         <div class="form-group"><label>2nd Vehicle</label>
-          <select id="qa-vehicle2" onchange="recalcQa()">
+          <select id="qa-vehicle2" onchange="_finalResetOnVehicles('qa')">
             <option>Sedan</option><option value="SUV/Van">XL</option><option>Premium</option><option>Sprinter Van</option>
           </select>
         </div>
@@ -4583,8 +4583,9 @@ async function _purgeOldClientRequests(){
       removed++;
     });
     if(removed){
+      var _gone = ids.filter(function(id){ return !(id in kept); });
       clientRequests = kept;
-      await storageSet('kat:clientRequests', clientRequests);
+      for(var _g=0;_g<_gone.length;_g++) await storageSet('kat:clientRequests/'+_gone[_g], null);
       console.log('[retention] removed '+removed+' booking request(s) older than '+BOOKING_REQUEST_RETENTION_DAYS+' days');
     }
   }catch(e){ console.warn('_purgeOldClientRequests failed', e); }
@@ -4632,6 +4633,14 @@ function _applyClientBookingRequestSideEffects(r){
   }
 }
 
+// v1350: change ONE booking request's status without rewriting the whole node. kat:clientRequests is shared by booking-link
+// submissions, transfers, merges and overrides, and every whole-node write replaced the server copy with this device's copy -
+// so a request that arrived after this device last synced (slow phone, or just a few seconds) was erased. Status-only writes can't do that.
+async function _setRequestStatus(id, status){
+  if(!id) return false;
+  try{ if(clientRequests && clientRequests[id]) clientRequests[id].status = status; }catch(e){}
+  return await storageSet('kat:clientRequests/'+id+'/status', status);
+}
 async function processClientRequests(){
   if(!currentUser) return;
   var myDriverName = getMyDriverName();
@@ -4642,7 +4651,7 @@ async function processClientRequests(){
   try{
     var reqs = await storageGet('kat:clientRequests');
     if(!reqs || typeof reqs!=='object') return;
-    var changed = false;
+    var changed = false, _doneIds = [];
     for(var id in reqs){
       var r = reqs[id];
       if(!r || r.status!=='pending') continue;
@@ -4701,11 +4710,12 @@ async function processClientRequests(){
       if(typeof sendPushToDriver==='function') sendPushToDriver(myDriverName, '\ud83d\udccb New request via your booking link', kind+' from '+(r.clientName||'a client'), {type:'client_request', clientRequestId:id}, true);
       _applyClientBookingRequestSideEffects(r);
       reqs[id].status = 'processed';
+      _doneIds.push(id);
       changed = true;
     }
     if(changed){
       await saveNotifs();
-      await storageSet('kat:clientRequests', reqs);
+      for(var _i=0;_i<_doneIds.length;_i++) await _setRequestStatus(_doneIds[_i], 'processed');
       if(typeof renderNotifPanel==='function') renderNotifPanel();
     }
   }catch(e){ console.warn('processClientRequests', e); }
@@ -6174,6 +6184,18 @@ function _finalPriceTyped(p){
   const raw=el.value, n=parseFloat(raw);
   const v=(raw===''||isNaN(n))?null:n;
   if(p==='q') _qFinalOv=v; else _qaFinalOv=v;
+  if(p==='q') calcQuote(); else recalcQa();
+}
+// v1351: a typed Final Price belongs to the vehicle setup it was typed for. Switching Double Vehicle (XXL) on/off or changing the
+// 2nd vehicle changes what the ride IS, but the typed number stayed and showed up as a large "Adjustment" on every leg
+// (Double -> Single left the old double-vehicle price in place). It now resets to the calculated price, with a note.
+function _finalResetOnVehicles(p, skipRecalc){
+  var had = (p==='q') ? _qFinalOv!=null : _qaFinalOv!=null;
+  if(had){
+    if(p==='q') _qFinalOv=null; else _qaFinalOv=null;
+    try{ showToast('Final price reset to the calculated price'); }catch(e){}
+  }
+  if(skipRecalc) return;
   if(p==='q') calcQuote(); else recalcQa();
 }
 function _finalPriceBlur(p){ if(p==='q') calcQuote(); else recalcQa(); }
@@ -27538,7 +27560,7 @@ async function _dismissBookingRequest(id){
   });
   if(!_ok) return;
   r.status = 'dismissed';
-  try{ await storageSet('kat:clientRequests', clientRequests); }catch(e){ console.warn('dismiss booking request failed', e); }
+  try{ await _setRequestStatus(id, 'dismissed'); }catch(e){ console.warn('dismiss booking request failed', e); }
   var back=document.getElementById('booking-requests-modal-back'); if(back) back.remove();
   _showBookingRequestsModal();
 }
@@ -27549,8 +27571,7 @@ async function _markBookingRequestHandled(){
   if(!id) return;
   try{
     if(!clientRequests || !clientRequests[id]) return;
-    clientRequests[id].status = 'scheduled';
-    await storageSet('kat:clientRequests', clientRequests);
+    await _setRequestStatus(id, 'scheduled');
   }catch(e){ console.warn('mark booking request handled failed', e); }
 }
 
@@ -32013,6 +32034,7 @@ function renderMorganCounter(){
 
 // ── XXL dual-vehicle helpers ──────────────────────────────
 function qaXXLChanged(){
+  _finalResetOnVehicles('qa', true);   // v1351: a typed Final Price was for the old number of vehicles
   const on=document.getElementById('qa-xxl')?.checked;
   const grp=document.getElementById('qa-vehicle2-group');
   if(grp) grp.style.display=on?'block':'none';
