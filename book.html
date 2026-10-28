@@ -103,6 +103,11 @@
   }
   .field-error{border-color:#dc2626 !important;}
   .field-error-msg{font-size:.7rem; color:#dc2626; margin-top:.3rem;}
+  /* v1355: a missing answer is flagged on the field itself */
+  .field.has-err input, .field.has-err select, .field.has-err textarea{border-color:#dc2626;}
+  .field-err{font-size:.78rem; font-weight:600; color:#dc2626; margin-top:.35rem;}
+  .veh-note{font-size:.8rem; font-weight:600; color:#92400e; background:#fffbeb; border:1.5px solid #fcd34d; border-radius:10px; padding:.55rem .7rem; margin-top:.5rem; line-height:1.45;}
+  .veh-note button{display:block; margin-top:.4rem; background:var(--gold); color:var(--gold-text,#fff); border:none; border-radius:8px; padding:.45rem .8rem; font-family:inherit; font-size:.8rem; font-weight:700; cursor:pointer;}
 
   .btn-primary{
     width:100%; padding:.95rem; background:var(--gold); color:var(--gold-text,#fff); border:none; border-radius:12px;
@@ -292,6 +297,7 @@ html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2
           <option value="Sprinter Van">Sprinter Van</option>
         </select>
         <div class="hint">Your driver confirms what’s available.</div>
+        <div class="veh-note" id="veh-cap-note" style="display:none;">A Sedan seats up to 3 passengers — we suggest an SUV / Van for your group. <button type="button" onclick="_useSuv()">Switch to SUV / Van</button></div>
       </div>
 
       <!-- ── LEG 1: LEAVING ──────────────────────────────────────────────────────────
@@ -343,6 +349,14 @@ html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2
           <select id="f-pickup-saved" style="display:none;margin-bottom:.4rem;" onchange="_onSavedAddrChange('pickup')"></select>
           <input id="f-pickup" placeholder="Address or airport terminal">
         </div>
+        <!-- v1354: extra pickup addresses. A client reported there was nowhere to say a second person / stop needs picking up;
+             they had to hide it in Notes. Up to 4, each sent in the request's `stops` list (and echoed in the notes line as a fallback for
+             drivers still on an older app build). The fee shown comes from the driver's published directory entry (extraStopFee). -->
+        <div class="field" id="xstops-field">
+          <div id="xstops-list"></div>
+          <button type="button" id="xstops-add" onclick="addXStop()" style="width:100%;padding:.7rem;background:none;border:1.5px dashed var(--gold);color:var(--gold);border-radius:10px;font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">+ Add another pickup address <span id="xstops-fee"></span></button>
+          <div class="hint">Picking up more than one person or place? Add each extra address here.</div>
+        </div>
         <div class="field" id="dest-field">
           <label id="dest-lbl">Where to</label>
           <select id="f-dest-saved" style="display:none;margin-bottom:.4rem;" onchange="_onSavedAddrChange('dest')"></select>
@@ -370,9 +384,20 @@ html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2
            ARRIVAL time, not a pickup time - for a pickup the driver needs to know when the
            plane lands, which is the one time only the client can supply. -->
       <div id="return-block" style="display:none;">
-        <div class="section-lbl">Coming back</div>
-        <div class="field"><label>Date arriving</label><input id="f-rt-date" type="date"></div>
-        <div class="field"><label>What time does your flight land?</label><input id="f-rt-time" type="time"></div>
+        <div class="section-lbl" id="rt-section-lbl">Coming back</div>
+        <div class="field"><label id="rt-date-lbl">Date arriving</label><input id="f-rt-date" type="date"></div>
+        <div class="field"><label id="rt-time-lbl">What time does your flight land?</label><input id="f-rt-time" type="time">
+          <div class="hint" id="rt-time-hint" style="display:none;"></div></div>
+        <!-- v1358: plain Round Trip, same-day return only. The driver needs to know whether to stay (billed as wait time, or hours on a
+             Sprinter Van) or leave and come back. The hours are worked out from the two times the client already gave. -->
+        <div class="field" id="wait-field" style="display:none;">
+          <label>Should your driver wait for you?</label>
+          <select id="f-wait" onchange="_syncWait()">
+            <option value="no">No — come back at my return time</option>
+            <option value="yes">Yes — wait while I’m there</option>
+          </select>
+          <div class="hint" id="wait-calc" style="display:none;"></div>
+        </div>
         <div class="field" id="rt-flight-field"><label>Return flight #</label><input id="f-rt-flight" placeholder="e.g. DL5678">
           <div class="hint">Lets your driver track your flight and adjust for delays.</div>
         </div>
@@ -485,12 +510,22 @@ function applyTypeVisibility(){
   const show = function(id, on, mode){ var el=document.getElementById(id); if(el) el.style.display = on ? (mode||'block') : 'none'; };
 
   show('terminal-field', isAir);
-  show('flight-field', isPickup && !isQuote);   // arriving flight - the one the driver tracks (v1210)
+  show('flight-field', isPickup);   // arriving flight - the one the driver tracks (v1210); v1355: asked on a quote too
   show('checked-field', isAir);                 // luggage only matters for airport trips
   show('carryon-field', isAir);
-  show('return-block', isReturn && !isQuote);
-  show('date-field', !isQuote);
-  show('dep-time-field', !isQuote);
+  // v1355: a quote is the SAME form as a ride request (date, times, return leg and flight numbers all asked) - holiday, Christmas, premium-hours
+  // and traffic surcharges depend on them, and the quote becomes a ride later. Only the title, button and confirmation wording differ.
+  show('return-block', isReturn);
+  // v1357: a plain Round Trip is not a flight. Its return asks the same plain questions as the way out (date, pickup time) and none of the
+  // airport ones (flight landing, return flight number, return terminal); only AP Round Trip keeps those.
+  show('rt-flight-field', isAir);
+  show('rt-terminal-field', isAir);
+  var _rtDl=document.getElementById('rt-date-lbl'), _rtTl=document.getElementById('rt-time-lbl'), _rtTh=document.getElementById('rt-time-hint');
+  if(_rtDl) _rtDl.textContent = isAir ? 'Date arriving' : 'Return date';
+  if(_rtTl) _rtTl.textContent = isAir ? 'What time does your flight land?' : 'What time do you need to be picked up for the ride back?';
+  if(_rtTh){ _rtTh.style.display = isAir ? 'none' : ''; _rtTh.textContent = 'Picked up from where we dropped you off.'; }
+  show('date-field', true);
+  show('dep-time-field', true);
 
   // Wording per leg and per trip type (v848).
   const dateLbl = document.getElementById('date-lbl');
@@ -591,6 +626,7 @@ function applyTypeVisibility(){
     if(tripType === 'AP PICK UP'){ if(pu) pu.textContent = 'Which hotel are we collecting you from?'; }
     else { if(de) de.textContent = 'Which hotel are we taking you to?'; }
   }
+  try{ _syncDateLimits(); _syncWait(); _syncSedanNote(); }catch(e){}
 }
 
 // Shows the pickup-time explainer the first time the field is focused, then leaves it visible.
@@ -645,6 +681,7 @@ async function init(){
     // the same one the in-app notification already correctly goes to — not whichever name is
     // currently showing on the page for branding purposes.
     submittingDriverName = driverInfo.displayName || '';
+    try{ _xstopRefresh(); }catch(e){}
   }catch(e){
     console.warn('Directory lookup failed:', e.message);
     goScreen('s-invalid');
@@ -695,6 +732,7 @@ async function init(){
     }catch(e){ console.warn('Booking token lookup failed (non-fatal):', e.message); }
   }
 
+  _syncDateLimits();
   renderBranding();
   _buildDynamicManifest();
   goScreen('s-action');
@@ -1121,7 +1159,7 @@ function goForm(type){
   const isQuote = type==='quote';
   document.getElementById('form-title').textContent = isQuote ? 'Request a quote' : 'Schedule a ride';
   document.getElementById('form-sub').textContent = isQuote
-    ? 'Just the basics \u2014 your driver will text you pricing.'
+    ? 'Fill in what you know \u2014 your driver will text you the price.'
     : 'Fill in what you know \u2014 your driver confirms everything.';
   document.getElementById('submit-btn').textContent = isQuote ? 'Request quote' : 'Send request';
   document.getElementById('form-error').style.display = 'none';
@@ -1172,6 +1210,134 @@ function _isNewAddress(addr){
   return !savedAddresses.some(function(a){ return (a.address||'').trim().toLowerCase()===norm; });
 }
 
+// ── REQUIRED ANSWERS (v1355) ──
+// A missing answer is flagged ON the field (red outline + one line under it), the form scrolls to it, and the flag clears the moment the client edits it.
+function _fieldBox(el){ return (el && el.closest && el.closest('.field')) || (el && el.parentNode) || null; }
+function _clearFieldErr(el){
+  var f=_fieldBox(el); if(!f) return;
+  f.classList.remove('has-err');
+  Array.prototype.slice.call(f.children).forEach(function(c){ if(c.classList && c.classList.contains('field-err')) c.remove(); });
+}
+function _clearAllFieldErrs(){
+  document.querySelectorAll('.field.has-err').forEach(function(f){ f.classList.remove('has-err'); });
+  document.querySelectorAll('.field-err').forEach(function(m){ m.remove(); });
+}
+function _fieldErr(id, msg){
+  var el=document.getElementById(id); var f=_fieldBox(el);
+  if(!f){ showFormError(msg); return false; }
+  _clearAllFieldErrs();
+  f.classList.add('has-err');
+  var m=document.createElement('div'); m.className='field-err'; m.textContent=msg; f.appendChild(m);
+  try{ f.scrollIntoView({behavior:'smooth', block:'center'}); }catch(e){}
+  try{ el.focus({preventScroll:true}); }catch(e){}
+  return false;
+}
+document.addEventListener('input',  function(e){ _clearFieldErr(e.target); });
+document.addEventListener('change', function(e){ _clearFieldErr(e.target); });
+function _todayStr(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+// The date pickers never offer a past day, and the return can't be before the departure.
+function _syncDateLimits(){
+  var t=_todayStr(), d=document.getElementById('f-date'), r=document.getElementById('f-rt-date');
+  if(d) d.min=t;
+  // A plain Round Trip returns on or after the outbound day; an AP Round Trip may arrive first (the dates decide which leg is first).
+  if(r) r.min=(tripType==='ROUND TRIP' && d && d.value && d.value>t) ? d.value : t;
+}
+document.addEventListener('change', function(e){ if(e.target && e.target.id==='f-date') _syncDateLimits(); });
+// v1358: wait time, worked out from the pickup and return times (same-day plain Round Trip only), rounded UP to the next quarter hour.
+function _mins(t){ var m=/^(\d{1,2}):(\d{2})/.exec(t||''); return m ? (+m[1])*60+(+m[2]) : null; }
+function _t12(t){ var m=_mins(t); if(m==null) return ''; var h=Math.floor(m/60), mm=m%60; return ((h+11)%12+1)+':'+String(mm).padStart(2,'0')+' '+(h<12?'AM':'PM'); }
+function _waitHours(){
+  if(tripType!=='ROUND TRIP') return 0;
+  var d=(document.getElementById('f-date')||{}).value, rd=(document.getElementById('f-rt-date')||{}).value;
+  if(!d || d!==rd) return 0;
+  if(((document.getElementById('f-wait')||{}).value)!=='yes') return 0;
+  var a=_mins((document.getElementById('f-pickup-time')||{}).value), z=_mins((document.getElementById('f-rt-time')||{}).value);
+  if(a==null || z==null || z<=a) return 0;
+  return Math.ceil((z-a)/15)/4;
+}
+function _syncWait(){
+  var d=(document.getElementById('f-date')||{}).value, rd=(document.getElementById('f-rt-date')||{}).value;
+  var f=document.getElementById('wait-field'); if(!f) return;
+  var on = tripType==='ROUND TRIP' && !!d && d===rd;
+  f.style.display = on ? 'block' : 'none';
+  var note=document.getElementById('wait-calc'); if(!note) return;
+  var h=_waitHours();
+  if(on && h>0){
+    var veh=(document.getElementById('f-vehicle')||{}).value;
+    note.textContent='About '+h+' hour'+(h===1?'':'s')+' ('+_t12(document.getElementById('f-pickup-time').value)+' to '+_t12(document.getElementById('f-rt-time').value)+'). Your driver confirms the time and price.'+(veh==='Sprinter Van'?' A Sprinter Van is billed by the hour.':'');
+    note.style.display='';
+  } else { note.style.display='none'; }
+}
+['f-date','f-rt-date','f-pickup-time','f-rt-time','f-vehicle'].forEach(function(id){ document.addEventListener('change', function(e){ if(e.target && e.target.id===id) _syncWait(); }); document.addEventListener('input', function(e){ if(e.target && e.target.id===id) _syncWait(); }); });
+// v1358: a Sedan seats 3; going over suggests an SUV / Van (v1359: suggestion, not a requirement).
+var SEDAN_MAX = 3;
+function _sedanTooSmall(){ return ((document.getElementById('f-vehicle')||{}).value)==='Sedan' && (parseInt((document.getElementById('f-pax')||{}).value)||1) > SEDAN_MAX; }
+// A suggestion, never a block: the client can keep the Sedan and your driver confirms.
+function _useSuv(){ var v=document.getElementById('f-vehicle'); if(v){ v.value='SUV/Van'; v.dispatchEvent(new Event('change',{bubbles:true})); } _syncSedanNote(); _syncWait(); }
+function _syncSedanNote(){ var n=document.getElementById('veh-cap-note'); if(n) n.style.display = _sedanTooSmall() ? '' : 'none'; }
+['f-pax','f-vehicle'].forEach(function(id){ document.addEventListener('change', function(e){ if(e.target && e.target.id===id) _syncSedanNote(); }); document.addEventListener('input', function(e){ if(e.target && e.target.id===id) _syncSedanNote(); }); });
+// Which AP Round Trip leg happens first is decided by the dates the client gave (the arrival before the departure means the pickup comes first); the same day compares the two times.
+function _apFirstLeg(date, time, rtDate, rtTime){
+  if(rtDate && date){ if(rtDate<date) return 'AP PICK UP'; if(rtDate===date && rtTime && time && rtTime<time) return 'AP PICK UP'; }
+  return 'AP RUN';
+}
+function _shown(id){ var el=document.getElementById(id); return !!el && el.style.display!=='none'; }
+// Returns true when everything needed is there; otherwise flags the FIRST missing answer (top to bottom) and returns false.
+function _validateRequest(c){
+  var $=function(i){ return document.getElementById(i); }, v=function(i){ return (($(i)||{}).value||'').trim(); };
+  if(!c.name)  return _fieldErr('f-name','Please enter your name.');
+  if(!c.phone) return _fieldErr('f-phone','Please enter your phone number.');
+  if(c.forOther){
+    if(!v('f-pass-name'))  return _fieldErr('f-pass-name','Please enter the passenger\u2019s name.');
+    if(!v('f-pass-phone')) return _fieldErr('f-pass-phone','Please enter the passenger\u2019s phone number.');
+  }
+  var today=_todayStr();
+  if(!c.date)           return _fieldErr('f-date', c.isPickup ? 'Please choose the date you\u2019re arriving.' : 'Please choose a date.');
+  if(c.date<today)      return _fieldErr('f-date','That date has already passed \u2014 please choose today or later.');
+  if(c.isPickup){ if(!v('f-time')) return _fieldErr('f-time','Please add the time your flight lands.'); }
+  else if(_shown('pickup-time-field') && !v('f-pickup-time')) return _fieldErr('f-pickup-time','Please add the time you need to be picked up.');
+  if(_shown('pickup-field') && !v('f-pickup')) return _fieldErr('f-pickup','Please add the pickup address.');
+  if(_shown('dest-field')   && !v('f-dest'))   return _fieldErr('f-dest','Please add where you\u2019re going.');
+  if(c.isAir && !c.terminal) return _fieldErr('f-terminal','Please choose which airline / terminal \u2014 this is how your driver gets the right airport address.');
+  if(c.isPickup && !c.flight) return _fieldErr('f-flight','Please enter your flight number so your driver can track it for delays.');
+  if(c.isRet){
+    if(!c.rtDate)      return _fieldErr('f-rt-date','Please choose your return date.');
+    if(c.rtDate<today) return _fieldErr('f-rt-date','That date has already passed \u2014 please choose today or later.');
+    if(!c.isAir && c.rtDate<c.date) return _fieldErr('f-rt-date','Your return can\u2019t be before the day you leave.');
+    if(!c.rtTime)      return _fieldErr('f-rt-time', c.isAir ? 'Please add the time your flight lands.' : 'Please add the time you\u2019d like to be picked up for the return.');
+    if(!c.isAir && c.rtDate===c.date && c.rtTime<=v('f-pickup-time')) return _fieldErr('f-rt-time','Your return time has to be later than your pickup time.');
+    if(c.isAir && !c.rtFlight) return _fieldErr('f-rt-flight','Please enter your return flight number so your driver can track it for delays.');
+    if(c.isAir && !c.rtTerminal){
+      var same=$('f-rt-terminal-same'); if(same && same.checked){ same.checked=false; _onRtTerminalSameChange(); }
+      return _fieldErr('f-rt-terminal','Please choose the terminal you\u2019re arriving back into.');
+    }
+  }
+  return true;
+}
+// ── EXTRA PICKUPS (v1354) ──
+var XSTOP_MAX = 4;
+function _xstopFeeText(){
+  var f = driverInfo && parseFloat(driverInfo.extraStopFee);
+  return (isFinite(f) && f>0) ? '(+$'+(Math.round(f*100)%100===0 ? f.toFixed(0) : f.toFixed(2))+' each)' : '(extra stop fee applies)';
+}
+function _xstopRows(){ return Array.prototype.slice.call(document.querySelectorAll('#xstops-list .f-xstop')); }
+function _xstopRefresh(){
+  var rows=_xstopRows(); var n=0;
+  document.querySelectorAll('#xstops-list .xstop-row label').forEach(function(l){ n++; l.textContent='Extra pickup '+n; });
+  var add=document.getElementById('xstops-add'); if(add) add.style.display = rows.length>=XSTOP_MAX ? 'none' : 'block';
+  var fee=document.getElementById('xstops-fee'); if(fee) fee.textContent=_xstopFeeText();
+}
+function addXStop(){
+  if(_xstopRows().length>=XSTOP_MAX) return;
+  var row=document.createElement('div'); row.className='field xstop-row'; row.style.cssText='display:flex;gap:.4rem;align-items:flex-end;margin-bottom:.6rem;';
+  row.innerHTML='<div style="flex:1;"><label></label><input type="text" class="f-xstop" placeholder="Address for this pickup"></div>'
+    +'<button type="button" aria-label="Remove this pickup" style="padding:.75rem .85rem;background:none;border:1.5px solid var(--light);border-radius:10px;color:var(--mid);font-size:1.1rem;line-height:1;cursor:pointer;margin-bottom:.05rem;">&times;</button>';
+  row.querySelector('button').onclick=function(){ row.remove(); _xstopRefresh(); };
+  document.getElementById('xstops-list').appendChild(row);
+  _xstopRefresh();
+  try{ row.querySelector('input').focus(); }catch(e){}
+}
+function _xstopValues(){ return _xstopRows().map(function(el){ return (el.value||'').trim(); }).filter(Boolean).slice(0,XSTOP_MAX); }
 async function submitRequest(){
   const name = document.getElementById('f-name').value.trim();
   const phone = document.getElementById('f-phone').value.trim();
@@ -1215,7 +1381,10 @@ async function submitRequest(){
   const _flightTime = document.getElementById('f-time').value;
   const time = _isArriving ? _flightTime : ((_puTimeEl && _puTimeEl.value) || _flightTime);
   const flightDepTime = _isArriving ? '' : _flightTime;
-  const notes = document.getElementById('f-notes').value.trim();
+  const notes0 = document.getElementById('f-notes').value.trim();
+  const xstops = _xstopValues();
+  // Echoed into the notes too, so a driver on an older app build (which does not know `stops`) still sees them.
+  const notes = xstops.length ? ('Extra pickups: '+xstops.join('; ')+(notes0?('\n'+notes0):'')) : notes0;
   const email = document.getElementById('f-email').value.trim();
   const vehicle = document.getElementById('f-vehicle').value;
   // The departing flight number field is gone (v848) - a flight number's only real use is
@@ -1251,27 +1420,14 @@ async function submitRequest(){
   const isAir = AIRPORT_TYPES.indexOf(tripType) >= 0;
   const isRet = RETURN_TYPES.indexOf(tripType) >= 0;
 
-  if(!name || !phone){ showFormError('Please enter your name and phone number.'); return; }
-  // Booking for someone else (v1210): the ride goes under the PASSENGER; the booker is recorded in
-  // the notes, with how they're related if they said.
   const _forOther = (bookingFor==='other');
   const passName  = ((document.getElementById('f-pass-name')||{}).value||'').trim();
   const passPhone = ((document.getElementById('f-pass-phone')||{}).value||'').trim();
   const relation  = ((document.getElementById('f-relation')||{}).value||'').trim();
-  if(_forOther && (!passName || !passPhone)){ showFormError('Please enter the passenger\u2019s name and phone number.'); return; }
-  if(tripType==='AP PICK UP' && requestType!=='quote' && !flight){ showFormError('Please enter your flight number so your driver can track it for delays.'); return; }
-  // The label used to say "(optional)" but drivers genuinely need this to track a delayed
-  // return flight — reported directly. Only enforced when the field is actually relevant
-  // (airport + round trip, matching the exact same isAir/isRet condition already used just
-  // below to decide whether rtFlight even gets sent at all).
-  if(isAir && isRet && !rtFlight){ showFormError('Please enter your return flight number so your driver can track it for delays.'); return; }
-  // The terminal is now REQUIRED on airport trips, and this guard is not optional. The airport
-  // address field is hidden on those trips, so the terminal is the ONLY source of the airport
-  // address - a blank one would submit a request with no airport information whatsoever, which
-  // is strictly worse than the "atl" it replaced. "Not sure" was dropped from the dropdown for
-  // the same reason.
-  if(isAir && !terminal){ showFormError('Please choose which airline / terminal you\u2019re flying \u2014 this is how your driver gets the right airport address.'); return; }
-  if(isAir && isRet && !rtTerminal){ showFormError('Please choose the terminal you\u2019re arriving back into.'); return; }
+  // v1355: every answer a driver needs to schedule or price the ride is checked here, in form order, and flagged on the field itself.
+  // (Replaces the one-line red message at the bottom. Booking for someone else, flight and terminal rules are unchanged, just anchored to their fields.)
+  if(!_validateRequest({ name:name, phone:phone, forOther:_forOther, date:date, isPickup:_isArriving, isAir:isAir, isRet:isRet, isQuote:(requestType==='quote'),
+                         terminal:terminal, vehicle:vehicle, pax:pax, flight:flight, rtDate:rtDate, rtTime:rtTime, rtFlight:rtFlight, rtTerminal:rtTerminal })) return;
   document.getElementById('form-error').style.display = 'none';
 
   // Established client (has a token) typed something that doesn't match any of their saved
@@ -1328,6 +1484,10 @@ async function submitRequest(){
     checkedBags: checkedBags,
     carryOnBags: carryOnBags,
     carSeatsNeeded: carSeatsNeeded,
+    stops: xstops,
+    waitRequested: _waitHours()>0,
+    waitHours: _waitHours(),
+    rtFirstLeg: (tripType==='AP ROUND TRIP') ? _apFirstLeg(date, time, rtDate, rtTime) : '',
     notes: _forOther
       ? ('Booked by '+name+(relation?(' ('+relation+')'):'')+' \u00b7 '+phone+(notes?('\n'+notes):''))
       : notes,

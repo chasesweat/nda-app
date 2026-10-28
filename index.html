@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191352">
+<meta name="version" content="202608191359">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -550,6 +550,7 @@ html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2
   <div style="padding:.6rem 1.1rem .35rem;font-size:.66rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#7c5cbf;">Admin</div>
   <div onclick="nav('drivers')" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🚘 Team</div>
   <div style="padding:.6rem 1.1rem .35rem;font-size:.66rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#7c5cbf;">More</div>
+  <div onclick="closeMenu(); _updateCheckNow(true);" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🔄 Check for updates</div>
   <div onclick="closeMenu(); promptInstall();" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">📲 Install app</div>
   <div onclick="closeMenu(); openMergeRequestModal();" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;border-bottom:1px solid #2d1460;display:flex;align-items:center;gap:.75rem;">🔗 Request Profile Merge</div>
   <div onclick="closeMenu();logout();" style="padding:1rem 1.1rem;font-size:.95rem;cursor:pointer;color:#fff;display:flex;align-items:center;gap:.75rem;">↩ Sign out</div>
@@ -4678,11 +4679,15 @@ async function processClientRequests(){
         // different terminal than they left from.
         if(r.rtTerminal && r.rtTerminal!==r.terminal) flightBit += ', returning into '+r.rtTerminal;
       }
+      var _stopsArr = Array.isArray(r.stops) ? r.stops.filter(Boolean) : [];
+      var stopsBit = _stopsArr.length ? ('. Extra pickups: '+_stopsArr.join('; ')) : '';
+      var waitBit = (parseFloat(r.waitHours)>0) ? ('. Wants the driver to wait about '+r.waitHours+' hour'+(parseFloat(r.waitHours)===1?'':'s')) : '';
+      var firstBit = (r.rtFirstLeg==='AP PICK UP') ? '. Arriving first (pickup is the first leg)' : '';
       var returnBit = (r.rtDate||r.rtTime) ? ('. Return '+(r.rtDate||'?')+(r.rtTime?' '+r.rtTime:'')) : '';
       var msg = kind+' from '+(r.clientName||'a client')+' ('+(r.clientPhone||'no phone given')+') via your booking link \u2014 '
         +(bits.length?bits.join(' \u00b7 ')+'. ':'')
         +(r.pickup||'?')+' \u2192 '+(r.destination||'?')+(r.date?', '+r.date:'')+(r.time?' '+r.time:'')
-        +returnBit+flightBit
+        +returnBit+flightBit+stopsBit+waitBit+firstBit
         +(r.clientEmail?'. '+r.clientEmail:'')
         +(r.notes?'. Notes: '+r.notes:'');
       if(!notifications[myDriverName]) notifications[myDriverName] = [];
@@ -4700,7 +4705,9 @@ async function processClientRequests(){
         rtDate: r.rtDate||'', rtTime: r.rtTime||'',
         flight: r.flight||'', terminal: r.terminal||'', rtFlight: r.rtFlight||'', rtTerminal: r.rtTerminal||'',
         pax: r.pax||1, checkedBags: r.checkedBags||0, carryOnBags: r.carryOnBags||0,
-        flightDepTime: r.flightDepTime||'', notes: r.notes||''
+        flightDepTime: r.flightDepTime||'', notes: r.notes||'', stops: _stopsArr,
+        waitHours: parseFloat(r.waitHours)||0, rtFirstLeg: r.rtFirstLeg||'',
+        carSeatsNeeded: !!r.carSeatsNeeded, bookedFor: r.bookedFor||''
       };
       _markNotifDirty(myDriverName);
       notifications[myDriverName].unshift({ rideId:null, type:'client_request', channel:null, read:false, msg:msg, ts:Date.now(), createdBy:'', clientRequestId:id, req:_reqPayload });
@@ -5713,6 +5720,8 @@ function _hm(str){ if(!str||typeof str!=='string'||str.indexOf(':')<0) return nu
 // Premium is a time RANGE. Default 00:00–05:00 (airport pickups start at 23:15, see premiumPickupStart). If start>end the range wraps past midnight (e.g. 22:00–05:00).
 function premiumStart(){ return (globalSettings.premiumStart!=null?globalSettings.premiumStart:'00:00'); }
 function premiumPickupStart(){ return (globalSettings.premiumPickupStart!=null?globalSettings.premiumPickupStart:'23:15'); }
+function premiumPickupEnd(){ return (globalSettings.premiumPickupEnd!=null?globalSettings.premiumPickupEnd:premiumEnd()); }   // v1356: own end time; follows the general end until set
+function premiumPickupEndMin(){ var m=_hm(premiumPickupEnd()); return m==null?premiumEndMin():m; }
 function premiumPickupStartMin(){ var m=_hm(premiumPickupStart()); return m==null?1395:m; }
 // Is this leg an airport pickup? type is the ride type; for an AP Round Trip, firstLeg is 'AP RUN' (drop-off first, so leg 2 is the pickup) or 'AP PICK UP'.
 function _legIsPickup(type, firstLeg, isReturnLeg){ if(type==='AP PICK UP') return true; if(type==='AP ROUND TRIP'){ var f=firstLeg||'AP RUN'; return isReturnLeg ? f==='AP RUN' : f==='AP PICK UP'; } return false; }
@@ -5721,7 +5730,7 @@ function premiumStartMin(){ var m=_hm(premiumStart()); return m==null?0:m; }
 function premiumEndMin(){ var m=_hm(premiumEnd()); return m==null?300:m; }
 // Back-compat shims (older callers/tests may still reference these)
 function premiumBefore(){ return premiumEnd(); }
-function isPremiumTime(mins, pickup){ if(mins<0) return false; var st=pickup?premiumPickupStartMin():premiumStartMin(), en=premiumEndMin(); if(st===en) return false; if(st<en){ return mins>=st && mins<en; } return mins>=st || mins<en; }
+function isPremiumTime(mins, pickup){ if(mins<0) return false; var st=pickup?premiumPickupStartMin():premiumStartMin(), en=pickup?premiumPickupEndMin():premiumEndMin(); if(st===en) return false; if(st<en){ return mins>=st && mins<en; } return mins>=st || mins<en; }
 function trafficDaysList(){ var d=globalSettings.trafficDays; return Array.isArray(d)?d:[1,2,3,4,5]; }
 function trafficAm(){ var w=globalSettings.trafficAm||{}; return {start:w.start||'06:30', end:w.end||'09:00'}; }
 function trafficPm(){ var w=globalSettings.trafficPm||{}; return {start:w.start||'14:30', end:w.end||'19:00'}; }
@@ -6596,7 +6605,7 @@ function _dmPromise(req){
 // direct pickup -> destination route, and the flat per-stop fee is the only stop charge. The stored ride shape is untouched for backward compatibility: `xstop`
 // stays a count, `xstopAddr` stays the addresses joined with ';' - every existing receipt,
 // confirmation-text, and Edit-Fee-modal consumer of those two fields keeps working as-is.
-var MAX_STOPS = 2; // intermediate stops (pickup + 2 + dropoff = 4 total addresses)
+var MAX_STOPS = 4; // intermediate stops (v1354: was 2; the booking form now lets a client add up to 4 extra pickups)
 var _stopSeq = 0;   // shared sequence so row ids never collide between the two forms
 var STOP_WRAP_ID = { q: 'q-stops-wrap', qa: 'qa-stops-wrap' };
 var STOP_ADD_BTN_ID = { q: 'q-addstop-btn', qa: 'qa-addstop-btn' };
@@ -6649,7 +6658,7 @@ function _stopsChanged(prefix){
 function addStopRow(prefix, prefillAddr){
   var wrap=document.getElementById(STOP_WRAP_ID[prefix]); if(!wrap) return;
   if(stopRows(prefix).length >= MAX_STOPS){
-    if(typeof showToast==='function') showToast('Up to '+(MAX_STOPS+2)+' stops total (pickup + '+MAX_STOPS+' stops + drop-off)');
+    if(typeof showToast==='function') showToast('Up to '+MAX_STOPS+' extra stops per ride');
     return;
   }
   _stopSeq++;
@@ -10617,6 +10626,28 @@ function _prefillFromClientRequest(req){
   window._prefillSourceRequestId = req._id || null;
   var isQuote = (req.requestType === 'quote');
   var P = isQuote ? 'q' : 'qa';
+  // v1358: an AP Round Trip where the client ARRIVES before they leave (the booking form decides this from the dates). The booking form always
+  // records the leaving leg as date/time/terminal and the arriving leg as rtDate/rtTime/rtFlight/rtTerminal, whichever comes first. The Quote form
+  // is laid out by type (leg 1 = AP Run, leg 2 = AP Pick Up) so it takes the request as is. Quick Add is laid out by ORDER (leg 1 = whichever
+  // happens first), so here the legs are swapped into order and "pickup first" is switched on.
+  if(!isQuote && req.type==='AP ROUND TRIP' && req.rtFirstLeg==='AP PICK UP'){
+    try{
+      var _depTermAddr = (typeof TERMINAL_ADDRESSES!=='undefined' && (TERMINAL_ADDRESSES[req.terminal]||'')) || req.destination || '';
+      var _arrTerm = req.rtTerminal || req.terminal;
+      var _arrTermAddr = (typeof TERMINAL_ADDRESSES!=='undefined' && (TERMINAL_ADDRESSES[_arrTerm]||'')) || '';
+      var _fl = req.flightDepTime ? ('Flight leaves at '+req.flightDepTime) : '';
+      req = Object.assign({}, req, {
+        _pickupFirst: true,
+        date: req.rtDate, time: req.rtTime, flight: req.rtFlight, terminal: _arrTerm, flightDepTime: '',
+        rtDate: req.date, rtTime: req.time, rtFlight: '', rtTerminal: req.terminal,
+        pickup: _arrTermAddr, destination: req.pickup,
+        notes: [req.notes||'', _fl].filter(Boolean).join('\n')
+      });
+      var _fp = document.getElementById('qa-rt-first-pickup'); if(_fp) _fp.checked = true;
+    }catch(e){ console.warn('arriving-first prefill failed (non-fatal)', e); }
+  } else if(!isQuote && req.type==='AP ROUND TRIP'){
+    var _fr = document.getElementById('qa-rt-first-run'); if(_fr) _fr.checked = true;   // leaving first (the usual order): do not inherit an earlier pickup-first choice
+  }
   // Reported directly: nothing on the opened form said which request this actually was.
   try{
     var _banner=document.getElementById(P+'-booking-request-banner');
@@ -10650,6 +10681,7 @@ function _prefillFromClientRequest(req){
       // case and would never compare equal).
       if(isQuote){ try{ _syncTripTypeTog(req.type); }catch(e){} }
       try{ isQuote ? updateTripFields() : qaTypeChanged(); }catch(e){}
+      if(req._pickupFirst){ try{ qaRtFirstLegChanged(); }catch(e){} }
     }
     set('client', req.clientName);
     // Reported directly: New Client checkbox never auto-checks on a booking-request-prefilled
@@ -10689,6 +10721,8 @@ function _prefillFromClientRequest(req){
     set('rt-flight', req.rtFlight);
     set('rt-terminal', req.rtTerminal);
     set('pax', req.pax);
+    // v1358: the client asked for the driver to wait (same-day plain Round Trip). The booking form worked out the hours from the two times.
+    if(req.waitHours>0){ if(req.vehicle==='Sprinter Van') set('sprinter-hours', req.waitHours); else set('wait', req.waitHours); }
     set('checked-bags', req.checkedBags);
     set('carryon-bags', req.carryOnBags);
     set('gate-code', req.gateCode);
@@ -10711,7 +10745,7 @@ function _prefillFromClientRequest(req){
       // _qaPlaceHomeAddress() already established elsewhere in this file (home is
       // PICKUP for AP RUN/ONE WAY/ROUND TRIP, DESTINATION for AP PICK UP
       // specifically) rather than inventing a second copy of that logic.
-      var _homeAddrVal = (req.type==='AP PICK UP') ? req.destination : req.pickup;
+      var _homeAddrVal = (req.type==='AP PICK UP' || req._pickupFirst) ? req.destination : req.pickup;
       var _haEl = set('home-address', _homeAddrVal);
       // .value= never fires oninput - same class of gap already fixed twice above in this
       // exact function (maybeAutofillClient, the mileage recalculation). Fired explicitly so
@@ -10733,7 +10767,7 @@ function _prefillFromClientRequest(req){
     // reason: the terminal answer is unambiguous, so leaving the field blank helps nobody.
     try{
       if(req.terminal && TERMINAL_ADDRESSES[req.terminal]){
-        var _apSuffix = _airportSideSuffix(req.type, P);
+        var _apSuffix = _airportSideSuffix(req._pickupFirst ? 'AP PICK UP' : req.type, P);
         var _apEl = document.getElementById(P+'-'+_apSuffix);
         if(_apEl){
           var _cur = (_apEl.value||'').trim();
@@ -10754,6 +10788,16 @@ function _prefillFromClientRequest(req){
     // after whatever else the client wrote. Only added when actually needed; the common "No"
     // answer stays silent rather than cluttering every prefilled ride with a non-answer.
     var _combinedNotes = req.notes || '';
+    // v1354: extra pickup addresses become real stop rows (priced at the extra-stop fee). The booking form also echoes them
+    // in a "Extra pickups: ..." notes line for older app builds; that line is dropped here so they are not listed twice.
+    try{
+      var _reqStops = Array.isArray(req.stops) ? req.stops.filter(Boolean) : [];
+      if(_reqStops.length){
+        _combinedNotes = _combinedNotes.replace(/^Extra pickups:[^\n]*\n?/, '').trim();
+        restoreStopRows(P, Math.min(_reqStops.length, MAX_STOPS), _reqStops.join(';'));
+        try{ _stopsChanged(P); }catch(e){}
+      }
+    }catch(e){ console.warn('extra pickups prefill failed (non-fatal)', e); }
     if(req.carSeatsNeeded){
       var _csLine = '\uD83D\uDC76 Car seat(s) needed \u2014 client will provide and install';
       _combinedNotes = _combinedNotes ? (_csLine+' \u00b7 '+_combinedNotes) : _csLine;
@@ -21985,8 +22029,10 @@ function _qaPlaceHomeAddress(t){
   var _homeFieldVal=(document.getElementById('qa-home-address')||{}).value||'';
   var _home=_homeFieldVal.trim() || (_ck ? (getClientDefaultAddress(_ck)||((buildClientDB(clientLookupScope())[_ck]||{}).address)||'') : '');
   if(!_home) return;
-  var homeField = _isAirport ? ((t==='AP PICK UP')?'qa-home':'qa-pickup') : 'qa-pickup';
-  var otherField = _isAirport ? ((t==='AP PICK UP')?'qa-pickup':'qa-home') : null;
+  // v1358: an AP Round Trip whose FIRST leg is the pickup is laid out like an AP Pick Up (airport in Pickup, the client's address in Destination).
+  var _eff = (t==='AP ROUND TRIP' && typeof qaRtFirstLegType==='function') ? qaRtFirstLegType() : t;
+  var homeField = _isAirport ? ((_eff==='AP PICK UP')?'qa-home':'qa-pickup') : 'qa-pickup';
+  var otherField = _isAirport ? ((_eff==='AP PICK UP')?'qa-pickup':'qa-home') : null;
   if(otherField){
     var oel=document.getElementById(otherField);
     if(oel && oel.value===_home){ oel.value=''; if(typeof _autofilledVals!=='undefined') _autofilledVals[otherField]=''; }
@@ -25374,7 +25420,7 @@ function buildSurchargeTriggersHTML(){
     +'<div style="font-size:.74rem;color:var(--mid);line-height:1.55;margin-bottom:1rem;">These are the current default hours a surcharge is suggested for on a new quote — edit them below. Whoever is scheduling can always switch any surcharge on or off per ride.</div>'
     +'<div style="font-size:.66rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Premium hours</div>'
     +'<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.4rem;font-size:.82rem;color:var(--black);">Current default premium hours are '+ti('trg-premium-start',premiumStart())+' and '+ti('trg-premium-end',premiumEnd())+'</div>'
-    +'<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.4rem;font-size:.82rem;color:var(--black);">Airport pickups start premium at '+ti('trg-premium-pickup-start',premiumPickupStart())+' (same end time)</div>'
+    +'<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.4rem;font-size:.82rem;color:var(--black);">Airport pickups: premium hours are '+ti('trg-premium-pickup-start',premiumPickupStart())+' and '+ti('trg-premium-pickup-end',premiumPickupEnd())+'</div>'
     +'<div style="font-size:.7rem;color:var(--mid);margin-bottom:1.1rem;">A start–end window. If the start is later than the end it wraps past midnight — e.g. 10:00 PM to 05:00 AM covers overnight rides on both sides of midnight.</div>'
     +'<div style="font-size:.66rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.4rem;">Traffic hours</div>'
     +'<div style="font-size:.72rem;color:var(--mid);margin-bottom:.4rem;">Days:</div><div style="display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-bottom:.6rem;">'+dayBoxes+'</div>'
@@ -25392,12 +25438,12 @@ function buildSurchargeTriggersHTML(){
 async function saveSurchargeTriggers(){
   if(typeof isAdmin==='function' && !isAdmin()){ showToast('Admins only','error'); return; }
   var ps=document.getElementById('trg-premium-start');
-  var pe=document.getElementById('trg-premium-end'); var pps=document.getElementById('trg-premium-pickup-start');
+  var pe=document.getElementById('trg-premium-end'); var pps=document.getElementById('trg-premium-pickup-start'); var ppe=document.getElementById('trg-premium-pickup-end');
   var days=[]; document.querySelectorAll('.trf-day').forEach(function(c){ if(c.checked) days.push(parseInt(c.getAttribute('data-day'),10)); });
   var ams=document.getElementById('trg-am-start'), ame=document.getElementById('trg-am-end');
   var pms=document.getElementById('trg-pm-start'), pme=document.getElementById('trg-pm-end');
   await queueAdminAction('surcharge_triggers', {
-    premiumStart:(ps&&ps.value)||null, premiumPickupStart:(pps&&pps.value)||null, premiumEnd:(pe&&pe.value)||null, trafficDays:days,
+    premiumStart:(ps&&ps.value)||null, premiumPickupStart:(pps&&pps.value)||null, premiumPickupEnd:(ppe&&ppe.value)||null, premiumEnd:(pe&&pe.value)||null, trafficDays:days,
     trafficAm:{start:(ams&&ams.value)||'06:30', end:(ame&&ame.value)||'09:00'},
     trafficPm:{start:(pms&&pms.value)||'14:30', end:(pme&&pme.value)||'19:00'}
   }, 'Change surcharge trigger hours & days');
@@ -27643,7 +27689,10 @@ function _openBookingRequestFromReview(id){
     rtDate: r.rtDate||'', rtTime: r.rtTime||'',
     flight: r.flight||'', terminal: r.terminal||'', rtFlight: r.rtFlight||'', rtTerminal: r.rtTerminal||'',
     pax: r.pax||1, checkedBags: r.checkedBags||0, carryOnBags: r.carryOnBags||0,
-    notes: r.notes||''
+    notes: r.notes||'',
+    stops: Array.isArray(r.stops) ? r.stops : [],
+    waitHours: parseFloat(r.waitHours)||0, rtFirstLeg: r.rtFirstLeg||'',
+    flightDepTime: r.flightDepTime||'', carSeatsNeeded: !!r.carSeatsNeeded, bookedFor: r.bookedFor||''
   };
   if(_req.requestType === 'quote'){
     nav('quote');
@@ -28769,7 +28818,8 @@ async function syncPublicDriverDirectory(dName){
     displayName: dName,
     businessName: (prof.businessName||'').trim(),
     logo: prof.logo || '',
-    logoAccentColor: prof.logoAccentColor || ''
+    logoAccentColor: prof.logoAccentColor || '',
+    extraStopFee: extraStopFee()   // v1354: shown on the booking form next to "Add another pickup"
   };
   // A driver who works ON BEHALF of another (PROXY_MAP - Morgan for Kat) brands their booking links
   // as that owner (v1213). Reported: a link Morgan sent one of Kat's clients showed Morgan's logo and
@@ -28789,7 +28839,7 @@ async function syncPublicDriverDirectory(dName){
     var dir = await storageGet('kat:publicDriverDirectory');
     if(!dir || typeof dir!=='object') dir = {};
     dir[login.toLowerCase()] = entry;
-    await storageSet('kat:publicDriverDirectory', dir);
+    await storageSetOne('kat:publicDriverDirectory', login.toLowerCase(), entry, dir);   // v1354: this driver's entry only, not the whole directory
   }catch(e){ console.warn('syncPublicDriverDirectory', e); }
 }
 
@@ -31153,6 +31203,7 @@ registerAdminAction('surcharge_triggers', async function(p){
   if(p.premiumStart) globalSettings.premiumStart=p.premiumStart;
   if(p.premiumEnd) globalSettings.premiumEnd=p.premiumEnd;
   if(p.premiumPickupStart) globalSettings.premiumPickupStart=p.premiumPickupStart;
+  if(p.premiumPickupEnd) globalSettings.premiumPickupEnd=p.premiumPickupEnd;
   delete globalSettings.premiumBefore; delete globalSettings.premiumAfter;
   globalSettings.trafficDays=p.trafficDays||[];
   if(p.trafficAm) globalSettings.trafficAm=p.trafficAm;
@@ -37671,12 +37722,42 @@ function _showUpdateBar(){
     var b=document.createElement('div'); b.id='update-bar';
     b.style.cssText='position:fixed;left:.75rem;right:.75rem;bottom:.75rem;z-index:100000;background:#2d1b57;color:#fff;border-radius:12px;padding:.8rem 1rem;display:flex;align-items:center;gap:.75rem;box-shadow:0 8px 24px rgba(0,0,0,.35);font-family:inherit;font-size:.88rem;';
     b.innerHTML='<div style="flex:1;font-weight:600;">A new version is ready.</div><button style="background:#c9a227;color:#1a0830;border:none;border-radius:8px;padding:.55rem 1rem;font-weight:800;font-family:inherit;cursor:pointer;">Update now</button>';
-    b.querySelector('button').onclick=function(){ window._swReloaded=true; window.location.reload(); };
+    b.querySelector('button').onclick=function(){ _hardUpdate(); };
     document.body.appendChild(b);
   }catch(e){}
 }
-var _lastUpdateCheck=0;
+// v1353: a second, independent way to learn a newer build exists. The service-worker update path can silently fail on a phone
+// (Kat stayed on an old build for days), so this reads sw.js straight from the server (never the cache) and compares its
+// "app build" line with the build on screen. A mismatch always shows the update bar - not only when the app is busy.
+async function _serverBuild(){
+  var r = await fetch('sw.js?_='+Date.now(), {cache:'no-store'});
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  var m = /app build (\d{12})/.exec(await r.text());
+  return m ? m[1] : '';
+}
+// manual=true (the menu button) always answers with a message; automatic checks stay silent unless a new build exists.
+async function _updateCheckNow(manual){
+  try{
+    if(manual) showToast('Checking for a new version\u2026');
+    var srv = await _serverBuild(), mine = _appBuildTag();
+    if(srv && mine && srv!==mine){ _showUpdateBar(); return 'new'; }
+    if(manual) showToast('You\u2019re on the latest version (v'+(mine||'?').slice(-3)+')');
+    return 'current';
+  }catch(e){
+    if(manual) showToast('Couldn\u2019t check \u2014 no connection right now','error');
+    return 'error';
+  }
+}
+// Update now: drop the saved app files so the reload must fetch the new build from the server, ask the worker to update, then reload.
+async function _hardUpdate(){
+  window._swReloaded = true;
+  try{ if(window._swReg) await window._swReg.update(); }catch(e){}
+  try{ if(window.caches){ var ks = await caches.keys(); await Promise.all(ks.map(function(k){ return caches.delete(k); })); } }catch(e){}
+  window.location.reload();
+}
+var _lastUpdateCheck=0, _lastBuildCompare=0;
 function _checkForAppUpdate(){
+  try{ if(Date.now()-_lastBuildCompare>60000){ _lastBuildCompare=Date.now(); _updateCheckNow(false); } }catch(e){}
   try{
     if(!window._swReg || Date.now()-_lastUpdateCheck<60000) return;
     _lastUpdateCheck=Date.now();
@@ -37699,6 +37780,7 @@ async function registerSW(){
       // .catch() here, not try/catch, actually catches it.
       window._swReg=reg; _lastUpdateCheck=Date.now();
       reg.update().catch(function(_e){});
+      setTimeout(function(){ _lastBuildCompare=Date.now(); _updateCheckNow(false); }, 6000);   // v1353: also compare builds shortly after every open
       setInterval(function(){ reg.update().catch(function(_e){}); }, 60*60*1000);
       reg.addEventListener('updatefound', function(){
         var nw=reg.installing;
