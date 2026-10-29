@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191359">
+<meta name="version" content="202608191367">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -4683,11 +4683,13 @@ async function processClientRequests(){
       var stopsBit = _stopsArr.length ? ('. Extra pickups: '+_stopsArr.join('; ')) : '';
       var waitBit = (parseFloat(r.waitHours)>0) ? ('. Wants the driver to wait about '+r.waitHours+' hour'+(parseFloat(r.waitHours)===1?'':'s')) : '';
       var firstBit = (r.rtFirstLeg==='AP PICK UP') ? '. Arriving first (pickup is the first leg)' : '';
+      var rtAddrBit = r.rtDestination ? ('. Return trip goes to a different address: '+r.rtDestination) : '';
+      var xxlBit = ((parseInt(r.pax)||0)>6) ? ('. \u26a0\ufe0f Group of '+r.pax+' \u2014 this ride may need to be an XXL') : '';
       var returnBit = (r.rtDate||r.rtTime) ? ('. Return '+(r.rtDate||'?')+(r.rtTime?' '+r.rtTime:'')) : '';
       var msg = kind+' from '+(r.clientName||'a client')+' ('+(r.clientPhone||'no phone given')+') via your booking link \u2014 '
         +(bits.length?bits.join(' \u00b7 ')+'. ':'')
         +(r.pickup||'?')+' \u2192 '+(r.destination||'?')+(r.date?', '+r.date:'')+(r.time?' '+r.time:'')
-        +returnBit+flightBit+stopsBit+waitBit+firstBit
+        +returnBit+rtAddrBit+flightBit+stopsBit+waitBit+firstBit+xxlBit
         +(r.clientEmail?'. '+r.clientEmail:'')
         +(r.notes?'. Notes: '+r.notes:'');
       if(!notifications[myDriverName]) notifications[myDriverName] = [];
@@ -4706,7 +4708,7 @@ async function processClientRequests(){
         flight: r.flight||'', terminal: r.terminal||'', rtFlight: r.rtFlight||'', rtTerminal: r.rtTerminal||'',
         pax: r.pax||1, checkedBags: r.checkedBags||0, carryOnBags: r.carryOnBags||0,
         flightDepTime: r.flightDepTime||'', notes: r.notes||'', stops: _stopsArr,
-        waitHours: parseFloat(r.waitHours)||0, rtFirstLeg: r.rtFirstLeg||'',
+        waitHours: parseFloat(r.waitHours)||0, rtFirstLeg: r.rtFirstLeg||'', rtDestination: r.rtDestination||'',
         carSeatsNeeded: !!r.carSeatsNeeded, bookedFor: r.bookedFor||''
       };
       _markNotifDirty(myDriverName);
@@ -5659,7 +5661,7 @@ const RATE_PER_MILE  = 2.50;
 const WAIT_RATE      = 60;
 // THE defaults for the admin-editable pricing settings: what each accessor returns when nothing is saved, and what "no change" means
 // in the Advanced Pricing confirmation. v1271: the accessors and saveAdvancedPricing each wrote these numbers out separately.
-const PRICING_DEFAULTS = { mileageRate:RATE_PER_MILE, includedMiles:50, changeFee:40, cancelFeePct:50, pickupFee:10, waitRate:WAIT_RATE, extraStopFee:10 };
+const PRICING_DEFAULTS = { mileageRate:RATE_PER_MILE, sprintMileageRate:5.5, sprintWaitRate:100, sprintMinFare:0, includedMiles:50, changeFee:40, cancelFeePct:50, pickupFee:10, waitRate:WAIT_RATE, extraStopFee:10 };
 const ADDONS_FLAT    = { premium:30, holiday:30, christmas:35, late:20, traffic:15 };
 let addonState = { premium:false, holiday:false, christmas:false, late:false, fuel:false, traffic:false };
 // AP Round Trip only: the return leg's OWN surcharge selections, independent from the
@@ -5703,6 +5705,15 @@ function waitRate(){ var v=parseFloat(globalSettings&&globalSettings.waitRate); 
 function pickupFee(){ var v=parseFloat(globalSettings&&globalSettings.pickupFee); return (isFinite(v)&&v>=0)?v:PRICING_DEFAULTS.pickupFee; }
 function extraStopFee(){ var v=parseFloat(globalSettings&&globalSettings.extraStopFee); return (isFinite(v)&&v>=0)?v:PRICING_DEFAULTS.extraStopFee; }
 function sedanBase(){ return BASE['Sedan']||DEFAULT_RATES['Sedan']; }
+// v1363: the Sprinter Van's own per-mile rate ($5.50). It replaces the regular per-mile rate wherever miles are charged: One Way, Round Trip
+// (both ways) and airport miles past the included radius. The Sprinter no longer bills by the hour.
+function sprintMileageRate(){ var v=parseFloat(globalSettings&&globalSettings.sprintMileageRate); return (isFinite(v)&&v>0)?v:PRICING_DEFAULTS.sprintMileageRate; }
+// v1363: the Sprinter Van's wait time is $100/hr (other vehicles use the regular wait rate).
+function sprintWaitRate(){ var v=parseFloat(globalSettings&&globalSettings.sprintWaitRate); return (isFinite(v)&&v>0)?v:PRICING_DEFAULTS.sprintWaitRate; }
+// v1366: optional minimum fare for a Sprinter Van mileage trip (One Way / Round Trip). 0 = no floor, which is how it ships; an admin can set one later.
+function sprintMinFare(){ var v=parseFloat(globalSettings&&globalSettings.sprintMinFare); return (isFinite(v)&&v>0)?v:PRICING_DEFAULTS.sprintMinFare; }
+function waitRateFor(vehicle){ return vehicle==='Sprinter Van' ? sprintWaitRate() : waitRate(); }
+function mileageRateFor(vehicle){ return vehicle==='Sprinter Van' ? sprintMileageRate() : mileageRate(); }
 function sprintHourly(){ var v=parseFloat(globalSettings&&globalSettings.sprintHourly); return (isFinite(v)&&v>0)?v:SPRINT_HOURLY_DEFAULT; }
 // The price shown on a vehicle button / used as a vehicle's starting base: the live rate, else the factory one.
 function vehicleBaseRate(v){ return BASE[v]||DEFAULT_RATES[v]||0; }
@@ -5970,27 +5981,20 @@ function tripMath(type, vehicle, miles, sprinterHours){
               apType:apType, apRt:apRt, rtType:rtType, owType:owType,
               legs: apRt?2:1, base:0, overMiles:0, overage:0,
               mileageCharge:0, serviceFee:0, vehUp:0, tripTotal:0, hourly:false, hours:0 };
-  // A Sprinter Van on a Round Trip bills hourly (hours x rate), not by mileage. One Way stays mileage-based.
-  if(vehicle==='Sprinter Van' && rtType){
-    r.hourly = true;
-    r.hours = sprinterHours;
-    r.base = sprinterHours * _sprintHr;
-    r.tripTotal = r.base;
-    return r;
-  }
   // One way / round trip: priced purely on mileage - vehicle base rates only apply to airport-type rides.
   if(rtType || owType){
     const mult = rtType?2:1;
-    r.mileageCharge = miles*mult*mileageRate();
+    r.mileageCharge = miles*mult*mileageRateFor(vehicle);
     r.serviceFee    = pickupFee()*mult;
-    r.vehUp         = vehUpcharge(vehicle);
+    r.vehUp         = vehicle==='Sprinter Van' ? 0 : vehUpcharge(vehicle);   // the Sprinter's per-mile rate IS its premium
     r.tripTotal     = r.mileageCharge + r.serviceFee + r.vehUp;
+    if(vehicle==='Sprinter Van' && sprintMinFare()>0 && r.tripTotal<sprintMinFare()){ r.minFareAdd = sprintMinFare()-r.tripTotal; r.tripTotal = sprintMinFare(); }
     return r;
   }
   // Airport (and anything else): flat base + mileage overage past the included radius.
   r.base      = vehicle==='Sprinter Van' ? (apType?_sprintAP:_sprintHr) : (BASE[vehicle]||0);
   r.overMiles = apType && miles > mileageTrigger() ? miles - includedMiles() : 0;
-  r.overage   = r.overMiles * mileageRate();
+  r.overage   = r.overMiles * mileageRateFor(vehicle);
   r.tripTotal = r.base + r.overage;
   return r;
 }
@@ -6028,12 +6032,12 @@ function _priceRide(inp){
   const state   = inp.state||{}, state2 = inp.state2||{};
   const tm   = tripMath(type, vehicle, miles, inp.sprinterHours);
   const base = tm.base;
-  const waitFee = wait * waitRate();
+  const waitFee = wait * waitRateFor(vehicle);
   function sumLines(ls){ return ls.reduce((s,l)=>s+l.val,0); }
   // Surcharges for leg 1 / a single trip, plus extra stops and wait time.
   function addExtras(sl){
     if(stops>0) sl.push({kind:'stops', label:`Additional pickup${stops>1?'s':''} (${stops} × $${extraStopFee()})`, val:stops*extraStopFee()});
-    if(waitFee>0) sl.push({kind:'wait', label:`Wait time (${wait}h × $${waitRate()}/hr)`, val:waitFee});
+    if(waitFee>0) sl.push({kind:'wait', label:`Wait time (${wait}h × $${waitRateFor(vehicle)}/hr)`, val:waitFee});
     return sl;
   }
   function leg1Surcharges(){ return addExtras(_surchargeLinesFor(state)); }
@@ -6047,7 +6051,7 @@ function _priceRide(inp){
       const L=[];
       L.push({kind:'base', label:`Base rate (${vehicle}) — incl. ${includedMiles()} mi`, val:base});
       if(miles > 0 && miles <= mileageTrigger()) L.push({kind:'mileage', label:`Mileage (${miles} mi — within radius)`, val:0, note:'No overage'});
-      if(overage > 0) L.push({kind:'mileage', label:`Mileage overage (${overMiles} mi × $${mileageRate().toFixed(2)})`, val:overage});   // v1295: the (9 mi × $2.50) in the label is all the detail shown - no second math line
+      if(overage > 0) L.push({kind:'mileage', label:`Mileage overage (${overMiles} mi × $${mileageRateFor(vehicle).toFixed(2)})`, val:overage});   // v1295: the (9 mi × $2.50) in the label is all the detail shown - no second math line
       // Double Vehicle rides on BOTH legs - each leg is its own independently-charged fare.
       if(isXXL && price2>0) L.push({kind:'veh2', label:`2nd vehicle (${vehicle2})`, val:price2});
       return L;
@@ -6077,18 +6081,19 @@ function _priceRide(inp){
   if(tm.hourly){
     lines.push({kind:'base', label:'Sprinter Van hourly', val:tm.base, note:`${tm.hours} hr × $${sprintHourly().toFixed(2)}/hr`});
   } else if(tm.rtType){
-    lines.push(miles>0?{kind:'mileage', label:'Round trip mileage', val:tm.mileageCharge, note:`${miles} mi × 2 = ${miles*2} mi × $${mileageRate().toFixed(2)}/mi`}:{kind:'mileage', label:'Round trip mileage', val:0, note:'Enter miles above'});
+    lines.push(miles>0?{kind:'mileage', label:'Round trip mileage', val:tm.mileageCharge, note:`${miles} mi × 2 = ${miles*2} mi × $${mileageRateFor(vehicle).toFixed(2)}/mi`}:{kind:'mileage', label:'Round trip mileage', val:0, note:'Enter miles above'});
     lines.push({kind:'service', label:'Pickup/Drop-off fee', val:tm.serviceFee});
     if(tm.vehUp>0) lines.push({kind:'vehup', label:`Vehicle upcharge (${vehicle})`, val:tm.vehUp});
   } else if(tm.owType){
-    lines.push(miles>0?{kind:'mileage', label:'Mileage', val:tm.mileageCharge, note:`${miles} mi × $${mileageRate().toFixed(2)}/mi`}:{kind:'mileage', label:'Mileage', val:0, note:'Enter miles above'});
+    lines.push(miles>0?{kind:'mileage', label:'Mileage', val:tm.mileageCharge, note:`${miles} mi × $${mileageRateFor(vehicle).toFixed(2)}/mi`}:{kind:'mileage', label:'Mileage', val:0, note:'Enter miles above'});
     lines.push({kind:'service', label:'Pickup/Drop-off fee', val:tm.serviceFee});
     if(tm.vehUp>0) lines.push({kind:'vehup', label:`Vehicle upcharge (${vehicle})`, val:tm.vehUp});
   } else {
     lines.push({kind:'base', label:`Base rate (${vehicle}) — includes up to ${includedMiles()} mi`, val:tm.base});
     if(tm.apType && miles > 0 && miles <= mileageTrigger()) lines.push({kind:'mileage', label:`Mileage (${miles} mi — within free radius)`, val:0, note:'No overage — within '+mileageTrigger()+' mi grace buffer'});
-    if(tm.overage > 0) lines.push({kind:'mileage', label:`Mileage overage (${tm.overMiles} mi × $${mileageRate().toFixed(2)})`, val:tm.overage});
+    if(tm.overage > 0) lines.push({kind:'mileage', label:`Mileage overage (${tm.overMiles} mi × $${mileageRateFor(vehicle).toFixed(2)})`, val:tm.overage});
   }
+  if(tm.minFareAdd>0) lines.push({kind:'minfare', label:'Sprinter minimum fare', val:tm.minFareAdd});
   if(isXXL && price2>0){
     lines.push({kind:'veh2', label:`2nd vehicle (${vehicle2})`, val:price2});
     tripTotal += price2;
@@ -6206,6 +6211,14 @@ function _finalResetOnVehicles(p, skipRecalc){
   }
   if(skipRecalc) return;
   if(p==='q') calcQuote(); else recalcQa();
+}
+// v1361: take the driver straight to the Final Price box on the Quote form, highlighted and ready to type in.
+function _focusFinalPrice(){
+  var el=document.getElementById('q-final-price'); if(!el) return;
+  var box=el.parentNode&&el.parentNode.parentNode;
+  try{ (box||el).scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){}
+  try{ if(box){ box.style.transition='box-shadow .3s'; box.style.boxShadow='0 0 0 4px rgba(212,160,23,.55)'; setTimeout(function(){ box.style.boxShadow=''; },2200); } }catch(e){}
+  setTimeout(function(){ try{ el.focus(); el.select(); }catch(e){} },350);
 }
 function _finalPriceBlur(p){ if(p==='q') calcQuote(); else recalcQa(); }
 function _finalPriceReset(p){
@@ -6842,7 +6855,7 @@ function updateSprinterHoursEstimate(prefix){
   if(!box) return;
   const type = (document.getElementById(prefix+'-type')||{}).value;
   const vehicle = prefix==='q' ? (document.getElementById('q-ride')||{}).value : (document.getElementById(prefix+'-vehicle')||{}).value;
-  const isEligible = vehicle==='Sprinter Van' && type==='ROUND TRIP';
+  const isEligible = false;   // v1363: the Sprinter bills by the mile now, so the hours box never shows
   box.style.display = isEligible ? 'block' : 'none';
   if(!isEligible) return;
   if(rateDisp) rateDisp.textContent = sprintHourly();
@@ -7841,7 +7854,7 @@ function _addonLeg1Touched(p){ return p==='qa' ? _qaTouched : _addonTouched; }
 function _renderAllAddonChips(){ try{ renderAddons('q'); renderAddons('qa'); }catch(e){} }
 function renderAddons(p){
   if(p==='q'){ var _xl=document.getElementById('xstop-fee-label'); if(_xl) _xl.textContent='\u00d7 $'+extraStopFee()+' each'; }
-  if(p==='qa'){ var _qx=document.getElementById('qa-xstop-label'); if(_qx) _qx.textContent='Extra stops ($'+extraStopFee()+' ea)'; var _qw=document.getElementById('qa-wait-label'); if(_qw) _qw.textContent='Wait time (hrs \u00b7 $'+waitRate()+'/hr)'; }
+  if(p==='qa'){ var _qx=document.getElementById('qa-xstop-label'); if(_qx) _qx.textContent='Extra stops ($'+extraStopFee()+' ea)'; var _qw=document.getElementById('qa-wait-label'); if(_qw) _qw.textContent='Wait time (hrs \u00b7 $'+waitRateFor((document.getElementById('qa-vehicle')||{}).value)+'/hr)'; }
   const box=document.getElementById(p+'-addons'); if(!box) return;
   box.innerHTML=_addonChipsHtml(_addonLeg1State(p), function(k){ return "toggleAddon('"+p+"','"+escAttr(k)+"')"; });
 }
@@ -8650,15 +8663,20 @@ function _xxlSplitNew(ride, leg2){
 async function openSendQuote(){
   // v1326: a quote needs a date to be sent - the surcharges depend on it.
   if(!((document.getElementById('q-date')||{}).value||'')){ showToast('Date is required to send a quote','error'); try{ document.getElementById('q-date').focus(); }catch(e){} return; }
+  // v1361: the price being sent is shown right here, with a way to change it (the Final Price box on the form).
+  var _sendTot=((document.getElementById('quote-total')||{}).textContent||'').trim();
+  var _sendTyp=(document.getElementById('q-type')||{}).value||'';
   var v=await showConfirmModal({
-    icon:'📤', iconBg:'#1e2a4a', title:'Send this quote', message:'How do you want to send it?',
+    icon:'📤', iconBg:'#1e2a4a', title:'Send this quote', message:(_sendTyp==='AP ROUND TRIP'||!_sendTot||_sendTot==='$0.00' ? '' : ('Quote total: '+_sendTot+'. '))+'How do you want to send it?',
     buttons:[
       {label:'💬 Text', style:'primary', value:'text'},
+      {label:'✏️ Change the price', style:'secondary', value:'price'},
       {label:'✉️ Email', style:'secondary', value:'email'},
       {label:'📄 PDF', style:'secondary', value:'pdf'},
       {label:'Cancel', style:'secondary', value:null}
     ]});
-  if(v==='text') textQuoteToClient();
+  if(v==='price') _focusFinalPrice();
+  else if(v==='text') textQuoteToClient();
   else if(v==='email') emailQuoteFromForm();
   else if(v==='pdf') quoteAsPdfFromForm();
 }
@@ -9823,6 +9841,7 @@ function openSavedQuoteDetail(qid){
         +(q.miles?row('Miles', q.miles+' mi'):'')+(q.pax?row('Passengers', q.pax):'')+row('Phone', q.phone)
         +totalRowHtml
       +'</div>'
+      +'<button onclick="editSavedQuote(\''+escAttr(qid)+'\');setTimeout(_focusFinalPrice,400)" style="width:100%;padding:.7rem;margin-bottom:.5rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:9px;font-family:inherit;font-size:.88rem;font-weight:700;cursor:pointer;">\u270f\ufe0f Change the price</button>'
       +'<button onclick="editSavedQuote(\''+escAttr(qid)+'\')" style="width:100%;padding:.7rem;margin-bottom:.5rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:9px;font-family:inherit;font-size:.88rem;font-weight:700;cursor:pointer;">\u270f\uFE0F Edit quote</button>'
       +'<button onclick="textSavedQuote(\''+escAttr(qid)+'\')" style="width:100%;padding:.7rem;margin-bottom:.5rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:9px;font-family:inherit;font-size:.88rem;font-weight:700;cursor:pointer;">\uD83D\uDCAC Text quote to client</button>'
       +'<button onclick="openQuoteDocument(\''+escAttr(qid)+'\')" style="width:100%;padding:.7rem;margin-bottom:.5rem;background:none;border:1.5px solid #2d1b57;color:#2d1b57;border-radius:9px;font-family:inherit;font-size:.88rem;font-weight:700;cursor:pointer;">\uD83D\uDCC4 Quote as PDF</button>'
@@ -10722,7 +10741,7 @@ function _prefillFromClientRequest(req){
     set('rt-terminal', req.rtTerminal);
     set('pax', req.pax);
     // v1358: the client asked for the driver to wait (same-day plain Round Trip). The booking form worked out the hours from the two times.
-    if(req.waitHours>0){ if(req.vehicle==='Sprinter Van') set('sprinter-hours', req.waitHours); else set('wait', req.waitHours); }
+    if(req.waitHours>0){ set('wait', req.waitHours); }   // v1363: a Sprinter's wait is billed like any other vehicle's
     set('checked-bags', req.checkedBags);
     set('carryon-bags', req.carryOnBags);
     set('gate-code', req.gateCode);
@@ -10802,6 +10821,16 @@ function _prefillFromClientRequest(req){
       var _csLine = '\uD83D\uDC76 Car seat(s) needed \u2014 client will provide and install';
       _combinedNotes = _combinedNotes ? (_csLine+' \u00b7 '+_combinedNotes) : _csLine;
     }
+    // v1360: lines the client can't see the reasons for. A group over 6 may not fit an SUV / Van (no Sprinter option is shown on the
+    // booking page), and a different return address has no field of its own on the forms yet, so both ride at the top of the notes.
+    if(req.rtDestination){
+      var _rdLine = '\u21a9\ufe0f Return trip goes to: '+req.rtDestination;
+      _combinedNotes = _combinedNotes ? (_rdLine+' \u00b7 '+_combinedNotes) : _rdLine;
+    }
+    if((parseInt(req.pax)||0)>6){
+      var _xxLine = '\u26a0\ufe0f Group of '+req.pax+' \u2014 may need an XXL';
+      _combinedNotes = _combinedNotes ? (_xxLine+' \u00b7 '+_combinedNotes) : _xxLine;
+    }
     if(_combinedNotes){
       var _nEl = document.getElementById(P+'-notes');
       if(_nEl){ _nEl.value = _combinedNotes; _notesLanded = true; }
@@ -10856,11 +10885,91 @@ function _prefillFromClientRequest(req){
 // Pulled out of handleNotifClick() rather than duplicated, so the setTimeout-ordering fix
 // described there (prefill called directly inside openQuickAddModal()'s own callback, not a
 // separately-timed race) stays in exactly one place.
+// v1364: a client's quote request opens the Quote form already filled in AND a review sheet over it: what they asked for, anything
+// that needs a person's judgment, and the quote exactly as the client will read it. The driver approves it (or changes the price, or
+// goes into the form to edit details) and only then does the text open. Nothing is sent by this sheet; "Approve & text" hands off
+// to the same Send path as the Quote form's own button.
+function _quoteApprovalWarnings(req){
+  var w=[];
+  var pax=parseInt(req.pax)||0;
+  if(pax>6) w.push('Group of '+pax+' \u2014 may need an XXL');
+  else if(pax>3 && (req.vehicle==='Sedan')) w.push('Group of '+pax+' asked for a Sedan \u2014 consider an SUV / Van');
+  if(Array.isArray(req.stops) && req.stops.filter(Boolean).length) w.push('Extra pickups: '+req.stops.filter(Boolean).join('; '));
+  if(req.rtDestination) w.push('Return trip goes to a different address: '+req.rtDestination);
+  if(parseFloat(req.waitHours)>0) w.push('Wants the driver to wait about '+req.waitHours+' hour'+(parseFloat(req.waitHours)===1?'':'s'));
+  if(req.carSeatsNeeded) w.push('Car seat(s) needed');
+  if(req.bookedFor==='other') w.push('Booked on behalf of someone else');
+  if(req.notes) w.push('Client notes: '+String(req.notes).replace(/^Extra pickups:[^\n]*\n?/,'').trim());
+  return w.filter(Boolean);
+}
+// v1365: a short "we got your request" text for the client, so they are not left wondering. Offered at the top of the approval sheet; the
+// driver taps once and Messages opens pre-filled. Remembered per request (ackSentAt, a single-field write) so it is only offered once.
+function quoteReceivedText(req){
+  var first=String((req&&req.clientName)||'').trim().split(' ')[0]||'';
+  var me=getMyDriverName()||''; var biz=''; try{ biz=_bizNameFor(me,me); }catch(e){}
+  var meShort=(DRIVER_PROFILES[me]&&DRIVER_PROFILES[me].displayName)||me.split(' ')[0]||'';
+  return (first?('Hi '+first+', '):'Hi, ')+'this is '+(meShort||'your driver')+(biz?(' with '+biz):'')+'. I received your quote request and I\u2019m working on it now \u2014 you\u2019ll have your quote shortly. Thank you!';
+}
+function _quoteAckSent(req){ var id=req&&req._id; return !!((id && ((window._ackSent||{})[id] || ((clientRequests||{})[id]||{}).ackSentAt)) || (req&&req.ackSentAt)); }
+async function sendQuoteReceivedText(req){
+  var num=_phoneDigits(req&&req.clientPhone);
+  if(!num){ showToast('No phone number on this request','error'); return false; }
+  var id=req._id; var now=Date.now();
+  window._ackSent=window._ackSent||{}; if(id) window._ackSent[id]=now;
+  if(id){
+    try{ if(clientRequests && clientRequests[id]) clientRequests[id].ackSentAt=now; }catch(e){}
+    try{ await storageSet('kat:clientRequests/'+id+'/ackSentAt', now); }catch(e){}
+  }
+  var isiOS=/iPad|iPhone|iPod/.test(navigator.userAgent||'');
+  window.location.href='sms:'+num+(isiOS?'&':'?')+'body='+encodeURIComponent(quoteReceivedText(req));
+  return true;
+}
+function _closeQuoteApproval(){ var o=document.getElementById('quote-approval'); if(o){ clearInterval(o._poll); o.remove(); } }
+function _showQuoteApproval(req){
+  _closeQuoteApproval();
+  var ov=document.createElement('div'); ov.id='quote-approval';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.6);z-index:13500;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  var warns=_quoteApprovalWarnings(req||{});
+  ov.innerHTML='<div style="background:var(--white);border-radius:16px;max-width:420px;width:100%;max-height:90vh;overflow-y:auto;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
+    +'<div style="font-size:1.05rem;font-weight:800;color:var(--black);">\ud83d\udccb Quote request'+(req&&req.clientName?' \u2014 '+escHtml(req.clientName):'')+'</div>'
+    +'<div style="font-size:.78rem;color:var(--mid);margin:.15rem 0 .7rem;">Review it, then approve to text it to the client.</div>'
+    +(warns.length?'<div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:10px;padding:.55rem .75rem;margin-bottom:.7rem;font-size:.8rem;color:#92400e;line-height:1.5;"><div style="font-weight:800;margin-bottom:.15rem;">Check before sending</div>'+warns.map(function(x){ return '<div>\u2022 '+escHtml(x)+'</div>'; }).join('')+'</div>':'')
+    +'<div style="font-size:.68rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:.3rem;">What the client will read</div>'
+    +'<div id="qap-preview" style="white-space:pre-wrap;font-size:.82rem;color:var(--black);background:var(--surface);border:1px solid var(--light);border-radius:10px;padding:.65rem .75rem;line-height:1.5;margin-bottom:.8rem;">Calculating the quote\u2026</div>'
+    +(_phoneDigits(req&&req.clientPhone)?(_quoteAckSent(req)
+        ?'<div id="qap-ack" style="text-align:center;font-size:.8rem;font-weight:700;color:#0f766e;margin-bottom:.6rem;">\u2713 Receipt text already sent</div>'
+        :'<button id="qap-ack" style="width:100%;padding:.65rem;margin-bottom:.55rem;background:none;border:1.5px solid #0f766e;color:#0f766e;border-radius:10px;font-family:inherit;font-size:.86rem;font-weight:800;cursor:pointer;">\ud83d\udcac Let them know we got it</button>'):'')
+    +'<button id="qap-approve" disabled style="width:100%;padding:.8rem;margin-bottom:.45rem;background:var(--accent);color:#fff;border:none;border-radius:10px;font-family:inherit;font-size:.95rem;font-weight:800;cursor:pointer;opacity:.5;">\u2705 Approve &amp; text quote</button>'
+    +'<div style="display:flex;gap:.45rem;">'
+    +'<button id="qap-price" style="flex:1;padding:.65rem;background:none;border:1.5px solid var(--gold);color:var(--gold);border-radius:9px;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;">\u270f\ufe0f Change price</button>'
+    +'<button id="qap-edit" style="flex:1;padding:.65rem;background:none;border:1.5px solid var(--accent);color:var(--accent);border-radius:9px;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;">Edit details</button>'
+    +'<button id="qap-later" style="flex:1;padding:.65rem;background:none;border:1.5px solid var(--light);color:var(--mid);border-radius:9px;font-family:inherit;font-size:.82rem;font-weight:700;cursor:pointer;">Later</button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+  var $=function(i){ return document.getElementById(i); };
+  function refresh(){
+    var tot=((document.getElementById('quote-total')||{}).textContent||'').trim();
+    var isAp=(((document.getElementById('q-type')||{}).value)==='AP ROUND TRIP');
+    var ready = isAp ? !!document.querySelector('#quote-lines [data-leg-subtotal]') : (tot && tot!=='$0.00');
+    var pv=$('qap-preview'), ap=$('qap-approve'); if(!pv||!ap) return;
+    if(ready){ var txt=''; try{ txt=_quoteDetailsText(); }catch(e){} pv.textContent=txt||('Total: '+tot); ap.disabled=false; ap.style.opacity='1'; }
+    else { pv.textContent='Calculating the quote\u2026 (add the miles in the form if it does not appear)'; ap.disabled=true; ap.style.opacity='.5'; }
+  }
+  refresh(); var n=0; ov._poll=setInterval(function(){ refresh(); if(++n>40) clearInterval(ov._poll); },500);
+  if($('qap-ack') && $('qap-ack').tagName==='BUTTON') $('qap-ack').onclick=async function(){
+    var b2=this; b2.disabled=true; b2.textContent='\u2713 Receipt text opened';
+    await sendQuoteReceivedText(req);
+  };
+  $('qap-approve').onclick=function(){ _closeQuoteApproval(); try{ textQuoteToClient(); }catch(e){ showToast('Could not open the text','error'); } };
+  $('qap-price').onclick=function(){ _closeQuoteApproval(); try{ _focusFinalPrice(); }catch(e){} };
+  $('qap-edit').onclick=function(){ _closeQuoteApproval(); };
+  $('qap-later').onclick=function(){ _closeQuoteApproval(); };
+}
 function _openAndPrefillClientRequest(req){
   if(!req) return;
   if(req.requestType === 'quote'){
     nav('quote');
-    setTimeout(function(){ try{ _prefillFromClientRequest(req); }catch(e){} }, 260);
+    setTimeout(function(){ try{ _prefillFromClientRequest(req); }catch(e){} try{ _showQuoteApproval(req); }catch(e){} }, 260);
   } else {
     nav('calendar');
     setTimeout(function(){
@@ -16130,7 +16239,7 @@ function _editSprinterHoursVisibility(){
   const g=document.getElementById('edit-sprinter-hours-group'); if(!g) return;
   const v=((document.getElementById('edit-vehicle')||{}).value||'').replace('+XXL','');
   const t=(document.getElementById('edit-type')||{}).value;
-  g.style.display = (v==='Sprinter Van' && t==='ROUND TRIP') ? '' : 'none';
+  g.style.display = 'none';   // v1363: the Sprinter no longer bills by the hour
 }
 
 function toggleEditMode(on){
@@ -18849,7 +18958,7 @@ function openFeeEditor(id){
         <label style="flex:1;font-size:.74rem;color:var(--mid);">Extra stops ($${extraStopFee()} ea)
           <input id="fee-edit-xstop" inputmode="numeric" type="number" min="0" step="1" value="${parseInt(r.xstop)||0}" oninput="recalcFeeEdit(true);toggleXstopAddr('fee-edit-xstop','fee-edit-xstop-addr-wrap')" style="width:100%;margin-top:.2rem;padding:.4rem .5rem;border:1.5px solid var(--light);border-radius:7px;font-family:'DM Sans',sans-serif;box-sizing:border-box;" />
         </label>
-        <label style="flex:1;font-size:.74rem;color:var(--mid);">Wait hrs ($${waitRate()}/hr)
+        <label style="flex:1;font-size:.74rem;color:var(--mid);">Wait hrs ($${waitRateFor(r.vehicle)}/hr)
           <input id="fee-edit-wait" inputmode="decimal" type="number" min="0" step="0.25" value="${parseFloat(r.wait)||0}" oninput="recalcFeeEdit(true)" style="width:100%;margin-top:.2rem;padding:.4rem .5rem;border:1.5px solid var(--light);border-radius:7px;font-family:'DM Sans',sans-serif;box-sizing:border-box;" />
         </label>
       </div>
@@ -20897,6 +21006,7 @@ function recalcQa(){
   const qaMiles=parseFloat((document.getElementById('qa-miles-hidden')||{}).value)||0;
   // Sprinter Van on a Round Trip bills hourly - show/estimate the hours box like the Quote does.
   try{ updateSprinterHoursEstimate('qa'); }catch(e){}
+  try{ var _qwl=document.getElementById('qa-wait-label'); if(_qwl) _qwl.textContent='Wait time (hrs \u00b7 $'+waitRateFor(veh)+'/hr)'; }catch(e){}
   // v1286: this form no longer has its own copy of the math. It asks _priceRide() - the same function the
   // Quote calls - so the lines, the order of operations and the rounding are the Quote's, by construction.
   try{ _syncPlainRtLeg2('qa'); }catch(e){}
@@ -22441,18 +22551,21 @@ function _schedulingTripDetailsText(r){
     var outFlight = (outbound.type==='AP PICK UP' && outbound.flight) ? ' ('+outbound.flight+')' : '';
     var retFlight = (ret.type==='AP PICK UP' && ret.flight) ? ' ('+ret.flight+')' : '';
     var addrDiffers = _schedulingHomeSideAddr(outbound).trim().toLowerCase() !== _schedulingHomeSideAddr(ret).trim().toLowerCase();
-    var total = (parseFloat(outbound.price)||0) + (parseFloat(ret.price)||0);
     var lines = [];
+    // v1362: each leg shows ITS OWN price (the two legs are priced and billed separately), never one combined total.
     lines.push('Outbound: '+fmtDateShort(outbound.date)+', '+fmtTime12(outbound.time)+outFlight);
     lines.push('\uD83D\uDE97 Transportation between '+outTF.from+' and '+outTF.to);
+    lines.push('\uD83D\uDCB0 Outbound price: $'+(parseFloat(outbound.price)||0).toFixed(0));
     lines.push('');
     lines.push('Return: '+fmtDateShort(ret.date)+', '+fmtTime12(ret.time)+retFlight);
     lines.push('\uD83D\uDE97 Transportation between '+retTF.from+' and '+retTF.to);
+    lines.push('\uD83D\uDCB0 Return price: $'+(parseFloat(ret.price)||0).toFixed(0));
     if(addrDiffers){
+      lines.push('');
       lines.push('\u26A0\uFE0F Note: your return address is different from your outbound address \u2014 please confirm this is correct.');
     }
     lines.push('');
-    lines.push('\uD83D\uDCB0 Total: $'+total.toFixed(0)+' (Gratuity not included but always appreciated)');
+    lines.push('(Gratuity not included but always appreciated)');
     return lines.join('\n');
   }
 
@@ -22595,7 +22708,9 @@ async function _clearSchedulingField(){
 // in). Threaded through from every real call site below where a ride object is actually
 // available.
 function policyTextMessage(firstName, rideDate, rideTime, ridePrice, ride){
-  const cancelFee = ridePrice ? cancelFeePct()+'% of the $'+ridePrice+' fare' : cancelFeePct()+'% of the fare';
+  let cancelFee = ridePrice ? cancelFeePct()+'% of the $'+ridePrice+' fare' : cancelFeePct()+'% of the fare';
+  // v1362: a round trip's two legs are priced separately, so the fee is on the leg being canceled, not on the one price that happened to be passed in.
+  try{ if(ride && typeof _roundTripPair==='function' && _roundTripPair(ride)) cancelFee = cancelFeePct()+'% of the fare for the leg being canceled'; }catch(e){}
   // Personal (currentUser - whoever's actively booking right now, not a resolved ride owner,
   // since a scheduling message is sent live by whoever's creating this specific booking) ->
   // shared default (Chase-editable, auto-promotes the same way every other message type does,
@@ -25484,6 +25599,9 @@ function buildAdvancedPricingHTML(){
       +'</div></div>';
   }
   var trip=fld('adv-mileage','Per-mile rate',mileageRate(),'$','/mi')
+    +fld('adv-sprintmile','Sprinter per-mile',sprintMileageRate(),'$','/mi')
+    +fld('adv-sprintwait','Sprinter wait time',sprintWaitRate(),'$','/hr')
+    +fld('adv-sprintmin','Sprinter minimum fare (0 = none)',sprintMinFare(),'$','')
     +fld('adv-included','Base incl. miles (AP)',includedMiles(),'','mi')
     +fld('adv-changefee','Change fee',changeFeeAmt(),'$','')
     +fld('adv-cancelpct','Cancellation fee',cancelFeePct(),'','%')
@@ -25546,10 +25664,10 @@ async function deleteCustomSurcharge(key){
 async function saveAdvancedPricing(){
   if(typeof isAdmin==='function' && !isAdmin()){ showToast('Admins only','error'); return; }
   function num(id,min){ var el=document.getElementById(id); if(!el) return null; var x=parseFloat(el.value); return (isFinite(x)&&x>=(min||0))?x:null; }
-  var oldMR=mileageRate(), oldPF=pickupFee(), oldWR=waitRate(), oldXS=extraStopFee(), oldIM=includedMiles(), oldCF=changeFeeAmt(), oldCP=cancelFeePct();
+  var oldMR=mileageRate(), oldSM=sprintMileageRate(), oldSW=sprintWaitRate(), oldSF=sprintMinFare(), oldPF=pickupFee(), oldWR=waitRate(), oldXS=extraStopFee(), oldIM=includedMiles(), oldCF=changeFeeAmt(), oldCP=cancelFeePct();
   var SK=Object.keys(ADDONS_FLAT);                       // premium, holiday, christmas, late, traffic
   var oldSur={}; SK.forEach(function(k){ oldSur[k]=surcharge(k); });
-  var mr=num('adv-mileage',0.01), pf=num('adv-pickup',0), wr=num('adv-wait',0), xs=num('adv-xstop',0);
+  var mr=num('adv-mileage',0.01), sm=num('adv-sprintmile',0.01), sw=num('adv-sprintwait',0.01), sf=num('adv-sprintmin',0), pf=num('adv-pickup',0), wr=num('adv-wait',0), xs=num('adv-xstop',0);
   var im=num('adv-included',1);
   var cf=num('adv-changefee',0);
   var cp=num('adv-cancelpct',0);
@@ -25558,7 +25676,7 @@ async function saveAdvancedPricing(){
   function eff(n,fb){ return n!=null?n:fb; }
   var changes=[];
   // [label, typed value, default key, current value] - in the order the confirmation lists them
-  [['Per-mile rate',mr,'mileageRate',oldMR],['Included miles (AP)',im,'includedMiles',oldIM],['Change fee',cf,'changeFee',oldCF],
+  [['Per-mile rate',mr,'mileageRate',oldMR],['Sprinter per-mile rate',sm,'sprintMileageRate',oldSM],['Sprinter wait time (/hr)',sw,'sprintWaitRate',oldSW],['Sprinter minimum fare',sf,'sprintMinFare',oldSF],['Included miles (AP)',im,'includedMiles',oldIM],['Change fee',cf,'changeFee',oldCF],
    ['Cancellation fee %',cp,'cancelFeePct',oldCP],['Per-pickup fee',pf,'pickupFee',oldPF],['Wait time (/hr)',wr,'waitRate',oldWR],['Extra stop',xs,'extraStopFee',oldXS]
   ].forEach(function(r){
     var to=eff(r[1], PRICING_DEFAULTS[r[2]]);
@@ -25569,7 +25687,7 @@ async function saveAdvancedPricing(){
     if(nv!==oldSur[k]) changes.push({label:ADDON_LABELS[k]+' surcharge',from:oldSur[k],to:nv});
   });
   if(!await _confirmRateChanges(changes)) return;
-  await queueAdminAction('pricing_advanced', {mr:mr,im:im,cf:cf,cp:cp,pf:pf,wr:wr,xs:xs,nSur:nSur},
+  await queueAdminAction('pricing_advanced', {mr:mr,sm:sm,sw:sw,sf:sf,im:im,cf:cf,cp:cp,pf:pf,wr:wr,xs:xs,nSur:nSur},
     'Advanced pricing \u2014 '+(changes.length?changes.map(function(c){return c.label+': '+c.from+' \u2192 '+c.to;}).join(', '):'no visible change'));
 }
 function renderPricingTracker(){
@@ -25603,16 +25721,7 @@ function renderPricingTracker(){
       +'</div>'
       +'</div>';
   });
-  // Sprinter Van hourly rate (for round trips / local) — same uniform box, inside the grid
-  rateHTML+='<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.7rem .75rem;min-height:118px;display:flex;flex-direction:column;">'
-    +'<div style="font-size:.68rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mid);margin-bottom:6px;min-height:2.1em;display:flex;align-items:flex-start;">Sprinter Van — Round Trip / Hourly</div>'
-    +'<div style="display:flex;align-items:center;gap:4px;">'
-    +'<span style="font-size:.85rem;color:var(--mid);">$</span>'
-    +'<input type="number" id="rate-sprint-hourly" min="0" step="1" value="'+sprintHourly()+'"'
-    +' style="width:100%;padding:.35rem .4rem;border:1px solid #ddd;border-radius:6px;font-size:.88rem;font-weight:600;box-sizing:border-box;" /><span style="font-size:.8rem;color:var(--mid);margin-left:2px;">/hr</span>'
-    +'</div>'
-    +'<div style="margin-top:auto;padding-top:6px;"><div style="font-size:.64rem;color:var(--mid);">Round trip / local ride rate</div></div>'
-    +'</div>';
+  // v1363: the Sprinter Van's hourly rate is gone - it bills by the mile now (Advanced Pricing > Sprinter per-mile).
   rateHTML+='</div>'
     +'<button onclick="saveBaseRates()" style="padding:.5rem 1.25rem;background:#7c3aed;'
     +'color:#fff;border:none;border-radius:8px;font-weight:700;font-size:.88rem;'
@@ -27691,12 +27800,12 @@ function _openBookingRequestFromReview(id){
     pax: r.pax||1, checkedBags: r.checkedBags||0, carryOnBags: r.carryOnBags||0,
     notes: r.notes||'',
     stops: Array.isArray(r.stops) ? r.stops : [],
-    waitHours: parseFloat(r.waitHours)||0, rtFirstLeg: r.rtFirstLeg||'',
+    waitHours: parseFloat(r.waitHours)||0, rtFirstLeg: r.rtFirstLeg||'', rtDestination: r.rtDestination||'',
     flightDepTime: r.flightDepTime||'', carSeatsNeeded: !!r.carSeatsNeeded, bookedFor: r.bookedFor||''
   };
   if(_req.requestType === 'quote'){
     nav('quote');
-    setTimeout(function(){ try{ _prefillFromClientRequest(_req); }catch(e){} }, 260);
+    setTimeout(function(){ try{ _prefillFromClientRequest(_req); }catch(e){} try{ _showQuoteApproval(_req); }catch(e){} }, 260);
   } else {
     nav('calendar');
     setTimeout(function(){
@@ -31146,6 +31255,9 @@ function _renderAdminApprovalsHTML(){
 // ── Registered actions: PRICING (all require a second admin) ──
 registerAdminAction('pricing_advanced', async function(p){
   if(p.mr!=null) globalSettings.mileageRate=p.mr; else delete globalSettings.mileageRate;
+  if(p.sm!=null) globalSettings.sprintMileageRate=p.sm; else delete globalSettings.sprintMileageRate;
+  if(p.sw!=null) globalSettings.sprintWaitRate=p.sw; else delete globalSettings.sprintWaitRate;
+  if(p.sf!=null && p.sf>0) globalSettings.sprintMinFare=p.sf; else delete globalSettings.sprintMinFare;
   if(p.im!=null) globalSettings.includedMiles=p.im; else delete globalSettings.includedMiles;
   if(p.cf!=null) globalSettings.changeFee=p.cf; else delete globalSettings.changeFee;
   if(p.cp!=null) globalSettings.cancelFeePct=p.cp; else delete globalSettings.cancelFeePct;

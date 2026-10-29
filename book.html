@@ -417,6 +417,15 @@ html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2
             <option value="International">International</option>
           </select>
         </div>
+        <!-- v1360: a different place on the way back. Collapsed by default so the common case (back to where you started) stays one less question. -->
+        <div class="field" id="rt-addr-field">
+          <button type="button" class="more-toggle" id="rt-addr-toggle" style="margin:0;" onclick="_toggleRtAddr()">+ Going somewhere different on the way back?</button>
+          <div id="rt-addr-block" style="display:none;margin-top:.5rem;">
+            <label>Where should we take you on the return trip?</label>
+            <input id="f-rt-dest" placeholder="Address for the return trip">
+            <div class="hint">Leave blank if it’s the same place you started from.</div>
+          </div>
+        </div>
       </div>
 
       <!-- ── MORE DETAILS (v1210) ───────────────────────────────────────────────────
@@ -1148,6 +1157,13 @@ function _welcomeAnswer(same){
   _setupWelcome();
   if(!same){ try{ document.getElementById('f-name').focus(); }catch(e){} }
 }
+function _toggleRtAddr(){
+  var b=document.getElementById('rt-addr-block'), t=document.getElementById('rt-addr-toggle'); if(!b) return;
+  var open = b.style.display==='none';
+  b.style.display = open ? 'block' : 'none';
+  if(t) t.textContent = open ? '\u2212 Same place on the way back' : '+ Going somewhere different on the way back?';
+  if(!open){ var i=document.getElementById('f-rt-dest'); if(i) i.value=''; }
+}
 function _toggleMore(){
   var b=document.getElementById('more-block'), t=document.getElementById('more-toggle'); if(!b) return;
   var open = b.style.display==='none';
@@ -1181,6 +1197,32 @@ function showFormError(msg){
 // Styled replacement for a native confirm() - matches the rest of this page's look instead of
 // a jarring browser-default dialog. Returns a Promise<boolean> so submitRequest() can just
 // await it the same way it would a confirm() call, just nicer to look at.
+// v1361: one last look before it is sent. Shows the request the way the driver will read it; "Change something" returns to the form with
+// everything still filled in. Resolves true to send, false to go back.
+function _confirmSummary(rows, isQuote){
+  return new Promise(function(resolve){
+    var ov = document.createElement('div');
+    ov.id = 'confirm-summary';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(26,13,46,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+    var list = rows.filter(function(r){ return r && r[1]; }).map(function(r){
+      return '<div style="display:flex;justify-content:space-between;gap:1rem;padding:.4rem 0;border-bottom:1px solid var(--light);font-size:.85rem;"><span style="color:var(--mid);flex:0 0 auto;">'+esc(r[0])+'</span><span style="font-weight:600;color:var(--black);text-align:right;word-break:break-word;">'+esc(r[1])+'</span></div>';
+    }).join('');
+    ov.innerHTML =
+        '<div style="background:var(--white);border-radius:18px;max-width:400px;width:100%;max-height:88vh;overflow:auto;padding:1.4rem 1.25rem;box-shadow:0 24px 60px rgba(0,0,0,.35);">'
+      + '<div style="font-size:1.05rem;font-weight:800;color:var(--black);margin-bottom:.15rem;">Please check your request</div>'
+      + '<div style="font-size:.8rem;color:var(--mid);margin-bottom:.7rem;">'+(isQuote?'This is what your driver will quote from.':'This is what your driver will schedule from.')+'</div>'
+      + '<div style="background:var(--surface);border:1.5px solid var(--light);border-radius:10px;padding:.2rem .8rem;margin-bottom:1rem;">'+list+'</div>'
+      + '<button type="button" id="_cs-yes" class="btn-primary" style="margin-top:0;">'+(isQuote?'Looks right \u2014 request my quote':'Looks right \u2014 send it')+'</button>'
+      + '<button type="button" id="_cs-no" class="btn-ghost" style="margin-top:.4rem;">Change something</button>'
+      + '</div>';
+    document.body.appendChild(ov);
+    var close = function(answer){ if(ov.parentNode) ov.parentNode.removeChild(ov); resolve(answer); };
+    document.getElementById('_cs-yes').onclick = function(){ close(true); };
+    document.getElementById('_cs-no').onclick  = function(){ close(false); };
+  });
+}
+var _TRIP_NAMES = {'ONE WAY':'One way','ROUND TRIP':'Round trip','AP RUN':'To the airport','AP PICK UP':'From the airport','AP ROUND TRIP':'Airport round trip'};
+function _prettyDate(d){ try{ var x=new Date(d+'T12:00:00'); return isNaN(x)?d:x.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'}); }catch(e){ return d; } }
 function _confirmAddressOverlay(address, fieldLabel){
   return new Promise(function(resolve){
     var ov = document.createElement('div');
@@ -1264,15 +1306,33 @@ function _syncWait(){
   var h=_waitHours();
   if(on && h>0){
     var veh=(document.getElementById('f-vehicle')||{}).value;
-    note.textContent='About '+h+' hour'+(h===1?'':'s')+' ('+_t12(document.getElementById('f-pickup-time').value)+' to '+_t12(document.getElementById('f-rt-time').value)+'). Your driver confirms the time and price.'+(veh==='Sprinter Van'?' A Sprinter Van is billed by the hour.':'');
+    note.textContent='About '+h+' hour'+(h===1?'':'s')+' ('+_t12(document.getElementById('f-pickup-time').value)+' to '+_t12(document.getElementById('f-rt-time').value)+'). Your driver confirms the time and price.';
     note.style.display='';
   } else { note.style.display='none'; }
 }
 ['f-date','f-rt-date','f-pickup-time','f-rt-time','f-vehicle'].forEach(function(id){ document.addEventListener('change', function(e){ if(e.target && e.target.id===id) _syncWait(); }); document.addEventListener('input', function(e){ if(e.target && e.target.id===id) _syncWait(); }); });
 // v1358: a Sedan seats 3; going over suggests an SUV / Van (v1359: suggestion, not a requirement).
 var SEDAN_MAX = 3;
+var XXL_PAX_OVER = 6;
 function _sedanTooSmall(){ return ((document.getElementById('f-vehicle')||{}).value)==='Sedan' && (parseInt((document.getElementById('f-pax')||{}).value)||1) > SEDAN_MAX; }
 // A suggestion, never a block: the client can keep the Sedan and your driver confirms.
+// v1366: the Sprinter Van is offered again, with a heads-up when it is chosen: it is one van, so it may not be free. They can keep it
+// (the request still goes to the driver, who confirms) or pick something else.
+function _showSprinterNotice(){
+  if(document.getElementById('sprinter-notice')) return;
+  var ov=document.createElement('div'); ov.id='sprinter-notice';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(26,13,46,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1.25rem;';
+  ov.innerHTML='<div style="background:var(--white);border-radius:18px;max-width:360px;width:100%;padding:1.5rem 1.35rem;box-shadow:0 24px 60px rgba(0,0,0,.35);text-align:center;">'
+    +'<div style="font-size:1.9rem;margin-bottom:.5rem;">\ud83d\ude90</div>'
+    +'<div style="font-size:1.03rem;font-weight:800;color:var(--black);margin-bottom:.5rem;">Sprinter Van availability</div>'
+    +'<div style="font-size:.88rem;color:var(--mid);line-height:1.5;margin-bottom:1.2rem;">Our Sprinter Van has limited availability and may not be available for your date. Send your request and your driver will confirm.</div>'
+    +'<button type="button" id="_sp-keep" class="btn-primary" style="margin-top:0;">Got it \u2014 keep the Sprinter Van</button>'
+    +'<button type="button" id="_sp-change" class="btn-ghost" style="margin-top:.4rem;">Choose a different vehicle</button></div>';
+  document.body.appendChild(ov);
+  document.getElementById('_sp-keep').onclick=function(){ ov.remove(); };
+  document.getElementById('_sp-change').onclick=function(){ var v=document.getElementById('f-vehicle'); if(v){ v.value=''; try{ v.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){} } ov.remove(); try{ v&&v.focus(); }catch(e){} };
+}
+document.addEventListener('change', function(e){ if(e.target && e.target.id==='f-vehicle' && e.target.value==='Sprinter Van') _showSprinterNotice(); });
 function _useSuv(){ var v=document.getElementById('f-vehicle'); if(v){ v.value='SUV/Van'; v.dispatchEvent(new Event('change',{bubbles:true})); } _syncSedanNote(); _syncWait(); }
 function _syncSedanNote(){ var n=document.getElementById('veh-cap-note'); if(n) n.style.display = _sedanTooSmall() ? '' : 'none'; }
 ['f-pax','f-vehicle'].forEach(function(id){ document.addEventListener('change', function(e){ if(e.target && e.target.id===id) _syncSedanNote(); }); document.addEventListener('input', function(e){ if(e.target && e.target.id===id) _syncSedanNote(); }); });
@@ -1283,36 +1343,76 @@ function _apFirstLeg(date, time, rtDate, rtTime){
 }
 function _shown(id){ var el=document.getElementById(id); return !!el && el.style.display!=='none'; }
 // Returns true when everything needed is there; otherwise flags the FIRST missing answer (top to bottom) and returns false.
+// v1367: every missing or invalid answer is collected (not just the first), each one is flagged on its own field, and a short list at the
+// bottom -- right above the Send button -- tells the client exactly what is left, each item tappable. A phone number must be one we can
+// actually text (10+ digits), for the booker and for a passenger.
+function _phoneOk(s){ var d=String(s||'').replace(/\D/g,''); return d.length>=10 && d.length<=15; }
+function _markFieldErr(id,msg){
+  var el=document.getElementById(id), f=_fieldBox(el); if(!f) return;
+  f.classList.add('has-err');
+  var m=document.createElement('div'); m.className='field-err'; m.textContent=msg; f.appendChild(m);
+}
+function _showMissingSummary(errs){
+  var box=document.getElementById('form-error'); if(!box) return;
+  box.innerHTML='';
+  var h=document.createElement('div'); h.style.cssText='font-weight:800;margin-bottom:.3rem;';
+  h.textContent = errs.length===1 ? 'One thing is left before you can send this:' : ('A few things are left before you can send this ('+errs.length+'):');
+  box.appendChild(h);
+  errs.forEach(function(e){
+    var a=document.createElement('div'); a.style.cssText='cursor:pointer;text-decoration:underline;padding:.12rem 0;';
+    a.textContent='• '+e.label; a.setAttribute('data-goto',e.id);
+    a.onclick=function(){ var el=document.getElementById(e.id), f=_fieldBox(el); try{ (f||el).scrollIntoView({behavior:'smooth',block:'center'}); }catch(x){} try{ el.focus({preventScroll:true}); }catch(x){} };
+    box.appendChild(a);
+  });
+  box.style.fontSize='.85rem'; box.style.display='block';
+}
+// As each flagged answer is fixed, its line drops off the list; the list closes itself when nothing is left.
+function _trimMissingSummary(e){
+  var box=document.getElementById('form-error'); if(!box||box.style.display==='none'||!e||!e.target||!e.target.id) return;
+  var el=e.target; if(!(el.value||'').trim()) return;
+  if((el.id==='f-phone'||el.id==='f-pass-phone') && !_phoneOk(el.value)) return;
+  var li=box.querySelector('[data-goto="'+el.id+'"]'); if(!li) return;
+  li.remove();
+  if(!box.querySelector('[data-goto]')){ box.style.display='none'; box.innerHTML=''; }
+}
+document.addEventListener('change', _trimMissingSummary);
 function _validateRequest(c){
   var $=function(i){ return document.getElementById(i); }, v=function(i){ return (($(i)||{}).value||'').trim(); };
-  if(!c.name)  return _fieldErr('f-name','Please enter your name.');
-  if(!c.phone) return _fieldErr('f-phone','Please enter your phone number.');
+  var errs=[]; var bad=function(id,msg,label){ errs.push({id:id,msg:msg,label:label||msg}); };
+  if(!c.name) bad('f-name','Please enter your name.','Your name');
+  if(!c.phone) bad('f-phone','Please enter your phone number.','Your phone number');
+  else if(!_phoneOk(c.phone)) bad('f-phone','Please enter a phone number we can text — 10 digits, like (770) 555-0134.','A phone number we can text (10 digits)');
   if(c.forOther){
-    if(!v('f-pass-name'))  return _fieldErr('f-pass-name','Please enter the passenger\u2019s name.');
-    if(!v('f-pass-phone')) return _fieldErr('f-pass-phone','Please enter the passenger\u2019s phone number.');
+    if(!v('f-pass-name'))  bad('f-pass-name','Please enter the passenger’s name.','The passenger’s name');
+    if(!v('f-pass-phone')) bad('f-pass-phone','Please enter the passenger’s phone number.','The passenger’s phone number');
+    else if(!_phoneOk(v('f-pass-phone'))) bad('f-pass-phone','Please enter a phone number we can text — 10 digits, like (770) 555-0134.','A passenger phone number we can text (10 digits)');
   }
   var today=_todayStr();
-  if(!c.date)           return _fieldErr('f-date', c.isPickup ? 'Please choose the date you\u2019re arriving.' : 'Please choose a date.');
-  if(c.date<today)      return _fieldErr('f-date','That date has already passed \u2014 please choose today or later.');
-  if(c.isPickup){ if(!v('f-time')) return _fieldErr('f-time','Please add the time your flight lands.'); }
-  else if(_shown('pickup-time-field') && !v('f-pickup-time')) return _fieldErr('f-pickup-time','Please add the time you need to be picked up.');
-  if(_shown('pickup-field') && !v('f-pickup')) return _fieldErr('f-pickup','Please add the pickup address.');
-  if(_shown('dest-field')   && !v('f-dest'))   return _fieldErr('f-dest','Please add where you\u2019re going.');
-  if(c.isAir && !c.terminal) return _fieldErr('f-terminal','Please choose which airline / terminal \u2014 this is how your driver gets the right airport address.');
-  if(c.isPickup && !c.flight) return _fieldErr('f-flight','Please enter your flight number so your driver can track it for delays.');
+  if(!c.date) bad('f-date', c.isPickup ? 'Please choose the date you’re arriving.' : 'Please choose a date.', c.isPickup ? 'The date you’re arriving' : 'The date of your trip');
+  else if(c.date<today) bad('f-date','That date has already passed — please choose today or later.','A date that hasn’t passed');
+  if(c.isPickup){ if(!v('f-time')) bad('f-time','Please add the time your flight lands.','The time your flight lands'); }
+  else if(_shown('pickup-time-field') && !v('f-pickup-time')) bad('f-pickup-time','Please add the time you need to be picked up.','Your pickup time');
+  if(_shown('pickup-field') && !v('f-pickup')) bad('f-pickup','Please add the pickup address.','The pickup address');
+  if(_shown('dest-field')   && !v('f-dest'))   bad('f-dest','Please add where you’re going.','Where you’re going');
+  if(c.isAir && !c.terminal) bad('f-terminal','Please choose which airline / terminal — this is how your driver gets the right airport address.','Your airline / terminal');
+  if(c.isPickup && !c.flight) bad('f-flight','Please enter your flight number so your driver can track it for delays.','Your flight number');
   if(c.isRet){
-    if(!c.rtDate)      return _fieldErr('f-rt-date','Please choose your return date.');
-    if(c.rtDate<today) return _fieldErr('f-rt-date','That date has already passed \u2014 please choose today or later.');
-    if(!c.isAir && c.rtDate<c.date) return _fieldErr('f-rt-date','Your return can\u2019t be before the day you leave.');
-    if(!c.rtTime)      return _fieldErr('f-rt-time', c.isAir ? 'Please add the time your flight lands.' : 'Please add the time you\u2019d like to be picked up for the return.');
-    if(!c.isAir && c.rtDate===c.date && c.rtTime<=v('f-pickup-time')) return _fieldErr('f-rt-time','Your return time has to be later than your pickup time.');
-    if(c.isAir && !c.rtFlight) return _fieldErr('f-rt-flight','Please enter your return flight number so your driver can track it for delays.');
+    if(!c.rtDate) bad('f-rt-date','Please choose your return date.','Your return date');
+    else if(c.rtDate<today) bad('f-rt-date','That date has already passed — please choose today or later.','A return date that hasn’t passed');
+    else if(!c.isAir && c.date && c.rtDate<c.date) bad('f-rt-date','Your return can’t be before the day you leave.','A return date on or after the day you leave');
+    if(!c.rtTime) bad('f-rt-time', c.isAir ? 'Please add the time your flight lands.' : 'Please add the time you’d like to be picked up for the return.', c.isAir ? 'The time your return flight lands' : 'Your return pickup time');
+    else if(!c.isAir && c.rtDate && c.rtDate===c.date && c.rtTime<=v('f-pickup-time')) bad('f-rt-time','Your return time has to be later than your pickup time.','A return time later than your pickup time');
+    if(c.isAir && !c.rtFlight) bad('f-rt-flight','Please enter your return flight number so your driver can track it for delays.','Your return flight number');
     if(c.isAir && !c.rtTerminal){
       var same=$('f-rt-terminal-same'); if(same && same.checked){ same.checked=false; _onRtTerminalSameChange(); }
-      return _fieldErr('f-rt-terminal','Please choose the terminal you\u2019re arriving back into.');
+      bad('f-rt-terminal','Please choose the terminal you’re arriving back into.','Your return terminal');
     }
   }
-  return true;
+  if(!errs.length) return true;
+  _fieldErr(errs[0].id, errs[0].msg);            // flags the first one and scrolls to it (clears any earlier flags)
+  errs.slice(1).forEach(function(e){ _markFieldErr(e.id, e.msg); });
+  _showMissingSummary(errs);
+  return false;
 }
 // ── EXTRA PICKUPS (v1354) ──
 var XSTOP_MAX = 4;
@@ -1446,6 +1546,33 @@ async function submitRequest(){
     newAddressesToSave.push({ field:'destination', address:dest });
   }
 
+  // v1361: summary of what is about to be sent (after any address questions, so it is the last thing they see)
+  { var _rows = [];
+    var _isQ = requestType==='quote';
+    _rows.push(['Name', _forOther ? (passName+' (booked by '+name+')') : name]);
+    _rows.push(['Phone', _forOther ? passPhone : phone]);
+    _rows.push(['Trip', _TRIP_NAMES[tripType] || tripType]);
+    _rows.push([_isArriving ? 'Flight lands' : (isRet ? 'Leaving' : 'Date'), _prettyDate(date)+(time?(' at '+_t12(time)):'')]);
+    _rows.push(['From', pickup]); _rows.push(['To', dest]);
+    if(xstops.length) _rows.push(['Extra pickups', xstops.join('; ')]);
+    if(isAir && terminal) _rows.push(['Terminal', terminal]);
+    if(isAir && flight) _rows.push(['Flight', flight]);
+    if(isRet){
+      _rows.push([isAir ? 'Coming back' : 'Return', _prettyDate(rtDate)+(rtTime?(' at '+_t12(rtTime)):'')]);
+      if(isAir && rtFlight) _rows.push(['Return flight', rtFlight]);
+      if(isAir && rtTerminal) _rows.push(['Return terminal', rtTerminal]);
+      var _rd = (((document.getElementById('rt-addr-block')||{}).style||{}).display==='block') ? ((document.getElementById('f-rt-dest')||{}).value||'').trim() : '';
+      if(_rd) _rows.push(['Return trip goes to', _rd]);
+      if(_waitHours()>0) _rows.push(['Driver waits', 'About '+_waitHours()+' hour'+(_waitHours()===1?'':'s')]);
+    }
+    _rows.push(['Passengers', String(pax)]);
+    if(isAir && checkedBags) _rows.push(['Checked bags', String(checkedBags)]);
+    if(carryOnBags) _rows.push(['Carry-ons', String(carryOnBags)]);
+    if(carSeatsNeeded) _rows.push(['Car seats', 'Yes \u2014 you will provide them']);
+    if(vehicle) _rows.push(['Vehicle', vehicle==='SUV/Van' ? 'SUV / Van' : vehicle]);
+    if(notes0) _rows.push(['Notes', notes0]);
+    if(!(await _confirmSummary(_rows, _isQ))) return;
+  }
   const btn = document.getElementById('submit-btn');
   btn.disabled = true; btn.textContent = 'Sending\u2026';
 
@@ -1485,6 +1612,10 @@ async function submitRequest(){
     carryOnBags: carryOnBags,
     carSeatsNeeded: carSeatsNeeded,
     stops: xstops,
+    // v1360: a different return address (only when the section is open and filled in), and a heads-up for the dispatcher that a
+    // group over 6 may not fit an SUV / Van. The client is never shown a Sprinter option; the dispatcher decides.
+    rtDestination: (isRet && ((document.getElementById('rt-addr-block')||{}).style||{}).display==='block') ? ((document.getElementById('f-rt-dest')||{}).value||'').trim() : '',
+    xxlMayBeNeeded: pax>XXL_PAX_OVER,
     waitRequested: _waitHours()>0,
     waitHours: _waitHours(),
     rtFirstLeg: (tripType==='AP ROUND TRIP') ? _apFirstLeg(date, time, rtDate, rtTime) : '',
