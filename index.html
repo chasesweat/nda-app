@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191367">
+<meta name="version" content="202608191369">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -11530,6 +11530,11 @@ function _ridePaidTag(r){
   }
   return '';
 }
+// v1369: true once a ride's scheduled time has passed. Past that point the driver's next action is finishing the ride, not starting it, so
+// "Ride Completed" replaces "Start Ride" (a client who texts first, or a ride that simply happened, no longer needs the arrival text).
+function _ridePastTime(r){
+  try{ return !!r && !r.rideStartedAt && r.status!=='paid' && typeof _hoursUntilRide==='function' && _hoursUntilRide(r) < 0; }catch(e){ return false; }
+}
 function _isRideWithinHoursSymmetric(r, hours){
   var h = _hoursUntilRide(r);
   if(h===Infinity) return false;
@@ -11919,7 +11924,9 @@ function renderMyCal(){
       // all to itself on cards with no button; Start Ride gets flex-basis:100%, so with the
       // parent's flex-wrap it always starts a fresh full-width row of its own, never sharing one.
       const startBtn = _canStartHere
-        ? `<button onclick="event.stopPropagation();openStartRide(${r.id})" style="flex-basis:100%;width:100%;margin-top:.5rem;min-height:44px;padding:.6rem .8rem;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;white-space:nowrap;">&#128663; Start Ride</button>`
+        ? (_ridePastTime(r)
+            ? `<button onclick="event.stopPropagation();_dashRideCompletedPrompt(${r.id})" style="flex-basis:100%;width:100%;margin-top:.5rem;min-height:44px;padding:.6rem .8rem;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;white-space:nowrap;">&#9989; Ride Completed</button>`
+            : `<button onclick="event.stopPropagation();openStartRide(${r.id})" style="flex-basis:100%;width:100%;margin-top:.5rem;min-height:44px;padding:.6rem .8rem;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;white-space:nowrap;">&#128663; Start Ride</button>`)
         : '';
       // "Add a button to send the confirmation early" - direct request. Previously there was no
       // way to send a ride's confirmation text before the automatic day-before reminder offered
@@ -18754,7 +18761,9 @@ function rideActionBarHtml(rid){
 
   return '<div id="mt-bar" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem;">'
     +'<div style="display:flex;gap:5px;flex-wrap:wrap;width:100%;">'
-    +'<button onclick="openStartRide('+rid+')" style="flex:1;min-height:44px;padding:.7rem .9rem;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;">&#128663; Start Ride</button>'
+    +(_ridePastTime(r)
+      ? '<button onclick="_dashRideCompletedPrompt('+rid+')" style="flex:1;min-height:44px;padding:.7rem .9rem;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">&#9989; Ride Completed</button>'
+      : '<button onclick="openStartRide('+rid+')" style="flex:1;min-height:44px;padding:.7rem .9rem;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;">&#128663; Start Ride</button>')
     +'</div></div>';
 }
 
@@ -23186,7 +23195,8 @@ function refreshDash(){
         } else if(_stopped){
           _btns.push('<button onclick="event.stopPropagation();_dashRideCompletedPrompt('+r.id+')" style="flex:1;min-width:0;min-height:44px;padding:.5rem .5rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\u2705 Ride Completed</button>');
         } else if(!r.rideStartedAt){
-          _btns.push('<button onclick="event.stopPropagation();openStartRide('+r.id+')" style="flex:1;min-width:0;min-height:44px;padding:.5rem .5rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;">\ud83d\ude97 Start Ride</button>');
+          if(_ridePastTime(r)) _btns.push('<button onclick="event.stopPropagation();_dashRideCompletedPrompt('+r.id+')" style="flex:1;min-width:0;min-height:44px;padding:.5rem .5rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\u2705 Ride Completed</button>');
+          else _btns.push('<button onclick="event.stopPropagation();openStartRide('+r.id+')" style="flex:1;min-width:0;min-height:44px;padding:.5rem .5rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;">\ud83d\ude97 Start Ride</button>');
         } else if(r.type==='ROUND TRIP'){
           // Genuine round trips (not AP ROUND TRIP) get Pause/Resume instead of nothing once
           // started - a regular round trip has two real driving segments (out to the client,
@@ -23252,6 +23262,13 @@ function refreshDash(){
           // action, same reasoning the AP RUN branch above already uses once it's started.
           _btns.push('<button onclick="event.stopPropagation();_dashRideCompletedPrompt('+r.id+')" style="flex:1;min-width:0;min-height:44px;padding:.5rem .5rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\u2705 Ride Completed</button>');
         }
+        // v1369: a started airport ride that is past its time but never had an arrival text sent (the client texted first, or the text was
+        // skipped) had no way to finish from this card. Ride Completed is offered once the time has passed.
+        try{
+          if(!_stopped && r.rideStartedAt && _isAirport && !r.arrivalSentAt && typeof _hoursUntilRide==='function' && _hoursUntilRide(r)<0
+             && !_btns.some(function(x){ return /Ride Completed/.test(x); }))
+            _btns.push('<button onclick="event.stopPropagation();_dashRideCompletedPrompt('+r.id+')" style="flex:1;min-width:0;min-height:44px;padding:.5rem .5rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\u2705 Ride Completed</button>');
+        }catch(e){}
         // Client Invoiced used to be a separate, always-visible link here, disconnected from
         // the button it was actually an alternative to (reported directly as looking "slapped
         // in"). That choice now lives inside the Ride Completed prompt itself instead of being
@@ -24556,7 +24573,7 @@ function renderDashFeesAwaitingYourApproval(){
     +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.6rem;line-height:1.4;">These drivers say they\u2019ve sent your fee \u2014 confirm you actually received it.</div>';
   rows.forEach(function(ri){
     html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.4rem 0;border-top:1px solid #fde9b8;gap:.5rem;flex-wrap:wrap;">'
-      +'<div style="font-size:.78rem;min-width:0;"><b>'+escHtml(ri.driver.split(' ')[0])+'</b> <span style="color:var(--mid);">'+escHtml(ri.client||'')+' \u00b7 '+fmtDateShort(ri.date)+' \u00b7 $'+ri.fee.toFixed(2)+' \u00b7 says '+escHtml(ri.method)+'</span></div>'
+      +'<div style="font-size:.78rem;min-width:0;line-height:1.35;"><b>'+escHtml(ri.client||'Ride')+'</b><div style="color:var(--mid);font-size:.72rem;">Paid by '+escHtml(ri.driver.split(' ')[0])+' \u00b7 '+fmtDateShort(ri.date)+' \u00b7 $'+ri.fee.toFixed(2)+' \u00b7 says '+escHtml(ri.method)+'</div></div>'
       +'<div style="display:flex;gap:.3rem;flex-shrink:0;">'
       +'<button onclick="_feeUndoRide(\''+escAttr(dName)+'\',\''+escAttr(ri.driver)+'\','+_feeIdArg(ri.id)+')" style="padding:.26rem .6rem;background:none;border:1.5px solid #dc2626;color:#dc2626;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;">\u2717 Not received</button>'
       +'<button onclick="markFeeRidePaid(\''+escAttr(dName)+'\',\''+escAttr(ri.driver)+'\','+_feeIdArg(ri.id)+',\''+escAttr(ri.method)+'\')" style="padding:.26rem .6rem;background:#15803d;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;">\u2713 Received</button>'
@@ -24590,7 +24607,7 @@ function renderDashFeesAwaitingApproval(){
     +'<div style="font-size:.75rem;color:var(--mid);margin-bottom:.6rem;line-height:1.4;">Already paid \u2014 just waiting on confirmation.</div>';
   rows.forEach(function(ri){
     html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:.4rem 0;border-top:1px solid var(--light);gap:.5rem;flex-wrap:wrap;">'
-      +'<div style="font-size:.78rem;min-width:0;"><b>'+escHtml(ri.owner.split(' ')[0])+'</b> <span style="color:var(--mid);">'+escHtml(ri.client||'')+' \u00b7 '+fmtDateShort(ri.date)+' \u00b7 $'+ri.fee.toFixed(2)+'</span></div>'
+      +'<div style="font-size:.78rem;min-width:0;line-height:1.35;"><b>'+escHtml(ri.client||'Ride')+'</b><div style="color:var(--mid);font-size:.72rem;">Client owner: '+escHtml(ri.owner.split(' ')[0])+' \u00b7 '+fmtDateShort(ri.date)+' \u00b7 $'+ri.fee.toFixed(2)+'</div></div>'
       +'<div style="display:flex;gap:.3rem;flex-shrink:0;align-items:center;">'
       +'<span style="font-size:.7rem;color:#b45309;font-weight:700;">\u23F3 Awaiting confirmation</span>'
       +'<button onclick="_feeUndoRide(\''+escAttr(ri.owner)+'\',\''+escAttr(dName)+'\','+_feeIdArg(ri.id)+')" style="padding:.26rem .6rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;">\u21a9 Undo</button>'
