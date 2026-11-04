@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191373">
+<meta name="version" content="202608191375">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -12993,6 +12993,14 @@ function clientPhoneFor(r){
       for(let i=0;i<arr.length;i++){ p=_extractPhone(arr[i]&&arr[i].number); if(p) return p; }
     }
   }catch(e){}
+  // v1374: a driver booked as a passenger has no client record any more; use their own profile number.
+  try{
+    if(_isGroupDriverName(r.client)){
+      var _dk=String(r.client).trim().toLowerCase();
+      var _dn=Object.keys(DRIVER_PROFILES).find(function(n){ return n.toLowerCase()===_dk || String((DRIVER_PROFILES[n]||{}).displayName||'').toLowerCase()===_dk; });
+      var _dp=_dn && _extractPhone((DRIVER_PROFILES[_dn]||{}).phone); if(_dp) return _dp;
+    }
+  }catch(e){}
   // Last resort: the same client on ANOTHER ride may carry the number (regulars often do)
   try{
     const key=(r.client||'').trim().toLowerCase();
@@ -20770,8 +20778,25 @@ function _rideFeeOwner(r){
   if(!r || clientIsDriver(r.client)) return null;
   return _rideClientOwner(r);
 }
+// v1374: a driver in the group is never a client of another driver. Jim Fortner (a driver) came up as "Chase's client" because Chase once
+// created a ride with him as the client, so Kat could not book him for a ride to the airport without the client-owner warning and fee.
+// Matches full roster names only (never a first name alone), case-insensitively.
+function _isGroupDriverName(name){
+  try{
+    var k=String(name||'').trim().toLowerCase(); if(!k) return false;
+    var hit=function(n){ return String(n||'').trim().toLowerCase()===k; };
+    if(typeof DRIVERS!=='undefined' && DRIVERS.some(hit)) return true;
+    if(typeof DRIVER_PROFILES!=='undefined'){
+      var names=Object.keys(DRIVER_PROFILES);
+      for(var i=0;i<names.length;i++){ if(hit(names[i]) || hit((DRIVER_PROFILES[names[i]]||{}).displayName)) return true; }
+    }
+    if(typeof USER_DRIVER_MAP!=='undefined' && Object.keys(USER_DRIVER_MAP).some(function(u){ return hit(USER_DRIVER_MAP[u]); })) return true;
+  }catch(e){}
+  return false;
+}
 function getClientOwner(clientName){
   if(!clientName) return null;
+  if(_isGroupDriverName(clientName)) return null;   // v1374
   const key=(clientName||'').toLowerCase().trim();
   if(clientOwners && clientOwners[key]) return clientOwners[key];
   const r=(rides||[]).find(function(r){ return r.client&&r.client.toLowerCase().trim()===key&&r.createdBy; });
@@ -36023,15 +36048,11 @@ function buildClientDB(forDriver){
   const ensure=(key,name)=>{ if(!db[key]) db[key]={name,phone:'',email:'',drivers:new Set(),rides:[],lastRide:'',address:'',notes:'',paymentMethod:'',phones:[],emails:[],source:''}; return db[key]; };
   // Check if this driver has a linked profile partner
   const _linkedPartner = (forDriver && window._showCombinedIncome===true) ? (driverSettings[forDriver]||{}).linkedWith : null;
-  rides.forEach(r=>{
-    if(!r.client) return;
-    if(forDriver){
-      // Include rides CREATED by this driver OR by the linked partner
-      const rideOwner=_loginToDriver(r.createdBy);
-      if(rideOwner!==forDriver && rideOwner!==_linkedPartner) return;
-    }
+  const _seenRide = new Set();
+  const addRide = (r)=>{
     const key=r.client.trim().toLowerCase();
     const e=ensure(key, r.client.trim());
+    _seenRide.add(r);
     if(r.driver) e.drivers.add(r.driver);
     addPhoneUnique(e.phones, r.phone, '');
     addExtraPhonesTo(e.phones, r.extraPhones);
@@ -36041,7 +36062,35 @@ function buildClientDB(forDriver){
     if(addr && !e.address) e.address=addr;
     e.rides.push(r);
     if(!e.lastRide || r.date>e.lastRide) e.lastRide=r.date;
+  };
+  rides.forEach(r=>{
+    if(!r.client) return;
+    if(forDriver){
+      // Include rides CREATED by this driver OR by the linked partner
+      const rideOwner=_loginToDriver(r.createdBy);
+      if(rideOwner!==forDriver && rideOwner!==_linkedPartner) return;
+    }
+    addRide(r);
   });
+  // v1375: a client the app says a driver OWNS (an owner tag, or the creator of their first ride) is always on that driver's list, even when
+  // someone else created the rides and nothing was saved to the list by hand. The warning "X is in Y's client list" and this list now agree.
+  // (A driver in the group is never anyone's client.)
+  if(forDriver){
+    try{
+      const _firstOwner={};
+      rides.forEach(r=>{ if(r && r.client && r.createdBy){ const k=r.client.trim().toLowerCase(); if(!(k in _firstOwner)) _firstOwner[k]=feeOwnerFor(r.createdBy); } });
+      const _ownerOf=(k,name)=> _isGroupDriverName(name) ? null : ((clientOwners && clientOwners[k]) || _firstOwner[k] || null);
+      rides.forEach(r=>{
+        if(!r || !r.client || _seenRide.has(r)) return;
+        const k=r.client.trim().toLowerCase();
+        if(_ownerOf(k, r.client)===forDriver) addRide(r);
+      });
+      Object.keys(clientOwners||{}).forEach(k=>{
+        if(clientOwners[k]!==forDriver || db[k] || _isGroupDriverName(k)) return;
+        ensure(k, k.replace(/\b\w/g, c=>c.toUpperCase()));   // tagged but no ride yet: listed under the tag's name
+      });
+    }catch(e){ console.warn('owned-client list merge failed', e); }
+  }
   // Collect imported clients for this driver AND any proxy logins (e.g. Morgan stores under 'Morgan' but shows for Kat)
   let imported;
   if(forDriver){
@@ -36172,6 +36221,7 @@ function _renderProxyRow(p){
 function _maybePromptClientOwner(clientName, flow){
   try{
     if(!clientName || !currentUser) return false;
+    if(_isGroupDriverName(clientName)) return false;   // v1374: no "whose client is this?" for a driver
     if(!PROXY_MAP[currentUser.name]) return false;      // only proxy dispatchers
     if(!_isNewClient(clientName)) return false;          // only genuinely new clients
     // v1303: if she already answered "who is this ride for?" on the form, use that answer instead of popping the question up again.
@@ -36239,6 +36289,7 @@ function _resolveClientOwner(which){
 
 async function upsertClientFromRide(ride){
   if(!ride || !ride.client) return;
+  if(_isGroupDriverName(ride.client)) return;   // v1374: a driver is never added to anyone's client list
   var driver;
   try{ var _k=ride.client.trim().toLowerCase(); var _own=(clientOwners&&clientOwners[_k])||null; driver = _own ? (Object.keys(USER_DRIVER_MAP).find(function(k){return USER_DRIVER_MAP[k]===_own;})||clientStoreDriver()) : clientStoreDriver(); }catch(e){ driver=clientStoreDriver(); }
   if(!driver) return;
@@ -36564,7 +36615,7 @@ function renderClients(){
   })();
   const db = buildClientDB(viewAs);
   const q  = (document.getElementById('client-search')?.value||'').toLowerCase().trim();
-  let baseClients = Object.values(db);
+  let baseClients = Object.values(db).filter(function(c){ return !_isGroupDriverName(c && c.name); });   // v1374: drivers are never listed as clients
   if(_isProxy && !_hasGrant){
     // Keep the two lists separate: 'mine' shows only clients Morgan tagged as hers; the
     // owner list shows everything else (Kat's + untagged, the historical default).
