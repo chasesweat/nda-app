@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191372">
+<meta name="version" content="202608191373">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -3480,11 +3480,15 @@ function setupRealtimeListeners(){
     }
   });
   // Listen for saved-quote changes so they sync across devices.
-  fbRef('nda/kat/savedQuotes').on('value', snap=>{  if(snap.exists()){
+  fbRef('nda/kat/savedQuotes').on('value', snap=>{
+    // v1373: an emptied list (the last saved quote deleted or booked on another device) now clears this device too; it used to be ignored.
+    if(snap.exists()){
       var _v=snap.val();
       savedQuotes = Array.isArray(_v) ? _v : (_v && typeof _v==='object' ? Object.values(_v) : []);
-      try{ if(typeof renderSavedQuotes==='function' && document.getElementById('saved-quotes-wrap')) renderSavedQuotes(); }catch(e){}
+    } else {
+      savedQuotes = [];
     }
+    try{ if(typeof renderSavedQuotes==='function' && document.getElementById('saved-quotes-wrap')) renderSavedQuotes(); }catch(e){}
   });
   // Listen for finder-fee payment changes so marking paid / undo shows up live on the
   // OTHER person's dashboard (e.g. an undo reappears as "owed" on the owner's page).
@@ -3539,7 +3543,9 @@ function setupRealtimeListeners(){
   }
   // Listen for client request changes
   fbRef('nda/kat/clientRequests').on('value', snap=>{
-    if(snap.exists()){ clientRequests = snap.val()||{}; updateNotifBadge(); }
+    // v1373: an emptied node now clears the local copy too (it used to be ignored, leaving removed requests showing until a reload).
+    if(snap.exists()){ clientRequests = snap.val()||{}; _crSeed(clientRequests); updateNotifBadge(); }
+    else { clientRequests = {}; _crSeed({}); try{ updateNotifBadge(); }catch(e){} }
   });
   // Listen for shared documents changes
   fbRef('nda/kat/documents').on('value', snap=>{
@@ -4586,6 +4592,7 @@ async function _purgeOldClientRequests(){
     if(removed){
       var _gone = ids.filter(function(id){ return !(id in kept); });
       clientRequests = kept;
+      _crSeed(kept);
       for(var _g=0;_g<_gone.length;_g++) await storageSet('kat:clientRequests/'+_gone[_g], null);
       console.log('[retention] removed '+removed+' booking request(s) older than '+BOOKING_REQUEST_RETENTION_DAYS+' days');
     }
@@ -10702,6 +10709,13 @@ function _prefillFromClientRequest(req){
     if(_banner){
       _banner.innerHTML='\uD83D\uDCCB Booking-link request from <b>'+escHtml(req.clientName||'a client')
         +'</b> \u2014 they chose: <b>'+(isQuote?'Request a quote':'Schedule a ride')+'</b>';
+      // v1373: a ride request gets the same "we got your request" text a quote request has (quotes show it on the approval sheet).
+      if(!isQuote && _phoneDigits(req.clientPhone)){
+        window._qaReceiptReq = req;
+        _banner.innerHTML += (_quoteAckSent(req)
+          ? '<div id="qa-ack" style="margin-top:.45rem;font-size:.78rem;font-weight:700;color:#0f766e;">\u2713 Receipt text already sent</div>'
+          : '<button type="button" id="qa-ack" onclick="_sendQaReceipt(this)" style="display:block;width:100%;margin-top:.5rem;padding:.55rem;background:none;border:1.5px solid #0f766e;color:#0f766e;border-radius:9px;font-family:inherit;font-size:.82rem;font-weight:800;cursor:pointer;">\ud83d\udcac Let them know we got it</button>');
+      }
       _banner.style.display='block';
     }
   }catch(e){}
@@ -10933,11 +10947,23 @@ function _quoteApprovalWarnings(req){
 }
 // v1365: a short "we got your request" text for the client, so they are not left wondering. Offered at the top of the approval sheet; the
 // driver taps once and Messages opens pre-filled. Remembered per request (ackSentAt, a single-field write) so it is only offered once.
+function _defaultReceivedTpl(){
+  return 'Hi {name}, this is {driver}{business}. I received your {request} and I\u2019m working on it now \u2014 {next}. Thank you!';
+}
 function quoteReceivedText(req){
   var first=String((req&&req.clientName)||'').trim().split(' ')[0]||'';
   var me=getMyDriverName()||''; var biz=''; try{ biz=_bizNameFor(me,me); }catch(e){}
   var meShort=(DRIVER_PROFILES[me]&&DRIVER_PROFILES[me].displayName)||me.split(' ')[0]||'';
-  return (first?('Hi '+first+', '):'Hi, ')+'this is '+(meShort||'your driver')+(biz?(' with '+biz):'')+'. I received your quote request and I\u2019m working on it now \u2014 you\u2019ll have your quote shortly. Thank you!';
+  var isQ = !req || req.requestType==='quote';
+  var tpl=''; try{ tpl=_msgTemplate('receivedTemplate','defaultReceivedTemplate','received'); }catch(e){}
+  if(!tpl) tpl=_defaultReceivedTpl();
+  return tpl
+    .replace(/\{name\}/g, first)
+    .replace(/\{driver\}/g, meShort||'your driver')
+    .replace(/\{business\}/g, biz?(' with '+biz):'')
+    .replace(/\{request\}/g, isQ?'quote request':'ride request')
+    .replace(/\{next\}/g, isQ?'you\u2019ll have your quote shortly':'I\u2019ll confirm your ride shortly')
+    .replace(/^Hi ,/,'Hi,');
 }
 function _quoteAckSent(req){ var id=req&&req._id; return !!((id && ((window._ackSent||{})[id] || ((clientRequests||{})[id]||{}).ackSentAt)) || (req&&req.ackSentAt)); }
 async function sendQuoteReceivedText(req){
@@ -10952,6 +10978,11 @@ async function sendQuoteReceivedText(req){
   var isiOS=/iPad|iPhone|iPod/.test(navigator.userAgent||'');
   window.location.href='sms:'+num+(isiOS?'&':'?')+'body='+encodeURIComponent(quoteReceivedText(req));
   return true;
+}
+async function _sendQaReceipt(btn){
+  var req=window._qaReceiptReq; if(!req) return;
+  if(btn){ btn.disabled=true; btn.textContent='\u2713 Receipt text opened'; }
+  await sendQuoteReceivedText(req);
 }
 function _closeQuoteApproval(){ var o=document.getElementById('quote-approval'); if(o){ clearInterval(o._poll); o.remove(); } }
 function _showQuoteApproval(req){
@@ -19172,8 +19203,26 @@ function buildFeeBreakdown(r){
 // { requestId: { clientName, fromDriver, toDriver, reason, status:'pending'|'approved'|'denied', ts, decidedBy } }
 let clientRequests = {};
 let clientReqDriver = {};
-async function loadClientRequests(){ const d=await storageGet('kat:clientRequests'); if(d) clientRequests=d; }
-async function saveClientRequests(){ await storageSet('kat:clientRequests', clientRequests); }
+async function loadClientRequests(){ const d=await storageGet('kat:clientRequests'); if(d){ clientRequests=d; _crSeed(d); } }
+// v1373: this used to write the WHOLE clientRequests node from this device's copy. A booking a client sent after this device last loaded the
+// list was not in that copy, so the save wiped it. Now only the requests this device added or changed are written, one at a time; a request
+// this device never saw is left alone. (Removing a request is done on its own, by id, in the retention clean-up.)
+var _crBaseline = {};
+function _crSeed(obj){
+  _crBaseline = {};
+  try{ Object.keys(obj||{}).forEach(function(k){ _crBaseline[k]=JSON.stringify(obj[k]); }); }catch(e){}
+}
+async function saveClientRequests(){
+  var cur = clientRequests || {}, ok = true;
+  var ids = Object.keys(cur);
+  for(var i=0;i<ids.length;i++){
+    var id=ids[i], js; try{ js=JSON.stringify(cur[id]); }catch(e){ continue; }
+    if(_crBaseline[id]===js) continue;
+    var r = await storageSet('kat:clientRequests/'+id, cur[id]);
+    if(r===false) ok=false; else _crBaseline[id]=js;
+  }
+  return ok;
+}
 async function loadClientReqDriver(){ const d=await storageGet('kat:clientReqDriver'); if(d) clientReqDriver=d; }
 async function saveClientReqDriver(){ await storageSet('kat:clientReqDriver', clientReqDriver); }
 function _reqOwner(){ return (currentUser&&PROXY_MAP[currentUser.name])||getMyDriverName()||''; }
@@ -26133,6 +26182,7 @@ const _TEMPLATE_FIELD_MAP = {
   receiptclosing:{ global: 'defaultReceiptClosingLine',   personal: 'receiptClosingLine' },
   quote:        { global: 'defaultQuoteTemplate',         personal: 'quoteTemplate' },
   comparison:   { global: 'defaultComparisonTemplate',     personal: 'comparisonTemplate' },
+  received:     { global: 'defaultReceivedTemplate',       personal: 'receivedTemplate' },
 };
 // Kat and Morgan run one shared business - a message-template edit by either of them is meant
 // to reach clients identically no matter which of the two actually made it, per direct
@@ -26160,7 +26210,7 @@ const _TEMPLATE_FIELD_MAP = {
 // is ever touched by either.
 const KAT_MORGAN_MIRROR_FIELDS_FULLNAME = [
   'confTemplate','pickupInstructions','arrivalTemplate','driverChangeTemplate',
-  'receiptShareTemplate','receiptClosingLine','quoteTemplate','comparisonTemplate',
+  'receiptShareTemplate','receiptClosingLine','quoteTemplate','comparisonTemplate','receivedTemplate',
   'confTemplateByType','pickupInstructionsByType','useTypeInstructions',
   'pickupInstructionsByTerminal'
 ];
@@ -26208,6 +26258,7 @@ const HARDCODED_MSG_DEFAULTS = {
   scheduling: _defaultPolicyTpl(),
   quote: _defaultQuoteTpl(),
   comparison: _defaultComparisonTpl(),
+  received: _defaultReceivedTpl(),
 };
 // Keys with NO genuine hardcoded default at all - these fields correctly stay blank rather
 // than being pre-filled with an explanatory note (e.g. "no built-in default exists") as if it
@@ -26537,6 +26588,7 @@ function renderMessageTemplates(){
       + field('personal','receiptshare', 'My receipt share text', 'The message sent alongside a shared PDF receipt. Placeholders: {date}', myCustom.receiptShareTemplate, 3)
       + field('personal','receiptclosing', 'My receipt closing line', 'Just the closing line of the receipt itself \u2014 the rest (charges, totals, receipt number) is always computed and can\'t be edited here, for accuracy. Placeholders: {org}', myCustom.receiptClosingLine, 2)
       + field('personal','quote', 'My quote message', 'Sent when you text a quote to a client from the Quote page. {quoteDetails} fills in the date, time, destination, pick-up location and pricing for you, and its shape adjusts automatically for round trips (two dated legs plus a combined total). Placeholders: {name} {business} {quoteDetails}', myCustom.quoteTemplate, 4)
+      + field('personal','received', 'My \u201cwe got your request\u201d text', 'Sent when you tap \u201cLet them know we got it\u201d on a booking-link request (quote or ride). Placeholders: {name} {driver} {business} {request} {next} \u2014 {request} becomes \u201cquote request\u201d or \u201cride request\u201d, and {next} says what happens next.', myCustom.receivedTemplate, 3)
       + field('personal','comparison', 'My price comparison message', 'Sent when you text or email a multi-vehicle price comparison to a client from the Quote page. {comparisonDetails} lists the trip and every vehicle option with its price. Placeholders: {name} {business} {comparisonDetails}', myCustom.comparisonTemplate, 3)
       + (function(){
           // openPolicyEditor()/_savePolicyEditor() (still used by onboarding, unchanged) read and
@@ -33467,6 +33519,49 @@ async function resetArrivalSent(id){
   try{ if(typeof renderRideView==='function' && activeRideId===id) renderRideView(r); }catch(e){}
   showToast('Arrival status reset');
 }
+// v1373: the ride has no phone number for the client. Type it in (saved onto the ride, then the arrival text opens), or mark them arrived
+// without sending a text (the client texted first, or there is nobody to text). Either way the ride moves forward.
+function _closeArrivalNoPhone(){ var o=document.getElementById('arrival-nophone'); if(o) o.remove(); }
+function _showArrivalNoPhone(id){
+  var r=_rideById(id); if(!r) return;
+  _closeArrivalNoPhone();
+  var ov=document.createElement('div'); ov.id='arrival-nophone';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(20,8,40,.65);z-index:14000;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  ov.innerHTML='<div style="background:var(--white);border-radius:16px;max-width:360px;width:100%;padding:1.25rem;box-shadow:0 20px 50px rgba(0,0,0,.4);">'
+    +'<div style="font-size:1.02rem;font-weight:800;color:var(--black);margin-bottom:.3rem;">No phone number for '+escHtml(r.client||'this client')+'</div>'
+    +'<div style="font-size:.82rem;color:var(--mid);line-height:1.45;margin-bottom:.8rem;">Add their number to send the arrival text, or mark them as arrived without texting.</div>'
+    +'<input id="arr-np-input" type="tel" inputmode="tel" autocomplete="off" placeholder="Client\u2019s mobile number" style="width:100%;box-sizing:border-box;padding:.65rem .75rem;border:1.5px solid var(--light);border-radius:9px;font-family:inherit;font-size:1rem;margin-bottom:.35rem;" />'
+    +'<div id="arr-np-err" style="font-size:.74rem;color:#b91c1c;min-height:1em;margin-bottom:.45rem;"></div>'
+    +'<button id="arr-np-send" style="width:100%;padding:.75rem;margin-bottom:.45rem;background:#1d4ed8;color:#fff;border:none;border-radius:10px;font-family:inherit;font-size:.92rem;font-weight:800;cursor:pointer;">Save number &amp; send arrival text</button>'
+    +'<button id="arr-np-skip" style="width:100%;padding:.7rem;margin-bottom:.45rem;background:none;border:1.5px solid #15803d;color:#15803d;border-radius:10px;font-family:inherit;font-size:.88rem;font-weight:800;cursor:pointer;">Mark arrived without texting</button>'
+    +'<button id="arr-np-cancel" style="width:100%;padding:.6rem;background:none;border:1.5px solid var(--light);color:var(--mid);border-radius:10px;font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;">Cancel</button>'
+    +'</div>';
+  document.body.appendChild(ov);
+  var $=function(i){ return document.getElementById(i); };
+  ov.onclick=function(e){ if(e.target===ov) _closeArrivalNoPhone(); };
+  $('arr-np-cancel').onclick=_closeArrivalNoPhone;
+  $('arr-np-send').onclick=async function(){
+    var raw=($('arr-np-input').value||'').trim(), dg=raw.replace(/\D/g,'');
+    if(dg.length<10 || dg.length>15){ $('arr-np-err').textContent='Enter a full phone number (10 digits).'; return; }
+    var r2=_rideById(id); if(!r2){ _closeArrivalNoPhone(); return; }
+    r2.phone=formatPhoneUS(raw); touchRide(r2,'added client phone');
+    _protectRide(r2.id);
+    try{ var ok=await saveRides(); if(ok) window._pendingUnsavedRideIds.delete(r2.id); }catch(e){}
+    _closeArrivalNoPhone();
+    sendArrivalText(id);
+  };
+  $('arr-np-skip').onclick=async function(){
+    var r2=_rideById(id); if(!r2){ _closeArrivalNoPhone(); return; }
+    r2.arrivalSentAt=Date.now(); r2.arrivalNoText=true; touchRide(r2,'marked arrived (no text)');
+    _protectRide(r2.id);
+    try{ var ok=await saveRides(); if(ok) window._pendingUnsavedRideIds.delete(r2.id); }catch(e){}
+    _closeArrivalNoPhone();
+    try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+    try{ if(typeof renderRideView==='function' && activeRideId===id) renderRideView(r2); }catch(e){}
+    showToast('\u2713 Marked arrived \u2014 no text sent');
+  };
+  setTimeout(function(){ try{ $('arr-np-input').focus(); }catch(e){} },80);
+}
 // Dashboard arrival flow: confirm first, then send. 'No' just closes and leaves the row.
 // Confirms before actually sending - originally dashboard-only (hence the name), now also used
 // by the ride detail modal's own Send Arrival Text button, which used to call sendArrivalText()
@@ -33478,6 +33573,9 @@ async function resetArrivalSent(id){
 async function dashSendArrival(id){
   var r=_rideById(id);
   if(!r){ showToast('Ride not found','error'); return; }
+  // v1373: a ride with no number for the client used to show "No phone numbers found" and nothing else, which left the ride unable to move on
+  // (no Arrived, so no way through the completion flow when the client texts first). Type the number here, or skip the text.
+  if(!clientPhoneFor(r)){ _showArrivalNoPhone(id); return; }
   var when=fmtTime12(r.time)||'the scheduled time';
   var ok=await askConfirm('Send the arrival text to '+(r.client||'this client')+'?\n\nPickup scheduled at '+when+'.', {yes:'Send text',title:'Send arrival text?'});
   if(!ok) return;   // stay on the dashboard, row remains
