@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191375">
+<meta name="version" content="202608191376">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -11923,6 +11923,16 @@ function isMyDrivingRide(r){
 function isMyScheduledRide(r){
   const dName=getMyDriverName();
   const login=currentUser&&currentUser.name;
+  // v1376: when the client is a driver in the group, the confirmation is sent by whoever the ride is assigned to, not by whoever booked it
+  // (Kat books a ride for Jim and assigns Chase: Chase sends it). Kat & Morgan still share, so Morgan counts when Kat is the assigned driver.
+  // A ride with nobody assigned yet falls through to the usual rule (the creator).
+  try{
+    if(r && r.driver && typeof _isGroupDriverName==='function' && _isGroupDriverName(r.client)){
+      if(dName && r.driver===dName) return true;
+      const _mine = login ? (PROXY_MAP[login]||USER_DRIVER_MAP[login]||null) : null;
+      return !!(_mine && _mine===r.driver);
+    }
+  }catch(e){}
   // Effective creator for ownership purposes: r.createdBy as-is, UNLESS it isn't a real,
   // recognized person at all (e.g. 'FamilyWall' from an auto-import) - in that case, fall back
   // to whoever most recently made a real edit to this ride, since that's who's actually
