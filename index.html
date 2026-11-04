@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191369">
+<meta name="version" content="202608191372">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -876,7 +876,7 @@ html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2
         </div>
         <div id="q-final-note" style="font-size:.74rem;color:var(--mid);margin-top:.35rem;">Type a different number to change the price. The difference shows as an Adjustment line.</div>
       </div>
-        <button type="button" id="q-send-btn" class="btn-secondary" onclick="openSendQuote()" style="width:100%;margin-top:1rem;padding:.85rem;min-height:44px;font-size:.95rem;">&#128228; Send quote&hellip;</button><div style="font-size:.68rem;color:var(--mid);margin-top:4px;padding-left:.2rem;">Pick text, email or PDF when you tap it. The quote is saved to Saved Quotes automatically and kept up to date as you change it.</div><button id="q-schedule-btn" onclick="saveQuote()" class="btn-primary" style="width:100%;margin-top:.75rem;padding:.85rem;">Schedule</button>
+        <button type="button" id="q-send-btn" class="btn-secondary" onclick="openSendQuote()" style="width:100%;margin-top:1rem;padding:.85rem;min-height:44px;font-size:.95rem;">&#128228; Send quote&hellip;</button><button type="button" id="q-save-btn" class="btn-secondary" onclick="saveQuoteNow()" style="width:100%;margin-top:.5rem;padding:.7rem;min-height:44px;font-size:.9rem;">&#128190; Save quote</button><div style="font-size:.68rem;color:var(--mid);margin-top:4px;padding-left:.2rem;">Pick text, email or PDF when you tap Send. Quotes also save themselves and stay up to date as you change them, so you can pick one up on another device from Saved Quotes below.</div><div id="q-save-status" style="font-size:.72rem;font-weight:700;margin-top:3px;padding-left:.2rem;min-height:1em;"></div><button id="q-schedule-btn" onclick="saveQuote()" class="btn-primary" style="width:100%;margin-top:.75rem;padding:.85rem;">Schedule</button>
         <!-- Shown only when the trip has more than one pickup (at least one extra stop), per Chase.
              A plain A-to-B trip needs no route preview. Visibility is set by _syncRouteBtn(). -->
         <button id="q-route-btn" onclick="viewRouteOnMaps()" style="display:none;width:100%;margin-top:.5rem;padding:.7rem;background:none;border:1.5px solid var(--accent);border-radius:8px;color:var(--accent);font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;">↗ View route in Google Maps</button>
@@ -1738,7 +1738,7 @@ html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2
         <div id="qa-sprinter-hours-estimate-note" style="font-size:.72rem;color:var(--gold);margin-top:.3rem;"></div>
       </div>
       <div class="form-group" style="grid-column:1/-1;"><label>Vehicle</label>
-        <select id="qa-vehicle" onchange="recalcQa()">
+        <select id="qa-vehicle" onchange="_finalResetOnVehicles('qa', false, 'vehicle')">
           <option selected>Sedan</option>
           <option value="SUV/Van">XL</option>
           <option>Premium</option>
@@ -5399,7 +5399,7 @@ async function _saveRidesInner(){
 // Quotes saved for later (NOT on the calendar) — each is a full ride-shaped object
 // plus a _quoteId. Scheduling one moves it into rides[].
 let savedQuotes = [];
-async function saveSavedQuotes(){ await storageSetArray('kat:savedQuotes', savedQuotes); }
+async function saveSavedQuotes(){ return await storageSetArray('kat:savedQuotes', savedQuotes); }
 
 // ── RIDE ARCHIVE SYSTEM ───────────────────────────────────────────────────
 // To keep the live app fast, SETTLED rides older than ARCHIVE_DAYS move to a separate
@@ -6203,11 +6203,13 @@ function _finalPriceTyped(p){
 // v1351: a typed Final Price belongs to the vehicle setup it was typed for. Switching Double Vehicle (XXL) on/off or changing the
 // 2nd vehicle changes what the ride IS, but the typed number stayed and showed up as a large "Adjustment" on every leg
 // (Double -> Single left the old double-vehicle price in place). It now resets to the calculated price, with a note.
-function _finalResetOnVehicles(p, skipRecalc){
-  var had = (p==='q') ? _qFinalOv!=null : _qaFinalOv!=null;
+function _finalResetOnVehicles(p, skipRecalc, why){
+  var _old=(p==='q') ? _qFinalOv : _qaFinalOv;
+  var had = _old!=null;
   if(had){
     if(p==='q') _qFinalOv=null; else _qaFinalOv=null;
-    try{ showToast('Final price reset to the calculated price'); }catch(e){}
+    // v1372: a vehicle change reprices the trip; the number that was typed (the old price) is named so it can be typed again.
+    try{ showToast(why==='vehicle' ? ('Price updated for the new vehicle (the $'+(+_old).toFixed(2)+' you typed was cleared)') : 'Final price reset to the calculated price'); }catch(e){}
   }
   if(skipRecalc) return;
   if(p==='q') calcQuote(); else recalcQa();
@@ -7702,6 +7704,9 @@ function toggleVehicle(v){
     var i=list.indexOf(v);
     if(i>-1) list.splice(i,1); else list.push(v);
   }
+  // v1372: choosing a different vehicle reprices the quote. A Final Price typed for the old vehicle used to stay and show a Reset
+  // button instead; it is cleared now (Edit price or typing a number works again afterwards).
+  try{ _finalResetOnVehicles('q', true, 'vehicle'); }catch(e){}
   setSelectedVehicles(list);
   try{ updateSprinterHoursEstimate('q'); }catch(e){}
 }
@@ -8670,7 +8675,7 @@ async function openSendQuote(){
     icon:'📤', iconBg:'#1e2a4a', title:'Send this quote', message:(_sendTyp==='AP ROUND TRIP'||!_sendTot||_sendTot==='$0.00' ? '' : ('Quote total: '+_sendTot+'. '))+'How do you want to send it?',
     buttons:[
       {label:'💬 Text', style:'primary', value:'text'},
-      {label:'✏️ Change the price', style:'secondary', value:'price'},
+      {label:'✏️ Edit price', style:'secondary', value:'price'},
       {label:'✉️ Email', style:'secondary', value:'email'},
       {label:'📄 PDF', style:'secondary', value:'pdf'},
       {label:'Cancel', style:'secondary', value:null}
@@ -8686,17 +8691,27 @@ async function openSendQuote(){
 function _scheduleQuoteAutoSave(){
   if(window._qAutoSaving) return;
   clearTimeout(window._qAutoTimer);
-  window._qAutoTimer=setTimeout(_quoteAutoSave,1500);
+  window._qAutoPending=true;
+  window._qAutoTimer=setTimeout(function(){ window._qAutoPending=false; _quoteAutoSave(); },1500);
 }
-async function _quoteAutoSave(){
+// v1372: what the quote page shows under Send quote, so it is clear whether the quote is in Saved Quotes (which every device reads).
+function _qSaveStatus(msg, ok){
+  var el=document.getElementById('q-save-status'); if(!el) return;
+  el.textContent=msg||''; el.style.color = ok ? '#15803d' : 'var(--mid)';
+}
+// Returns {ok:true} once saved, or {ok:false, reason} (plain words) when it can't be yet. `manual` = the Save quote button.
+async function _quoteAutoSave(manual){
   try{
-    if(window._qBooked) return;
-    var pg=document.getElementById('page-quote'); if(!pg||!pg.classList.contains('active')) return;
-    var client=((document.getElementById('q-client')||{}).value||'').trim(); if(!client) return;
-    var vs=(typeof getSelectedVehicles==='function')?getSelectedVehicles():[]; if(vs.length!==1) return;
+    if(window._qBooked) return {ok:false, reason:'This quote was already booked.'};
+    var pg=document.getElementById('page-quote'); if(!pg||!pg.classList.contains('active')) return {ok:false, reason:''};
+    var client=((document.getElementById('q-client')||{}).value||'').trim();
+    if(!client){ _qSaveStatus('Not saved yet \u2014 add the client\u2019s name.',false); return {ok:false, reason:'Add the client\u2019s name to save this quote.'}; }
+    var vs=(typeof getSelectedVehicles==='function')?getSelectedVehicles():[];
+    if(vs.length!==1){ _qSaveStatus('Not saved yet \u2014 pick one vehicle (a comparison of several is not saved).',false); return {ok:false, reason:'Pick one vehicle to save this quote (a comparison of several vehicles is not saved).'}; }
     var type=(document.getElementById('q-type')||{}).value||'';
-    if(type==='AP ROUND TRIP'){ if(!document.querySelector('#quote-lines [data-leg-subtotal]')) return; }
-    else { var total=((document.getElementById('quote-total')||{}).textContent||'').trim(); if(!total||total==='$0.00') return; }
+    var _noPrice={ok:false, reason:'Fill in the trip details first so there is a price to save.'};
+    if(type==='AP ROUND TRIP'){ if(!document.querySelector('#quote-lines [data-leg-subtotal]')){ _qSaveStatus('Not saved yet \u2014 fill in the trip details.',false); return _noPrice; } }
+    else { var total=((document.getElementById('quote-total')||{}).textContent||'').trim(); if(!total||total==='$0.00'){ _qSaveStatus('Not saved yet \u2014 fill in the trip details.',false); return _noPrice; } }
     window._qAutoSaving=true;
     var fresh=_gatherQuoteRide({silent:true});
     window._qAutoSaving=false;
@@ -8706,10 +8721,24 @@ async function _quoteAutoSave(){
     if(ex){ Object.assign(ex,fresh); }
     else { fresh._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); fresh.savedAt=Date.now(); savedQuotes.push(fresh); ex=fresh; }
     window._editingQuoteId=ex._quoteId;
-    await saveSavedQuotes();
+    var _saved = await saveSavedQuotes();
     try{ renderSavedQuotes(); }catch(e){}
-  }catch(e){ window._qAutoSaving=false; console.warn('quote auto-save failed',e); }
+    var _t=''; try{ _t=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}); }catch(e){}
+    if(_saved===false){ _qSaveStatus('Could not save \u2014 check your connection and tap Save quote.',false); return {ok:false, reason:'Could not save \u2014 check your connection and try again.'}; }
+    _qSaveStatus('\u2713 Saved to Saved Quotes at '+_t+' \u2014 open it from any device.',true);
+    return {ok:true};
+  }catch(e){ window._qAutoSaving=false; console.warn('quote auto-save failed',e); _qSaveStatus('Could not save \u2014 tap Save quote to try again.',false); return {ok:false, reason:'Could not save this quote.'}; }
 }
+// The Save quote button: saves right now and says what happened.
+async function saveQuoteNow(){
+  clearTimeout(window._qAutoTimer); window._qAutoPending=false;
+  var r=await _quoteAutoSave(true);
+  if(r && r.ok) showToast('\u2713 Quote saved \u2014 it will be in Saved Quotes on your other devices');
+  else showToast((r&&r.reason)||'Could not save this quote.','error');
+}
+// Leaving the page (switching apps or devices) saves a quote that was still waiting on the delay.
+document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='hidden' && window._qAutoPending){ clearTimeout(window._qAutoTimer); window._qAutoPending=false; try{ _quoteAutoSave(); }catch(e){} } });
+window.addEventListener('pagehide',function(){ if(window._qAutoPending){ clearTimeout(window._qAutoTimer); window._qAutoPending=false; try{ _quoteAutoSave(); }catch(e){} } });
 (function(){
   function wire(){
     var pg=document.getElementById('page-quote'); if(!pg||pg._qAutoWired) return; pg._qAutoWired=true;
@@ -16132,7 +16161,8 @@ async function showConfirmModal(opts){
       // row so it's apart from the real choices, and an odd leftover choice spans the row. Labels never
       // wrap mid-word.
       var _span = _many && ((b.value===null && i===btns.length-1) || (i===_lastChoice && _choiceCount%2===1));
-      var _sz = _many ? ('min-width:0;white-space:nowrap;'+(_span?'grid-column:1/-1;':'')) : 'flex:1;min-width:0;';
+      // v1372: a long label ("Change the price") spilled out of its grid cell; only short labels stay on one line.
+      var _sz = _many ? ('min-width:0;'+(String(b.label||'').length>13?'white-space:normal;':'white-space:nowrap;')+(_span?'grid-column:1/-1;':'')) : 'flex:1;min-width:0;';
       return '<button data-idx="'+i+'" style="'+_sz+'padding:.7rem .5rem;background:'+bg+';color:'+color+';border:'+border+';border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;line-height:1.2;">'+b.label+'</button>';
     }).join('');
     ov.innerHTML='<div style="background:#1a0d2e;border:1.5px solid #4a2d6e;border-radius:16px;max-width:330px;width:100%;padding:1.25rem;box-shadow:0 24px 60px rgba(0,0,0,.5);">'
@@ -18756,7 +18786,18 @@ function rideActionBarHtml(rid){
       +'<div style="width:100%;display:flex;align-items:center;gap:.5rem;background:#f0fdf4;border:1.5px solid #86efac;'
       +'border-radius:8px;padding:.55rem .8rem;font-size:.78rem;font-weight:700;color:#15803d;">'
       +'\u2713 Ride started'+(_t?' at '+_t:'')+'</div>'
+      // v1370: an airport ride whose arrival text never went out (early landing, client texted first) still needs a way to finish.
+      +((r.type==='AP PICK UP'||r.type==='AP ROUND TRIP'||r.type==='AP RUN') && !r.arrivalSentAt
+        ? '<button onclick="_dashRideCompletedPrompt('+rid+')" style="flex:1;min-height:44px;padding:.7rem .9rem;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">&#9989; Ride Completed</button>' : '')
       +'</div>';
+  }
+  // v1370: same for an unstarted airport pickup that has not reached its time yet.
+  if(!_ridePastTime(r) && (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')){
+    return '<div id="mt-bar" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem;">'
+      +'<div style="display:flex;gap:5px;flex-wrap:wrap;width:100%;">'
+      +'<button onclick="openStartRide('+rid+')" style="flex:1;min-height:44px;padding:.7rem .9rem;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;">&#128663; Start Ride</button>'
+      +'<button onclick="_dashRideCompletedPrompt('+rid+')" style="flex:1;min-height:44px;padding:.7rem .9rem;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">&#9989; Ride Completed</button>'
+      +'</div></div>';
   }
 
   return '<div id="mt-bar" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem;">'
@@ -23196,7 +23237,13 @@ function refreshDash(){
           _btns.push('<button onclick="event.stopPropagation();_dashRideCompletedPrompt('+r.id+')" style="flex:1;min-width:0;min-height:44px;padding:.5rem .5rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\u2705 Ride Completed</button>');
         } else if(!r.rideStartedAt){
           if(_ridePastTime(r)) _btns.push('<button onclick="event.stopPropagation();_dashRideCompletedPrompt('+r.id+')" style="flex:1;min-width:0;min-height:44px;padding:.5rem .5rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\u2705 Ride Completed</button>');
-          else _btns.push('<button onclick="event.stopPropagation();openStartRide('+r.id+')" style="flex:1;min-width:0;min-height:44px;padding:.5rem .5rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;">\ud83d\ude97 Start Ride</button>');
+          else{
+            _btns.push('<button onclick="event.stopPropagation();openStartRide('+r.id+')" style="flex:1;min-width:0;min-height:44px;padding:.5rem .5rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;">\ud83d\ude97 Start Ride</button>');
+            // v1370: a flight can land well before the scheduled time and the client may text first, so an airport ride offers
+            // Ride Completed beside Start Ride instead of waiting for the clock.
+            if(r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')
+              _btns.push('<button onclick="event.stopPropagation();_dashRideCompletedPrompt('+r.id+')" style="flex:1;min-width:0;min-height:44px;padding:.5rem .5rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\u2705 Ride Completed</button>');
+          }
         } else if(r.type==='ROUND TRIP'){
           // Genuine round trips (not AP ROUND TRIP) get Pause/Resume instead of nothing once
           // started - a regular round trip has two real driving segments (out to the client,
@@ -23262,10 +23309,11 @@ function refreshDash(){
           // action, same reasoning the AP RUN branch above already uses once it's started.
           _btns.push('<button onclick="event.stopPropagation();_dashRideCompletedPrompt('+r.id+')" style="flex:1;min-width:0;min-height:44px;padding:.5rem .5rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\u2705 Ride Completed</button>');
         }
-        // v1369: a started airport ride that is past its time but never had an arrival text sent (the client texted first, or the text was
-        // skipped) had no way to finish from this card. Ride Completed is offered once the time has passed.
+        // v1369/v1370: a started airport ride with no arrival text sent (the client texted first, or the flight landed early and the text
+        // cannot go yet) had no way to finish from this card. v1369 gated this on the scheduled time having passed, which left an early
+        // landing stuck: ride time still ahead, no arrival text, no Ride Completed. Once the ride is started, Ride Completed always shows.
         try{
-          if(!_stopped && r.rideStartedAt && _isAirport && !r.arrivalSentAt && typeof _hoursUntilRide==='function' && _hoursUntilRide(r)<0
+          if(!_stopped && r.rideStartedAt && _isAirport
              && !_btns.some(function(x){ return /Ride Completed/.test(x); }))
             _btns.push('<button onclick="event.stopPropagation();_dashRideCompletedPrompt('+r.id+')" style="flex:1;min-width:0;min-height:44px;padding:.5rem .5rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\u2705 Ride Completed</button>');
         }catch(e){}

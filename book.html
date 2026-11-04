@@ -1629,11 +1629,28 @@ async function submitRequest(){
   try{
     // .push() generates its own unique key server-side - this is what makes it safe for many
     // clients to submit at the same moment with zero risk of overwriting each other.
-    await fbDB.ref('nda/kat/clientRequests').push(record);
+    try{
+      await fbDB.ref('nda/kat/clientRequests').push(record);
+    }catch(e1){
+      // v1370: a client kept getting "Something went wrong sending this". The page never said why. If the database refuses the
+      // newer fields (v1360 added rtDestination, xxlMayBeNeeded, waitRequested/waitHours, rtFirstLeg, stops), the same request is
+      // sent once more without them, with what they said folded into the notes so the driver still sees it.
+      console.warn('Submit failed, retrying without the newer fields:', e1 && (e1.code||e1.message));
+      var slim = Object.assign({}, record);
+      ['rtDestination','xxlMayBeNeeded','waitRequested','waitHours','rtFirstLeg','stops'].forEach(function(k){ delete slim[k]; });
+      var extra = [];
+      if(record.rtDestination) extra.push('Return trip goes to: '+record.rtDestination);
+      if(record.waitRequested) extra.push('Driver to wait about '+record.waitHours+' hour'+(record.waitHours===1?'':'s'));
+      if(record.xxlMayBeNeeded) extra.push('Group over '+XXL_PAX_OVER+' - may need an XXL');
+      if(extra.length) slim.notes = (slim.notes ? slim.notes+'\n' : '') + extra.join('\n');
+      try{ await fbDB.ref('nda/kat/clientRequests').push(slim); }
+      catch(e2){ e2.firstError = e1; throw e2; }
+    }
   }catch(e){
-    console.warn('Submit failed:', e.message);
+    var _why = String((e && (e.code || e.message)) || 'unknown').replace(/^Error:\s*/,'').slice(0,80);
+    console.warn('Submit failed:', _why);
     btn.disabled = false; btn.textContent = requestType==='quote' ? 'Request quote' : 'Send request';
-    showFormError('Something went wrong sending this \u2014 please try again in a moment.');
+    showFormError('Something went wrong sending this \u2014 please try again in a moment. (Reason: '+_why+')');
     return;
   }
 
