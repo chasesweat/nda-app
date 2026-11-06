@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191376">
+<meta name="version" content="202608191379">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -13920,7 +13920,7 @@ function renderRideView(r){
     if(!stops.length) return '';
     return stops.map(function(addr,i){
       const lbl = stops.length>1 ? 'STOP '+(i+1) : 'EXTRA STOP';
-      return `<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:#b45309;min-width:58px;margin-top:2px;">${lbl}</span><div style="font-size:.86rem;">${mapsLink(addr,"var(--accent)")}</div></div>`;
+      return `<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:#b45309;min-width:78px;flex-shrink:0;white-space:nowrap;margin-top:2px;">${lbl}</span><div style="font-size:.86rem;">${mapsLink(addr,"var(--accent)")}</div></div>`;
     }).join('');
   })();
 
@@ -16438,6 +16438,30 @@ function toggleEditMode(on){
   (function(){ var _rd=document.getElementById('edit-reqdriver'); if(_rd){ var _isCreator=(currentUser&&currentUser.name===r.createdBy); _rd.value=(_isCreator&&r.reqDriverNote)?r.reqDriverNote:''; _rd.closest('.form-group').style.display=_isCreator?'block':'none'; } })();
 }
 
+// v1379: after a date/time edit, re-detect Premium / Traffic / Holiday / Christmas for the new moment. If the ride's fee was
+// still exactly what the pricing engine gives for the old state, update the flags and the fee together. Returns a message
+// for the toast, or '' when nothing changed (custom fee, paid/invoiced, split or XXL ride, same surcharges).
+function _repriceOnDateChange(r, old){
+  if(!r.date || !r.time || (r.date===old.date && r.time===old.time)) return '';
+  if(r.xxl || r.pairId!=null || r.status==='paid' || r.paidAt || r.invoiced) return '';
+  if(!(parseFloat(old.price)>0)) return '';
+  var before = _priceRide(_priceInputsFromRecord(old)).total;
+  if(Math.abs(before - (parseFloat(old.price)||0)) > 0.5) return '';          // custom / negotiated fee: leave it
+  var p=r.time.split(':').map(Number), mins=(p[0]||0)*60+(p[1]||0), dow=new Date(r.date+'T12:00:00').getDay();
+  var xmas=isChristmasDate(r.date.slice(5)), hol=isHolidayDate(r.date) && !xmas;
+  var want = { premium:isPremiumTime(mins,_legIsPickup(r.type,'AP RUN',false)), traffic:isTrafficTime(dow,mins), holiday:hol, christmas:xmas };
+  var nr = Object.assign({}, old), changed=[];
+  Object.keys(want).forEach(function(k){
+    if(driverAutoOff(k)) return;
+    var was=(old[k]==='Y'||old[k]===true);
+    if(was!==want[k]){ nr[k]=want[k]?'Y':'N'; changed.push((want[k]?'+ ':'\u2212 ')+(_SURCHARGE_LABELS[k]||k)); }
+  });
+  if(!changed.length) return '';
+  var after = Math.round(_priceRide(_priceInputsFromRecord(nr)).total*100)/100;
+  Object.keys(want).forEach(function(k){ r[k]=nr[k]; });
+  r.price = after;
+  return 'surcharges updated ('+changed.join(', ')+'), fee $'+before+' \u2192 $'+after;
+}
 async function saveRideEdits(){
   const r=_rideById(activeRideId); if(!r) return;
   // PROTECTED (found completely unprotected during a session-wide audit - this is the function
@@ -16475,6 +16499,7 @@ async function saveRideEdits(){
     miles: r.miles, pax: r.pax, flight: r.flight, terminal: r.terminal, vehicle: r.vehicle,
     type: r.type, pickup: r.pickup, home: r.home, notes: r.notes,
   };
+  var _repOld = Object.assign({}, r);   // v1379: the ride as it was, to re-price a date/time change
   // Apply all edits
   r.client    = document.getElementById('edit-client').value.trim()||r.client;
   r.phone     = formatPhoneUS(document.getElementById('edit-phone').value);
@@ -16588,6 +16613,10 @@ async function saveRideEdits(){
       return;
     }
   }
+  // v1379: moving a ride to a day/time with different surcharges re-prices it, but only when the fee is still the calculator's
+  // number. A hand-typed or negotiated fee is never touched (the toast below warns instead).
+  var _repMsg = '';
+  try{ _repMsg = _repriceOnDateChange(r, _repOld); }catch(e){ _repMsg=''; }
   var _sreOk = await saveRides(); if(_sreOk) window._pendingUnsavedRideIds.delete(r.id);
   await saveNotifs();
   toggleEditMode(false);
@@ -16596,7 +16625,14 @@ async function saveRideEdits(){
   renderInterest(r);
   refreshDash(); renderCal(); updateNotifBadge();
   var _milesChanged = Math.abs((parseFloat(r.miles)||0) - _preEditMiles) >= 0.5;
-  if(_milesChanged){
+  var _trafMismatch = false;
+  try{ if((r.date!==_rideEditSnapshot.date || r.time!==_rideEditSnapshot.time) && (r.traffic==='Y'||r.traffic===true) && r.date && r.time){
+    var _tp=r.time.split(':').map(Number); _trafMismatch = !isTrafficTime(new Date(r.date+'T12:00:00').getDay(), (_tp[0]||0)*60+(_tp[1]||0)); } }catch(e){}
+  if(_repMsg){
+    showToast('Ride updated \u2713 \u2014 '+_repMsg);
+  } else if(_trafMismatch){
+    showToast('Ride updated \u2713 \u2014 the Traffic surcharge is still on but the new day/time is not a traffic time. Check \u2709\uFE0F Edit fee', 'error');
+  } else if(_milesChanged){
     showToast('Ride updated \u2713 \u2014 mileage changed, check the fee via \u2709\uFE0F Edit fee', 'error');
   } else {
     showToast('Ride updated \u2713');
@@ -18840,15 +18876,6 @@ function rideActionBarHtml(rid){
         ? '<button onclick="_dashRideCompletedPrompt('+rid+')" style="flex:1;min-height:44px;padding:.7rem .9rem;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">&#9989; Ride Completed</button>' : '')
       +'</div>';
   }
-  // v1370: same for an unstarted airport pickup that has not reached its time yet.
-  if(!_ridePastTime(r) && (r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')){
-    return '<div id="mt-bar" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem;">'
-      +'<div style="display:flex;gap:5px;flex-wrap:wrap;width:100%;">'
-      +'<button onclick="openStartRide('+rid+')" style="flex:1;min-height:44px;padding:.7rem .9rem;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;">&#128663; Start Ride</button>'
-      +'<button onclick="_dashRideCompletedPrompt('+rid+')" style="flex:1;min-height:44px;padding:.7rem .9rem;border-radius:8px;font-family:inherit;font-size:.88rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">&#9989; Ride Completed</button>'
-      +'</div></div>';
-  }
-
   return '<div id="mt-bar" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem;">'
     +'<div style="display:flex;gap:5px;flex-wrap:wrap;width:100%;">'
     +(_ridePastTime(r)
@@ -23323,10 +23350,6 @@ function refreshDash(){
           if(_ridePastTime(r)) _btns.push('<button onclick="event.stopPropagation();_dashRideCompletedPrompt('+r.id+')" style="flex:1;min-width:0;min-height:44px;padding:.5rem .5rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\u2705 Ride Completed</button>');
           else{
             _btns.push('<button onclick="event.stopPropagation();openStartRide('+r.id+')" style="flex:1;min-width:0;min-height:44px;padding:.5rem .5rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#7c3aed;color:#fff;">\ud83d\ude97 Start Ride</button>');
-            // v1370: a flight can land well before the scheduled time and the client may text first, so an airport ride offers
-            // Ride Completed beside Start Ride instead of waiting for the clock.
-            if(r.type==='AP PICK UP'||r.type==='AP ROUND TRIP')
-              _btns.push('<button onclick="event.stopPropagation();_dashRideCompletedPrompt('+r.id+')" style="flex:1;min-width:0;min-height:44px;padding:.5rem .5rem;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:800;cursor:pointer;border:none;background:#15803d;color:#fff;">\u2705 Ride Completed</button>');
           }
         } else if(r.type==='ROUND TRIP'){
           // Genuine round trips (not AP ROUND TRIP) get Pause/Resume instead of nothing once
