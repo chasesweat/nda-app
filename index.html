@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191379">
+<meta name="version" content="202608191384">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -1229,10 +1229,9 @@ html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2
         <div class="form-group"><label>Client Name</label><input type="text" id="edit-client" list="qa-client-list" autocomplete="off" oninput="populateClientDatalist();maybeAutofillClient('edit')" /><div id="edit-clientnotes-alert" style="display:none;font-size:.82rem;color:#1e3a8a;background:#dbeafe;border:1.5px solid #60a5fa;border-radius:8px;padding:.55rem .7rem;margin-top:.5rem;line-height:1.45;"></div></div>
         <div class="form-group"><label>Phone</label><input type="tel" id="edit-phone" inputmode="tel" autocomplete="tel" oninput="checkPhoneFieldHint('edit')" /><div id="edit-phone-hint" style="display:none;font-size:.72rem;color:#b45309;margin-top:.25rem;">&#9888; That looks like an address. Phone numbers go here &mdash; put the address in the <b>Pickup</b> / <b>Drop-off</b> fields below.</div></div>
         <div class="form-group" style="grid-column:1/-1;"><label>Additional numbers on confirmation <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(comma-separated)</span></label><input type="text" id="edit-extra-phones" placeholder="404-555-0102 (spouse), 770-555-0188 (assistant)" /></div>
-        <div class="form-group"><label>Email</label><input type="text" id="edit-email" /></div>
-        <div class="form-group"><label>Date</label><input type="date" id="edit-date" onchange="updateSuggestedPickupTime('edit')" /></div>
-        <div class="form-group"><label>Time</label><input type="time" id="edit-time" /><div id="edit-time-suggest-note" style="display:none;font-size:.74rem;font-weight:600;color:#5b21b6;background:#f3eeff;border:1px solid #d9c9f5;border-radius:7px;padding:.35rem .55rem;margin-top:.35rem;line-height:1.45;"></div></div>
-        <div id="edit-rt-group"><div class="form-group"><label>Return Date &amp; Time</label><div style="display:flex;gap:.5rem;"><input type="date" id="edit-rt-date" aria-label="Return date" style="flex:1;min-width:0;" /><input type="time" id="edit-rt" aria-label="Return pickup time" style="flex:1;min-width:0;" /></div></div></div>
+        <div class="form-group" style="grid-column:1/-1;"><label>Email</label><input type="text" id="edit-email" /></div>
+        <div class="form-group" style="grid-column:1/-1;"><label>Pickup Date &amp; Time</label><div style="display:flex;gap:.5rem;"><input type="date" id="edit-date" aria-label="Pickup date" onchange="updateSuggestedPickupTime('edit')" style="flex:1;min-width:0;" /><input type="time" id="edit-time" aria-label="Pickup time" style="flex:1;min-width:0;" /></div><div id="edit-time-suggest-note" style="display:none;font-size:.74rem;font-weight:600;color:#5b21b6;background:#f3eeff;border:1px solid #d9c9f5;border-radius:7px;padding:.35rem .55rem;margin-top:.35rem;line-height:1.45;"></div></div>
+        <div id="edit-rt-group"><div class="form-group" style="grid-column:1/-1;"><label>Return Date &amp; Time</label><div style="display:flex;gap:.5rem;"><input type="date" id="edit-rt-date" aria-label="Return date" style="flex:1;min-width:0;" /><input type="time" id="edit-rt" aria-label="Return pickup time" style="flex:1;min-width:0;" /></div></div></div>
         <div class="form-group" id="edit-miles-group"><label>Miles</label><input type="number" id="edit-miles" inputmode="decimal" min="0" step="0.1" /></div>
         <div class="form-group" id="edit-sprinter-hours-group" style="display:none;"><label>Sprinter hours <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(a Sprinter on a Round Trip bills by the hour)</span></label><input type="number" id="edit-sprinter-hours" min="0" step="0.25" /></div>
         <div class="form-group"><label>Passengers</label><input type="number" id="edit-pax" inputmode="numeric" min="1" max="14" /></div>
@@ -1965,6 +1964,20 @@ html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2
 // this file (always, unambiguously, "the current moment" - never used to parse some other
 // date) was changed to nowET() so this applies everywhere at once, not just to whichever call
 // sites happened to get individually reviewed.
+// v1383: ONE clock for everything that decides "which edit is newer". Date.now() is already UTC milliseconds (a phone in Chicago and one in
+// Georgia agree on it), but a phone whose clock is simply wrong would not - so every stamp is corrected by the database's own clock
+// offset (Firebase .info/serverTimeOffset, remembered between sessions). Times are SHOWN in Eastern.
+function _syncNow(){
+  var off=window._fbClockOffset;
+  if(typeof off!=='number'){ try{ off=parseFloat(localStorage.getItem('nda-clock-offset'))||0; }catch(e){ off=0; } window._fbClockOffset=off; }
+  return Date.now()+off;
+}
+function fmtTsET(ts){
+  try{
+    var d=new Date(ts), o={timeZone:'America/New_York'};
+    return d.toLocaleDateString('en-US',Object.assign({month:'short',day:'numeric'},o))+' '+d.toLocaleTimeString('en-US',Object.assign({hour:'numeric',minute:'2-digit'},o))+' ET';
+  }catch(e){ return ''; }
+}
 function nowET(){
   return new Date(new Date().toLocaleString('en-US', {timeZone: 'America/New_York'}));
 }
@@ -2554,6 +2567,8 @@ async function _showStorageBlockedHelp(){
   // show what this phone actually reported instead of leaving it to guesswork.
   var ownOk = true; try{ localStorage.setItem('nda-probe','1'); localStorage.removeItem('nda-probe'); }catch(e){ ownOk=false; }
   if(ownOk){
+    // v1384: only after 3 slow sign-ins in a row (a single slow start is normal on an iPhone)
+    try{ if((parseInt(localStorage.getItem('nda-auth-fb')||'0',10)||0) < 3) return; }catch(e){}
     // Told at most once a day - the facts are in the crash log every time, and a modal on every open is just noise.
     try{ var _last=parseInt(localStorage.getItem('nda-storage-help-at')||'0',10); if(_last && Date.now()-_last < 24*3600*1000) return; localStorage.setItem('nda-storage-help-at', String(Date.now())); }catch(e){}
   }
@@ -2670,7 +2685,7 @@ function _qdSaveNow(){
     var who = String((fields||{})['q-client']||'').trim();
     if(!who) return;
     if(!_qdActiveId) _qdActiveId = _qdNewId();
-    var rec = { id:_qdActiveId, ts:Date.now(), by:(currentUser&&currentUser.name)||'', fields:fields };
+    var rec = { id:_qdActiveId, ts:_syncNow(), by:(currentUser&&currentUser.name)||'', fields:fields };
     _qdDrop();
     storageSet('kat:quoteDrafts/'+_qdUserKey()+'/'+_qdActiveId, rec).catch(function(){});
   }catch(e){}
@@ -2992,10 +3007,12 @@ async function _fbSignInWithFallback(){
   var lastErr=null;
   for(var i=0;i<modes.length;i++){
     try{
-      if(modes[i][1]) await _withTimeout(auth.setPersistence(modes[i][1]), 5000, 'setPersistence');
+      if(modes[i][1]) await _withTimeout(auth.setPersistence(modes[i][1]), 12000, 'setPersistence');   // v1384: iPhones wake their storage slowly; 5 s gave up too soon
       if(auth.currentUser) return true;
-      await _withTimeout(auth.signInAnonymously(), 8000, 'signInAnonymously');
+      await _withTimeout(auth.signInAnonymously(), 12000, 'signInAnonymously');
       window._authStorageMode = modes[i][0];     // v1219: lets the app tell a person their storage is blocked
+      // v1384: count fallbacks IN A ROW; one slow start is not worth a warning, three in a row is (see _showStorageBlockedHelp)
+      try{ localStorage.setItem('nda-auth-fb', i===0 ? '0' : String((parseInt(localStorage.getItem('nda-auth-fb')||'0',10)||0)+1)); }catch(e){}
       if(i>0){
         var _health=''; try{ _health = await _withTimeout(_storageHealthText(), 6000, 'storage check'); }catch(e){ _health='(storage check did not finish)'; }
         try{ if(typeof _logCrash==='function') _logCrash('auth-storage-fallback',
@@ -3241,12 +3258,18 @@ async function storageSet(key, val) {
   if(_unsafeToOverwrite(key)) return _refuseUnsafeWrite(key);
   // Write to Firebase
   var _ok = true;
-  if(fbDB){
+  var _gp=key.replace(/:/g,'/'), _gq=false;
+  if(fbDB){ try{ _gq=_gobRecord(_gp, _mirrorBase(key), val); }catch(e){} }     // v1383: wait on this phone until the server confirms
+  // v1383: while the phone knows it is offline, do NOT hand Firebase a blind write to replay later (it would overwrite whatever others
+  // changed in the meantime); keep it in the outbox, where it is merged on reconnect.
+  var _heldOffline = !!(fbDB && _gq && window._fbConnected===false);
+  if(fbDB && !_heldOffline){
     await ensureFbAuth();
     try {
       await fbRef('nda/'+key.replace(/:/g,'/')).set(val);
     } catch(e){ console.warn('Firebase write failed:', e); _ok = false; }
   }
+  if(_gq && _ok && !_heldOffline) _gobClear([_gp]);
   // Also write to localStorage as backup - budgeted, see _lsMirror() (v1258)
   _lsMirror(key, JSON.stringify(val), !!fbDB && _ok);
   try{ _auditAdminChange(key); }catch(e){}
@@ -3281,11 +3304,15 @@ async function storageSetOne(coll, key, val, wholeObj){
     return false;
   }
   var _ok = true;
-  if(fbDB){
+  var _gp1=String(coll).replace(/:/g,'/')+'/'+k, _gq1=false;
+  if(fbDB){ try{ _gq1=_gobRecord(_gp1, _mirrorBase(coll, k), val); }catch(e){} }   // v1383
+  var _held1 = !!(fbDB && _gq1 && window._fbConnected===false);     // v1383: offline -> outbox, merged on reconnect (see storageSet)
+  if(fbDB && !_held1){
     await ensureFbAuth();
     try{ await fbRef('nda/'+String(coll).replace(/:/g,'/')+'/'+k).set(val); }
     catch(e){ console.warn('Firebase targeted write failed:', e); _ok = false; }
   }
+  if(_gq1 && _ok && !_held1) _gobClear([_gp1]);
   // Keep the localStorage backup whole-collection shaped, matching what storageSet writes and
   // what the loader expects - a partial cache would read back as a collection of one.
   if(wholeObj!==undefined){
@@ -3310,10 +3337,11 @@ var _offlineTimer=null;
 function _watchConnection(){
   if(window._connWatching || !fbRef) return;
   window._connWatching=true;
+  try{ fbRef('.info/serverTimeOffset').on('value', function(sn){ var o=sn&&sn.val(); if(typeof o==='number'){ window._fbClockOffset=o; try{ localStorage.setItem('nda-clock-offset', String(o)); }catch(e){} } }); }catch(e){}
   fbRef('.info/connected').on('value', function(snap){
     var on=!!(snap && snap.val());
     clearTimeout(_offlineTimer);
-    if(on){ window._fbConnected=true; _renderOfflineBar(); }
+    if(on){ window._fbConnected=true; _renderOfflineBar(); try{ if(_outboxCount()>0) _outboxReplaySoon(); }catch(e){} }
     else { _offlineTimer=setTimeout(function(){ window._fbConnected=false; _renderOfflineBar(); }, 4000); }
   });
 }
@@ -3329,12 +3357,17 @@ function _ridesAsOfLabel(){
 function _renderOfflineBar(){
   var bar=document.getElementById('nda-offline-bar');
   var offline = window._fbConnected===false;
+  // v1382: changes waiting on this phone. Online, the notice only appears once something has waited more than ~4 seconds.
+  var _pend=0, _old=false;
+  try{ var _ol=_outboxList().concat(_gobList()); _pend=_ol.length; _old=_ol.some(function(x){ return _syncNow()-(x.editedAt||0)>4000; }); }catch(e){}
   // The red "couldn't load" banner (v1196) already covers a failed load and pauses changes; don't
   // stack a second, softer message on top of it.
-  if(!offline || document.getElementById('nda-stale-banner')){ if(bar) bar.remove(); return; }
+  if((!offline && !(_pend>0 && _old)) || document.getElementById('nda-stale-banner')){ if(bar) bar.remove(); return; }
   var asOf=_ridesAsOfLabel();
-  var html='\uD83D\uDCF6 <b>Offline</b> \u2014 showing rides as of '+(asOf||'your last connection')
-          +'. Changes will send when you\u2019re back online.';
+  var _pendTxt = _pend>0 ? ' <b>'+_pend+' change'+(_pend===1?'':'s')+' saved on this phone, waiting to send \u2014 keep the app open.</b>' : '';
+  var html = offline
+    ? ('\uD83D\uDCF6 <b>Offline</b> \u2014 showing rides as of '+(asOf||'your last connection')+'. Changes will send when you\u2019re back online.'+_pendTxt)
+    : ('\u23F3 Sending '+_pend+' change'+(_pend===1?'':'s')+' saved on this phone\u2026');
   if(!bar){
     bar=document.createElement('div'); bar.id='nda-offline-bar';
     // v1258: same fix as the red banner - in flow, below the menu and modals, never over the header.
@@ -3488,6 +3521,7 @@ function setupRealtimeListeners(){
     } else {
       savedQuotes = [];
     }
+    try{ _fixSavedRoundTripTraffic(); }catch(e){}
     try{ if(typeof renderSavedQuotes==='function' && document.getElementById('saved-quotes-wrap')) renderSavedQuotes(); }catch(e){}
   });
   // Listen for finder-fee payment changes so marking paid / undo shows up live on the
@@ -3749,7 +3783,7 @@ function _uploadOpenTimes(){
   try{
     var list=JSON.parse(localStorage.getItem('nda-open-times')||'[]').slice(-30);
     if(!list.length) return;
-    var p=fbRef('nda/kat/openTimes/'+k).set({ updatedAt:Date.now(), device:_openDevice(), opens:list });
+    var p=fbRef('nda/kat/openTimes/'+k).set({ updatedAt:_syncNow(), device:_openDevice(), opens:list });
     if(p && p.catch) p.catch(function(){});
   }catch(e){}
 }
@@ -4470,7 +4504,7 @@ function _quoteAgeFrom(q){
 async function _expiringSoon(){
   var out = [];
   try{
-    var warnAt = Date.now() - (RETENTION_DAYS-EXPIRY_WARN_DAYS)*24*60*60*1000;
+    var warnAt = _syncNow() - (RETENTION_DAYS-EXPIRY_WARN_DAYS)*24*60*60*1000;
     // v1348: only MY quotes. savedQuotes is one shared array, so without this the warning listed
     // other drivers' quotes (the list on the Quote page already filtered to the creator).
     var _me=((currentUser&&currentUser.name)||'').trim();
@@ -4719,7 +4753,7 @@ async function processClientRequests(){
         carSeatsNeeded: !!r.carSeatsNeeded, bookedFor: r.bookedFor||''
       };
       _markNotifDirty(myDriverName);
-      notifications[myDriverName].unshift({ rideId:null, type:'client_request', channel:null, read:false, msg:msg, ts:Date.now(), createdBy:'', clientRequestId:id, req:_reqPayload });
+      notifications[myDriverName].unshift({ rideId:null, type:'client_request', channel:null, read:false, msg:msg, ts:_syncNow(), createdBy:'', clientRequestId:id, req:_reqPayload });
       // allowSelf=true: this is an EXTERNAL event (a client submitted the form) that merely got
       // noticed by this driver's own polling loop. Without it, sendPushToDriver's anti-self-push
       // guard matched and dropped this silently - bell notification appeared, phone never buzzed.
@@ -5164,6 +5198,253 @@ async function saveRides(){
 // Backward compatible: rides saved before this build have no _rev, which is treated as 0. The first
 // save stamps 1. The whole-list write used when rides are ADDED or DELETED is a separate path with its
 // own merge protection (v862) and is unchanged.
+// ── OFFLINE OUTBOX (v1382) ───────────────────────────────────────────────────
+// Every ride change is also written to this phone's own storage (nda-outbox-v1) BEFORE it is sent, and removed only
+// when the server confirms it. So a change made with no signal survives closing the app or a restart. When the phone
+// is back online each waiting change is merged into whatever the server holds NOW, field by field:
+//   * a field only I changed        -> mine
+//   * a field only someone else changed -> theirs is kept
+//   * a field we BOTH changed        -> the newer edit wins (my edit time vs the ride's last change on the server;
+//                                       if the server time is unknown the server's value is kept)
+// Entries: { id, base (ride as I last knew it), mine (ride as I left it), editedAt (ms), isNew, at (first queued) }.
+var _OUTBOX_KEY='nda-outbox-v1';
+function _outboxList(){
+  try{ var v=JSON.parse(localStorage.getItem(_OUTBOX_KEY)||'null'); if(Array.isArray(v)) return v; }catch(e){}
+  return Array.isArray(window._outboxMem) ? window._outboxMem : [];
+}
+function _outboxStore(list){
+  window._outboxMem=list;
+  try{ if(list.length) localStorage.setItem(_OUTBOX_KEY, JSON.stringify(list)); else localStorage.removeItem(_OUTBOX_KEY); }catch(e){}
+  try{ _renderOfflineBar(); }catch(e){}
+  if(list.length){ clearTimeout(window._outboxBarTimer); window._outboxBarTimer=setTimeout(function(){ try{ _renderOfflineBar(); }catch(e){} }, 4300); }
+}
+function _outboxCount(){ return _outboxList().length + _gobList().length; }
+function _outboxRecord(id, base, mine, isNew){
+  try{
+    var list=_outboxList(), now=_syncNow(), mineC=JSON.parse(JSON.stringify(mine));
+    var e=list.find(function(x){ return x.id===id; });
+    var who=''; try{ who=getMyDriverName()||(currentUser&&currentUser.name)||''; }catch(_e){}
+    if(e){ e.mine=mineC; e.editedAt=now; e.by=who||e.by; if(isNew) e.isNew=true; }
+    else { list.push({ id:id, base:(base?JSON.parse(JSON.stringify(base)):null), mine:mineC, editedAt:now, isNew:!!isNew, at:now, by:who }); }
+    if(list.length>80) list=list.slice(-80);
+    _outboxStore(list);
+  }catch(e){}
+}
+function _outboxClear(ids){
+  try{
+    var set=new Set(ids), list=_outboxList(), keep=list.filter(function(x){ return !set.has(x.id); });
+    if(keep.length!==list.length) _outboxStore(keep);
+  }catch(e){}
+}
+function _rideLastMod(r){
+  if(!r) return 0;
+  var t=parseFloat(r._modAt)||0;
+  (Array.isArray(r.trail)?r.trail:[]).forEach(function(x){ if(x&&x.sync) return; var v=parseFloat(x&&x.ts)||0; if(v>t) t=v; });   // a 'synced' line records when the sync ran, not when anything was edited
+  return t;
+}
+function _mergeRideEdit(server, base, mine, editedAt, who){
+  var skip={_rev:1,_modAt:1,trail:1,_fromPush:1,_archived:1,_archSnap:1};
+  var out=Object.assign({}, server), applied=[], kept=[], lostVals={}, srvTs=_rideLastMod(server);
+  var keys={}; Object.keys(mine||{}).forEach(function(k){ keys[k]=1; }); Object.keys(base||{}).forEach(function(k){ keys[k]=1; });
+  var J=function(o,k){ return JSON.stringify(o ? o[k] : undefined); };
+  Object.keys(keys).forEach(function(k){
+    if(skip[k]) return;
+    var jb=J(base,k), jm=J(mine,k), js=J(server,k);
+    if(jm===jb || js===jm) return;
+    var useMine = (js===jb) || (srvTs>0 && editedAt>srvTs);
+    if(useMine){ if(mine[k]===undefined) delete out[k]; else out[k]=JSON.parse(JSON.stringify(mine[k])); applied.push(k); }
+    else { kept.push(k); lostVals[k]=mine[k]; }
+  });
+  var changedByMe=Object.keys(keys).filter(function(k){ return !skip[k] && J(mine,k)!==J(base,k); });
+  var seen={}, tr=[];
+  (Array.isArray(server.trail)?server.trail:[]).concat(Array.isArray(mine.trail)?mine.trail:[]).forEach(function(x){
+    var key=(x&&x.ts)+'|'+(x&&x.by)+'|'+(x&&x.action); if(!seen[key]){ seen[key]=1; tr.push(x); }
+  });
+  // v1382: every edit stays in the history, stamped with when it was MADE. An edit that left no history line of its own gets one.
+  var by=who||'Someone', fmt=function(v){ var t=(v===undefined||v===null||v==='')?'(blank)':(typeof v==='object'?JSON.stringify(v):String(v)); return t.length>50?t.slice(0,47)+'\u2026':t; };
+  var baseTrailN=(base&&Array.isArray(base.trail))?base.trail.length:0;
+  var mineAdded=(Array.isArray(mine.trail)?mine.trail:[]).filter(function(x){ return !(base&&Array.isArray(base.trail)&&base.trail.some(function(b){ return b&&x&&b.ts===x.ts&&b.by===x.by&&b.action===x.action; })); });
+  if(!mineAdded.length && changedByMe.length){
+    tr.push({ by:by, action:'Edited '+changedByMe.join(', ')+' while offline', ts:editedAt||Date.now(), offline:true });
+  }
+  var syncBits=[];
+  if(kept.length) syncBits.push('kept the newer change to '+kept.map(function(k){ return k+' (this offline edit "'+fmt(lostVals[k])+'" was not applied)'; }).join(', '));
+  if(applied.length && srvTs>0 && (editedAt<srvTs)) syncBits.push('applied '+applied.join(', '));
+  if(applied.length||kept.length){
+    tr.push({ by:by, action:'Offline edit synced'+(syncBits.length?' \u2014 '+syncBits.join('; '):''), ts:_syncNow(), offline:true, sync:true });
+  }
+  tr.sort(function(a,b){ return (a.ts||0)-(b.ts||0); });
+  if(tr.length) out.trail=tr.slice(-24);
+  out._modAt=Math.max(parseFloat(server._modAt)||0, editedAt||0);
+  return { ride:out, applied:applied, kept:kept };
+}
+function _outboxMsg(client, m){
+  var what = m.kept.length ? ('merged your offline change to “'+(client||'a ride')+'” — kept the newer version of: '+m.kept.join(', '))
+                           : ('your offline change to “'+(client||'a ride')+'” was applied');
+  return what;
+}
+// Re-apply everything still waiting, against the live rides. Safe to run any number of times.
+async function _outboxReplay(){
+  if(window._outboxBusy) return;
+  var list=_outboxList(); if(!list.length) return;
+  if(window._fbConnected===false || !Array.isArray(rides) || (window._dataFresh===false)) return;
+  window._outboxBusy=true;
+  try{
+    var msgs=[], handled=[];
+    list.forEach(function(e){
+      var i=rides.findIndex(function(r){ return r && r.id===e.id; });
+      var mine=e.mine;
+      if(i<0){
+        if(e.isNew){ rides.push(JSON.parse(JSON.stringify(mine))); msgs.push('“'+(mine.client||'ride')+'” added'); }
+        handled.push(e.id); return;                       // an edit to a ride that is gone: nothing to apply
+      }
+      var live=rides[i];
+      if(e.isNew && !(live.client===mine.client && live.date===mine.date && live.time===mine.time)){
+        var nid=Math.max.apply(null, rides.map(function(r){ return (r&&+r.id)||0; }).concat([+nextId||0]))+1;
+        var cp=JSON.parse(JSON.stringify(mine)); cp.id=nid; rides.push(cp); try{ nextId=nid+1; }catch(_e){}
+        msgs.push('“'+(mine.client||'ride')+'” added'); handled.push(e.id); return;
+      }
+      var m=_mergeRideEdit(live, e.base, mine, e.editedAt, e.by);
+      if(m.applied.length||m.kept.length){ rides[i]=m.ride; msgs.push(_outboxMsg(mine.client, m)); }
+      handled.push(e.id);
+    });
+    var ok=await saveRides();
+    if(ok){
+      _outboxClear(handled);
+      try{ renderCal(); refreshDash(); }catch(e){}
+      if(msgs.length) try{ showToast('✓ Back online — '+msgs.join('; ')); }catch(e){}
+    }
+  }catch(e){ console.warn('outbox replay failed', e); }
+  finally{ window._outboxBusy=false; }
+}
+function _outboxReplayAll(){ _outboxReplay(); _gobReplay(); }
+function _outboxReplaySoon(){
+  [2500, 8000, 20000].forEach(function(ms){ setTimeout(function(){ _outboxReplayAll(); }, ms); });
+}
+setInterval(function(){ try{ if(_outboxCount()>0 && window._fbConnected!==false) _outboxReplayAll(); }catch(e){} }, 60000);
+// Push on the way out and on the way back: switching away from the app, or the connection returning, sends whatever waits.
+document.addEventListener('visibilitychange', function(){ try{ if(document.visibilityState==='hidden' && _outboxCount()>0 && window._fbConnected!==false) _outboxReplayAll(); }catch(e){} });
+window.addEventListener('pagehide', function(){ try{ if(_outboxCount()>0 && window._fbConnected!==false) _outboxReplayAll(); }catch(e){} });
+window.addEventListener('online', function(){ try{ if(_outboxCount()>0){ window._fbConnected=true; _outboxReplaySoon(); } }catch(e){} });
+// Ask the browser not to clear this phone-side queue when storage runs low.
+try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
+window.addEventListener('beforeunload', function(e){
+  if(_outboxCount()>0){ e.preventDefault(); e.returnValue='Changes are still waiting to send.'; return e.returnValue; }
+});
+
+// ── OFFLINE OUTBOX FOR EVERYTHING ELSE (v1383) ───────────────────────────────
+// Same idea as the ride outbox, for every other saved collection (saved quotes, clients, driver settings, templates, pricing, profiles...).
+// storageSet / storageSetOne queue the value on this phone (nda-outbox-gen-v1, keyed by database path) BEFORE writing and clear it when
+// the server confirms. On reconnect each waiting value is 3-way merged into what the server holds NOW (base = what this phone last knew):
+// a part only I changed -> mine; a part only someone else changed -> theirs kept; lists of items are merged item by item (my added /
+// removed / edited items applied unless someone changed the same item); a part BOTH changed -> the server's value stays and the
+// phone says so (these collections carry no per-field edit times, so "newer" cannot be proven; rides do carry them).
+var _GOB_KEY='nda-outbox-gen-v1';
+var _GOB_SKIP=/^(kat\/(crashLog|fcmTokens|driversLoggedIn|chatLastRead|uiPrefs|openTimes|quoteDrafts|ridesArchive|documents|docFolders|driverPhotoOverrides|publicDriverDirectory|receipts|notifications|sos|rides))(\/|$)/;
+function _gobList(){
+  try{ var v=JSON.parse(localStorage.getItem(_GOB_KEY)||'null'); if(Array.isArray(v)) return v; }catch(e){}
+  return Array.isArray(window._gobMem) ? window._gobMem : [];
+}
+function _gobStore(list){
+  window._gobMem=list;
+  try{ if(list.length) localStorage.setItem(_GOB_KEY, JSON.stringify(list)); else localStorage.removeItem(_GOB_KEY); }catch(e){}
+  try{ _renderOfflineBar(); }catch(e){}
+  if(list.length){ clearTimeout(window._outboxBarTimer); window._outboxBarTimer=setTimeout(function(){ try{ _renderOfflineBar(); }catch(e){} }, 4300); }
+}
+function _stable(o){
+  if(o===undefined) return 'u';
+  if(o===null || typeof o!=='object') return JSON.stringify(o);
+  if(Array.isArray(o)) return '['+o.map(_stable).join(',')+']';
+  return '{'+Object.keys(o).sort().map(function(k){ return JSON.stringify(k)+':'+_stable(o[k]); }).join(',')+'}';
+}
+function _eq(a,b){ return _stable(a)===_stable(b); }
+function _isPlainObj(o){ return o!==null && typeof o==='object' && !Array.isArray(o); }
+function _mirrorBase(coll, sub){
+  try{
+    var raw=localStorage.getItem(coll); if(raw==null) return null;
+    var v=JSON.parse(raw);
+    if(sub===undefined) return v;
+    return (v && typeof v==='object' && sub in v) ? v[sub] : null;
+  }catch(e){ return null; }
+}
+function _gobRecord(path, base, mine){
+  try{
+    if(_GOB_SKIP.test(path)) return false;
+    var mineC=JSON.parse(JSON.stringify(mine===undefined?null:mine));
+    if(JSON.stringify(mineC).length>90000) return false;          // photos/logos: too big for the phone-side queue
+    var list=_gobList(), now=_syncNow(), who=''; try{ who=getMyDriverName()||(currentUser&&currentUser.name)||''; }catch(e){}
+    var e=list.find(function(x){ return x.path===path; });
+    if(e){ e.mine=mineC; e.editedAt=now; e.by=who||e.by; }
+    else list.push({ path:path, base:(base===undefined?null:base), mine:mineC, editedAt:now, at:now, by:who });
+    if(list.length>60) list=list.slice(-60);
+    _gobStore(list); return true;
+  }catch(e){ return false; }
+}
+function _gobClear(paths){
+  try{ var set=new Set(paths), l=_gobList(), keep=l.filter(function(x){ return !set.has(x.path); }); if(keep.length!==l.length) _gobStore(keep); }catch(e){}
+}
+function _gMergeArr(srv, base, mine, path, conf){
+  var K=function(it){ return _itemKey(it); };
+  var sm={}, bm={}, mm={}, out=srv.slice();
+  srv.forEach(function(it){ var k=K(it); if(k!=null) sm[k]=it; });
+  (base||[]).forEach(function(it){ var k=K(it); if(k!=null) bm[k]=it; });
+  mine.forEach(function(it){ var k=K(it); if(k!=null) mm[k]=it; });
+  mine.forEach(function(m){
+    var k=K(m), b=bm[k], sv=sm[k];
+    if(b===undefined){ if(sv===undefined) out.push(m); else if(!_eq(sv,m)) conf.push(path+'['+k+']'); return; }       // I added it
+    if(_eq(m,b)) return;                                                                                                // I did not touch it
+    if(sv===undefined){ conf.push(path+'['+k+'] (deleted elsewhere)'); return; }
+    if(_eq(sv,b)){ var i=out.findIndex(function(x){ return K(x)===k; }); if(i>=0) out[i]=m; return; }                    // only I changed it
+    if(!_eq(sv,m)) conf.push(path+'['+k+']');
+  });
+  (base||[]).forEach(function(b){                                                                                       // I removed it
+    var k=K(b); if(mm[k]!==undefined) return;
+    var sv=sm[k]; if(sv===undefined) return;
+    if(_eq(sv,b)) out=out.filter(function(x){ return K(x)!==k; }); else conf.push(path+'['+k+'] (removed here, edited elsewhere)');
+  });
+  return out;
+}
+function _gMerge(srv, base, mine, path, conf){
+  if(_eq(mine,base)) return srv;
+  if(_eq(srv,mine)) return srv;
+  if(_eq(srv,base)) return mine;
+  if(_isPlainObj(srv) && _isPlainObj(mine) && (_isPlainObj(base)||base==null)){
+    var out=Object.assign({},srv), keys={};
+    Object.keys(srv).concat(Object.keys(mine)).concat(Object.keys(base||{})).forEach(function(k){ keys[k]=1; });
+    Object.keys(keys).forEach(function(k){
+      var v=_gMerge(srv[k], base?base[k]:undefined, mine[k], path+'/'+k, conf);
+      if(v===undefined) delete out[k]; else out[k]=v;
+    });
+    return out;
+  }
+  if(Array.isArray(srv) && Array.isArray(mine) && (Array.isArray(base)||base==null)) return _gMergeArr(srv, base, mine, path, conf);
+  conf.push(path);
+  return srv;                 // both changed the same value: the one already on the server stays
+}
+async function _gobReplay(){
+  if(window._gobBusy) return;
+  var list=_gobList(); if(!list.length) return;
+  if(window._fbConnected===false || typeof fbRef!=='function' || !fbDB) return;
+  window._gobBusy=true;
+  try{
+    await ensureFbAuth();
+    var done=[], notes=[], merged=0;
+    for(var i=0;i<list.length;i++){
+      var e=list[i];
+      var sn=await fbRef('nda/'+e.path).once('value'), srv=sn.val(); if(srv===undefined) srv=null;
+      var conf=[], res=_gMerge(srv, e.base, e.mine, e.path, conf);
+      if(!_eq(res,srv)){ await fbRef('nda/'+e.path).set(res); merged++; }
+      if(conf.length) notes.push(e.path+': kept the newer version of '+conf.slice(0,4).join(', ')+(conf.length>4?' …':''));
+      done.push(e.path);
+    }
+    _gobClear(done);
+    if(notes.length){
+      try{ var all=JSON.parse(localStorage.getItem('nda-sync-notes')||'[]'); notes.forEach(function(n){ all.push({ts:_syncNow(),note:n}); }); localStorage.setItem('nda-sync-notes', JSON.stringify(all.slice(-30))); }catch(_e){}
+    }
+    if(merged||notes.length) try{ showToast('✓ Back online — your saved changes were sent'+(notes.length?'. '+notes.join('; '):'')); }catch(_e){}
+  }catch(e){ console.warn('general outbox replay failed', e); }
+  finally{ window._gobBusy=false; }
+}
 async function _saveChangedRidesChecked(changed){
   var conflicts=[];
   await Promise.all(Object.keys(changed).map(function(k){
@@ -5199,16 +5480,30 @@ async function _saveChangedRidesChecked(changed){
 // A refused save means the server holds something newer or different. Show the server's version
 // and tell the driver plainly, rather than keep a change that would overwrite someone else's.
 function _handleRideConflicts(conflicts){
-  var drift=false;
+  var drift=false, mergedOnes=[];
   conflicts.forEach(function(c){
     try{ window._pendingUnsavedRideIds && window._pendingUnsavedRideIds.delete(c.id); }catch(e){}
     if(c.reason==='stale' && c.server && c.server.id===c.id){
       var i=(rides||[]).findIndex(function(r){ return r && r.id===c.id; });
-      if(i>=0) rides[i]=c.server;
+      // v1382: instead of discarding this phone's change, merge it into the server's newer copy (newer edit wins per field)
+      var ent=null; try{ ent=_outboxList().find(function(x){ return x.id===c.id; }); }catch(e){}
+      window._mergeTries=window._mergeTries||{};
+      if(i>=0 && ent && (window._mergeTries[c.id]||0)<3){
+        window._mergeTries[c.id]=(window._mergeTries[c.id]||0)+1;
+        var mm=_mergeRideEdit(c.server, ent.base, ent.mine, ent.editedAt, ent.by);
+        rides[i]=mm.ride; c._merged=mm; c._idx=i; mergedOnes.push(c);
+      } else if(i>=0) rides[i]=c.server;
     } else if(c.reason==='drift'){ drift=true; }
   });
   try{ _snapshotRidesBaseline(rides); }catch(e){}
-  var stale=conflicts.filter(function(c){ return c.reason==='stale'; });
+  var stale=conflicts.filter(function(c){ return c.reason==='stale' && !c._merged; });
+  if(mergedOnes.length){
+    try{ showToast('\u2713 '+mergedOnes.map(function(c){ return _outboxMsg(c.client, c._merged); }).join('; '),'error'); }catch(e){}
+    setTimeout(function(){ try{
+      // by now the save that raised this conflict has taken its own baseline; make the baseline the SERVER's copy so the merged ride counts as changed and is written
+      mergedOnes.forEach(function(c){ var k=(rides||[]).findIndex(function(r){ return r && r.id===c.id; }); if(k>=0 && _ridesBaseline.length===rides.length) _ridesBaseline[k]=JSON.stringify(c.server); });
+      saveRides().then(function(ok){ if(ok) _outboxClear(mergedOnes.map(function(c){ return c.id; })); }); }catch(e){} }, 300);
+  }
   if(stale.length){
     var who = stale.length===1 ? ('\u201C'+(stale[0].client||'A ride')+'\u201D was') : (stale.length+' rides were');
     showToast(who+' changed on another device \u2014 your change wasn\u2019t saved. Showing the latest; please check and redo it.','error');
@@ -5273,8 +5568,17 @@ async function _saveRidesInner(){
       return true;
     }
     if(changed){
+      // v1382: keep a copy of every change on this phone until the server confirms it (see OFFLINE OUTBOX).
+      Object.keys(changed).forEach(function(k){
+        var r=changed[k]; if(!r || r.id==null) return;
+        r._modAt=_syncNow();
+        var b=null; try{ b=_ridesBaseline[+k] ? JSON.parse(_ridesBaseline[+k]) : null; }catch(_e){}
+        _outboxRecord(r.id, b, r, false);
+      });
       // Each changed ride is written through a revision check instead of a blind update (v1210).
       var _conflicts = await _saveChangedRidesChecked(changed);
+      var _cids = new Set(_conflicts.map(function(c){ return c.id; }));
+      _outboxClear(Object.keys(changed).map(function(k){ return changed[k] && changed[k].id; }).filter(function(id){ return id!=null && !_cids.has(id); }));
       if(_conflicts.length) _handleRideConflicts(_conflicts);
     }
     else       {
@@ -5338,7 +5642,7 @@ async function _saveRidesInner(){
           const _srvByRev = {}; _srv.forEach(function(r){ _srvByRev[r.id]=r; });
           const _knownById = {};
           _ridesBaseline.forEach(function(bs){ try{ var o=JSON.parse(bs); if(o && o.id!=null) _knownById[o.id]=bs; }catch(_e){} });
-          const _strip = function(o){ var c=Object.assign({},o); delete c._rev; return JSON.stringify(c); };
+          const _strip = function(o){ var c=Object.assign({},o); delete c._rev; delete c._modAt; return JSON.stringify(c); };
           _toWrite = _toWrite.map(function(r){
             if(!r) return r;
             var sv=_srvByRev[r.id]; if(!sv) return r;
@@ -5379,7 +5683,14 @@ async function _saveRidesInner(){
         console.warn('saveRides: holding a push-only ride and could not read the server - not writing');
         return false;
       }
+      // v1382: rides this device created that the server has never seen wait in the outbox until the write is confirmed.
+      var _newIds=[];
+      try{
+        const _kn=new Set(); _ridesBaseline.forEach(function(bs){ try{ var o=JSON.parse(bs); if(o&&o.id!=null) _kn.add(o.id); }catch(_e){} });
+        _toWrite.forEach(function(r){ if(r && r.id!=null && !_kn.has(r.id) && !r._fromPush){ r._modAt=_syncNow(); _outboxRecord(r.id, null, r, true); _newIds.push(r.id); } });
+      }catch(_e){}
       await fbRef('nda/kat/rides').set(_toWrite);
+      _outboxClear(_newIds);
       // If push copies were swapped for the server's own, show those - otherwise the screen would
       // still hold the push copy while the baseline records the server's, and the next save would
       // see the difference and write the push copy straight back.
@@ -5405,6 +5716,34 @@ async function _saveRidesInner(){
 // ── SAVED QUOTES ──────────────────────────────────────────────────────────
 // Quotes saved for later (NOT on the calendar) — each is a full ride-shaped object
 // plus a _quoteId. Scheduling one moves it into rides[].
+// v1380: saved ROUND TRIP quotes whose return is on the same day were priced with the outbound's Traffic only. Re-judge the return
+// leg by its own time and, when the saved price is still the calculator's number, update it. A typed Final Price is left alone
+// (counted in the toast). Each quote is fixed once (_rtLegFix) so this is safe to run on every sync, on any device.
+function _fixSavedRoundTripTraffic(){
+  var list=savedQuotes||[], changed=0, kept=0;
+  list.forEach(function(q){
+    if(!q || q._rtLegFix===1380 || q.type!=='ROUND TRIP') return;
+    var rtm=q.rt||q.rtTime||''; var rd=q.rtDate||q.rtDateAP||'';
+    if(!q.date || !rtm || (rd && rd!==q.date)){ return; }                     // different-day returns were already per leg
+    var p=rtm.split(':').map(Number), mins=(p[0]||0)*60+(p[1]||0), dow=new Date(q.date+'T12:00:00').getDay();
+    var want=isTrafficTime(dow,mins), had=(q.rt_traffic==='Y'||q.rt_traffic===true);
+    q._rtLegFix=1380;
+    if(want===had) return;
+    var oldIn=_priceInputsFromRecord(q); oldIn.rtSeparate=false; oldIn.state2={};
+    var oldTotal=_priceRide(oldIn).total, price=parseFloat(q.price)||0;
+    if(price>0 && Math.abs(oldTotal-price)>0.5){ kept++; return; }          // typed Final Price: not touched
+    var nq=Object.assign({},q,{rt_traffic:want?'Y':'N'});
+    if(q.rt_premium===undefined){ ['premium','holiday','christmas','late','fuel'].forEach(function(k){ nq['rt_'+k]='N'; }); }
+    var nt=Math.round(_priceRide(_priceInputsFromRecord(nq)).total*100)/100;
+    q.rt_traffic=nq.rt_traffic; if(q.rt_premium===undefined){ ['premium','holiday','christmas','late','fuel'].forEach(function(k){ q['rt_'+k]='N'; }); }
+    q.price=nt; changed++;
+  });
+  if(changed||kept){
+    try{ saveSavedQuotes(); }catch(e){}
+    try{ if(changed) showToast(changed+' saved round-trip quote'+(changed>1?'s':'')+' re-priced for the return leg\u2019s traffic hours'+(kept?' ('+kept+' with a typed price left alone)':'')); }catch(e){}
+  }
+  return {changed:changed, kept:kept};
+}
 let savedQuotes = [];
 async function saveSavedQuotes(){ return await storageSetArray('kat:savedQuotes', savedQuotes); }
 
@@ -5942,7 +6281,7 @@ async function resetAllOnboarding(){
   if(!(currentUser && currentUser.role==='admin')){ showToast('Admins only','error'); return; }
   if(!await askConfirm('Re-prompt EVERY driver to review and update their profile info?\n\nThe next time each driver opens the app, the quick setup screen appears so they can fill in newly added fields (business name, logo, availability, and more). They can still skip it.\n\nThis affects all drivers.')) return;
   try{
-    globalSettings.onboardingResetAt = Date.now();
+    globalSettings.onboardingResetAt = _syncNow();
     await saveGlobalSettings();
     showToast('\u2713 All drivers will be asked to review their info at next login');
   }catch(e){ console.warn('reset onboarding', e); showToast('Could not save the reset','error'); }
@@ -6172,8 +6511,14 @@ function _paintPriceTotal(el, res){
 // ── Plain Round Trip, return on a different day (v1288) ──
 function _plainRtSeparate(p){
   if(((document.getElementById(p+'-type')||{}).value)!=='ROUND TRIP') return false;
+  const d=(document.getElementById(p+'-date')||{}).value||'', rd=(document.getElementById(p+'-rt-date')||{}).value||'', rtm=(document.getElementById(p+'-rt-time')||{}).value||'';
+  // v1380: priced per leg whenever the return has its own time (same day included), so Traffic follows each leg's own hours.
+  return !!(d && (rd ? (rd!==d || rtm) : rtm));
+}
+// A plain Round Trip whose return is on the SAME day as the outbound (or has no return date): only the time-based Traffic surcharge is judged per leg.
+function _plainRtSameDay(p){
   const d=(document.getElementById(p+'-date')||{}).value||'', rd=(document.getElementById(p+'-rt-date')||{}).value||'';
-  return !!(d && rd && d!==rd);
+  return ((document.getElementById(p+'-type')||{}).value)==='ROUND TRIP' && !!d && (!rd || rd===d);
 }
 const _plainRtSig = {q:'', qa:''};
 // Shows the return leg's own surcharge chips (and auto-fills them from the return date/time) only while it matters.
@@ -6185,7 +6530,7 @@ function _syncPlainRtLeg2(p){
   const lbl=document.getElementById(p+'-addons-label'); if(lbl) lbl.textContent = sep ? 'Surcharges \u2014 Leg 1 (outbound)' : 'Surcharges';
   const l2=document.getElementById(p+'-addons-leg2-label'); if(l2) l2.textContent='Surcharges \u2014 Leg 2 (return)';
   if(!sep){ _plainRtSig[p]=''; return; }
-  const sig=[(document.getElementById(p+'-rt-date')||{}).value,(document.getElementById(p+'-rt-time')||{}).value].join('|');
+  const sig=[(document.getElementById(p+'-rt-date')||{}).value,(document.getElementById(p+'-rt-time')||{}).value,(document.getElementById(p+'-date')||{}).value].join('|');
   if(sig!==_plainRtSig[p]){ _plainRtSig[p]=sig; applyReturnLegAutoAddons(p); renderAddonsLeg2(p); }
 }
 
@@ -7770,8 +8115,10 @@ function applyQuoteAutoAddons(){
 // toggling traffic off for the return trip never affects the outbound leg's traffic chip.
 function applyReturnLegAutoAddons(p){
   const S=_addonLeg2State(p), T=_addonLeg2Touched(p);
-  const dv=(document.getElementById(p+'-rt-date')||{}).value||'';
+  let dv=(document.getElementById(p+'-rt-date')||{}).value||'';
   const tv=(document.getElementById(p+'-rt-time')||{}).value||'';
+  const _sameDay = _plainRtSameDay(p);
+  if(_sameDay) dv=(document.getElementById(p+'-date')||{}).value||'';
   let mins=-1;
   if(tv){ const pp=tv.split(':').map(Number); mins=(pp[0]||0)*60+(pp[1]||0); }
   if(globalSettings.fuelEnabled !== false && !T.fuel && !driverAutoOff('fuel')) S.fuel=true;
@@ -7786,6 +8133,9 @@ function applyReturnLegAutoAddons(p){
     const xmas=isChristmasDate(mmdd), hol=isHolidayDate(dv);   // full date -> correct year
     if(!T.christmas && !driverAutoOff('christmas')) S.christmas = xmas;
     if(!T.holiday   && !driverAutoOff('holiday'))   S.holiday   = hol && !xmas;
+  }
+  if(_sameDay){   // v1380: same-day return - one holiday / late-notice / premium set (the outbound's); only Traffic is per leg
+    if(!T.late) S.late=false; if(!T.premium) S.premium=false; if(!T.christmas) S.christmas=false; if(!T.holiday) S.holiday=false;
   }
 }
 function onReturnLegDateTimeChange(p){
@@ -8183,7 +8533,7 @@ function touchRide(r, action, whoOverride){
   if(!r) return;
   const who = whoOverride || getMyDriverName() || currentUser?.name || 'Someone';
   if(!Array.isArray(r.trail)) r.trail = [];
-  r.trail.push({ by: who, action: action||'updated', ts: Date.now() });
+  r.trail.push({ by: who, action: action||'updated', ts: _syncNow() });
   if(r.trail.length>12) r.trail = r.trail.slice(-12);
 }
 // The driver's own business name, captured during onboarding (onb-bizname) and editable on
@@ -8460,8 +8810,8 @@ async function _autoSaveSentQuote(client, date, opts){
     if(typeof _gatherQuoteRide==='function' && typeof savedQuotes!=='undefined'){
       var qc=(client||'').trim().toLowerCase(), qd=date||'';
       var ex=savedQuotes.find(function(q){ return q && (q.client||'').trim().toLowerCase()===qc && q.date===qd; });
-      if(ex){ var fresh=_gatherQuoteRide(); Object.assign(ex, fresh); ex.sentAt=Date.now(); }
-      else { var q=_gatherQuoteRide(); q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); q.savedAt=Date.now(); q.sentAt=Date.now(); _quoteReplaceOnSave(q); savedQuotes.push(q); window._editingQuoteId=q._quoteId; }
+      if(ex){ var fresh=_gatherQuoteRide(); Object.assign(ex, fresh); ex.sentAt=_syncNow(); }
+      else { var q=_gatherQuoteRide(); q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); q.savedAt=_syncNow(); q.sentAt=_syncNow(); _quoteReplaceOnSave(q); savedQuotes.push(q); window._editingQuoteId=q._quoteId; }
       try{ _draftClear('page-quote'); }catch(e){}
       try{ _qdClearActive(); }catch(e){}
       var sp = (typeof saveSavedQuotes==='function') ? saveSavedQuotes() : null;
@@ -8726,7 +9076,7 @@ async function _quoteAutoSave(manual){
     if(qid) ex=list.find(function(x){ return x && x._quoteId===qid; })||null;
     if(!ex){ var qc=client.toLowerCase(); ex=list.find(function(x){ return x && (x.client||'').trim().toLowerCase()===qc && x.date===fresh.date; })||null; }
     if(ex){ Object.assign(ex,fresh); }
-    else { fresh._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); fresh.savedAt=Date.now(); savedQuotes.push(fresh); ex=fresh; }
+    else { fresh._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); fresh.savedAt=_syncNow(); savedQuotes.push(fresh); ex=fresh; }
     window._editingQuoteId=ex._quoteId;
     var _saved = await saveSavedQuotes();
     try{ renderSavedQuotes(); }catch(e){}
@@ -9220,7 +9570,9 @@ function _returnLegWhen(r){
 function _recordRtSeparate(r){
   if(r.type!=='ROUND TRIP') return false;
   const w=_returnLegWhen(r);
-  return !!(w.date && r.date && w.date!==r.date);
+  if(w.date && r.date && w.date!==r.date) return true;
+  // v1380: same day (or no return date) is per-leg too, but only for records saved with the return leg's own toggles
+  return !!(r.date && w.time && (!w.date || w.date===r.date) && (r.rt_traffic!==undefined));
 }
 // An unsplit Round Trip's RETURN leg. Its own saved toggles (rt_*) are used as-is - they are what was selected and charged, so a
 // waived surcharge stays waived. Only a record from before those toggles existed (no rt_ premium/traffic/holiday/christmas at all)
@@ -9243,6 +9595,10 @@ function _returnLegState(r){
     else st[k] = (k in d) ? !!d[k] : _ON(r[k]);                          // old record: derive from the return date/time
   });
   customSurchargeList().forEach(c=>{ st[c.key] = (r['rt_'+c.key]!==undefined) ? _ON(r['rt_'+c.key]) : _ON(r[c.key]); });
+  // v1380: a same-day plain Round Trip has ONE set of premium / holiday / Christmas / late / custom charges (the outbound's); the return leg adds Traffic only.
+  if(r.type==='ROUND TRIP' && r.date && (!w.date || w.date===r.date)){
+    Object.keys(st).forEach(function(k){ if(k!=='traffic') st[k]=false; });
+  }
   return st;
 }
 function _priceInputsFromRecord(r){
@@ -9898,7 +10254,7 @@ async function textSavedQuote(qid){
   // editable-template system textQuoteToClient() already uses, via quoteTextMessage()'s new
   // optional savedQuote parameter.
   let body = quoteTextMessage(first, q);
-  q.sentAt=Date.now();
+  q.sentAt=_syncNow();
   try{ await saveSavedQuotes(); }catch(e){}
   renderSavedQuotes();
   try{ var host=document.getElementById('sq-modal-host'); if(host){ _closeSqModal(); openSavedQuoteDetail(qid); } }catch(e){}
@@ -10340,7 +10696,7 @@ function addNotification(driverName, ride, action, customMsg, forceNow){
     }
   }catch(e){}
   _markNotifDirty(driverName);
-  notifications[driverName].unshift({ rideId:ride.id, type:action, channel:(ride&&ride.channel)||null, read:false, msg, ts:Date.now(), createdBy:currentUser?.name||'' });
+  notifications[driverName].unshift({ rideId:ride.id, type:action, channel:(ride&&ride.channel)||null, read:false, msg, ts:_syncNow(), createdBy:currentUser?.name||'' });
   // Fire push notification to driver's phone
   if(action==='assigned'){
     // The push goes out NOW regardless of how far out the ride is - that's the point of the
@@ -10349,7 +10705,7 @@ function addNotification(driverName, ride, action, customMsg, forceNow){
     // driverNotifiedAt) can't auto-accept a ride the driver has had no fair chance to answer.
     // _armAcceptWindowForNearRides() starts it later, when the ride comes into range.
     ride.driverResponse = 'pending';
-    if(_isNear) ride.driverNotifiedAt = Date.now();
+    if(_isNear) ride.driverNotifiedAt = _syncNow();
     else delete ride.driverNotifiedAt;   // a reassignment pushed further out must not keep an old clock
     // The push now carries the ride itself (v1211), so the driver's phone can hold it even if they
     // open the app later with no signal. See _pushRideSnapshot() for what's included and why.
@@ -10479,7 +10835,7 @@ function _armAcceptWindowForNearRides(){
     if(r.driverNotifiedAt) return;               // clock already running
     if(!r.driver || !r.date) return;
     if(r.date > tomorrow) return;                // still too far out - leave it unarmed
-    r.driverNotifiedAt = Date.now();
+    r.driverNotifiedAt = _syncNow();
     r.assignNotifyPending = false;
     changed = true;
     try{
@@ -10525,7 +10881,7 @@ function _clearAssignedNotif(driverName, rideId){
 async function acceptAssignedRide(rideId){
   var r=_rideById(rideId);
   if(!r){ showToast('Ride not found','error'); return; }
-  r.driverResponse='accepted'; r.driverRespondedAt=Date.now(); delete r.driverAutoAccepted;
+  r.driverResponse='accepted'; r.driverRespondedAt=_syncNow(); delete r.driverAutoAccepted;
   // Logged to history now (v819), same as auto-accept - a deliberate tap and a timeout both
   // belong in the same "what happened to this ride" log, not a separate banner for one of them.
   touchRide(r, 'accepted the ride');
@@ -12485,7 +12841,7 @@ function _markRideConfirmed(r){
   if(r.confirmSent) return;
   r.confirmSent=true;
   r.confirmSentBy=currentUser?.name||'';
-  r.confirmSentAt=Date.now();
+  r.confirmSentAt=_syncNow();
   touchRide(r, 'marked confirmation sent');
   // Auto-advance the ride trail to Confirmed (only from Scheduled — never downgrade a paid ride).
   if(r.status==='scheduled' || !r.status){ r.status='confirmed'; r.driverChangedPending=false; }
@@ -14549,7 +14905,7 @@ async function _saveMarkPaidCombined(rideId){
     if(tip>0) r.tip=tip;
     if(method){ r.payment=method; touchRide(r,'set payment method'); }
     if(tipSplitChecked && tipMethod){ r.tipPayment=tipMethod; } else { delete r.tipPayment; }
-    r.status='paid'; r.paidAt=Date.now(); r.paidBy=currentUser?.name||'';
+    r.status='paid'; r.paidAt=_syncNow(); r.paidBy=currentUser?.name||'';
     _stampRideCostBasis(r);   // lock in today's gas/maintenance rate for THIS ride, once
     // Clears the active "still waiting on this" flag now that it's genuinely paid - invoicedAt/
     // invoicedBy stay put as a historical record of when this went out for billing, same as
@@ -14778,7 +15134,7 @@ async function _dashSaveInvoicePaid(rideId){
   if(dashTipMethod){ r.tipPayment=dashTipMethod; } else { delete r.tipPayment; }
   // Same fields the full Mark Paid flow sets when genuinely closing a ride out - same
   // meaning, just reached through this lighter path instead.
-  r.status='paid'; r.paidAt=Date.now(); r.paidBy=currentUser?.name||'';
+  r.status='paid'; r.paidAt=_syncNow(); r.paidBy=currentUser?.name||'';
   _stampRideCostBasis(r);   // lock in today's gas/maintenance rate for THIS ride, once
   if(!r.payment) r.payment='Invoice';
   delete r.awaitingInvoice;
@@ -15567,7 +15923,7 @@ async function _generateDispatchInvoice(){
     rideValues:rowsData.reduce(function(m,r){ m[r.id]=Math.round(kmRideValue(r)*100)/100; return m; },{}),
     total:Math.round(total*100)/100,
     rate:Object.assign({},kmPaySettings), // snapshot - a later rate change shouldn't rewrite history
-    createdAt:Date.now(), createdBy:currentUser&&currentUser.name||'Morgan',
+    createdAt:_syncNow(), createdBy:currentUser&&currentUser.name||'Morgan',
     status:'sent', paidAt:null, paidBy:null, paidMethod:null, receivedAt:null
   };
   try{ await saveDispatchInvoices(); }catch(e){ console.warn(e); }
@@ -15607,7 +15963,7 @@ function _dispatchInvoiceStatusLabel(inv){
 async function markDispatchInvoicePaid(id){
   if(!kmVisible() || !kmIsKat()) return;
   var inv=dispatchInvoices[id]; if(!inv || inv.status!=='sent') return;
-  inv.status='paid_pending'; inv.paidAt=Date.now(); inv.paidBy=currentUser&&currentUser.name||'Kat';
+  inv.status='paid_pending'; inv.paidAt=_syncNow(); inv.paidBy=currentUser&&currentUser.name||'Kat';
   try{ await saveDispatchInvoices(); }catch(e){ console.warn(e); }
   showToast('\u23F3 Marked paid \u2014 stays here until Morgan taps \u2713 Received');
   try{ renderIncome(); }catch(e){}
@@ -15619,7 +15975,7 @@ async function markDispatchInvoicePaid(id){
 async function venmoAutoMarkDispatchInvoice(id){
   if(!kmVisible() || !kmIsKat()) return;
   var inv=dispatchInvoices[id]; if(!inv || inv.status!=='sent') return;
-  inv.status='paid_pending'; inv.paidAt=Date.now(); inv.paidBy=currentUser&&currentUser.name||'Kat'; inv.paidMethod='Venmo';
+  inv.status='paid_pending'; inv.paidAt=_syncNow(); inv.paidBy=currentUser&&currentUser.name||'Kat'; inv.paidMethod='Venmo';
   try{ await saveDispatchInvoices(); }catch(e){ console.warn(e); }
   showToast('\u23F3 Marked paid \u2014 stays here until Morgan taps \u2713 Received');
   try{ renderIncome(); }catch(e){}
@@ -15653,7 +16009,7 @@ function venmoPayDispatchInvoiceBtn(inv){
 async function markDispatchInvoiceReceived(id){
   if(!kmVisible() || kmIsKat()) return;
   var inv=dispatchInvoices[id]; if(!inv || inv.status!=='paid_pending') return;
-  inv.status='settled'; inv.receivedAt=Date.now();
+  inv.status='settled'; inv.receivedAt=_syncNow();
   try{ await saveDispatchInvoices(); }catch(e){ console.warn(e); }
   showToast('\u2713 Invoice settled');
   try{ renderIncome(); }catch(e){}
@@ -15679,7 +16035,7 @@ async function voidDispatchInvoice(id){
   var inv=dispatchInvoices[id]; if(!inv) return;
   if(inv.status!=='sent'){ showToast('Only an invoice still awaiting payment can be voided','error'); return; }
   if(!await askConfirm('Void this $'+inv.total.toFixed(2)+' invoice? This can\u2019t be undone.')) return;
-  inv.status='voided'; inv.voidedAt=Date.now(); inv.voidedBy=currentUser&&currentUser.name||'';
+  inv.status='voided'; inv.voidedAt=_syncNow(); inv.voidedBy=currentUser&&currentUser.name||'';
   try{ await saveDispatchInvoices(); }catch(e){ console.warn(e); }
   showToast('\u2713 Invoice voided');
   try{ renderIncome(); }catch(e){}
@@ -16071,7 +16427,7 @@ async function setRideStatus(id, status){
   r.status = status;
   touchRide(r, 'set status to '+status);
   if(status==='paid'){
-    r.paidAt = Date.now(); r.paidBy = currentUser?.name||'';
+    r.paidAt = _syncNow(); r.paidBy = currentUser?.name||'';
     // If this AP ride had a prior completed-but-unpaid AP ride for the same
     // client, let the previous driver AND that client's owner know the money
     // has now been collected, so they can settle up. The previous ride stays
@@ -16274,7 +16630,7 @@ async function cancelRide(id){
   // was directly modified this session for the cancellation-fee gate): without this, a Firebase
   // snapshot arriving mid-save could silently revert the cancellation.
   _protectRide(r.id);
-  r.status='cancelled'; touchRide(r, 'cancelled ride'); r.cancelledAt=Date.now(); r.cancelledBy=currentUser?.name||'';
+  r.status='cancelled'; touchRide(r, 'cancelled ride'); r.cancelledAt=_syncNow(); r.cancelledBy=currentUser?.name||'';
   if(_choice==='fee'){
     r.feeType='cancel'; r.feeAmount=_feeAmt;
     const _fn='Cancellation fee: $'+_feeAmt;
@@ -17105,7 +17461,7 @@ async function openStartRide(rideId){
   // completely still needs this recorded, so the button correctly disappears once a ride's
   // underway; that can't depend on odometer data that a driver with this preference will
   // never generate.
-  r.rideStartedAt = Date.now();
+  r.rideStartedAt = _syncNow();
   try{ saveRides(); }catch(e){}
   if(typeof refreshDash==='function') refreshDash();
 
@@ -17284,7 +17640,7 @@ async function _saveOdometerEdits(rideId){
   } else {
     delete r.drivenMiles;   // can't derive miles from an incomplete pair
   }
-  r.odoEditedAt = Date.now();
+  r.odoEditedAt = _syncNow();
   r.odoEditedBy = (currentUser && currentUser.name) || '';
   try{ await saveRides(); }catch(e){ console.warn('odometer edit save failed', e); }
   var ov=document.getElementById('odo-edit-overlay'); if(ov) ov.remove();
@@ -17306,7 +17662,7 @@ async function _saveOdometerStart(rideId){
   var ov=document.getElementById('odo-start-overlay'); if(ov) ov.remove();
   if(r && isFinite(val) && val>0){
     r.odoStart = val;
-    r.odoStartAt = Date.now();
+    r.odoStartAt = _syncNow();
     try{ saveRides(); }catch(e){}
   }
   _openStartRideFromCurrent(rideId);
@@ -17494,7 +17850,7 @@ function _applyOdometerEnd(r, endingReading){
   r.drivenMiles = total;
   _stampRideCostBasis(r);   // lock in today's gas/maintenance rate for THIS ride, once
   r.odoEnd = endingReading;
-  r.odoEndAt = Date.now();
+  r.odoEndAt = _syncNow();
   return { total: total, mine: total, count: 1 };
 }
 // Display-only preview for Mark Paid's ending-odometer field - computes what the miles WOULD
@@ -17647,7 +18003,7 @@ function openPauseRide(rideId){
   var skipOdo = dn && driverSettings[dn] && driverSettings[dn].skipOdometerPrompts===true;
   if(skipOdo || r.odoStart==null){
     _protectRide(r.id);
-    r.pausedAt = Date.now();
+    r.pausedAt = _syncNow();
     try{ saveRides(); }catch(e){}
     showToast('Ride paused');
     if(typeof refreshDash==='function') refreshDash();
@@ -17663,7 +18019,7 @@ function openResumeRide(rideId){
   var skipOdo = dn && driverSettings[dn] && driverSettings[dn].skipOdometerPrompts===true;
   if(skipOdo){
     _protectRide(r.id);
-    r.resumedAt = Date.now();
+    r.resumedAt = _syncNow();
     try{ saveRides(); }catch(e){}
     if(typeof refreshDash==='function') refreshDash();
     _openResumeRideFromCurrent(rideId);
@@ -18392,7 +18748,7 @@ async function _saveLogMiles(rideId, billLater){
     // renders it as its own small badge alongside the trail, not folded into one of the chips.
     if(billLater){
       r.awaitingInvoice=true;
-      r.invoicedAt=Date.now();
+      r.invoicedAt=_syncNow();
       r.invoicedBy=currentUser?.name||'';
       // BUG FIX (reported with a screenshot): invoicing a ride never marked it as STOPPED, only
       // as awaiting invoice. The ride is plainly over at this point - the ending odometer was
@@ -18400,7 +18756,7 @@ async function _saveLogMiles(rideId, billLater){
       // it was in progress: it kept offering "Resume navigation" on a finished ride, and its
       // green button stayed on "Ride Completed" instead of advancing to "Invoice Paid" (that
       // branch requires stopped AND awaiting-invoice). One missing field, two visible symptoms.
-      if(r.rideStartedAt && !r.rideStoppedAt) r.rideStoppedAt = Date.now();
+      if(r.rideStartedAt && !r.rideStoppedAt) r.rideStoppedAt = _syncNow();
       touchRide(r,'marked awaiting invoice');
     }
     // BUG FIX (reported directly: a ride correctly marked awaiting invoice, saved, confirmed -
@@ -22041,7 +22397,7 @@ async function saveOnboarding(){
     try{ if(typeof _writeDriverPhotoOverrideCacheEntry==='function') _writeDriverPhotoOverrideCacheEntry(dn, _onbGeneratedCard); }catch(e){}
   }
   // Mark onboarding as completed so an admin "re-prompt all" reset clears for this driver.
-  p.onboardedAt = Date.now();
+  p.onboardedAt = _syncNow();
   // Persist everything
   try{
     // One driver's records - this is that driver's own onboarding, nobody else's (v874).
@@ -22068,7 +22424,7 @@ function closeOnboarding(forever){
   if(forever){
     try{ localStorage.setItem(_onbDismissKey(), 'forever'); }catch(e){}
     // They were re-prompted and chose to skip — clear any pending admin reset so we don't nag.
-    try{ var _dn=getMyDriverName(); if(_dn){ DRIVER_PROFILES[_dn]=DRIVER_PROFILES[_dn]||{}; DRIVER_PROFILES[_dn].onboardedAt=Date.now(); storageSet('kat:driverProfiles', DRIVER_PROFILES); } }catch(e){}
+    try{ var _dn=getMyDriverName(); if(_dn){ DRIVER_PROFILES[_dn]=DRIVER_PROFILES[_dn]||{}; DRIVER_PROFILES[_dn].onboardedAt=_syncNow(); storageSet('kat:driverProfiles', DRIVER_PROFILES); } }catch(e){}
     showToast('Got it \u2014 you can update your info anytime in your profile');
   }
   // First-login setup just finished — offer the tutorial or jumping into the app.
@@ -22465,7 +22821,7 @@ async function saveQuickAddAsQuote(){
   if(!(await _confirmIfOtherDriverClientAddress('qa'))){ _reenableBtns(); return; }
   const q=_gatherQaRide(client, qaType);
   q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000);
-  q.savedAt=Date.now();
+  q.savedAt=_syncNow();
   try{
     savedQuotes.push(q);
     await saveSavedQuotes();
@@ -22942,7 +23298,7 @@ async function sendPolicyText(phone, firstName, rideDate, rideTime, ridePrice, r
     if(_r){
       _protectRide(_r.id);
       _r.schedulingTextSent = true;
-      _r.schedulingTextSentAt = Date.now();
+      _r.schedulingTextSentAt = _syncNow();
       try{
         var _ok = await saveRides();
         if(_ok) window._pendingUnsavedRideIds.delete(_r.id);
@@ -23691,7 +24047,7 @@ async function _dashMarkAllSchedulingTextSent(){
   due.forEach(function(r){
     _protectRide(r.id);
   });
-  due.forEach(function(r){ r.schedulingTextSent=true; r.schedulingTextSentAt=Date.now(); });
+  due.forEach(function(r){ r.schedulingTextSent=true; r.schedulingTextSentAt=_syncNow(); });
   try{
     var _ok = await saveRides();
     if(_ok) due.forEach(function(r){ window._pendingUnsavedRideIds.delete(r.id); });
@@ -23918,7 +24274,7 @@ async function approveFeeWaive(rideId){
   if(!feePayments[key]) feePayments[key]={};
   var wr=feePayments[key].waivedRides=(feePayments[key].waivedRides||[]);
   if(wr.indexOf(req.rideId)<0) wr.push(req.rideId);
-  req.status='approved'; req.resolvedAt=Date.now();
+  req.status='approved'; req.resolvedAt=_syncNow();
   try{ await saveFeePayments(); }catch(e){} await saveFeeWaiveRequests();
   try{ addNotification(driver, {id:req.rideId,client:req.client,date:req.date}, 'fee_waive_approved', (owner.split(' ')[0])+' waived the 15% fee for '+(req.client||'the')+'\u2019s ride on '+(typeof fmtDateShort==='function'?fmtDateShort(req.date):req.date)+' \u2713'); await saveNotifs(); }catch(e){}
   showToast('\u2713 Fee waived for '+(req.client||'that ride'));
@@ -23926,7 +24282,7 @@ async function approveFeeWaive(rideId){
 }
 async function denyFeeWaive(rideId){
   var req=feeWaiveRequests[rideId]||feeWaiveRequests[String(rideId)]; if(!req) return;
-  req.status='denied'; req.resolvedAt=Date.now();
+  req.status='denied'; req.resolvedAt=_syncNow();
   await saveFeeWaiveRequests();
   try{ addNotification(req.driver, {id:req.rideId,client:req.client,date:req.date}, 'fee_waive_denied', (req.owner.split(' ')[0])+' kept the 15% fee for '+(req.client||'the')+'\u2019s ride on '+(typeof fmtDateShort==='function'?fmtDateShort(req.date):req.date)); await saveNotifs(); }catch(e){}
   showToast('Waiver declined');
@@ -25061,7 +25417,7 @@ async function _applyDriverArchive(name){
   const record = {
     archiveId: 'arch_'+Date.now()+'_'+Math.random().toString(36).slice(2,8),
     name: name,
-    archivedAt: Date.now(),
+    archivedAt: _syncNow(),
     archivedBy: (currentUser&&currentUser.name)||'',
     reactivatedAt: null,
     data: {
@@ -25201,7 +25557,7 @@ async function reactivateDriver(archiveId){
 
   // Keep the archive record for audit history rather than deleting it - just stamp it reactivated
   // so the "browse archived drivers" list knows not to show it as currently archived.
-  rec.reactivatedAt = Date.now();
+  rec.reactivatedAt = _syncNow();
   await storageSetArray('kat:archivedDrivers', archived);
 
   showToast('\u2705 '+liveName.split(' ')[0]+' reactivated');
@@ -27787,7 +28143,7 @@ async function _getOrCreateClientBookingToken(clientName, driverLogin){
       clientName: (clientName||'').trim(),
       clientPhone: c.phone || (c.phones&&c.phones[0]) || '',
       clientEmail: c.email || (c.emails&&c.emails[0]) || '',
-      createdAt: Date.now()
+      createdAt: _syncNow()
     };
     // Only written when the owner actually has their own branding - otherwise book.html falls
     // back to the sending driver's directory entry, which is the existing correct behavior.
@@ -27818,7 +28174,7 @@ async function _getOrCreateCalendarToken(driverName){
   var token;
   try{ token = _randomToken24(); }catch(e){ console.warn('calendar token random generation failed', e); return ''; }
   try{
-    await fbRef('nda/kat/calendarTokens/'+token).set({ driverName: (driverName||'').trim(), createdAt: Date.now() });
+    await fbRef('nda/kat/calendarTokens/'+token).set({ driverName: (driverName||'').trim(), createdAt: _syncNow() });
     await fbRef('nda/kat/calendarTokenByDriver/'+_fbSafeKey(driverKey)).set(token);
   }catch(e){ console.warn('calendar token create failed', e); return ''; }
   return token;
@@ -29778,7 +30134,7 @@ async function saveOutsideRide(editId){
     if(_i<0){ err.textContent='Could not find that ride.'; return; }
     const _prev = outsideRides[dName][_i];
     outsideRides[dName][_i] = Object.assign({}, _prev, {
-      date, time, client: client||'Outside ride', type, price:amount, miles, notes, editedAt:Date.now(),
+      date, time, client: client||'Outside ride', type, price:amount, miles, notes, editedAt:_syncNow(),
       fare:_gf, tip:_tp, providerFee:_pf, payment:_pm,
     });
     await saveOutsideRides(dName);
@@ -31149,7 +31505,7 @@ async function approveCautiousFlag(id){
   const req=cautiousFlagRequests[id]; if(!req||req.status!=='pending') return;
   cautiousList.push({id:'caut_'+Date.now(),name:req.name,phoneLast4:req.phoneLast4,phone:req.phone,reason:req.reason,addedBy:req.flaggedBy,addedAt:nowET().toISOString()});
   await saveCautiousList();
-  req.status='approved'; req.resolvedAt=Date.now();
+  req.status='approved'; req.resolvedAt=_syncNow();
   await saveCautiousFlagRequests();
   try{
     addNotification(req.flaggedBy, {id:id}, 'cautious_approved', (req.owner.split(' ')[0])+' agreed \u2014 '+req.name+' is now on the cautious list.');
@@ -31162,7 +31518,7 @@ async function approveCautiousFlag(id){
 // The owner declines \u2014 nothing goes on the list, the flagger is told without the client name repeated.
 async function denyCautiousFlag(id){
   const req=cautiousFlagRequests[id]; if(!req||req.status!=='pending') return;
-  req.status='denied'; req.resolvedAt=Date.now();
+  req.status='denied'; req.resolvedAt=_syncNow();
   await saveCautiousFlagRequests();
   try{
     addNotification(req.flaggedBy, {id:id}, 'cautious_denied', (req.owner.split(' ')[0])+' reviewed your cautious flag on '+req.name+' and decided not to add it.');
@@ -31279,7 +31635,7 @@ async function approveAdminAction(id){
     showToast('Approved '+req.approvals.length+'/2 \u2014 one more admin needed');
     return;
   }
-  req.status='approved'; req.approvedAt=Date.now();
+  req.status='approved'; req.approvedAt=_syncNow();
   await saveAdminActions();
   var fn=ADMIN_ACTION_EXEC[req.type];
   if(typeof fn==='function'){
@@ -31294,7 +31650,7 @@ async function denyAdminAction(id){
   var req=adminActions[id]; if(!req||req.status!=='pending') return;
   var me=currentUser&&currentUser.name;
   if(!_isAdminLogin(me)){ showToast('Admins only','error'); return; }
-  req.status='denied'; req.deniedBy=me; req.resolvedAt=Date.now();
+  req.status='denied'; req.deniedBy=me; req.resolvedAt=_syncNow();
   await saveAdminActions();
   try{ addNotification(USER_DRIVER_MAP[req.requester]||req.requester, {id:id}, 'admin_approval', 'Declined: '+req.label); await saveNotifs(); }catch(e){}
   try{ refreshDash(); updateNotifBadge(); }catch(e){}
@@ -32519,7 +32875,7 @@ async function _backfillSchedulingTextSentForExistingRides(){
   (rides||[]).forEach(function(r){
     if(!r || r.schedulingTextSent) return;
     r.schedulingTextSent = true;
-    r.schedulingTextSentAt = Date.now();
+    r.schedulingTextSentAt = _syncNow();
     r.schedulingTextAssumed = true; // distinguishes an assumed backfill from a real, confirmed send
     touched++;
   });
@@ -33550,7 +33906,7 @@ function sendArrivalText(id){
   var _opened = openArrivalThread(id, buildArrivalText(r));
   if(!_opened) return; // openArrivalThread already showed the specific reason why
   try{ markPartSent(id,'arrival'); }catch(e){}
-  r.arrivalSentAt=Date.now();
+  r.arrivalSentAt=_syncNow();
   // Same protection as every other status-tracking save in this pipeline - copied directly.
   // Found during the full-pipeline audit, not the original v964/v965 sweep (this function
   // predates this session), but the same exact gap: a stale snapshot could silently revert
@@ -33610,7 +33966,7 @@ function _showArrivalNoPhone(id){
   };
   $('arr-np-skip').onclick=async function(){
     var r2=_rideById(id); if(!r2){ _closeArrivalNoPhone(); return; }
-    r2.arrivalSentAt=Date.now(); r2.arrivalNoText=true; touchRide(r2,'marked arrived (no text)');
+    r2.arrivalSentAt=_syncNow(); r2.arrivalNoText=true; touchRide(r2,'marked arrived (no text)');
     _protectRide(r2.id);
     try{ var ok=await saveRides(); if(ok) window._pendingUnsavedRideIds.delete(r2.id); }catch(e){}
     _closeArrivalNoPhone();
@@ -36920,7 +37276,7 @@ function showPage(id){
 // ═══════════════════════════════════════════
 function fmtDate(ds){if(!ds)return'—';const[y,m,d]=ds.split('-');return new Date(y,m-1,d).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'});}
 function fmtDateShort(ds){if(!ds)return'—';const[y,m,d]=ds.split('-');return new Date(y,m-1,d).toLocaleDateString('en-US',{month:'short',day:'numeric'});}
-function fmtTs(ts){const d=new Date(ts);return d.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}
+function fmtTs(ts){return fmtTsET(ts);}   // v1383: always Eastern, whatever time zone the phone is in
 function dataURLtoBlob(dataURL){
   try{
     const arr=dataURL.split(","), mime=arr[0].match(/:(.*?);/)[1];
