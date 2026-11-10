@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191384">
+<meta name="version" content="202608191387">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -3522,6 +3522,7 @@ function setupRealtimeListeners(){
       savedQuotes = [];
     }
     try{ _fixSavedRoundTripTraffic(); }catch(e){}
+    try{ _dedupePartialQuotes(); }catch(e){}
     try{ if(typeof renderSavedQuotes==='function' && document.getElementById('saved-quotes-wrap')) renderSavedQuotes(); }catch(e){}
   });
   // Listen for finder-fee payment changes so marking paid / undo shows up live on the
@@ -5716,6 +5717,33 @@ async function _saveRidesInner(){
 // ── SAVED QUOTES ──────────────────────────────────────────────────────────
 // Quotes saved for later (NOT on the calendar) — each is a full ride-shaped object
 // plus a _quoteId. Scheduling one moves it into rides[].
+// v1385: clean up the half-built duplicates the old auto-save left behind. A saved quote is removed ONLY when ALL of these hold: its price is
+// under $50, it was never sent, another saved quote for the same client exists that is at least twice the price (and at least $60), the two
+// were saved within 2 hours of each other, and their dates agree (or one has no date). Each removed quote is kept in this phone's
+// 'nda-removed-partial-quotes' list and the toast says how many went.
+function _dedupePartialQuotes(){
+  var list=savedQuotes||[]; if(list.length<2) return 0;
+  var gone=[];
+  list.forEach(function(q){
+    if(!q || q.sentAt) return;
+    var pr=parseFloat(q.price)||0; if(!(pr>0 && pr<50)) return;
+    var qc=(q.client||'').trim().toLowerCase(); if(!qc) return;
+    var real=list.find(function(r){
+      if(!r || r===q || (r.client||'').trim().toLowerCase()!==qc) return false;
+      var rp=parseFloat(r.price)||0; if(!(rp>=60 && rp>=pr*2)) return false;
+      if(q.date && r.date && q.date!==r.date) return false;
+      var a=parseFloat(q.savedAt)||0, b=parseFloat(r.savedAt)||0;
+      return !a || !b || Math.abs(a-b)<=2*3600*1000;
+    });
+    if(real) gone.push(q);
+  });
+  if(!gone.length) return 0;
+  try{ var keep=JSON.parse(localStorage.getItem('nda-removed-partial-quotes')||'[]'); gone.forEach(function(q){ keep.push({removedAt:_syncNow(), quote:q}); }); localStorage.setItem('nda-removed-partial-quotes', JSON.stringify(keep.slice(-20))); }catch(e){}
+  savedQuotes = list.filter(function(q){ return gone.indexOf(q)<0; });
+  try{ saveSavedQuotes(); }catch(e){}
+  try{ showToast(gone.length+' unfinished duplicate quote'+(gone.length>1?'s were':' was')+' removed from Saved Quotes'); }catch(e){}
+  return gone.length;
+}
 // v1380: saved ROUND TRIP quotes whose return is on the same day were priced with the outbound's Traffic only. Re-judge the return
 // leg by its own time and, when the saved price is still the calculator's number, update it. A typed Final Price is left alone
 // (counted in the toast). Each quote is fixed once (_rtLegFix) so this is safe to run on every sync, on any device.
@@ -8425,7 +8453,10 @@ function _icsEventDesc(r, opts){
     var phrase = _terminalPhrase(term);
     if(phrase && phrase!=='terminal') out.push(phrase);
   }
-  if(r.flight) out.push(r.flight);
+  // v1387: the arrival flight can live on the return leg (rtFlight) of a round trip whose airport
+  // pickup is leg 2; same fallback the terminal line above already uses. Leg-1 flight wins.
+  var _fl = String(r.flight||'').trim() || String(r.rtFlight||'').trim();
+  if(_fl) out.push(_fl);
   if(r.phone)  out.push(r.phone);
   var price = _icsPriceSummary(r);
   if(price) out.push(price);
@@ -8809,9 +8840,13 @@ async function _autoSaveSentQuote(client, date, opts){
   try{
     if(typeof _gatherQuoteRide==='function' && typeof savedQuotes!=='undefined'){
       var qc=(client||'').trim().toLowerCase(), qd=date||'';
-      var ex=savedQuotes.find(function(q){ return q && (q.client||'').trim().toLowerCase()===qc && q.date===qd; });
-      if(ex){ var fresh=_gatherQuoteRide(); Object.assign(ex, fresh); ex.sentAt=_syncNow(); }
-      else { var q=_gatherQuoteRide(); q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); q.savedAt=_syncNow(); q.sentAt=_syncNow(); _quoteReplaceOnSave(q); savedQuotes.push(q); window._editingQuoteId=q._quoteId; }
+      var _rid2 = window._prefillSourceRequestId || window._qSrcReqId || '';
+      var ex=null;
+      if(window._editingQuoteId) ex=savedQuotes.find(function(q){ return q && q._quoteId===window._editingQuoteId; })||null;     // v1385
+      if(!ex && _rid2) ex=savedQuotes.find(function(q){ return q && q.fromRequestId===_rid2; })||null;
+      if(!ex) ex=savedQuotes.find(function(q){ return q && (q.client||'').trim().toLowerCase()===qc && q.date===qd; })||null;
+      if(ex){ var fresh=_gatherQuoteRide(); if(_rid2) fresh.fromRequestId=_rid2; Object.assign(ex, fresh); ex.sentAt=_syncNow(); window._editingQuoteId=ex._quoteId; }
+      else { var q=_gatherQuoteRide(); if(_rid2) q.fromRequestId=_rid2; q._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); q.savedAt=_syncNow(); q.sentAt=_syncNow(); _quoteReplaceOnSave(q); savedQuotes.push(q); window._editingQuoteId=q._quoteId; }
       try{ _draftClear('page-quote'); }catch(e){}
       try{ _qdClearActive(); }catch(e){}
       var sp = (typeof saveSavedQuotes==='function') ? saveSavedQuotes() : null;
@@ -9069,13 +9104,23 @@ async function _quoteAutoSave(manual){
     var _noPrice={ok:false, reason:'Fill in the trip details first so there is a price to save.'};
     if(type==='AP ROUND TRIP'){ if(!document.querySelector('#quote-lines [data-leg-subtotal]')){ _qSaveStatus('Not saved yet \u2014 fill in the trip details.',false); return _noPrice; } }
     else { var total=((document.getElementById('quote-total')||{}).textContent||'').trim(); if(!total||total==='$0.00'){ _qSaveStatus('Not saved yet \u2014 fill in the trip details.',false); return _noPrice; } }
+    // v1385: a ONE WAY / ROUND TRIP with no distance yet is priced with only the surcharges ($15-30). Saving that half-built price created
+    // a second, wrong quote next to the real one when a booking request was opened. Wait until the distance is in.
+    if(type==='ONE WAY' || type==='ROUND TRIP'){
+      var _mi=parseFloat((document.getElementById('q-miles')||{}).value)||0;
+      var _sph=parseFloat((document.getElementById('q-sprinter-hours')||{}).value)||0;
+      if(_mi<=0 && _sph<=0 && getSelectedVehicles()[0]!=='Sprinter Van'){ _qSaveStatus('Not saved yet \u2014 waiting for the distance.',false); return {ok:false, reason:'Waiting for the distance \u2014 fill in pickup and destination so the price is complete.'}; }
+    }
     window._qAutoSaving=true;
     var fresh=_gatherQuoteRide({silent:true});
     window._qAutoSaving=false;
     var list=savedQuotes||[], ex=null, qid=window._editingQuoteId;
+    var _rid = window._prefillSourceRequestId || window._qSrcReqId || '';
+    if(_rid){ window._qSrcReqId=_rid; fresh.fromRequestId=_rid; }
     if(qid) ex=list.find(function(x){ return x && x._quoteId===qid; })||null;
+    if(!ex && _rid) ex=list.find(function(x){ return x && x.fromRequestId===_rid; })||null;      // v1385: one booking request = one quote
     if(!ex){ var qc=client.toLowerCase(); ex=list.find(function(x){ return x && (x.client||'').trim().toLowerCase()===qc && x.date===fresh.date; })||null; }
-    if(ex){ Object.assign(ex,fresh); }
+    if(ex){ var _keepSent=ex.sentAt, _keepSaved=ex.savedAt; Object.assign(ex,fresh); if(_keepSent) ex.sentAt=_keepSent; if(_keepSaved) ex.savedAt=_keepSaved; }
     else { fresh._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); fresh.savedAt=_syncNow(); savedQuotes.push(fresh); ex=fresh; }
     window._editingQuoteId=ex._quoteId;
     var _saved = await saveSavedQuotes();
@@ -23271,7 +23316,7 @@ function clearQuoteForm(){
   try{ var _qfp=document.getElementById('q-final-price'); if(_qfp) _qfp.value=''; }catch(e){}
   try{ var _qsh=document.getElementById('q-sprinter-hours'); if(_qsh) _qsh.value=''; }catch(e){}
   try{ _qVehTouched=false; _ensureQuoteDefaultVehicle(true); }catch(e){}   // v1286: back to Sedan
-  try{ window._qBooked=false; window._editingQuoteId=null; window._qInfoFor=null; window._moreUser.q=false; var _qx=document.getElementById('q-extra-phones'); if(_qx) _qx.value=''; var _qrp=document.getElementById('q-repeat'); if(_qrp){ _qrp.value='none'; var _qro=document.getElementById('q-repeat-opts'); if(_qro) _qro.style.display='none'; } var _qmb=document.getElementById('q-more-body'); if(_qmb) _qmb.style.display='none'; _qInfoSync(); _moreSync('q'); }catch(e){}
+  try{ window._qBooked=false; window._editingQuoteId=null; window._qSrcReqId=null; window._qInfoFor=null; window._moreUser.q=false; var _qx=document.getElementById('q-extra-phones'); if(_qx) _qx.value=''; var _qrp=document.getElementById('q-repeat'); if(_qrp){ _qrp.value='none'; var _qro=document.getElementById('q-repeat-opts'); if(_qro) _qro.style.display='none'; } var _qmb=document.getElementById('q-more-body'); if(_qmb) _qmb.style.display='none'; _qInfoSync(); _moreSync('q'); }catch(e){}
   calcQuote();
 }
 async function sendPolicyText(phone, firstName, rideDate, rideTime, ridePrice, ride){
@@ -37244,7 +37289,7 @@ function showPage(id){
     // sending it would delete A - the marker would still be set and _quoteReplaceOnSave() would
     // dutifully remove it. editSavedQuote() calls nav('quote') and then sets the marker inside a
     // 150ms setTimeout, so it is always set AFTER this clear, never wiped by it.
-    window._editingQuoteId = null;
+    window._editingQuoteId = null; window._qSrcReqId = null;
     // Cleared on every visit, same as the flags below - _openAndPrefillClientRequest() calls
     // nav('quote') and only sets this banner 260ms later, well after this synchronous reset, so
     // a prefilled visit still shows it; an ordinary visit never shows a stale one from the last.
@@ -37254,7 +37299,7 @@ function showPage(id){
     try{ var _ncq=document.getElementById('q-new-client'); if(_ncq) delete _ncq.dataset.userTouched; }catch(e){}
     try{ var _ntq=document.getElementById('q-notes'); if(_ntq) delete _ntq.dataset.userTouched; }catch(e){}
     try{ var _ntsq=document.getElementById('q-note-save'); if(_ntsq) _ntsq.checked=true; }catch(e){}
-    populateDriverFilter(); renderAddons('q'); updateTripFields(); calcQuote(); populateClientDatalist(); if(gmapsLoaded) setTimeout(initAddressAutocomplete, 100); _draftMaybeOffer('page-quote', 'q-client'); setTimeout(function(){ try{ _qdMaybeOffer(); }catch(e){} }, 400); }
+    populateDriverFilter(); renderAddons('q'); updateTripFields(); calcQuote(); populateClientDatalist(); if(gmapsLoaded) setTimeout(initAddressAutocomplete, 100); /* v1386: no resume prompts on the Quote page - auto-save + Saved Quotes list is the way back in */ }
   if(id==='calendar') renderCal();
   if(id==='clients') renderClients();
   if(id==='documents') renderDocuments();
