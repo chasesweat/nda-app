@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191388">
+<meta name="version" content="202608191389">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -38511,7 +38511,12 @@ async function _updateCheckNow(manual){
 // Update now: drop the saved app files so the reload must fetch the new build from the server, ask the worker to update, then reload.
 async function _hardUpdate(){
   window._swReloaded = true;
+  // v1389: the banner survived "Update now" because the reload could still be served the OLD page from the browser's own
+  // HTTP cache (separate from the app cache this deletes). So: force-refresh page + worker from the server, remove the
+  // worker entirely (it re-registers on load), clear the app cache, then reload.
+  try{ await Promise.all([ fetch(location.pathname, {cache:'reload'}), fetch('sw.js', {cache:'reload'}) ]); }catch(e){}
   try{ if(window._swReg) await window._swReg.update(); }catch(e){}
+  try{ if(navigator.serviceWorker){ var regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map(function(r){ return r.unregister(); })); } }catch(e){}
   try{ if(window.caches){ var ks = await caches.keys(); await Promise.all(ks.map(function(k){ return caches.delete(k); })); } }catch(e){}
   window.location.reload();
 }
