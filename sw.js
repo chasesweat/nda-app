@@ -9,11 +9,11 @@
 
 // IMPORTANT: bump this version string on EVERY deploy. Changing sw.js's bytes is what makes
 // the browser reinstall the worker, wipe the old cache, and pull the newest app. (Paired with
-// app build 202608191392.)
+// app build 202608191394.)
 // VERSIONING RULE: the visible build number (hamburger menu, last 3 digits of index.html's
 // <meta name="version"> tag) is always this cache number PLUS 409. Bump both by exactly 1
-// together on every single deploy — never skip, never jump. Current: cache v983 = build 1392.
-const CACHE = 'nwda-cache-v983';
+// together on every single deploy — never skip, never jump. Current: cache v985 = build 1394.
+const CACHE = 'nwda-cache-v985';
 
 // Take over immediately on install.
 self.addEventListener('install', function (e) {
@@ -35,7 +35,9 @@ self.addEventListener('install', function (e) {
   // stale-while-revalidate + network-fallback logic still works, just without this warm start.
   e.waitUntil(
     caches.open(CACHE)
-      .then(function (c) { return c.add('./index.html'); })
+      // v1394: fetch with cache:'reload'. cache.add() goes through the browser's HTTP cache, which on GitHub Pages can hold the previous
+      // index.html for ~10 minutes - so a new worker could warm its cache with the OLD page and the app stayed a build behind (stuck banner).
+      .then(function (c) { return fetch('./index.html', { cache: 'reload' }).then(function (res) { if (!res || res.status !== 200) throw new Error('HTTP ' + (res && res.status)); return c.put('./index.html', res); }); })
       .catch(function (err) { console.warn('[SW] precache during install failed (non-fatal):', err); })
       .then(function () { self.skipWaiting(); })
   );

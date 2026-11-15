@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191389">
+<meta name="version" content="202608191394">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -653,7 +653,6 @@ html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2
     <div id="dash-km-pay"></div>
     <div id="dash-income-overview" style="margin-bottom:1.5rem;"></div>
     <div id="dash-fees" style="margin-bottom:1.5rem;"></div>
-    <div id="dash-fees-awaiting-approval" style="margin-bottom:1.5rem;"></div>
     <div id="dash-admin-approvals" style="margin-bottom:1.5rem;"></div>
     <!-- DO NOW -->
     <div id="dash-finalize-tomorrow"></div>
@@ -667,6 +666,8 @@ html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2
     <div style="font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--mid);margin-bottom:.75rem;" id="dash-upcoming-label">Your upcoming rides</div>
     <div id="upcoming-list"></div>
     <div id="dash-confirmations-sent" style="margin-top:1.5rem;margin-bottom:1.5rem;"></div>
+    <!-- v1391: Fees awaiting approval (your fees already paid, waiting on the other person) sits at the bottom of the dashboard, after your rides, as Chase wants. -->
+    <div id="dash-fees-awaiting-approval" style="margin-bottom:1.5rem;"></div>
     <!-- WARNINGS -->
     <div id="dash-save-failed" style="margin-bottom:1.5rem;"></div>
     <div id="dash-rides-load-failed" style="margin-bottom:1.5rem;"></div>
@@ -9120,6 +9121,8 @@ async function _quoteAutoSave(manual){
     if(qid) ex=list.find(function(x){ return x && x._quoteId===qid; })||null;
     if(!ex && _rid) ex=list.find(function(x){ return x && x.fromRequestId===_rid; })||null;      // v1385: one booking request = one quote
     if(!ex){ var qc=client.toLowerCase(); ex=list.find(function(x){ return x && (x.client||'').trim().toLowerCase()===qc && x.date===fresh.date; })||null; }
+    // v1393: the first auto-save can happen before a date is picked; when the date arrives, update that unfinished copy instead of adding a second one.
+    if(!ex){ var qc2=client.toLowerCase(), now2=_syncNow(); ex=list.find(function(x){ return x && !x.sentAt && !x.date && (x.client||'').trim().toLowerCase()===qc2 && (!x.savedAt || Math.abs(now2-(parseFloat(x.savedAt)||now2))<=3*3600*1000); })||null; }
     if(ex){ var _keepSent=ex.sentAt, _keepSaved=ex.savedAt; Object.assign(ex,fresh); if(_keepSent) ex.sentAt=_keepSent; if(_keepSaved) ex.savedAt=_keepSaved; }
     else { fresh._quoteId='q_'+Date.now()+'_'+Math.floor(Math.random()*1000); fresh.savedAt=_syncNow(); savedQuotes.push(fresh); ex=fresh; }
     window._editingQuoteId=ex._quoteId;
@@ -11074,6 +11077,7 @@ function _airportSideSuffix(type, prefix){
 
 function _prefillFromClientRequest(req){
   if(!req) return;
+  window._editingQuoteId = null; window._qSrcReqId = null;   // v1393: a booking request is its own new quote, never an update of whatever the form last held
   // Tracks which booking-request record (if any) this prefill came from, so whichever save/
   // send action eventually completes it can mark that specific request as handled — see
   // _markBookingRequestHandled(), called from saveQuote(), saveQuickAddRide(), and both quote-
@@ -17018,6 +17022,17 @@ async function saveRideEdits(){
   // number. A hand-typed or negotiated fee is never touched (the toast below warns instead).
   var _repMsg = '';
   try{ _repMsg = _repriceOnDateChange(r, _repOld); }catch(e){ _repMsg=''; }
+  // v1391: a changed DATE voids the confirmation. The client was told the old day, so the green check comes off the calendar, the
+  // Confirmed status goes back to Scheduled, and the ride shows up on To Confirm again once its new day is tomorrow.
+  var _confReset = false;
+  try{
+    if(_rideEditSnapshot && _rideEditSnapshot.date && r.date && r.date!==_rideEditSnapshot.date && (r.confirmSent || r.status==='confirmed')){
+      r.confirmSent=false; delete r.confirmSentBy; delete r.confirmSentAt;
+      if(r.status==='confirmed') r.status='scheduled';
+      touchRide(r, 'confirmation reset (date changed)');
+      _confReset = true;
+    }
+  }catch(e){}
   var _sreOk = await saveRides(); if(_sreOk) window._pendingUnsavedRideIds.delete(r.id);
   await saveNotifs();
   toggleEditMode(false);
@@ -17030,13 +17045,13 @@ async function saveRideEdits(){
   try{ if((r.date!==_rideEditSnapshot.date || r.time!==_rideEditSnapshot.time) && (r.traffic==='Y'||r.traffic===true) && r.date && r.time){
     var _tp=r.time.split(':').map(Number); _trafMismatch = !isTrafficTime(new Date(r.date+'T12:00:00').getDay(), (_tp[0]||0)*60+(_tp[1]||0)); } }catch(e){}
   if(_repMsg){
-    showToast('Ride updated \u2713 \u2014 '+_repMsg);
+    showToast('Ride updated \u2713 \u2014 '+_repMsg+(_confReset?' Confirmation cleared \u2014 needs a new confirmation text.':''));
   } else if(_trafMismatch){
     showToast('Ride updated \u2713 \u2014 the Traffic surcharge is still on but the new day/time is not a traffic time. Check \u2709\uFE0F Edit fee', 'error');
   } else if(_milesChanged){
     showToast('Ride updated \u2713 \u2014 mileage changed, check the fee via \u2709\uFE0F Edit fee', 'error');
   } else {
-    showToast('Ride updated \u2713');
+    showToast('Ride updated \u2713'+(_confReset?' \u2014 confirmation cleared, it needs a new confirmation text':''));
   }
 }
 
@@ -31196,16 +31211,24 @@ function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm,
         <div style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;font-size:.82rem;">
           <span style="color:var(--mid);">Fare</span>
           ${canDeleteRide(r)
-            ? `<span style="display:flex;align-items:center;gap:.15rem;">$<input type="number" min="0" step="0.01" value="${fare.toFixed(2)}" class="income-fare-input" data-ride-id="${r.id}" oninput="updateFareFareTotal(this)" onblur="persistRideFareEdit(${r.id},this.value)" onclick="event.stopPropagation()" style="width:72px;padding:.15rem .3rem;border:1.5px solid var(--light);border-radius:5px;font-family:'DM Sans',sans-serif;font-size:.82rem;text-align:right;"></span>`
+            ? `<span style="display:flex;align-items:center;gap:.15rem;">$<input type="number" min="0" step="0.01" value="${fare.toFixed(2)}" class="income-fare-input" data-ride-id="${r.id}" oninput="updateFareFareTotal(this)" onblur="persistRideFareEdit(${r.id},this.value)" onclick="event.stopPropagation()" style="width:104px;box-sizing:border-box;padding:.15rem .3rem;border:1.5px solid var(--light);border-radius:5px;font-family:'DM Sans',sans-serif;font-size:.82rem;text-align:right;"></span>`
             : `<span>$${fare.toFixed(2)}</span>`}
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;font-size:.82rem;">
           <span style="color:var(--mid);">Tip</span>
-          <span style="display:flex;align-items:center;gap:.15rem;">$<input type="number" min="0" step="0.01" value="${tip||''}" placeholder="0" class="income-tip-input" data-ride-id="${r.id}" oninput="updateFareTipTotal(this)" onblur="persistRideTip(${r.id},this.value)" onclick="event.stopPropagation()" style="width:64px;padding:.2rem .3rem;border:1.5px solid var(--light);border-radius:5px;font-family:'DM Sans',sans-serif;font-size:.82rem;text-align:right;" /></span>
+          <span style="display:flex;align-items:center;gap:.15rem;">$<input type="number" min="0" step="0.01" value="${tip||''}" placeholder="0" class="income-tip-input" data-ride-id="${r.id}" oninput="updateFareTipTotal(this)" onblur="persistRideTip(${r.id},this.value)" onclick="event.stopPropagation()" style="width:104px;box-sizing:border-box;padding:.2rem .3rem;border:1.5px solid var(--light);border-radius:5px;font-family:'DM Sans',sans-serif;font-size:.82rem;text-align:right;" /></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;font-size:.82rem;">
+          <span style="color:var(--mid);">Start miles <span style="font-size:.7rem;">(odometer)</span></span>
+          <input type="text" inputmode="decimal" class="odo-start-input" value="${r.odoStart!=null?r.odoStart:''}" placeholder="—" oninput="_sanitizeNumField(this);_fareOdoPreview(this)" onblur="persistRideOdo(${r.id})" onclick="event.stopPropagation()" style="width:120px;box-sizing:border-box;padding:.2rem .3rem;border:1.5px solid var(--light);border-radius:5px;font-family:'DM Sans',sans-serif;font-size:.82rem;text-align:right;">
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;font-size:.82rem;">
+          <span style="color:var(--mid);">End miles <span style="font-size:.7rem;">(odometer)</span></span>
+          <input type="text" inputmode="decimal" class="odo-end-input" value="${r.odoEnd!=null?r.odoEnd:''}" placeholder="—" oninput="_sanitizeNumField(this);_fareOdoPreview(this)" onblur="persistRideOdo(${r.id})" onclick="event.stopPropagation()" style="width:120px;box-sizing:border-box;padding:.2rem .3rem;border:1.5px solid var(--light);border-radius:5px;font-family:'DM Sans',sans-serif;font-size:.82rem;text-align:right;">
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;font-size:.82rem;">
           <span style="color:var(--mid);">Miles driven</span>
-          <span style="display:flex;align-items:center;gap:.5rem;">${miles>0?miles+' mi':'<em style="color:var(--mid);">not logged</em>'}<button onclick="event.stopPropagation();openLogMiles(${r.id})" style="padding:.25rem .6rem;border:1.5px solid #7c3aed;background:#fff;color:#7c3aed;border-radius:7px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">&#128205; ${miles>0?'Edit':'Log'}</button></span>
+          <span style="display:flex;align-items:center;gap:.5rem;"><span class="odo-miles-out">${miles>0?miles+' mi':'<em style="color:var(--mid);">not logged</em>'}</span><button onclick="event.stopPropagation();openLogMiles(${r.id})" title="Type the total instead of start/end readings" style="padding:.25rem .6rem;border:1.5px solid #7c3aed;background:#fff;color:#7c3aed;border-radius:7px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;">&#128205; ${miles>0?'Edit total':'Log'}</button></span>
         </div>
         <div style="display:flex;justify-content:space-between;padding:.3rem 0;font-size:.82rem;color:#dc2626;">
           <span>Vehicle cost <span style="font-size:.7rem;">(gas + maint)</span></span><span>−$${(gas+maint).toFixed(2)}</span>
@@ -31214,7 +31237,7 @@ function renderMyFares(dName, allFiltered, totalGasCost, totalMaintCost, gasCpm,
           <span>Client fee${(r.feeOverride!=null&&r.feeOverride!=='')?' <em style="font-style:italic;color:var(--mid);font-size:.72rem;">(adjusted)</em>':' ('+clientFeePct()+'%)'}</span>
           <span style="display:flex;align-items:center;gap:.4rem;">
             ${isAdmin()
-              ? `<span style="display:flex;align-items:center;gap:.1rem;">\u2212$<input type="number" min="0" step="0.01" value="${fee.toFixed(2)}" class="income-fee-input" data-ride-id="${r.id}" data-fare="${fare.toFixed(2)}" oninput="updateFareFeeTotal(this)" onblur="persistRideFeeOverride(${r.id},this.value)" onclick="event.stopPropagation()" style="width:60px;padding:.15rem .3rem;border:1.5px solid var(--light);border-radius:5px;font-family:'DM Sans',sans-serif;font-size:.82rem;color:#dc2626;text-align:right;"></span>`
+              ? `<span style="display:flex;align-items:center;gap:.1rem;">\u2212$<input type="number" min="0" step="0.01" value="${fee.toFixed(2)}" class="income-fee-input" data-ride-id="${r.id}" data-fare="${fare.toFixed(2)}" oninput="updateFareFeeTotal(this)" onblur="persistRideFeeOverride(${r.id},this.value)" onclick="event.stopPropagation()" style="width:96px;box-sizing:border-box;padding:.15rem .3rem;border:1.5px solid var(--light);border-radius:5px;font-family:'DM Sans',sans-serif;font-size:.82rem;color:#dc2626;text-align:right;"></span>`
               : `<span>\u2212$${fee.toFixed(2)}</span>`}
             ${(isAdmin()&&r.feeOverride!=null&&r.feeOverride!=='')?`<button onclick="event.stopPropagation();resetRideFeeOverride(${r.id})" style="padding:.2rem .5rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:7px;font-family:inherit;font-size:.66rem;font-weight:600;cursor:pointer;white-space:nowrap;">\u21ba Reset to ${clientFeePct()}%</button>`:''}
             ${isAdmin()?`<button onclick="event.stopPropagation();_feeCorrectPaidToWaived('${owner}','${dName}',${_feeIdArg(r.id)})" style="padding:.2rem .5rem;background:none;border:1.5px solid var(--mid);color:var(--mid);border-radius:7px;font-family:inherit;font-size:.66rem;font-weight:600;cursor:pointer;white-space:nowrap;">\u21a9 Shouldn\u2019t have charged</button>`:''}
@@ -31296,6 +31319,50 @@ async function _persistRideEdit(rideId, mutate, failLabel){
   try{ if(await saveRides()) window._pendingUnsavedRideIds.delete(r.id); }catch(e){ console.warn(failLabel+' save failed',e); }
   try{ if(typeof renderIncome==='function' && document.getElementById('page-income') && document.getElementById('page-income').classList.contains('active')) renderIncome(); }catch(e){}
   try{ if(typeof refreshDash==='function') refreshDash(); }catch(e){}
+}
+// v1390: Start/End odometer fields inside the My Fares dropdown. Editing either reading re-derives the ride's driven miles
+// (same two-segment rule as the odometer editor), so gas/maintenance and net follow. Only saves when the pair is valid; a
+// single blank reading leaves the miles untouched rather than wiping a manually logged total.
+function _fareOdoRead(item){
+  var g=function(c){ var el=item.querySelector(c); if(!el) return ''; var raw=_sanitizeNumStr(el.value).trim(); return raw===''?'':parseFloat(raw); };
+  return { odoStart:g('.odo-start-input'), odoEnd:g('.odo-end-input') };
+}
+function _fareOdoPreview(inp){
+  try{
+    var item=inp.closest('.fare-item'); if(!item) return;
+    var r=_rideById(parseInt(item.getAttribute('data-row-id'),10)||item.getAttribute('data-row-id')); if(!r) return;
+    var v=_fareOdoRead(item), out=item.querySelector('.odo-miles-out'); if(!out) return;
+    if(v.odoStart===''||v.odoEnd===''||!(v.odoEnd>v.odoStart)) return;
+    var two=r.odoPause!=null&&r.odoResume!=null;
+    var t=two?(r.odoPause-v.odoStart)+(v.odoEnd-r.odoResume):(v.odoEnd-v.odoStart);
+    out.textContent=parseFloat(t.toFixed(2))+' mi';
+  }catch(e){}
+}
+async function persistRideOdo(rideId){
+  var item=document.querySelector('.fare-item[data-row-id="'+rideId+'"]'); if(!item) return;
+  var v=_fareOdoRead(item);
+  var changed=false;
+  await _persistRideEdit(rideId, function(r){
+    var two=r.odoPause!=null&&r.odoResume!=null;
+    var vals={odoStart:v.odoStart,odoPause:r.odoPause,odoResume:r.odoResume,odoEnd:v.odoEnd};
+    var err=_validateOdoSet(vals,two);
+    if(err){ showToast(err,'error'); return false; }
+    var same=function(a,b){ return (a===''||a==null)?(b===''||b==null):(a===b); };
+    if(same(v.odoStart,r.odoStart) && same(v.odoEnd,r.odoEnd)) return false;   // nothing actually changed
+    ['odoStart','odoEnd'].forEach(function(k){ if(v[k]==='') delete r[k]; else r[k]=v[k]; });
+    if(r.odoStart!=null && r.odoEnd!=null){
+      r.drivenMiles = two ? parseFloat(((r.odoPause-r.odoStart)+(r.odoEnd-r.odoResume)).toFixed(2)) : parseFloat((r.odoEnd-r.odoStart).toFixed(2));
+      try{ _stampRideCostBasis(r); }catch(e){}
+    }
+    r.odoEditedAt=_syncNow(); r.odoEditedBy=(currentUser&&currentUser.name)||'';
+    changed=true;
+  }, 'odometer');
+  if(!changed) return;
+  showToast('\u2713 Miles updated');
+  // The page repaints after a save; reopen this card so editing the second reading doesn't mean hunting for it again.
+  setTimeout(function(){
+    try{ var it=document.querySelector('.fare-item[data-row-id="'+rideId+'"]'); if(it){ var d=it.querySelector('.fare-details'), ch=it.querySelector('.fare-chev'); if(d) d.style.display='block'; if(ch) ch.style.transform='rotate(90deg)'; } }catch(e){}
+  }, 60);
 }
 async function persistRideTip(rideId,val){
   // Keeps the Bottom Line (the single total) and dashboard in sync with the new tip.
@@ -37289,7 +37356,10 @@ function showPage(id){
     // sending it would delete A - the marker would still be set and _quoteReplaceOnSave() would
     // dutifully remove it. editSavedQuote() calls nav('quote') and then sets the marker inside a
     // 150ms setTimeout, so it is always set AFTER this clear, never wiped by it.
-    window._editingQuoteId = null; window._qSrcReqId = null;
+    // v1393: only when the form is EMPTY. The form keeps what was typed while you look at another page, and the quote it belongs to
+    // was already auto-saved, so the marker must stay with it. Clearing it here made the next auto-save (after a date or vehicle change)
+    // miss the saved copy and write a second quote.
+    if(!((document.getElementById('q-client')||{}).value||'').trim()){ window._editingQuoteId = null; window._qSrcReqId = null; }
     // Cleared on every visit, same as the flags below - _openAndPrefillClientRequest() calls
     // nav('quote') and only sets this banner 260ms later, well after this synchronous reset, so
     // a prefilled visit still shows it; an ordinary visit never shows a stale one from the last.
