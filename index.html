@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191396">
+<meta name="version" content="202608191401">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -522,6 +522,9 @@ html.tp-fine input[type="time"],html.tp-touch input[type="time"]{padding-right:2
 /* v1330: invisible tap-area growth for small buttons (no layout change) */
 .tap-grow{position:relative;}
 .tap-grow::after{content:'';position:absolute;left:50%;top:50%;width:max(100%,44px);height:max(100%,44px);transform:translate(-50%,-50%);}
+/* v1401: every button whose label is just "Cancel" is red with white lettering (class added by _styleCancelButtons below). */
+button.cancel-red{background:#dc2626!important;color:#fff!important;border:1.5px solid #dc2626!important;font-weight:700!important;}
+button.cancel-red:active{background:#b91c1c!important;border-color:#b91c1c!important;}
 </style>
 </head>
 <body>
@@ -2375,6 +2378,32 @@ try{
   }).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style','hidden']});
 }catch(e){}
 document.addEventListener('DOMContentLoaded',function(){ _queueGrowSmallButtons(document.body); });
+
+// v1401: one rule for every dismiss button in the app. A button whose whole label is "Cancel" (ignoring icons/punctuation) gets the red style; if its
+// label changes later (some buttons flip between "Edit" and "Cancel") the style follows. "Cancel ride", "Cancel fee", etc. are real actions with
+// longer labels and are NOT touched. Applies to buttons added later too (every popup in the app is built at runtime).
+function _isCancelLabel(b){ return /^[^a-z0-9]*cancel[^a-z0-9]*$/i.test((b.textContent||'').trim()); }
+function _styleCancelButtons(root){
+  try{
+    if(!root || root.nodeType!==1) return;
+    var all=[]; if(root.tagName==='BUTTON') all.push(root);
+    var l=root.querySelectorAll?root.querySelectorAll('button'):[]; for(var i=0;i<l.length;i++) all.push(l[i]);
+    all.forEach(function(b){ b.classList.toggle('cancel-red', _isCancelLabel(b)); });
+  }catch(e){}
+}
+try{
+  new MutationObserver(function(ms){
+    ms.forEach(function(m){
+      if(m.type==='childList'){
+        m.addedNodes.forEach(function(n){ if(n.nodeType===1) _styleCancelButtons(n); });
+        var el=(m.target&&m.target.nodeType===1)?m.target:null; var bt=el&&el.closest?el.closest('button'):null; if(bt) _styleCancelButtons(bt);
+      } else if(m.type==='characterData'){
+        var p=m.target.parentElement; var b2=p&&p.closest?p.closest('button'):null; if(b2) _styleCancelButtons(b2);
+      }
+    });
+  }).observe(document.documentElement,{childList:true,subtree:true,characterData:true});
+}catch(e){}
+document.addEventListener('DOMContentLoaded',function(){ _styleCancelButtons(document.body); });
 
 // Is this phone refusing browser storage? Seen on an iPhone (v1217 export): every kind of storage failed,
 // so Firebase sign-in fell all the way back to NONE. The person is then logged out on every open (the login
@@ -6259,13 +6288,31 @@ async function loadGlobalSettings(){
     Object.assign(globalSettings,d);
     // Apply saved base rates into the live BASE object
     if(d.sprintHourly) BASE['Sprinter Van RT']=d.sprintHourly; // hourly rate ref
-    if(d.baseRates&&typeof d.baseRates==='object'){
-      Object.keys(d.baseRates).forEach(function(v){
-        if(d.baseRates[v]>0) BASE[v]=d.baseRates[v];
-      });
-    }
+    _applyBaseRatesFromSettings();
   }
 }
+// v1397: copy the saved vehicle rates into the live BASE table. A vehicle with no saved rate falls back to the factory rate (the Sprinter has none, so it
+// is removed from BASE and shows the factory $405). Used at boot, right after an admin saves new rates, and when the app comes back to the foreground.
+function _applyBaseRatesFromSettings(){
+  var br=(globalSettings&&globalSettings.baseRates&&typeof globalSettings.baseRates==='object')?globalSettings.baseRates:{};
+  ['Sedan','SUV/Van','Premium','Sprinter Van'].forEach(function(v){
+    if(br[v]>0) BASE[v]=br[v];
+    else if(v==='Sprinter Van') delete BASE[v];
+    else BASE[v]=DEFAULT_RATES[v];
+  });
+}
+// Re-read the shared settings and repaint anything showing vehicle prices (Quote page buttons + the live quote). Throttled to once a minute unless forced.
+var _lastPricingRefresh=0;
+async function _refreshPricingLive(force){
+  try{
+    if(!force && Date.now()-_lastPricingRefresh<60000) return;
+    _lastPricingRefresh=Date.now();
+    if(!force) await loadGlobalSettings(); else _applyBaseRatesFromSettings();
+    try{ refreshVehicleButtonLabels(); }catch(e){}
+    try{ if(document.getElementById('page-quote') && document.getElementById('page-quote').classList.contains('active') && typeof calcQuote==='function') calcQuote(); }catch(e){}
+  }catch(e){ console.warn('_refreshPricingLive', e); }
+}
+document.addEventListener('visibilitychange', function(){ if(document.visibilityState==='visible') _refreshPricingLive(false); });
 // Ask the admin to confirm rate changes before saving. changes = [{label, from, to}].
 async function _confirmRateChanges(changes){
   if(!changes.length) return true;
@@ -7580,6 +7627,22 @@ function _lookupByFuzzyTerminal(map, term){
 }
 // Tolerant of both the full form ('North Domestic') and legacy short form
 // ('North'); returns '' if there's no terminal set or no match.
+// v1399: which saved address is the airport and which is the client, for an AP PICK UP. The saved model is pickup = airport, home = client. Some rides
+// (reported: Deidre Brodey, created by Kat) were saved with the CLIENT'S street address in pickup and nothing in home. The card then labelled the client's
+// address as the pickup but its link jumped to the airport terminal's coordinates, and the Start-navigation route replaced the client's address with the
+// terminal, so the client's address was never routed at all. This reads such a ride as what it is: airport side = the terminal, client side = that address.
+function _looksLikeAirportText(a){
+  a=String(a||'').trim(); if(!a) return false;
+  try{ if(_terminalCoordFromAddressText(a)) return true; }catch(e){}
+  return /airport|hartsfield|\bATL\b|terminal|concourse|domestic|international/i.test(a);
+}
+function apPickupSides(r){
+  var p=String((r&&r.pickup)||'').trim(), h=String((r&&r.home)||'').trim();
+  if(r && r.type==='AP PICK UP' && p && !h && !_looksLikeAirportText(p)){
+    return { pickup:'', home:p, misfiled:true };       // pickup='' = "use the terminal"
+  }
+  return { pickup:p, home:h, misfiled:false };
+}
 function terminalToAddress(term){
   if(!term) return '';
   var key=String(term).trim();
@@ -11730,17 +11793,43 @@ function driverShortName(fullName){
 }
 const COLOR_POOL = ['#7c3aed','#4a148c','#f5a623','#ffcba4','#000000','#e53935','#43a047','#1e88e5','#e0c3fc','#a0522d','#a0a0a0','#ff6d00','#8b0000','#2e7d32','#ff6b6b','#c8920a','#0097a7','#e91e8c','#00838f','#5d4037','#c2185b','#00897b','#6d4c41','#455a64','#d84315','#827717'];
 function _norm(c){ return (c||'').toLowerCase(); }
-function pickUnusedColor(){
-  var used=Object.values(driverColors).map(_norm);
-  var free=COLOR_POOL.filter(function(c){ return used.indexOf(_norm(c))<0; });
-  if(free.length) return free[Math.floor(Math.random()*free.length)];
-  // The whole pool is taken - generate something new. Each channel's 30-209 range genuinely can
-  // land on OUTSIDE_DRIVER_COLOR (107,107,107) by chance, so this retries rather than risk it.
-  var r=function(){return Math.floor(Math.random()*180+30);};
-  var gen; var tries=0;
-  do{ gen='#'+[r(),r(),r()].map(function(n){return n.toString(16).padStart(2,'0');}).join(''); tries++; }
-  while(_norm(gen)===_norm(OUTSIDE_DRIVER_COLOR) && tries<10);
-  return gen;
+// v1397: a color for a new driver that LOOKS different from every color already assigned, not merely one that is not an exact duplicate.
+// Candidates = the preset pool plus freshly generated vivid colors. Each is scored by its perceptual distance (CIE76 delta-E in Lab space)
+// to the nearest assigned color (the outside-driver lime counts as assigned too). A random one from those clearly different (>= 30) wins;
+// if none clears that bar the single most different candidate is used.
+function _hexToLab(hex){
+  var h=String(hex||'').replace('#',''); if(h.length===3) h=h.split('').map(function(c){return c+c;}).join('');
+  if(!/^[0-9a-f]{6}$/i.test(h)) return null;
+  var c=[0,2,4].map(function(k){ var v=parseInt(h.substr(k,2),16)/255; return v<=0.04045? v/12.92 : Math.pow((v+0.055)/1.055,2.4); });
+  var x=(c[0]*0.4124+c[1]*0.3576+c[2]*0.1805)/0.95047, y=(c[0]*0.2126+c[1]*0.7152+c[2]*0.0722), z=(c[0]*0.0193+c[1]*0.1192+c[2]*0.9505)/1.08883;
+  var f=function(t){ return t>0.008856? Math.cbrt(t) : (7.787*t+16/116); };
+  return [116*f(y)-16, 500*(f(x)-f(y)), 200*(f(y)-f(z))];
+}
+function _colorDist(a,b){
+  var A=_hexToLab(a), B=_hexToLab(b); if(!A||!B) return 0;
+  return Math.sqrt(Math.pow(A[0]-B[0],2)+Math.pow(A[1]-B[1],2)+Math.pow(A[2]-B[2],2));
+}
+function _hslToHex(h,s,l){
+  s/=100; l/=100; var k=function(n){return (n+h/30)%12;}, a=s*Math.min(l,1-l);
+  var f=function(n){ var v=l-a*Math.max(-1,Math.min(k(n)-3,Math.min(9-k(n),1))); return Math.round(255*v).toString(16).padStart(2,'0'); };
+  return '#'+f(0)+f(8)+f(4);
+}
+function pickDistinctColor(exceptName){
+  var used=[]; Object.keys(driverColors||{}).forEach(function(n){ if(n!==exceptName && driverColors[n]) used.push(driverColors[n]); });
+  used.push(OUTSIDE_DRIVER_COLOR);
+  var cands=COLOR_POOL.slice();
+  for(var i=0;i<80;i++) cands.push(_hslToHex(Math.floor(Math.random()*360), 55+Math.floor(Math.random()*36), 34+Math.floor(Math.random()*26)));
+  var scored=cands.map(function(c){ var m=Infinity; used.forEach(function(u){ var d=_colorDist(c,u); if(d<m) m=d; }); return {c:c,d:m}; });
+  var good=scored.filter(function(x){ return x.d>=30; });
+  if(good.length) return good[Math.floor(Math.random()*good.length)].c;
+  scored.sort(function(a,b){ return b.d-a.d; });
+  return scored[0].c;
+}
+function pickUnusedColor(){ return pickDistinctColor(); }
+function rollDriverColor(inputId, exceptName){
+  var el=document.getElementById(inputId); if(!el) return;
+  el.value=pickDistinctColor(exceptName);
+  try{ el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){}
 }
 
 // ── DRIVER COLOR VAULT ──────────────────────────────────────────────────────
@@ -12552,7 +12641,7 @@ function openNav(addr){
     +'<button data-u="maps" style="flex:1;padding:.85rem;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-family:inherit;font-size:.95rem;font-weight:700;cursor:pointer;">Maps</button>'
     +'<button data-u="waze" style="flex:1;padding:.85rem;border:none;border-radius:8px;background:#33ccff;color:#053b54;font-family:inherit;font-size:.95rem;font-weight:700;cursor:pointer;">Waze</button>'
     +'</div>'
-    +'<button data-u="cancel" style="width:100%;padding:.7rem;border:none;border-radius:8px;background:none;color:#999;font-family:inherit;font-size:.9rem;font-weight:600;cursor:pointer;">Cancel</button>';
+    +'<button data-u="cancel" style="width:100%;padding:.85rem;border:none;border-radius:8px;background:#dc2626;color:#fff;font-family:inherit;font-size:.95rem;font-weight:700;cursor:pointer;">Cancel</button>';
   box.querySelector('[data-u="maps"]').addEventListener("click",()=>go(mapsUrl));
   box.querySelector('[data-u="waze"]').addEventListener("click",()=>go(wazeUrl));
   box.querySelector('[data-u="cancel"]').addEventListener("click",close);
@@ -14470,9 +14559,9 @@ function renderRideView(r){
 
     ${_bothAddr && (r.pickup||r.home) ? `<div class="detail-row" style="grid-column:1/-1;">
       <div style="display:flex;flex-direction:column;gap:.4rem;">
-        ${r.pickup?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:78px;flex-shrink:0;margin-top:2px;">PICKUP</span><div style="font-size:.86rem;">${mapsLink(r.pickup,"var(--accent)", (r.type==='AP PICK UP'&&r.terminal)?terminalToAddress(r.terminal):null)}</div></div>`:''}
+        ${(function(){ var _sd=apPickupSides(r); var _pk=_sd.misfiled ? (r.terminal ? (String(r.terminal).replace(/\s*terminal\s*$/i,'')+' Terminal') : 'Airport') : _sd.pickup; return _pk?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:78px;flex-shrink:0;margin-top:2px;">PICKUP</span><div style="font-size:.86rem;">${mapsLink(_pk,"var(--accent)", (r.type==='AP PICK UP'&&r.terminal)?terminalToAddress(r.terminal):null)}</div></div>`:''; })()}
         ${extraStopsHtml}
-        ${r.home?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:78px;flex-shrink:0;margin-top:2px;">DESTINATION</span><div style="font-size:.86rem;">${mapsLink(r.home,"var(--accent)", ((r.type==='AP RUN'||r.type==='AP ROUND TRIP')&&r.terminal)?terminalToAddress(r.terminal):null)}</div></div>`:''}
+        ${apPickupSides(r).home?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:78px;flex-shrink:0;margin-top:2px;">DESTINATION</span><div style="font-size:.86rem;">${mapsLink(apPickupSides(r).home,"var(--accent)", ((r.type==='AP RUN'||r.type==='AP ROUND TRIP')&&r.terminal)?terminalToAddress(r.terminal):null)}</div></div>`:''}
       </div>
     </div>` : ''}
 
@@ -17381,8 +17470,9 @@ function _buildRouteUrlsFrom(r, startAddr, endAddr, linkRide){
     if(home){ try{ showToast('Using your saved home address as the start point'); }catch(e){} }
   }
   var endPt   = (endAddr!==undefined&&endAddr!==null ? String(endAddr) : home).trim();
-  var pickup  = (r.pickup||'').trim();
-  var dropoff = (r.home||'').trim();
+  var _sides  = apPickupSides(r);   // v1399: a misfiled AP PICK UP (client address saved in pickup) still routes airport -> client
+  var pickup  = _sides.pickup;
+  var dropoff = _sides.home;
   var t       = r.type||'';
   // For airport rides, prefer the terminal's verified GPS coordinate when a terminal is set
   // (falls back to the ride's own saved address otherwise - never a street address derived
@@ -18156,7 +18246,7 @@ function _openStartRideFromCurrent(rideId){
 
 // Starting from current location: ask where the route should END —
 // home, back to this same spot, or a typed address.
-function _rideDropAddr(id){ var r=_rideById(id); if(!r) return ''; var t=r.type||''; var term=(typeof terminalToAddress==='function')?terminalToAddress(r.terminal):''; if((t==='AP RUN'||t==='AP ROUND TRIP')&&term) return term; return (r.home||r.dropoff||'').trim(); }
+function _rideDropAddr(id){ var r=_rideById(id); if(!r) return ''; var t=r.type||''; var term=(typeof terminalToAddress==='function')?terminalToAddress(r.terminal):''; if((t==='AP RUN'||t==='AP ROUND TRIP')&&term) return term; return (apPickupSides(r).home||r.dropoff||'').trim(); }
 function _askReturnDest(rideId, locStr){
   var home=_rtGetHome();
   window._srtId=rideId; window._srtLoc=locStr; window._srtHome=home;
@@ -25666,7 +25756,7 @@ function openAddDriverModal(){
     +fld('Vehicle year','nd-vyear','e.g. 2024')
     +fld('Vehicle make/model','nd-vehicle','e.g. Toyota Sienna')
     +'<div style="margin-bottom:.7rem;"><div style="font-size:.66rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">Card color</div>'
-    +'<input type="color" id="nd-color" value="'+pickUnusedColor()+'" style="width:100%;height:40px;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;background:#fff;" /></div>'
+    +'<div style="display:flex;gap:.5rem;align-items:center;"><input type="color" id="nd-color" value="'+pickUnusedColor()+'" style="flex:1;height:40px;border:1.5px solid var(--light);border-radius:8px;cursor:pointer;background:#fff;" /><button type="button" onclick="rollDriverColor(\'nd-color\')" style="padding:.55rem .8rem;border:1.5px solid #7c3aed;background:#fff;color:#7c3aed;border-radius:8px;font-family:inherit;font-size:.8rem;font-weight:700;cursor:pointer;white-space:nowrap;">&#127922; New color</button></div></div>'
     +'<div style="margin-bottom:1rem;"><div style="font-size:.66rem;color:var(--mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">Driver card photo</div>'
     +'<div style="display:flex;align-items:center;gap:.6rem;">'
     +'<div id="nd-photo-preview" style="width:64px;height:40px;border-radius:6px;background:#f4f2f8 center/cover no-repeat;border:1.5px solid var(--light);flex-shrink:0;"></div>'
@@ -31944,6 +32034,7 @@ registerAdminAction('pricing_base', async function(p){
   if(p.hourly!=null) globalSettings.sprintHourly=p.hourly;
   await saveGlobalSettings();
   try{ renderPricingTracker(); }catch(e){}
+  try{ _refreshPricingLive(true); }catch(e){}   // v1397: repaint the vehicle buttons and the open quote right away
 });
 registerAdminAction('pricing_clientfee', async function(p){
   globalSettings.clientFeePct=p.v;
@@ -37382,6 +37473,7 @@ function showPage(id){
     // was already auto-saved, so the marker must stay with it. Clearing it here made the next auto-save (after a date or vehicle change)
     // miss the saved copy and write a second quote.
     if(!((document.getElementById('q-client')||{}).value||'').trim()){ window._editingQuoteId = null; window._qSrcReqId = null; }
+    try{ _refreshPricingLive(false); }catch(e){}   // v1397: pick up vehicle-rate changes made on another device
     // Cleared on every visit, same as the flags below - _openAndPrefillClientRequest() calls
     // nav('quote') and only sets this banner 260ms later, well after this synchronous reset, so
     // a prefilled visit still shows it; an ordinary visit never shows a stale one from the last.
