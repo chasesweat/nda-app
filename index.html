@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191401">
+<meta name="version" content="202608191403">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -2628,6 +2628,7 @@ function _logCrash(kind, message, stack){
       page: (typeof _currentPageId!=='undefined') ? _currentPageId : '',
       who: (typeof currentUser!=='undefined' && currentUser && currentUser.name) || '(not logged in)',
       build: (document.querySelector('meta[name="version"]')||{}).content || '',
+      transport: window._fbTransport||'',
       ua: navigator.userAgent
     };
 
@@ -2656,6 +2657,8 @@ function _logCrash(kind, message, stack){
   }catch(e){ /* logging a crash must never itself be able to crash */ }
 }
 window.addEventListener('error', function(ev){
+  // v1402: "ResizeObserver loop completed with undelivered notifications" is a harmless browser notice (nothing breaks), not a crash - keep it out of the log.
+  if(/ResizeObserver loop/i.test(String(ev.message||''))) return;
   _logCrash('error', ev.message, ev.error && ev.error.stack);
 });
 window.addEventListener('unhandledrejection', function(ev){
@@ -2980,6 +2983,17 @@ async function initFirebase(){
   try {
     if(typeof firebase === 'undefined') throw new Error('Firebase SDK not loaded');
     firebase.initializeApp(firebaseConfig);
+    // v1403: force long-polling instead of websockets. Slow cold loads / "did not answer in 8s -
+    // database reports connected" reads (mostly Kat's iPhone) point at websockets stalling on
+    // cellular/Safari. Must run BEFORE the first firebase.database(). To revert: set
+    // localStorage 'nda-fb-transport' = 'ws' (or delete this block).
+    window._fbTransport = 'default';
+    try{
+      var _pref=''; try{ _pref=localStorage.getItem('nda-fb-transport')||''; }catch(_e){}
+      var _I = firebase.database && firebase.database.INTERNAL;
+      if(_pref==='ws' && _I && typeof _I.forceWebSockets==='function'){ _I.forceWebSockets(); window._fbTransport='websocket'; }
+      else if(_I && typeof _I.forceLongPolling==='function'){ _I.forceLongPolling(); window._fbTransport='long-polling'; }
+    }catch(_e){ window._fbTransport='default (force failed)'; }
     fbDB  = firebase.database();
     fbRef = (path) => fbDB.ref(path);
     // v1257: start watching connection state immediately. It used to start only inside
@@ -24745,7 +24759,10 @@ function venmoPayRideBtn(ownerName, amount, payerDName, rideId){
   const _openVenmo='(function(e){e.preventDefault();e.stopPropagation();'
     +(autoMark?('Promise.resolve('+autoMark+').catch(function(){showToast(\'\\u26a0\\ufe0f Payment tracking failed to save \\u2014 opening Venmo anyway; mark it paid manually after\',\'error\');}).then(function(){'):'(function(){')
     +'window.open(\''+url.replace(/'/g,"\\'")+'\',\'_blank\',\'noopener\');'
-    +'})();})(event)';
+    // v1402: with tracking the chain is Promise...then(function(){ window.open(...); }) and must end right there. It used to end "})();" - calling the
+    // promise that .then() returns, which throws "...is not a function" (seen in the crash log on John's iPhone and Chase's phone). Without tracking
+    // the (function(){...})() form needs those trailing parentheses, so the closer now depends on which form was built.
+    +(autoMark?'});':'})();')+'})(event)';
   return '<a href="'+url.replace(/"/g,'&quot;')+'" rel="noopener" '
     +'onclick="'+_openVenmo+'" '
     +'style="flex:1;min-width:78px;padding:.42rem;background:#3d95ce;color:#fff;border:none;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:600;cursor:pointer;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center;box-sizing:border-box;">Venmo</a>';
