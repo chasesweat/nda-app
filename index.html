@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191408">
+<meta name="version" content="202608191410">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -4715,27 +4715,66 @@ async function _purgeOldSavedQuotes(){
     // Ages from sentAt when the quote has been sent - see _quoteAgeFrom(). A quote with neither
     // timestamp can't be aged at all and is dropped, same as before.
     savedQuotes = (savedQuotes||[]).filter(function(q){ var from=_quoteAgeFrom(q); return from && from >= cutoff; });
-    // v1407: a quote whose ride date has passed is dead weight - removed automatically. The LAST date on the quote counts
-    // (a round trip's return date if it is later), so a trip still under way is kept. No date = untouched (the age rule above
-    // still applies). The last 20 removed are kept on this phone (nda-removed-past-quotes) in case one was wanted.
-    try{
-      var _today = toDateStr(nowET());
-      var _past = (savedQuotes||[]).filter(function(q){
-        if(!q) return false;
-        var last = [q.date, q.rtDate, q.rtDateAP].filter(function(d){ return /^\d{4}-\d{2}-\d{2}$/.test(d||''); }).sort().pop();
-        return !!last && last < _today;
-      });
-      if(_past.length){
-        try{ var _keep=JSON.parse(localStorage.getItem('nda-removed-past-quotes')||'[]'); _past.forEach(function(q){ _keep.push({removedAt:_syncNow(), quote:q}); }); localStorage.setItem('nda-removed-past-quotes', JSON.stringify(_keep.slice(-20))); }catch(e){}
-        savedQuotes = savedQuotes.filter(function(q){ return _past.indexOf(q)<0; });
-        console.log('[retention] removed '+_past.length+' saved quote(s) whose ride date has passed');
-      }
-    }catch(e){ console.warn('past-date quote purge failed', e); }
     if(savedQuotes.length !== before){
       await saveSavedQuotes();
       if(typeof renderSavedQuotes==='function') renderSavedQuotes();
     }
   }catch(e){ console.warn('_purgeOldSavedQuotes failed', e); }
+}
+// v1408: quotes whose ride date has passed are NOT deleted silently - the driver is shown a list and chooses.
+// Only the driver's OWN quotes (same owner rule as the Saved Quotes panel). The LAST date on the quote counts (a round trip's
+// later return date), today is kept, no date is never offered. "No" remembers those quotes on this phone so it does not nag
+// at every open (they can still be deleted by hand); the last 20 deleted are kept locally in nda-removed-past-quotes.
+function _pastDatedQuotesForMe(){
+  var me=((typeof currentUser!=='undefined' && currentUser && currentUser.name)||'').trim(); if(!me) return [];
+  var today=toDateStr(nowET()), dismissed=[];
+  try{ dismissed=JSON.parse(localStorage.getItem('nda-past-quotes-dismissed')||'[]'); }catch(e){}
+  return (savedQuotes||[]).filter(function(q){
+    if(!q || !q._quoteId) return false;
+    if(((q.createdBy||q.driver||'')+'').trim()!==me) return false;
+    if(dismissed.indexOf(q._quoteId)>=0) return false;
+    var last=[q.date,q.rtDate,q.rtDateAP].filter(function(d){ return /^\d{4}-\d{2}-\d{2}$/.test(d||''); }).sort().pop();
+    return !!last && last<today;
+  });
+}
+function _offerPastQuotesPurge(){
+  try{
+    var list=_pastDatedQuotesForMe(); if(!list.length) return;
+    if(document.getElementById('past-quotes-overlay')) return;
+    var ov=document.createElement('div'); ov.id='past-quotes-overlay';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:15000;display:flex;align-items:center;justify-content:center;padding:1.2rem;';
+    var rows=list.map(function(q,i){
+      var d=[q.date,q.rtDate,q.rtDateAP].filter(Boolean).sort().pop();
+      return '<label style="display:flex;align-items:center;gap:.6rem;padding:.5rem 0;border-bottom:1px solid var(--light);cursor:pointer;">'
+        +'<input type="checkbox" class="pq-chk" data-qid="'+escAttr(q._quoteId)+'" checked style="width:18px;height:18px;flex-shrink:0;">'
+        +'<span style="flex:1;min-width:0;"><span style="display:block;font-weight:600;font-size:.88rem;color:#0f172a;">'+escHtml(q.client||'Client')+'</span>'
+        +'<span style="display:block;font-size:.74rem;color:#64748b;">'+escHtml(fmtDateShort(d))+(q.price?(' \u00b7 $'+(parseFloat(q.price)||0).toFixed(2)):'')+'</span></span></label>';
+    }).join('');
+    ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:400px;width:100%;max-height:85vh;display:flex;flex-direction:column;padding:1.2rem;box-shadow:0 24px 60px rgba(0,0,0,.35);">'
+      +'<div style="font-size:1.05rem;font-weight:800;color:#0f172a;">Delete old quotes?</div>'
+      +'<div style="font-size:.8rem;color:#475569;margin:.3rem 0 .6rem;line-height:1.4;">These saved quotes are for rides whose date has already passed. Untick any you want to keep.</div>'
+      +'<div style="overflow-y:auto;flex:1;border-top:1px solid var(--light);">'+rows+'</div>'
+      +'<div style="display:flex;gap:.6rem;margin-top:.9rem;">'
+      +'<button id="pq-no" style="flex:1;padding:.7rem;border:1.5px solid #cbd5e1;border-radius:10px;background:#fff;color:#0f172a;font-weight:700;font-family:inherit;cursor:pointer;">No, keep them</button>'
+      +'<button id="pq-yes" style="flex:1;padding:.7rem;border:none;border-radius:10px;background:#dc2626;color:#fff;font-weight:700;font-family:inherit;cursor:pointer;">Yes, delete</button></div></div>';
+    document.body.appendChild(ov);
+    function ids(sel){ return Array.prototype.slice.call(ov.querySelectorAll('.pq-chk')).filter(function(c){ return c.checked===sel; }).map(function(c){ return c.getAttribute('data-qid'); }); }
+    function remember(arr){ try{ var d=JSON.parse(localStorage.getItem('nda-past-quotes-dismissed')||'[]'); localStorage.setItem('nda-past-quotes-dismissed', JSON.stringify(d.concat(arr).slice(-200))); }catch(e){} }
+    document.getElementById('pq-no').onclick=function(){ remember(ids(true).concat(ids(false))); ov.remove(); };
+    document.getElementById('pq-yes').onclick=async function(){
+      var del=ids(true), keepIds=ids(false);
+      remember(keepIds);   // unticked ones: don't ask about them again
+      var gone=(savedQuotes||[]).filter(function(q){ return q && del.indexOf(q._quoteId)>=0; });
+      if(gone.length){
+        try{ var k=JSON.parse(localStorage.getItem('nda-removed-past-quotes')||'[]'); gone.forEach(function(q){ k.push({removedAt:_syncNow(), quote:q}); }); localStorage.setItem('nda-removed-past-quotes', JSON.stringify(k.slice(-20))); }catch(e){}
+        savedQuotes=(savedQuotes||[]).filter(function(q){ return gone.indexOf(q)<0; });
+        try{ await saveSavedQuotes(); }catch(e){}
+        try{ renderSavedQuotes(); }catch(e){}
+        try{ showToast(gone.length+' old quote'+(gone.length>1?'s':'')+' deleted'); }catch(e){}
+      }
+      ov.remove();
+    };
+  }catch(e){ console.warn('_offerPastQuotesPurge failed', e); }
 }
 // Poll for SOS updates every 90 seconds while app is open
 // Poll for new client requests every 60 seconds while the app is open - same pattern as
@@ -8795,6 +8834,8 @@ function _icsEventDesc(r, opts){
   var _fl = String(r.flight||'').trim() || String(r.rtFlight||'').trim();
   if(_fl) out.push(_fl);
   if(r.phone)  out.push(r.phone);
+  // v1410: extra stop addresses go in the notes for every ride type (ROUND TRIP already had them above).
+  String(r.xstopAddr||'').split(';').map(function(x){ return x.trim(); }).filter(Boolean).forEach(function(a){ out.push('Extra Pickup/Dropoff: '+a); });
   var price = _icsPriceSummary(r);
   if(price) out.push(price);
   return out.join('\n');
@@ -36857,6 +36898,7 @@ function enterApp(){
   (async function(){
     try{ if(window._dataFreshPromise) await window._dataFreshPromise; }catch(e){}
     try{ if(typeof _purgeOldSavedQuotes==='function') await _purgeOldSavedQuotes(); }catch(e){}
+    try{ _offerPastQuotesPurge(); }catch(e){}
     try{ if(typeof _purgeOldClientRequests==='function') await _purgeOldClientRequests(); }catch(e){}
   })();
   setTimeout(maybShowTutorialBanner, 1200);
