@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191403">
+<meta name="version" content="202608191407">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -733,6 +733,19 @@ button.cancel-red:active{background:#b91c1c!important;border-color:#b91c1c!impor
           <input type="hidden" id="q-type" value="AP ROUND TRIP" />
           <div id="q-pickup-note" style="display:none;margin-top:.5rem;font-size:.75rem;line-height:1.4;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;border-radius:8px;padding:.5rem .7rem;"></div>
         </div>
+        <!-- v1405: same "Which happens first?" choice Quick Add has - an AP Round Trip can start with the pickup (client arriving first). -->
+        <div id="q-rt-first-section" class="form-group" style="display:none;background:#fff;border:1.5px solid #d8b4fe;border-radius:8px;padding:.6rem .7rem;">
+          <div style="font-size:.72rem;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#7c3aed;margin-bottom:.4rem;">Which happens first?</div>
+          <div style="font-size:.68rem;color:var(--mid);margin-bottom:.5rem;line-height:1.4;">Most trips start with dropping someone off. If the client is arriving first and you pick them up before the return leg, choose that instead &mdash; it decides which address box is the airport below.</div>
+          <div style="display:flex;gap:.5rem;">
+            <label style="flex:1;display:flex;align-items:center;gap:.4rem;padding:.45rem .6rem;border:1.5px solid #7c3aed;border-radius:7px;background:#7c3aed;color:#fff;cursor:pointer;font-size:.78rem;font-weight:600;" id="q-rt-first-run-label">
+              <input type="radio" name="q-rt-first" id="q-rt-first-run" value="AP RUN" checked onchange="qRtFirstLegChanged()" style="margin:0;"> AP Run (dropping off)
+            </label>
+            <label style="flex:1;display:flex;align-items:center;gap:.4rem;padding:.45rem .6rem;border:1.5px solid var(--light);border-radius:7px;background:#fff;color:var(--black);cursor:pointer;font-size:.78rem;font-weight:600;" id="q-rt-first-pickup-label">
+              <input type="radio" name="q-rt-first" id="q-rt-first-pickup" value="AP PICK UP" onchange="qRtFirstLegChanged()" style="margin:0;"> AP Pickup (picking up)
+            </label>
+          </div>
+        </div>
         <!-- v1280: asked AFTER the travel type - bags only apply to airport runs (hidden otherwise). -->
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;"><div class="form-group"><label>Passengers</label><input type="number" id="q-pax" inputmode="numeric" aria-label="Number of passengers" value="1" min="1" max="14" oninput="calcQuote()" /></div><div class="form-group" id="q-checked-group"><label>Checked Bags</label><input type="number" id="q-checked-bags" inputmode="numeric" aria-label="Checked bags" value="0" min="0" /></div><div class="form-group" id="q-carryon-group"><label>Carry-on Bags</label><input type="number" id="q-carryon-bags" aria-label="Carry-on bags" value="0" min="0" /></div></div>
         <div class="form-group"><label id="q-pickup-label">Pickup</label><select id="q-pickup-mode" onchange="addrModeChanged('q','pickup')" style="display:none;width:100%;margin-bottom:.4rem;padding:.55rem .7rem;border:1.5px solid var(--light);border-radius:8px;font-size:.88rem;background:var(--white);"></select><input type="text" id="q-pickup" placeholder="Start typing…" oninput="debounceMileage()" /></div>
@@ -811,6 +824,7 @@ button.cancel-red:active{background:#b91c1c!important;border-color:#b91c1c!impor
               <input type="time" id="q-rt-time" aria-label="Return pickup time" onchange="onReturnLegDateTimeChange('q')" style="flex:1;min-width:0;" />
             </div>
           </div>
+          <div id="q-rt-addr-slot"></div>
           <div class="form-group" id="q-rt-flight-group"><label>Return Flight #</label><input type="text" id="q-rt-flight" placeholder="e.g. DL1234" oninput="calcQuote()" /></div>
           <div class="form-group" id="q-rt-terminal-group"><label>Return Terminal</label>
             <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.35rem;">
@@ -823,6 +837,18 @@ button.cancel-red:active{background:#b91c1c!important;border-color:#b91c1c!impor
             <label>Surcharges — Leg 2 (return)</label>
             <div style="font-size:.68rem;color:var(--mid);margin-bottom:.4rem;">Set independently from the outbound leg above — auto-filled from the return date/time, adjust as needed.</div>
             <div class="addon-grid" id="q-addons-leg2"></div>
+          </div>
+          <!-- v1405: same "both legs ready" check Quick Add has - Schedule stays off until each leg has its required details. -->
+          <div id="q-rt-legready-group" style="display:none;margin-top:.6rem;padding:.5rem;background:#fff;border-radius:8px;border:1.5px solid #d8b4fe;">
+            <div style="font-size:.75rem;font-weight:600;color:#7c3aed;margin-bottom:.4rem;">Both legs must be confirmed before scheduling <span style="font-weight:400;color:var(--mid);">(auto-checks once the required info for each leg is filled in)</span></div>
+            <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;">
+              <input type="checkbox" id="q-leg-run" style="width:15px;height:15px;accent-color:#7c3aed;cursor:pointer;" onchange="qCheckLegs(true)" />
+              <label for="q-leg-run" id="q-leg-run-label" style="font-size:.82rem;cursor:pointer;">AP Run &mdash; outbound leg ready</label>
+            </div>
+            <div style="display:flex;align-items:center;gap:.5rem;">
+              <input type="checkbox" id="q-leg-pickup" style="width:15px;height:15px;accent-color:#7c3aed;cursor:pointer;" onchange="qCheckLegs(true)" />
+              <label for="q-leg-pickup" id="q-leg-pickup-label" style="font-size:.82rem;cursor:pointer;">AP Pickup &mdash; return leg ready</label>
+            </div>
           </div>
         </div>
         <div class="form-group" id="q-wait-group"><label>Wait time (hrs)</label><input type="number" id="q-wait" inputmode="decimal" aria-label="Wait time in hours" value="0" min="0" step="0.25" oninput="calcQuote()" /></div>
@@ -1231,7 +1257,7 @@ button.cancel-red:active{background:#b91c1c!important;border-color:#b91c1c!impor
     <div id="rm-edit-mode" style="display:none;">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
         <div class="form-group"><label>Client Name</label><input type="text" id="edit-client" list="qa-client-list" autocomplete="off" oninput="populateClientDatalist();maybeAutofillClient('edit')" /><div id="edit-clientnotes-alert" style="display:none;font-size:.82rem;color:#1e3a8a;background:#dbeafe;border:1.5px solid #60a5fa;border-radius:8px;padding:.55rem .7rem;margin-top:.5rem;line-height:1.45;"></div></div>
-        <div class="form-group"><label>Phone</label><input type="tel" id="edit-phone" inputmode="tel" autocomplete="tel" oninput="checkPhoneFieldHint('edit')" /><div id="edit-phone-hint" style="display:none;font-size:.72rem;color:#b45309;margin-top:.25rem;">&#9888; That looks like an address. Phone numbers go here &mdash; put the address in the <b>Pickup</b> / <b>Drop-off</b> fields below.</div></div>
+        <div class="form-group"><label>Phone</label><input type="tel" id="edit-phone" inputmode="tel" autocomplete="tel" oninput="checkPhoneFieldHint('edit')" onblur="this.value=formatPhoneUS(this.value);checkCautiousForForm('edit')" /><div id="edit-phone-hint" style="display:none;font-size:.72rem;color:#b45309;margin-top:.25rem;">&#9888; That looks like an address. Phone numbers go here &mdash; put the address in the <b>Pickup</b> / <b>Drop-off</b> fields below.</div></div>
         <div class="form-group" style="grid-column:1/-1;"><label>Additional numbers on confirmation <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(comma-separated)</span></label><input type="text" id="edit-extra-phones" placeholder="404-555-0102 (spouse), 770-555-0188 (assistant)" /></div>
         <div class="form-group" style="grid-column:1/-1;"><label>Email</label><input type="text" id="edit-email" /></div>
         <div class="form-group" style="grid-column:1/-1;"><label>Pickup Date &amp; Time</label><div style="display:flex;gap:.5rem;"><input type="date" id="edit-date" aria-label="Pickup date" onchange="updateSuggestedPickupTime('edit')" style="flex:1;min-width:0;" /><input type="time" id="edit-time" aria-label="Pickup time" style="flex:1;min-width:0;" /></div><div id="edit-time-suggest-note" style="display:none;font-size:.74rem;font-weight:600;color:#5b21b6;background:#f3eeff;border:1px solid #d9c9f5;border-radius:7px;padding:.35rem .55rem;margin-top:.35rem;line-height:1.45;"></div></div>
@@ -1287,6 +1313,9 @@ button.cancel-red:active{background:#b91c1c!important;border-color:#b91c1c!impor
         <div class="form-group" style="grid-column:1/-1;"><label>Gate code <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(optional — only the client owner and assigned driver see this)</span></label><input type="text" id="edit-gate-code" placeholder="e.g. #1234" /></div>
         <div class="form-group" style="grid-column:1/-1;"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;"><input type="checkbox" id="edit-private" style="width:auto;margin:0;" /> <span>🔒 Private ride <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(hidden from other drivers — creator, assigned driver, and admins only)</span></span></label></div>
         <div class="form-group" style="grid-column:1/-1;"><label id="edit-home-label">Destination</label><input type="text" id="edit-home" oninput="_editDebounceMileage()" /></div>
+        <div style="grid-column:1/-1;"><div id="edit-stops-wrap"></div>
+          <div class="form-group" style="margin-top:-.3rem;margin-bottom:.5rem;"><button type="button" id="edit-addstop-btn" onclick="addStopRow('edit')" style="background:none;border:1px dashed var(--gold);color:var(--gold);border-radius:8px;padding:.45rem .9rem;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:600;cursor:pointer;">+ Add Stop</button></div></div>
+        <div class="form-group" id="edit-rt-dest-group" style="grid-column:1/-1;display:none;"><label>Return trip drop-off address <span style="font-weight:600;color:var(--mid);font-size:.72rem;">(only if the way back ends somewhere different)</span></label><input type="text" id="edit-rt-dest" placeholder="Leave blank if it ends where it started" /></div>
       </div>
       <div class="form-group" style="margin-top:.5rem;">
         <label>Notes</label>
@@ -1658,7 +1687,7 @@ button.cancel-red:active{background:#b91c1c!important;border-color:#b91c1c!impor
       <div class="form-group" style="grid-column:1/-1;"><label>Home Address <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--mid);">(Auto-Fills Pickup/Drop-Off Below)</span></label>
         <input type="text" id="qa-home-address" placeholder="Start typing…" oninput="qaHomeAddressChanged()" />
       </div>
-      <div class="form-group"><label>Phone</label><input type="tel" id="qa-phone" inputmode="tel" autocomplete="tel" placeholder="404-555-0100" oninput="checkPhoneFieldHint('qa')" onblur="checkCautiousForForm('qa')" /><div id="qa-phone-hint" style="display:none;font-size:.72rem;color:#b45309;margin-top:.25rem;">&#9888; That looks like an address. Phone numbers go here &mdash; put the address in the <b>Pickup Address</b> / <b>Drop-off</b> fields lower in this form.</div></div>
+      <div class="form-group"><label>Phone</label><input type="tel" id="qa-phone" inputmode="tel" autocomplete="tel" placeholder="404-555-0100" oninput="checkPhoneFieldHint('qa')" onblur="this.value=formatPhoneUS(this.value);checkCautiousForForm('qa')" /><div id="qa-phone-hint" style="display:none;font-size:.72rem;color:#b45309;margin-top:.25rem;">&#9888; That looks like an address. Phone numbers go here &mdash; put the address in the <b>Pickup Address</b> / <b>Drop-off</b> fields lower in this form.</div></div>
       <div class="form-group"><label>Email</label><input type="email" id="qa-email" placeholder="client@email.com" /></div>
       <div style="grid-column:1/-1;font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--gold-text,#7c3aed);margin:.5rem 0 .2rem;" id="qa-leg1-lbl">Trip Details</div>
       <div class="form-group" style="grid-column:1/-1;"><label>Travel type<span class="mtip-dot" id="mtd-qa-type" onclick="toggleMtip('qa-type')" title="What&#8217;s this?">i</span><div class="mtip-pop" id="mtp-qa-type">Picking this first decides which way the trip runs — the app fills Pickup &amp; Destination for you (home on one side, airport terminal on the other).</div></label>
@@ -1807,6 +1836,7 @@ button.cancel-red:active{background:#b91c1c!important;border-color:#b91c1c!impor
         <div style="font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#7c3aed;margin-bottom:.6rem;" id="qa-rt-section-label">Return Leg (AP Pickup)</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
           <div class="form-group" style="grid-column:1/-1;"><label>Return Date &amp; Time</label><div style="display:flex;gap:.5rem;"><input type="date" id="qa-rt-date" aria-label="Return date" onchange="onReturnLegDateTimeChange('qa');qaCheckLegs()" style="flex:1;min-width:0;" /><input type="time" id="qa-rt-time" aria-label="Return pickup time" onchange="onReturnLegDateTimeChange('qa');qaCheckLegs()" style="flex:1;min-width:0;" /></div></div>
+          <div id="qa-rt-addr-slot" style="grid-column:1/-1;"></div>
           <div class="form-group" id="qa-rt-flight-group"><label id="qa-rt-flight-label">Return Flight #</label><input type="text" id="qa-rt-flight" placeholder="e.g. DL1234" /></div>
           <div class="form-group" id="qa-rt-terminal-group"><label id="qa-rt-terminal-label">Return Terminal</label>
             <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.35rem;">
@@ -6404,8 +6434,10 @@ function rideSprinterHours(r){
   var h = (r.sprinterHours!=null && r.sprinterHours!=='') ? r.sprinterHours : r.medHours;
   return parseFloat(h)||0;
 }
-function tripMath(type, vehicle, miles, sprinterHours){
-  miles=parseFloat(miles)||0; sprinterHours=parseFloat(sprinterHours)||0;
+// v1404: miles2 = the RETURN leg's own distance when the return goes to a different address (0/blank = same route back).
+// Plain Round Trip bills miles + miles2 (instead of miles x 2); an AP Round Trip's return leg gets its own overage from miles2.
+function tripMath(type, vehicle, miles, sprinterHours, miles2){
+  miles=parseFloat(miles)||0; sprinterHours=parseFloat(sprinterHours)||0; miles2=parseFloat(miles2)||0;
   const apType  = type==='AP RUN'||type==='AP PICK UP'||type==='AP ROUND TRIP';
   const apRt    = type==='AP ROUND TRIP';
   const rtType  = type==='ROUND TRIP';
@@ -6420,7 +6452,9 @@ function tripMath(type, vehicle, miles, sprinterHours){
   // One way / round trip: priced purely on mileage - vehicle base rates only apply to airport-type rides.
   if(rtType || owType){
     const mult = rtType?2:1;
-    r.mileageCharge = miles*mult*mileageRateFor(vehicle);
+    r.miles2 = (rtType && miles2>0) ? miles2 : 0;
+    r.totalMiles = r.miles2>0 ? miles+r.miles2 : miles*mult;
+    r.mileageCharge = r.totalMiles*mileageRateFor(vehicle);
     r.serviceFee    = pickupFee()*mult;
     r.vehUp         = vehicle==='Sprinter Van' ? 0 : vehUpcharge(vehicle);   // the Sprinter's per-mile rate IS its premium
     r.tripTotal     = r.mileageCharge + r.serviceFee + r.vehUp;
@@ -6432,6 +6466,12 @@ function tripMath(type, vehicle, miles, sprinterHours){
   r.overMiles = apType && miles > mileageTrigger() ? miles - includedMiles() : 0;
   r.overage   = r.overMiles * mileageRateFor(vehicle);
   r.tripTotal = r.base + r.overage;
+  // v1404: an AP Round Trip whose return goes to a different address has its own distance, so its own overage.
+  r.miles2 = (apRt && miles2>0) ? miles2 : 0;
+  if(r.miles2>0){
+    r.overMiles2 = r.miles2 > mileageTrigger() ? r.miles2 - includedMiles() : 0;
+    r.overage2   = r.overMiles2 * mileageRateFor(vehicle);
+  } else { r.miles2 = 0; r.overMiles2 = r.overMiles; r.overage2 = r.overage; }
   return r;
 }
 
@@ -6466,7 +6506,8 @@ function _priceRide(inp){
   const base2   = isXXL?(BASE[vehicle2]||DEFAULT_RATES['Sedan']):0;
   const price2  = isXXL?(parseFloat(inp.price2)||base2):0;
   const state   = inp.state||{}, state2 = inp.state2||{};
-  const tm   = tripMath(type, vehicle, miles, inp.sprinterHours);
+  const miles2 = parseFloat(inp.miles2)||0;
+  const tm   = tripMath(type, vehicle, miles, inp.sprinterHours, miles2);
   const base = tm.base;
   const waitFee = wait * waitRateFor(vehicle);
   function sumLines(ls){ return ls.reduce((s,l)=>s+l.val,0); }
@@ -6483,11 +6524,12 @@ function _priceRide(inp){
   // ── AP ROUND TRIP — two separate leg breakdowns ──
   if(tm.apRt){
     const overMiles = tm.overMiles, overage = tm.overage;
-    function legLines(){
+    function legLines(o){
+      const lm = o ? o.miles : miles, lo = o ? o.overMiles : overMiles, lv = o ? o.overage : overage;
       const L=[];
       L.push({kind:'base', label:`Base rate (${vehicle}) — incl. ${includedMiles()} mi`, val:base});
-      if(miles > 0 && miles <= mileageTrigger()) L.push({kind:'mileage', label:`Mileage (${miles} mi — within radius)`, val:0, note:'No overage'});
-      if(overage > 0) L.push({kind:'mileage', label:`Mileage overage (${overMiles} mi × $${mileageRateFor(vehicle).toFixed(2)})`, val:overage});   // v1295: the (9 mi × $2.50) in the label is all the detail shown - no second math line
+      if(lm > 0 && lm <= mileageTrigger()) L.push({kind:'mileage', label:`Mileage (${lm} mi — within radius)`, val:0, note:'No overage'});
+      if(lv > 0) L.push({kind:'mileage', label:`Mileage overage (${lo} mi × $${mileageRateFor(vehicle).toFixed(2)})`, val:lv});   // v1295: the (9 mi × $2.50) in the label is all the detail shown - no second math line
       // Double Vehicle rides on BOTH legs - each leg is its own independently-charged fare.
       if(isXXL && price2>0) L.push({kind:'veh2', label:`2nd vehicle (${vehicle2})`, val:price2});
       return L;
@@ -6500,16 +6542,19 @@ function _priceRide(inp){
     if(leg1Fuel>0) leg1Lines.push({kind:'fuel', label:fuelLabel(), val:leg1Fuel});
     const leg1Total = Math.floor(leg1Sub + leg1Fuel);
 
-    const leg2Lines = legLines();
+    // v1404: the return leg is priced on ITS OWN distance when it goes to a different address.
+    const leg2Lines = legLines(tm.miles2>0 ? {miles:tm.miles2, overMiles:tm.overMiles2, overage:tm.overage2} : null);
     const s2 = _surchargeLinesFor(state2);
     s2.forEach(x=>leg2Lines.push(x));
-    const leg2Sub = base + overage + (isXXL?price2:0) + sumLines(s2);
+    const leg2Sub = base + tm.overage2 + (isXXL?price2:0) + sumLines(s2);
     const leg2Fuel = state2.fuel ? leg2Sub*fuelRate() : 0;
     if(leg2Fuel>0) leg2Lines.push({kind:'fuel', label:fuelLabel(), val:leg2Fuel});
     const leg2Total = Math.floor(leg2Sub + leg2Fuel);
-    return { apRt:true, tm:tm, calcTotal:leg1Total+leg2Total, total:leg1Total+leg2Total,
-             legs:[ {title:'Leg 1 — AP Run (Drop Off)', lines:leg1Lines, total:leg1Total},
-                    {title:'Leg 2 — AP Pick Up (Return)', lines:leg2Lines, total:leg2Total} ] };
+    // v1405: the titles follow which leg comes first (a client arriving first is picked up on leg 1).
+    const _pf = inp.firstLeg==='AP PICK UP';
+    return { apRt:true, tm:tm, calcTotal:leg1Total+leg2Total, total:leg1Total+leg2Total, firstLeg:(_pf?'AP PICK UP':'AP RUN'),
+             legs:[ {title:(_pf?'Leg 1 — AP Pick Up (Arrival)':'Leg 1 — AP Run (Drop Off)'), lines:leg1Lines, total:leg1Total},
+                    {title:(_pf?'Leg 2 — AP Run (Return)':'Leg 2 — AP Pick Up (Return)'), lines:leg2Lines, total:leg2Total} ] };
   }
   // ── All other types ──
   const lines = [];
@@ -6517,7 +6562,7 @@ function _priceRide(inp){
   if(tm.hourly){
     lines.push({kind:'base', label:'Sprinter Van hourly', val:tm.base, note:`${tm.hours} hr × $${sprintHourly().toFixed(2)}/hr`});
   } else if(tm.rtType){
-    lines.push(miles>0?{kind:'mileage', label:'Round trip mileage', val:tm.mileageCharge, note:`${miles} mi × 2 = ${miles*2} mi × $${mileageRateFor(vehicle).toFixed(2)}/mi`}:{kind:'mileage', label:'Round trip mileage', val:0, note:'Enter miles above'});
+    lines.push(miles>0?{kind:'mileage', label:'Round trip mileage', val:tm.mileageCharge, note:(tm.miles2>0 ? `${miles} mi out + ${tm.miles2} mi back = ${tm.totalMiles} mi × $${mileageRateFor(vehicle).toFixed(2)}/mi` : `${miles} mi × 2 = ${miles*2} mi × $${mileageRateFor(vehicle).toFixed(2)}/mi`)}:{kind:'mileage', label:'Round trip mileage', val:0, note:'Enter miles above'});
     lines.push({kind:'service', label:'Pickup/Drop-off fee', val:tm.serviceFee});
     if(tm.vehUp>0) lines.push({kind:'vehup', label:`Vehicle upcharge (${vehicle})`, val:tm.vehUp});
   } else if(tm.owType){
@@ -6704,11 +6749,14 @@ function calcQuote() {
   const grpV2  = document.getElementById('q-vehicle2-group');
   if(grpV2) grpV2.style.display=isXXL?'block':'none';
   try{ _syncPlainRtLeg2('q'); }catch(e){}
+  try{ qCheckLegs(); }catch(e){}   // v1405
   let res = _priceRide({
     rtSeparate: _plainRtSeparate('q'),
     type:    document.getElementById('q-type').value,
     vehicle: document.getElementById('q-ride')?.value||'Sedan',
     miles:   document.getElementById('q-miles').value,
+    miles2:  _rtMiles2('q'),   // v1404
+    firstLeg: rtFirstLegType('q'),   // v1405
     sprinterHours: (document.getElementById('q-sprinter-hours')||{}).value,
     wait:    _qWaitVal(),
     stops:   stopRows('q').length,   // v1295: was a separate global that could go stale and bill a stop the saved quote did not have ($180 quote scheduled as $191)
@@ -6839,6 +6887,7 @@ async function _qaCalcMileage(){
     // frozen at whatever it was computed as before mileage was known (i.e. no overage
     // ever gets added, since recalcQa() only runs when OTHER fields change).
     try{ recalcQa(); }catch(e){}
+    try{ if(rtAddrState('qa').on) _rtAddrCalc('qa'); }catch(e){}   // v1404: the return leg's distance follows the first leg's addresses
     try{ if(typeof updateSuggestedPickupTime==='function') updateSuggestedPickupTime('qa'); }catch(e){}
   }catch(e){
     if(st) st.textContent='Could not calculate distance';
@@ -7064,11 +7113,11 @@ function _dmPromise(req){
 // confirmation-text, and Edit-Fee-modal consumer of those two fields keeps working as-is.
 var MAX_STOPS = 4; // intermediate stops (v1354: was 2; the booking form now lets a client add up to 4 extra pickups)
 var _stopSeq = 0;   // shared sequence so row ids never collide between the two forms
-var STOP_WRAP_ID = { q: 'q-stops-wrap', qa: 'qa-stops-wrap' };
-var STOP_ADD_BTN_ID = { q: 'q-addstop-btn', qa: 'qa-addstop-btn' };
+var STOP_WRAP_ID = { q: 'q-stops-wrap', qa: 'qa-stops-wrap', edit: 'edit-stops-wrap' };   // v1405: Edit Ride too
+var STOP_ADD_BTN_ID = { q: 'q-addstop-btn', qa: 'qa-addstop-btn', edit: 'edit-addstop-btn' };
 // Quote form rows use the class q-stop-input; Add Ride's are namespaced separately (qa-stop-input).
 // Neither form's mileage reads these rows (v1266) - they feed the per-stop fee and xstopAddr only.
-function _stopClass(prefix){ return prefix==='q' ? 'q-stop-input' : 'qa-stop-input'; }
+function _stopClass(prefix){ return prefix==='q' ? 'q-stop-input' : (prefix==='edit' ? 'edit-stop-input' : 'qa-stop-input'); }
 function stopRows(prefix){
   var wrapId = STOP_WRAP_ID[prefix]; if(!wrapId) return [];
   return Array.from(document.querySelectorAll('#'+wrapId+' .'+_stopClass(prefix)));
@@ -7096,6 +7145,7 @@ function _syncRouteBtn(){
   b.style.display = n>0 ? '' : 'none';
 }
 function _stopsChanged(prefix){
+  if(prefix==='edit') return;   // v1405: Edit Ride re-prices on save, not live
   if(prefix==='q') _syncRouteBtn();
   if(prefix==='q'){
     // calcQuote() bills stopRows('q').length directly (v1295), so the count always reflects what's on screen, address rows included.
@@ -7230,6 +7280,7 @@ async function calcMileage(){
       + `<span style="color:#8a7fa3;cursor:pointer;text-decoration:underline;font-size:.8em;" onclick="forceRecalcMileage('q')">recalculate</span>`;
     updateMilesDisplay();
     calcQuote();
+    try{ if(rtAddrState('q').on) _rtAddrCalc('q'); }catch(e){}   // v1404
     updateSuggestedPickupTime('q');
   } catch(err){
     statusEl.innerHTML = `Could not calculate. <span style="color:#4ade80;cursor:pointer;text-decoration:underline;" onclick="openGoogleMaps()">Open Google Maps ↗</span>`;
@@ -7336,7 +7387,7 @@ function updateSuggestedPickupTime(p){
   if(!box) return;
   const type = document.getElementById(p+'-type')?.value;
   // AP ROUND TRIP's outbound leg is a departing flight - same calculation, same usefulness.
-  if(type !== 'AP RUN' && type !== 'AP ROUND TRIP'){ box.style.display='none'; _setTimeSuggestNote(p,''); return; }
+  if((type !== 'AP RUN' && type !== 'AP ROUND TRIP') || (type==='AP ROUND TRIP' && rtFirstLegType(p)==='AP PICK UP')){ box.style.display='none'; _setTimeSuggestNote(p,''); return; }   // v1405: no flight-departure time when the pickup comes first
   const depTimeVal = document.getElementById(p+'-flight-dep-time')?.value;
   const dateVal     = document.getElementById(p+'-date')?.value;
   const terminal    = document.getElementById(p+'-terminal')?.value;
@@ -7756,6 +7807,7 @@ function autoFillTerminalAddress(){
   _applyTerminalAutoFill({
     terminalId:'q-terminal', typeId:'q-type',
     targetIdForType:function(type){
+      if(type==='AP ROUND TRIP') type = rtFirstLegType('q');   // v1405
       if(type==='AP RUN'||type==='AP ROUND TRIP') return 'q-dropoff';
       if(type==='AP PICK UP') return 'q-pickup';
       return null;
@@ -7868,7 +7920,7 @@ function applyAirportFieldVisibility(prefix){
   var isAP = type==='AP RUN'||type==='AP PICK UP'||type==='AP ROUND TRIP';
   // On a round trip, leg 1's own flight field only matters if leg 1 is itself a pickup -
   // otherwise leg 1 is a run (drop-off at a scheduled time, no flight to track).
-  var wantsFlight = (type==='AP PICK UP') || (type==='AP ROUND TRIP' && prefix==='qa' && typeof qaRtFirstLegType==='function' && qaRtFirstLegType()==='AP PICK UP');
+  var wantsFlight = (type==='AP PICK UP') || (type==='AP ROUND TRIP' && rtFirstLegType(prefix)==='AP PICK UP');   // v1405: both forms
   var set=function(id,on){ var el=document.getElementById(id); if(el) el.style.display = on?'':'none'; };
   set(prefix+'-flight-group', wantsFlight);
   set(prefix+'-terminal-group', isAP);
@@ -7884,7 +7936,7 @@ function applyAirportFieldVisibility(prefix){
   // exactly as useful there as on an AP Run. The original "AP Run only" restriction read as an
   // oversight rather than a decision - the reasoning above it concerns ARRIVING flights, which
   // is a different field entirely.
-  var wantsFlightDep = (type==='AP RUN' || type==='AP ROUND TRIP');
+  var wantsFlightDep = (type==='AP RUN' || (type==='AP ROUND TRIP' && rtFirstLegType(prefix)!=='AP PICK UP'));   // v1405: a departing flight only when the drop-off is first
   set(prefix+'-flight-dep-group', wantsFlightDep);
   if(!wantsFlightDep){
     var fdt=document.getElementById(prefix+'-flight-dep-time'); if(fdt) fdt.value='';
@@ -7914,6 +7966,8 @@ function updateTripFields(){
   // section heading is reworded for the same reason - "Return flight" means nothing to someone
   // catching a train home.
   show('q-ap-rt-fields', isAPRT || isRT);
+  try{ if(!isAPRT){ var _qfr0=document.getElementById('q-rt-first-run'); if(_qfr0) _qfr0.checked=true; } qApplyFirstLeg(); }catch(e){}   // v1405
+  try{ if(!(isAPRT||isRT)) rtAddrReset('q'); rtAddrRender('q'); }catch(e){}   // v1404
   ['q-rt-flight-group','q-rt-terminal-group'].forEach(function(id){ show(id, isAPRT); });
   var _rtHdr = document.getElementById('q-ap-rt-header');
   if(_rtHdr) _rtHdr.textContent = isAPRT ? 'Return leg \u2014 flying back' : 'Return leg';
@@ -7964,7 +8018,7 @@ function updateTripFields(){
   // case, since nothing is departing from the driver's side, a flight is arriving on the
   // client's. Every other type keeps the original wording, which is accurate for them.
   var _qdtl=document.getElementById('q-date-time-label');
-  if(_qdtl) _qdtl.textContent = (type==='AP PICK UP') ? 'Arrival Date & Time' : 'Departing Date & Time';
+  if(_qdtl) _qdtl.textContent = (type==='AP PICK UP' || (isAPRT && rtFirstLegType('q')==='AP PICK UP')) ? 'Arrival Date & Time' : 'Departing Date & Time';
   // Direction preview so the scheduler can see the flow at a glance.
   var _dp=document.getElementById('q-direction-preview');
   if(_dp){
@@ -7999,6 +8053,7 @@ function updateTripFields(){
     }
   }
   if(qRepeatNote) qRepeatNote.style.display = isAPRT ? 'block' : 'none';
+  try{ qApplyFirstLeg(); qCheckLegs(); }catch(e){}   // v1405: after the generic labels above, so the first-leg wording wins
   updateSuggestedPickupTime('q');
 }
 
@@ -8034,6 +8089,7 @@ function setActiveTog(btn){
 // client who hasn't had this new field populated yet (an older saved quote, or before
 // maybeAutofillClient() has run). Only ever moves autofilled/empty values, never a manual entry.
 function _qPlaceHomeAddress(t){
+  if(t==='AP ROUND TRIP') t = rtFirstLegType('q');   // v1405: laid out like its first leg
   var _isAirport = (t==='AP RUN'||t==='AP PICK UP'||t==='AP ROUND TRIP');
   var _isPlain = (t==='ONE WAY'||t==='ROUND TRIP');
   if(!_isAirport && !_isPlain) return;
@@ -8081,6 +8137,171 @@ function rtTerminalSameChanged(p){
   }
   try{ rtTerminalPicked(p); }catch(e){}
   try{ _recalcForm(p); }catch(e){}
+}
+
+// ── v1404: a DIFFERENT ADDRESS FOR THE RETURN LEG ─────────────────────────────────────────────────────────────
+// Quote (p='q') and Quick Add (p='qa') share this. The client is picked up at one place and the return goes to / starts at
+// another. Saved as rtDestination (the same name the booking link already uses) + rtMiles (the return leg's own distance).
+//   ROUND TRIP     : back-leg drop-off address; distance = destination -> that address; billed miles = out + back.
+//   AP ROUND TRIP  : the client-side address of the RETURN leg (drop-off after a pick up, or pickup for a run); distance =
+//                    airport -> that address, priced with its own overage.
+var _rtAddrTimers = {};
+function _rtFirstLegOf(p){ try{ return rtFirstLegType(p); }catch(e){ return 'AP RUN'; } }
+function _rtAddrLabel(p){
+  var t=(document.getElementById(p+'-type')||{}).value;
+  if(t==='ROUND TRIP') return {toggle:'Going somewhere different on the way back?', field:'Return trip drop-off address', hint:'Leave off if the return ends where the trip started.'};
+  if(_rtFirstLegOf(p)==='AP PICK UP') return {toggle:'Being picked up from a different address for the return?', field:'Return pickup address (where we pick them up for the airport)', hint:'Leave off if it is the same address as the first leg.'};
+  return {toggle:'Returning to a different address?', field:'Return drop-off address (where we take them from the airport)', hint:'Leave off if it is the same address as the first leg.'};
+}
+function rtAddrRender(p){
+  var slot=document.getElementById(p+'-rt-addr-slot'); if(!slot) return;
+  var _L=_rtAddrLabel(p), _sig=_L.toggle+'|'+_L.field;
+  if(slot.dataset.sig===_sig && slot.firstChild) return;   // already drawn for this wording - never rebuild under someone typing
+  slot.dataset.sig=_sig;
+  var on=!!(document.getElementById(p+'-rt-addr-on')||{}).checked;
+  var addr=(document.getElementById(p+'-rt-dest')||{}).value||'';
+  var miles=(document.getElementById(p+'-rt-miles')||{}).value||'';
+  var L=_rtAddrLabel(p);
+  slot.innerHTML='<div style="margin:.15rem 0 .6rem;">'
+    +'<label style="display:flex;align-items:center;gap:.45rem;font-size:.8rem;font-weight:600;cursor:pointer;color:var(--black);">'
+    +'<input type="checkbox" id="'+p+'-rt-addr-on" onchange="rtAddrToggle(\''+p+'\')" style="width:15px;height:15px;accent-color:#7c3aed;cursor:pointer;"'+(on?' checked':'')+'> '+escHtml(L.toggle)+'</label>'
+    +'<div id="'+p+'-rt-addr-box" style="display:'+(on?'block':'none')+';margin-top:.4rem;">'
+    +'<label style="font-size:.72rem;font-weight:700;display:block;margin-bottom:.2rem;">'+escHtml(L.field)+'</label>'
+    +'<input type="text" id="'+p+'-rt-dest" placeholder="Start typing…" value="'+escHtml(addr)+'" oninput="rtAddrChanged(\''+p+'\')" style="width:100%;">'
+    +'<input type="hidden" id="'+p+'-rt-miles" value="'+escHtml(miles)+'">'
+    +'<div id="'+p+'-rt-addr-status" style="font-size:.74rem;color:var(--mid);margin-top:.25rem;line-height:1.4;">'+escHtml(L.hint)+'</div>'
+    +'</div></div>';
+}
+function rtAddrState(p){
+  var on=!!(document.getElementById(p+'-rt-addr-on')||{}).checked;
+  var type=(document.getElementById(p+'-type')||{}).value;
+  if(!on || (type!=='ROUND TRIP' && type!=='AP ROUND TRIP')) return {on:false, addr:'', miles:0};
+  var addr=((document.getElementById(p+'-rt-dest')||{}).value||'').trim();
+  return {on:!!addr, addr:addr, miles:addr ? (parseFloat((document.getElementById(p+'-rt-miles')||{}).value)||0) : 0};
+}
+function rtAddrToggle(p){
+  var on=!!(document.getElementById(p+'-rt-addr-on')||{}).checked;
+  var box=document.getElementById(p+'-rt-addr-box'); if(box) box.style.display=on?'block':'none';
+  if(!on){ rtAddrClear(p); try{ _recalcForm(p); }catch(e){} }
+  else { var i=document.getElementById(p+'-rt-dest'); if(i) i.focus(); }
+}
+function rtAddrClear(p){
+  var d=document.getElementById(p+'-rt-dest'); if(d) d.value='';
+  var m=document.getElementById(p+'-rt-miles'); if(m) m.value='';
+  var st=document.getElementById(p+'-rt-addr-status'); if(st) st.textContent=_rtAddrLabel(p).hint;
+}
+function rtAddrReset(p){
+  var c=document.getElementById(p+'-rt-addr-on'); if(c) c.checked=false;
+  var b=document.getElementById(p+'-rt-addr-box'); if(b) b.style.display='none';
+  rtAddrClear(p);
+}
+// Restore from a saved quote / ride / booking request.
+function rtAddrSet(p, addr, miles){
+  addr=(addr||'').trim();
+  if(!document.getElementById(p+'-rt-addr-slot')) return;
+  if(!addr){ rtAddrReset(p); return; }
+  rtAddrRender(p);
+  var c=document.getElementById(p+'-rt-addr-on'); if(c) c.checked=true;
+  var b=document.getElementById(p+'-rt-addr-box'); if(b) b.style.display='block';
+  var d=document.getElementById(p+'-rt-dest'); if(d) d.value=addr;
+  var m=document.getElementById(p+'-rt-miles'); if(m) m.value=(parseFloat(miles)>0)?String(parseFloat(miles)):'';
+  var st=document.getElementById(p+'-rt-addr-status');
+  if(st && parseFloat(miles)>0) st.textContent='✓ '+parseFloat(miles)+' mi on the return leg';
+  if(!(parseFloat(miles)>0)) rtAddrChanged(p);
+}
+function rtAddrChanged(p){
+  var m=document.getElementById(p+'-rt-miles'); if(m) m.value='';
+  clearTimeout(_rtAddrTimers[p]);
+  _rtAddrTimers[p]=setTimeout(function(){ _rtAddrCalc(p); }, 900);
+}
+// The airport end of the return leg: the chosen return terminal, else whichever of the form's two addresses is the airport.
+function _rtAirportAddr(p){
+  var rtT=(document.getElementById(p+'-rt-terminal')||{}).value || (document.getElementById(p+'-terminal')||{}).value || '';
+  if(rtT && TERMINAL_ADDRESSES[rtT]) return TERMINAL_ADDRESSES[rtT];
+  var side = _rtFirstLegOf(p)==='AP PICK UP' ? 'pickup' : 'dest';
+  return ((document.getElementById(_addrFieldId(p,side))||{}).value||'').trim();
+}
+async function _rtAddrCalc(p){
+  var st=document.getElementById(p+'-rt-addr-status');
+  var S=rtAddrState(p);
+  if(!S.addr){ return; }
+  var type=(document.getElementById(p+'-type')||{}).value;
+  var from = (type==='ROUND TRIP') ? ((document.getElementById(_addrFieldId(p,'dest'))||{}).value||'').trim() : _rtAirportAddr(p);
+  if(!from){ if(st) st.textContent='Fill in the '+(type==='ROUND TRIP'?'destination':'airport / terminal')+' above first, then the return distance is worked out.'; return; }
+  if(st) st.textContent='Getting the return distance…';
+  try{
+    if(!gmapsLoaded){ loadGoogleMapsAPI(); var w=0; while(!gmapsLoaded && w<5000){ await new Promise(function(r){setTimeout(r,200);}); w+=200; } }
+    if(!gmapsLoaded){ if(st) st.textContent='Maps unavailable — the return is billed as the same distance as the way out until it can be measured.'; return; }
+    var route=await _resolveRouteMeters(from, S.addr);
+    var mi=_floorMiles(route.meters);
+    // the address may have changed while the lookup ran
+    if(rtAddrState(p).addr!==S.addr) return;
+    var m=document.getElementById(p+'-rt-miles'); if(m) m.value=String(mi);
+    if(st) st.textContent='✓ '+mi+' mi on the return leg ('+(type==='ROUND TRIP'?'destination to that address':'airport to that address')+')';
+    try{ _recalcForm(p); }catch(e){}
+  }catch(e){ if(st) st.textContent='Could not measure the return leg — billed as the same distance as the way out.'; }
+}
+// What the pricing engine should use as the return leg's miles (0 = same as the way out).
+function _rtMiles2(p){ var S=rtAddrState(p); return S.on ? S.miles : 0; }
+
+// ── v1405: the Quote form's "which leg first" + "both legs ready" (mirrors Quick Add) ──
+function qRtFirstLegChanged(){
+  try{ qApplyFirstLeg(); }catch(e){}
+  try{ autoFillTerminalAddress(); }catch(e){}
+  try{ _qPlaceHomeAddress('AP ROUND TRIP'); }catch(e){}
+  try{ applyQuoteAutoAddons(); renderAddons('q'); applyReturnLegAutoAddons('q'); renderAddonsLeg2('q'); }catch(e){}
+  try{ debounceMileage(); }catch(e){}
+  try{ updateSuggestedPickupTime('q'); }catch(e){}
+  calcQuote();
+}
+// Repaint every label / field that depends on the first leg. Safe to call any time (updateTripFields does).
+function qApplyFirstLeg(){
+  var t=(document.getElementById('q-type')||{}).value;
+  var isAPRT=(t==='AP ROUND TRIP');
+  var sec=document.getElementById('q-rt-first-section'); if(sec) sec.style.display=isAPRT?'block':'none';
+  var first=rtFirstLegType('q'), second=(first==='AP RUN')?'AP PICK UP':'AP RUN';
+  function paint(el,on){ if(!el) return; el.style.background=on?'#7c3aed':'#fff'; el.style.color=on?'#fff':'var(--black)'; el.style.borderColor=on?'#7c3aed':'var(--light)'; }
+  paint(document.getElementById('q-rt-first-run-label'), first==='AP RUN');
+  paint(document.getElementById('q-rt-first-pickup-label'), first==='AP PICK UP');
+  if(!isAPRT) return;
+  var set=function(id,txt){ var e=document.getElementById(id); if(e) e.textContent=txt; };
+  set('q-ap-rt-header','Leg 2 — Return ('+second+')');
+  set('q-addons-label','Surcharges — Leg 1 ('+first+')');
+  var l2=document.querySelector('#q-addons-leg2-group > label'); if(l2) l2.textContent='Surcharges — Leg 2 ('+second+')';
+  set('q-leg-run-label','AP Run — '+(first==='AP RUN'?'leg 1 ready':'leg 2 ready'));
+  set('q-leg-pickup-label','AP Pickup — '+(first==='AP PICK UP'?'leg 1 ready':'leg 2 ready'));
+  var dl=document.getElementById('q-date-time-label'); if(dl) dl.textContent=(first==='AP PICK UP')?'Arrival Date & Time':'Departing Date & Time';
+  // The return leg's flight number only matters when the return is the pickup (an arriving flight to meet).
+  var rf=document.getElementById('q-rt-flight-group'); if(rf) rf.style.display=(second==='AP PICK UP')?'block':'none';
+  try{ applyAirportFieldVisibility('q'); }catch(e){}
+  try{ renderAddrPickers('q'); }catch(e){}
+  try{ rtAddrRender('q'); }catch(e){}
+}
+function _qLegFieldsReady(legType){
+  var first=rtFirstLegType('q');
+  if(legType===first){
+    var pickup=((document.getElementById('q-pickup')||{}).value||'').trim();
+    var dest=((document.getElementById('q-dropoff')||{}).value||'').trim();
+    var date=(document.getElementById('q-date')||{}).value||'';
+    return !!(pickup && dest && date);
+  }
+  return !!(((document.getElementById('q-rt-date')||{}).value||'') && ((document.getElementById('q-rt-time')||{}).value||''));
+}
+function qAutoCheckLegs(){
+  if((document.getElementById('q-type')||{}).value!=='AP ROUND TRIP') return;
+  var r=document.getElementById('q-leg-run'), p=document.getElementById('q-leg-pickup');
+  if(r && !r.checked && _qLegFieldsReady('AP RUN')) r.checked=true;
+  if(p && !p.checked && _qLegFieldsReady('AP PICK UP')) p.checked=true;
+}
+function qCheckLegs(skipAuto){
+  var t=(document.getElementById('q-type')||{}).value;
+  var btn=document.getElementById('q-schedule-btn');
+  var grp=document.getElementById('q-rt-legready-group'); if(grp) grp.style.display=(t==='AP ROUND TRIP')?'block':'none';
+  if(t!=='AP ROUND TRIP'){ if(btn && !window._qSaving){ btn.disabled=false; btn.style.opacity=''; } return; }
+  if(!skipAuto){ try{ qAutoCheckLegs(); }catch(e){} }
+  var ok=!!((document.getElementById('q-leg-run')||{}).checked && (document.getElementById('q-leg-pickup')||{}).checked);
+  if(btn && !window._qSaving){ btn.disabled=!ok; btn.style.opacity=ok?'':'0.45'; }
+  return ok;
 }
 function setTripType(t, btn){
   const el=document.getElementById('q-type'); if(el) el.value=t;
@@ -8199,7 +8420,7 @@ function applyQuoteAutoAddons(){
   if(dv && tv && !_addonTouched.late && !driverAutoOff('late')) addonState.late = _isLateNoticeRide(dv,tv);
 
   // Premium hours — needs TIME only.
-  if(tv && !_addonTouched.premium && !driverAutoOff('premium')) addonState.premium = isPremiumTime(mins, _legIsPickup((document.getElementById('q-type')||{}).value,'AP RUN',false));
+  if(tv && !_addonTouched.premium && !driverAutoOff('premium')) addonState.premium = isPremiumTime(mins, _legIsPickup((document.getElementById('q-type')||{}).value, rtFirstLegType('q'), false));
 
   // Traffic — needs BOTH date + time, because the day of week decides.
   if(dv && tv && !_addonTouched.traffic && !driverAutoOff('traffic')){
@@ -8229,7 +8450,7 @@ function applyReturnLegAutoAddons(p){
   if(tv){ const pp=tv.split(':').map(Number); mins=(pp[0]||0)*60+(pp[1]||0); }
   if(globalSettings.fuelEnabled !== false && !T.fuel && !driverAutoOff('fuel')) S.fuel=true;
   if(dv && tv && !T.late && !driverAutoOff('late')) S.late = _isLateNoticeRide(dv,tv);   // v1288: the return leg's own date and time
-  if(tv && !T.premium && !driverAutoOff('premium')) S.premium = isPremiumTime(mins, _legIsPickup((document.getElementById(p+'-type')||{}).value, (p==='qa'&&typeof qaRtFirstLegType==='function')?qaRtFirstLegType():'AP RUN', true));
+  if(tv && !T.premium && !driverAutoOff('premium')) S.premium = isPremiumTime(mins, _legIsPickup((document.getElementById(p+'-type')||{}).value, rtFirstLegType(p), true));
   if(dv && tv && !T.traffic && !driverAutoOff('traffic')){
     const dow=new Date(dv+'T12:00:00').getDay();
     S.traffic = isTrafficTime(dow,mins);
@@ -8456,13 +8677,16 @@ function _icsCalendar(events){
 // already encodes exactly that rule (Morgan -> Kathleen Herringdine) and is the same function
 // the fee ledger and pickup instructions use, so this can never disagree with them. Converted
 // back to the short login name for display, matching the form used everywhere else.
-function _icsOwnerTag(r){
+// v1406: shared by the calendar title and the saved-contact name. Uses the real client owner (the stored owner first, then the Kat/Morgan
+// rule on whoever created the ride), so a ride Morgan typed in for Kat's client reads "(Kat)" everywhere.
+function _clientOwnerTag(r){
   try{
-    var ownerFull = (typeof feeOwnerFor==='function' ? feeOwnerFor(r.createdBy) : '') || '';
-    var shortName = (typeof _loginForDriver==='function' ? _loginForDriver(ownerFull) : '') || '';
+    var ownerFull = (typeof _rideClientOwner==='function' ? _rideClientOwner(r) : '') || '';
+    var shortName = (ownerFull && typeof _loginForDriver==='function' ? _loginForDriver(ownerFull) : '') || '';
     return (shortName || (r.createdBy||'')).trim();
-  }catch(e){ return (r.createdBy||'').trim(); }
+  }catch(e){ return ((r&&r.createdBy)||'').trim(); }
 }
+function _icsOwnerTag(r){ return _clientOwnerTag(r); }
 function _icsEventTitle(r){
   var owner = _icsOwnerTag(r);
   return (r.type?r.type+' \u2014 ':'') + (r.client||'Ride') + (owner?' ('+owner+')':'');
@@ -8536,7 +8760,9 @@ function _icsEventDesc(r, opts){
     if(_px>1) blocks.push(_px+' Passengers');
     var _xs = String(r.xstopAddr||'').split(';').map(function(x){ return x.trim(); }).filter(Boolean);
     _xs.forEach(function(a){ blocks.push('Extra Pickup/Dropoff: '+a); });
-    if(r.destination) blocks.push('Going to: '+String(r.destination).trim());
+    var _goTo = String(r.destination||r.home||'').trim();   // v1404: a saved ride keeps its destination in `home`, only a booking request calls it `destination`
+    if(_goTo) blocks.push('Going to: '+_goTo);
+    if(r.rtDestination) blocks.push('Returning to: '+String(r.rtDestination).trim());   // v1404
     var _rt = r.rt || r.rtTime;
     if(_rt && typeof fmtTime12==='function') blocks.push('Returning at '+fmtTime12(_rt));
     var _pr = _icsPriceSummary(r);
@@ -8756,21 +8982,25 @@ function _quoteBreakdownBullets(lineEls){
 // check here; that flexibility only exists once a ride is actually booked and split.
 function _quoteDetailsText(){
   var type = (document.getElementById('q-type')||{}).value || '';
-  var homeAddr = (document.getElementById('q-pickup')||{}).value || '';
+  // v1405: with the pickup first, the client's address is the DESTINATION box (the airport is in Pickup); and the return leg uses the
+  // return address when one was entered (v1404).
+  var _firstQ = rtFirstLegType('q'), _secondQ = (_firstQ==='AP RUN') ? 'AP PICK UP' : 'AP RUN';
+  var homeAddr = (document.getElementById(_firstQ==='AP PICK UP' && type==='AP ROUND TRIP' ? 'q-dropoff' : 'q-pickup')||{}).value || '';
+  var _retHome = (rtAddrState('q').addr) || homeAddr;
   var lines = [];
 
   if(type==='AP ROUND TRIP'){
     var legDefs = [
-      { num:'1', legType:'AP RUN',     date:(document.getElementById('q-date')||{}).value,
-        time:(document.getElementById('q-time')||{}).value, flight:'',
+      { num:'1', legType:_firstQ, home:homeAddr, date:(document.getElementById('q-date')||{}).value,
+        time:(document.getElementById('q-time')||{}).value, flight:(_firstQ==='AP PICK UP' ? ((document.getElementById('q-flight')||{}).value||'') : ''),
         terminal:(document.getElementById('q-terminal')||{}).value },
-      { num:'2', legType:'AP PICK UP', date:(document.getElementById('q-rt-date')||{}).value,
+      { num:'2', legType:_secondQ, home:_retHome, date:(document.getElementById('q-rt-date')||{}).value,
         time:(document.getElementById('q-rt-time')||{}).value,
-        flight:(document.getElementById('q-rt-flight')||{}).value,
+        flight:(_secondQ==='AP PICK UP' ? ((document.getElementById('q-rt-flight')||{}).value||'') : ''),
         terminal:(document.getElementById('q-rt-terminal')||{}).value },
     ];
     legDefs.forEach(function(leg, i){
-      var tf = _quoteToFrom(leg.legType, leg.terminal, homeAddr);
+      var tf = _quoteToFrom(leg.legType, leg.terminal, leg.home);
       var flightPart = leg.flight ? ' ('+leg.flight+')' : '';
       if(i>0) lines.push('');
       lines.push('Date: '+(leg.date?fmtDateShort(leg.date):''));
@@ -8835,15 +9065,18 @@ function _quoteDetailsTextFromSaved(q){
     var leg1Lines = bd.lines.filter(function(l){ return / \u2014 Leg 1 \(outbound\)$/.test(l.label); });
     var leg2Lines = bd.lines.filter(function(l){ return / \u2014 Leg 2 \(return\)$/.test(l.label); });
     var stripSuffix = function(l){ return { label:l.label.replace(/ \u2014 Leg [12] \((outbound|return)\)$/,''), val:l.val }; };
-    var outLeg = { date:q.date, time:q.time, terminal:q.terminal, flight:'', legType:'AP RUN' };
-    var retLeg = { date:q.rtDateAP, time:q.rtTime, terminal:q.rtTerminal, flight:q.rtFlight, legType:'AP PICK UP' };
+    // v1405: first-leg aware (pickup-first round trips) and the client's address is the Destination box when the pickup is first.
+    var _f1 = (q.rtFirstLeg==='AP PICK UP') ? 'AP PICK UP' : 'AP RUN', _f2 = (_f1==='AP RUN') ? 'AP PICK UP' : 'AP RUN';
+    var _clientAddr = (_f1==='AP PICK UP') ? (q.home||'') : (q.pickup||'');
+    var outLeg = { date:q.date, time:q.time, terminal:q.terminal, flight:(_f1==='AP PICK UP' ? (q.flight||'') : ''), legType:_f1, home:_clientAddr };
+    var retLeg = { date:q.rtDateAP, time:q.rtTime, terminal:q.rtTerminal, flight:(_f2==='AP PICK UP' ? (q.rtFlight||'') : ''), legType:_f2, home:(q.rtDestination||_clientAddr) };
     [ [outLeg, leg1Lines, bd.leg1, 'Outbound'], [retLeg, leg2Lines, bd.leg2, 'Return'] ].forEach(function(entry, i){
       var leg = entry[0], legLines = entry[1], legTotal = entry[2], label = entry[3];
       // _quoteToFrom, not _schedulingToFrom: a quote's round trip has only ONE shared home
       // address (q.pickup) - no separate return-leg address field exists on the quote form at
       // all (confirmed directly when this was first built) - _schedulingToFrom expects two
       // genuinely distinct addresses the way a real, split ride record has.
-      var tf = _quoteToFrom(leg.legType, leg.terminal, q.pickup);
+      var tf = _quoteToFrom(leg.legType, leg.terminal, leg.home);
       var flightPart = leg.flight ? ' ('+leg.flight+')' : '';
       if(i>0) lines.push('');
       lines.push(label+': '+(leg.date?fmtDateShort(leg.date):'')+', '+(leg.time?fmtTime12(leg.time):'')+flightPart);
@@ -9289,12 +9522,13 @@ async function saveQuote(){
   const btn=document.getElementById('q-schedule-btn');
   if(btn){ btn.disabled=true; btn.style.opacity='.55'; }
   try{ return await _saveQuoteInner(); }
-  finally{ window._qSaving=false; if(btn){ btn.disabled=false; btn.style.opacity=''; } }
+  finally{ window._qSaving=false; if(btn){ btn.disabled=false; btn.style.opacity=''; } try{ qCheckLegs(true); }catch(e){} }
 }
 async function _saveQuoteInner(){
   const client=document.getElementById('q-client').value.trim();
   if(!client){showToast('Please enter a client name','error');return;}
   // v1318: a date is required to schedule (surcharges depend on it) - same as Quick Add.
+  if((document.getElementById('q-type')||{}).value==='AP ROUND TRIP' && !qCheckLegs()){ showToast('Check both leg confirmation boxes before scheduling','error'); return; }   // v1405
   if(!((document.getElementById('q-date')||{}).value||'')){ showToast('Date is required to schedule a ride','error'); try{ document.getElementById('q-date').focus(); }catch(e){} return; }
   if(!window._qOwnerResolved && typeof _maybePromptClientOwner==='function' && _maybePromptClientOwner(client,'quote')){ return; }
   window._qOwnerResolved=false;
@@ -9323,7 +9557,17 @@ async function _saveQuoteInner(){
     return;
   }
   let _leg2=null, _xxlLeg2=[], _qMade=[];
+  // v1405: same driver-availability gate Quick Add has always had. A driver marked unavailable is refused outright when the
+  // reason is a hard block; otherwise the scheduler is asked, and an override request goes to the driver after the save.
+  let _driverNeedsOverride=false, _qBadDates=[];
   if(repeat==='none'){
+    if(_refuseUnavailableRide(ride)) return;
+    _qBadDates = (ride.driver && !_isSelfDriver(ride.driver) && !isDriverAvailable(ride.driver, ride.date, ride.time)) ? [ride.date] : [];
+    if(_qBadDates.length){
+      const _proceedQ = await showUnavailableConfirm(ride.driver, ride.client, _qBadDates.map(fmtDateShort).join(', '), ride.time);
+      if(!_proceedQ) return;
+      _driverNeedsOverride = true;
+    }
     rides.push(ride);
     // Wrapped (v818) - this had zero error handling between pushing the ride into memory and
     // actually persisting it below. If splitApRoundTripRide threw for any reason, saveRides()
@@ -9356,6 +9600,20 @@ async function _saveQuoteInner(){
     if(!await askConfirm('Create '+count+' recurring rides ('+repeat+', one every '+_repeatLabel(repeat)+') for '+client+'?', {yes:'Create rides'})){ return; }
     let _spill=false;
     if(repeat==='monthly'){ const _sp=await _askMonthlySpill(ride.date,count); if(!_sp) return; _spill=(_sp==='spill'); }
+    if(ride.driver){
+      const _qDates = Array.from({length:count}, function(_,i){ return _repeatDate(ride.date,repeat,i,_spill); });
+      const _refusedQ = _qDates.filter(function(dt){ return _driverUnavailableReason(ride.driver, dt, ride.time); });
+      if(_refusedQ.length){
+        showToast(String(ride.driver).split(' ')[0]+' is unavailable '+_refusedQ.map(fmtDateShort).join(', ')+' \u2014 '+(_driverUnavailableReason(ride.driver,_refusedQ[0],ride.time)||'marked unavailable'), 'error');
+        return;
+      }
+      _qBadDates = _isSelfDriver(ride.driver) ? [] : _qDates.filter(function(dt){ return !isDriverAvailable(ride.driver, dt, ride.time); });
+      if(_qBadDates.length){
+        const _proceedQ2 = await showUnavailableConfirm(ride.driver, ride.client, _qBadDates.map(fmtDateShort).join(', '), ride.time);
+        if(!_proceedQ2) return;
+        _driverNeedsOverride = true;
+      }
+    }
     try{ _qMade=_scheduleSeries(ride, repeat, count, _spill); }
     catch(e){
       console.warn('saveQuote recurring failed', e);
@@ -9401,6 +9659,10 @@ async function _saveQuoteInner(){
   // v1321: same ending as Quick Add - clear the form, say so, then the shared follow-up prompts.
   clearQuoteForm();
   showToast(ride.type==='AP ROUND TRIP' ? `AP Round Trip added: ${client} (2 rides)` : (repeat!=='none' ? `Rides added: ${client}` : `Ride added: ${client}`));
+  if(_driverNeedsOverride){
+    const _ovrQ = _qMade.length ? _qMade.filter(function(x){ return x.driver===ride.driver && _qBadDates.indexOf(x.date)>-1; }) : [ride];
+    for(const x of _ovrQ) await sendAvailOverrideRequest(x, currentUser?.name||'');
+  }
   _afterRideScheduled(ride);
 }
 
@@ -9450,6 +9712,8 @@ function _gatherQuoteRide(opts){
     rtTerminal:document.getElementById('q-rt-terminal')?.value||'',
     rtTime:document.getElementById('q-rt-time')?.value||'',
     rtDateAP:document.getElementById('q-rt-date')?.value||'',
+    rtDestination:rtAddrState('q').addr, rtMiles:rtAddrState('q').miles||0,   // v1404: a different address for the return leg
+    rtFirstLeg:(document.getElementById('q-type').value==='AP ROUND TRIP' ? rtFirstLegType('q') : ''),   // v1405: pickup-first round trips
     type:document.getElementById('q-type').value,
     vehicle:document.getElementById('q-ride').value,
     sprinterHours:parseFloat(document.getElementById('q-sprinter-hours')?.value)||0,
@@ -9461,7 +9725,7 @@ function _gatherQuoteRide(opts){
     price2: document.getElementById('q-xxl')?.checked ? (parseFloat(document.getElementById('q-price2')?.value)||0) : 0,
     flight:document.getElementById('q-flight').value,
     terminal:document.getElementById('q-terminal').value,
-    pax:document.getElementById('q-pax').value,
+    pax:(parseInt(document.getElementById('q-pax').value)||1),   // v1405: a number, same as Quick Add (was text)
     checkedBags:parseInt(document.getElementById('q-checked-bags')?.value)||0,
     carryOnBags:parseInt(document.getElementById('q-carryon-bags')?.value)||0,
     phone:formatPhoneUS(document.getElementById('q-phone').value),
@@ -9629,9 +9893,9 @@ function buildQuoteHTML(q, cmp, logoOverride){
       +'<td style="padding:6px 0 12px;border-top:1px solid #eee;text-align:right;font-size:14px;font-weight:700;color:#111;">'+money(total)+'</td></tr>';
   }
   const rows = isLegGrouped
-    ? legHeaderRow('Leg 1 \u2014 AP Run (Drop Off)') + leg1Lines.map(lineRow).join('')
+    ? legHeaderRow(q.rtFirstLeg==='AP PICK UP' ? 'Leg 1 \u2014 AP Pick Up (Arrival)' : 'Leg 1 \u2014 AP Run (Drop Off)') + leg1Lines.map(lineRow).join('')
       + legSubtotalRow('Leg 1 total', bd.leg1!=null ? bd.leg1 : leg1Lines.reduce((s,l)=>s+l.val,0))
-      + legHeaderRow('Leg 2 \u2014 AP Pick Up (Return)') + leg2Lines.map(lineRow).join('')
+      + legHeaderRow(q.rtFirstLeg==='AP PICK UP' ? 'Leg 2 \u2014 AP Run (Return)' : 'Leg 2 \u2014 AP Pick Up (Return)') + leg2Lines.map(lineRow).join('')
       + legSubtotalRow('Leg 2 total', bd.leg2!=null ? bd.leg2 : leg2Lines.reduce((s,l)=>s+l.val,0))
       + otherLines.map(lineRow).join('')
     : (bd.lines||[]).map(lineRow).join('');
@@ -9751,7 +10015,7 @@ function _priceInputsFromRecord(r){
   const sep=_recordRtSeparate(r);
   // The second leg of a SPLIT AP Round Trip carries a copy of the booking's stops and wait time, but they were billed once, on leg 1.
   const isLeg2 = r.rtLegNumber===2 && r.pairId!=null && !r.xxlPair;
-  return { type:r.type, vehicle:r.vehicle||'Sedan', miles:r.miles, sprinterHours:rideSprinterHours(r),
+  return { type:r.type, firstLeg:(r.rtFirstLeg||'AP RUN'), vehicle:r.vehicle||'Sedan', miles:r.miles, miles2:((r.type==='AP ROUND TRIP'||r.type==='ROUND TRIP') ? (parseFloat(r.rtMiles)||0) : 0), sprinterHours:rideSprinterHours(r),
            wait:(isLeg2?0:r.wait), stops:(isLeg2?0:(r.xstop==='Y'?1:r.xstop)), xxl:!!r.xxl, vehicle2:r.vehicle2, price2:r.price2,
            rtSeparate:sep, state:st, state2:((r.type==='AP ROUND TRIP'||sep) ? _returnLegState(r) : {}) };
 }
@@ -9881,10 +10145,10 @@ function emailQuoteFromForm(){
     var legRe = / \u2014 (Leg \d \((?:outbound|return)\))$/;
     var leg1Lines = (bd.lines||[]).filter(function(l){ return / \u2014 Leg 1 \(outbound\)$/.test(l.label); });
     var leg2Lines = (bd.lines||[]).filter(function(l){ return / \u2014 Leg 2 \(return\)$/.test(l.label); });
-    lines += 'Leg 1 \u2014 AP Run (Drop Off):\n';
+    lines += (q.rtFirstLeg==='AP PICK UP' ? 'Leg 1 \u2014 AP Pick Up (Arrival):\n' : 'Leg 1 \u2014 AP Run (Drop Off):\n');
     leg1Lines.forEach(function(l){ lines += l.label.replace(legRe,'')+': '+money(l.val)+'\n'; });
     lines += 'Leg 1 total: '+money(bd.leg1||0)+'\n\n';
-    lines += 'Leg 2 \u2014 AP Pick Up (Return):\n';
+    lines += (q.rtFirstLeg==='AP PICK UP' ? 'Leg 2 \u2014 AP Run (Return):\n' : 'Leg 2 \u2014 AP Pick Up (Return):\n');
     leg2Lines.forEach(function(l){ lines += l.label.replace(legRe,'')+': '+money(l.val)+'\n'; });
     lines += 'Leg 2 total: '+money(bd.leg2||0)+'\n';
     lines += '\nEach leg is billed separately, and may be driven by a different member of our team.\n\nThis is a quote, not a booking \u2014 your ride isn\u2019t reserved until you confirm. Prices are held subject to availability and may change if the trip details change. If all of this is correct and acceptable, please let me know and I\u2019ll get you scheduled. Thank you!\n\nQuotes do not include tip \u2014 never required, but always greatly appreciated by your driver.';
@@ -10068,8 +10332,11 @@ function splitApRoundTripRide(ride){
     flight: ride.rtFlight||'', terminal: ride.rtTerminal||'',
     // Leg 2 picks up from wherever leg 1 actually dropped off, and ends at the terminal if
     // leg 2 is a run, or starts at the terminal if leg 2 is itself the pickup.
-    pickup: secondType==='AP PICK UP' ? (terminalAddr || ride.home || '') : (ride.home || ''),
-    home: secondType==='AP PICK UP' ? (ride.pickup || '') : (terminalAddr || ride.home || ''),
+    // v1404: a different return address replaces the client's address on leg 2 (drop-off after a pick up, or the pickup for a run),
+    // and leg 2 carries its own distance so any later re-pricing of that ride uses it.
+    pickup: secondType==='AP PICK UP' ? (terminalAddr || ride.home || '') : (ride.rtDestination || ride.home || ''),
+    home: secondType==='AP PICK UP' ? (ride.rtDestination || ride.pickup || '') : (terminalAddr || ride.home || ''),
+    miles: (parseFloat(ride.rtMiles)>0 ? parseFloat(ride.rtMiles) : ride.miles),
     price: split.leg2,
     // BUG FIX: leg2's own surcharge flags, NOT leg1's inherited via the Object.assign above.
     // apRoundTripLegSplit() -> buildRideBreakdown() already correctly priced leg2 FROM these
@@ -10108,7 +10375,7 @@ function splitApRoundTripRide(ride){
   // and actively misleading on leg2 (which just got its OWN real fuel/traffic/etc values, not
   // these). Deleting from both rather than leaving stale, unused data for a future reader to
   // wonder about.
-  ['rt_premium','rt_traffic','rt_holiday','rt_christmas','rt_late','rt_fuel'].forEach(function(k){
+  ['rt_premium','rt_traffic','rt_holiday','rt_christmas','rt_late','rt_fuel','rtMiles'].forEach(function(k){
     delete ride[k]; delete leg2[k];
   });
   try{
@@ -10244,6 +10511,7 @@ function editSavedQuote(qid){
     set('q-date', q.date||'');
     set('q-time', q.time||'');
     set('q-type', q.type||'AP RUN');
+    try{ var _fp=document.getElementById('q-rt-first-pickup'), _fr=document.getElementById('q-rt-first-run'); if(_fp&&_fr){ if(q.rtFirstLeg==='AP PICK UP') _fp.checked=true; else _fr.checked=true; } }catch(e){}   // v1405
     // Same highlight desync as the booking-request prefill: without this, editing a saved AP RUN
     // quote leaves the default "AP Round Trip" button lit while the form prices a one-way.
     try{ _syncTripTypeTog(q.type||'AP RUN'); }catch(e){}
@@ -10253,6 +10521,7 @@ function editSavedQuote(qid){
     set('q-rt-flight', q.rtFlight||'');
     set('q-rt-terminal', q.rtTerminal||'');
     set('q-rt-time', q.rtTime||'');
+    try{ rtAddrSet('q', q.rtDestination, q.rtMiles); }catch(e){}   // v1404
     set('q-pax', q.pax||1);
     set('q-checked-bags', q.checkedBags||0);
     set('q-carryon-bags', q.carryOnBags||0);
@@ -11182,9 +11451,9 @@ function _prefillFromClientRequest(req){
   var P = isQuote ? 'q' : 'qa';
   // v1358: an AP Round Trip where the client ARRIVES before they leave (the booking form decides this from the dates). The booking form always
   // records the leaving leg as date/time/terminal and the arriving leg as rtDate/rtTime/rtFlight/rtTerminal, whichever comes first. The Quote form
-  // is laid out by type (leg 1 = AP Run, leg 2 = AP Pick Up) so it takes the request as is. Quick Add is laid out by ORDER (leg 1 = whichever
-  // happens first), so here the legs are swapped into order and "pickup first" is switched on.
-  if(!isQuote && req.type==='AP ROUND TRIP' && req.rtFirstLeg==='AP PICK UP'){
+  // v1405: the Quote form now has the same "which happens first" choice as Quick Add, so BOTH forms are laid out by ORDER (leg 1 = whichever
+  // happens first) and the legs are swapped into order here with "pickup first" switched on.
+  if(req.type==='AP ROUND TRIP' && req.rtFirstLeg==='AP PICK UP'){
     try{
       var _depTermAddr = (typeof TERMINAL_ADDRESSES!=='undefined' && (TERMINAL_ADDRESSES[req.terminal]||'')) || req.destination || '';
       var _arrTerm = req.rtTerminal || req.terminal;
@@ -11197,10 +11466,10 @@ function _prefillFromClientRequest(req){
         pickup: _arrTermAddr, destination: req.pickup,
         notes: [req.notes||'', _fl].filter(Boolean).join('\n')
       });
-      var _fp = document.getElementById('qa-rt-first-pickup'); if(_fp) _fp.checked = true;
+      var _fp = document.getElementById(P+'-rt-first-pickup'); if(_fp) _fp.checked = true;
     }catch(e){ console.warn('arriving-first prefill failed (non-fatal)', e); }
-  } else if(!isQuote && req.type==='AP ROUND TRIP'){
-    var _fr = document.getElementById('qa-rt-first-run'); if(_fr) _fr.checked = true;   // leaving first (the usual order): do not inherit an earlier pickup-first choice
+  } else if(req.type==='AP ROUND TRIP'){
+    var _fr = document.getElementById(P+'-rt-first-run'); if(_fr) _fr.checked = true;   // leaving first (the usual order): do not inherit an earlier pickup-first choice
   }
   // Reported directly: nothing on the opened form said which request this actually was.
   try{
@@ -11242,7 +11511,7 @@ function _prefillFromClientRequest(req){
       // case and would never compare equal).
       if(isQuote){ try{ _syncTripTypeTog(req.type); }catch(e){} }
       try{ isQuote ? updateTripFields() : qaTypeChanged(); }catch(e){}
-      if(req._pickupFirst){ try{ qaRtFirstLegChanged(); }catch(e){} }
+      if(req._pickupFirst){ try{ isQuote ? qRtFirstLegChanged() : qaRtFirstLegChanged(); }catch(e){} }
     }
     set('client', req.clientName);
     // Reported directly: New Client checkbox never auto-checks on a booking-request-prefilled
@@ -11366,8 +11635,13 @@ function _prefillFromClientRequest(req){
     // v1360: lines the client can't see the reasons for. A group over 6 may not fit an SUV / Van (no Sprinter option is shown on the
     // booking page), and a different return address has no field of its own on the forms yet, so both ride at the top of the notes.
     if(req.rtDestination){
-      var _rdLine = '\u21a9\ufe0f Return trip goes to: '+req.rtDestination;
-      _combinedNotes = _combinedNotes ? (_rdLine+' \u00b7 '+_combinedNotes) : _rdLine;
+      // v1404: the forms now have a real return-address field - it is filled in (and its distance measured) instead of riding in the notes.
+      var _rdOk=false;
+      try{ rtAddrSet(P, req.rtDestination, 0); _rdOk=!!document.getElementById(P+'-rt-dest'); }catch(e){}
+      if(!_rdOk){
+        var _rdLine = '\u21a9\ufe0f Return trip goes to: '+req.rtDestination;
+        _combinedNotes = _combinedNotes ? (_rdLine+' \u00b7 '+_combinedNotes) : _rdLine;
+      }
     }
     if((parseInt(req.pax)||0)>6){
       var _xxLine = '\u26a0\ufe0f Group of '+req.pax+' \u2014 may need an XXL';
@@ -11376,6 +11650,10 @@ function _prefillFromClientRequest(req){
     if(_combinedNotes){
       var _nEl = document.getElementById(P+'-notes');
       if(_nEl){ _nEl.value = _combinedNotes; _notesLanded = true; }
+      // v1405: everything a booking request puts in the notes (car seats, return address, group size, extra pickups, who booked it,
+      // the client's own trip remarks) belongs to THIS trip. It must not become the client's standing note, so "keep this note
+      // with the client" is unticked. The driver can tick it again for a note that really is permanent.
+      var _nsEl0 = document.getElementById(P+'-note-save'); if(_nsEl0) _nsEl0.checked = false;
     }
     // A request booked FOR someone else carries "Booked by <name> (<relation>) - <phone>" in its notes
     // (booking link, v1209b). Chase: that must NOT be kept as a standing note on the PASSENGER's client
@@ -12881,6 +13159,20 @@ function renderConfirmations(){
           'if(this.checked){var v=document.getElementById(\'cchk-'+pid+'-vcard\'); if(v) v.checked=false;}') : '')
         +'</div>';
 
+      // v1407: drivers with more than one vehicle card had no way to see or change which card this
+      // confirmation sends from here (the picker only auto-opened on the first plain text send).
+      let vehBar='';
+      try{
+        const _vl=r.driver?driverVehicles(r.driver.trim()):[];
+        if(_vl.length>1){
+          const _cur=rideVehicle(r)||{}, _chosen=(typeof r.vehicleIdx==='number');
+          vehBar='<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:-.2rem 0 .6rem;font-size:.76rem;">'
+            +'<span style="font-weight:700;color:var(--black);">\uD83D\uDE97 '+escHtml(_cur.label||('Vehicle '+(rideVehicleIdx(r)+1)))+'</span>'
+            +(_chosen?'':'<span style="font-size:.68rem;font-weight:700;color:#92400e;background:#fffbeb;border:1px solid #fcd34d;border-radius:12px;padding:1px 7px;">not chosen yet</span>')
+            +'<button onclick="event.stopPropagation();openVehiclePicker('+r.id+')" style="margin-left:auto;font-size:.72rem;font-weight:700;color:var(--accent);background:none;border:1.5px solid var(--accent);border-radius:20px;padding:.25rem .7rem;cursor:pointer;font-family:inherit;">Choose card ('+_vl.length+')</button>'
+            +'</div>';
+        }
+      }catch(e){ vehBar=''; }
       return '<div id="conf-card-'+r.id+'" style="border:1.5px solid '+c+';border-left:5px solid '+c+';border-radius:12px;padding:.9rem 1rem;margin-bottom:.75rem;background:var(--white);">'
         +'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem;margin-bottom:.4rem;">'
         +'<div>'
@@ -12896,6 +13188,7 @@ function renderConfirmations(){
         +'</div>'
         +'<div id="'+drvPreviewId+'-loader" style="font-size:.72rem;color:var(--mid);font-style:italic;">'+(r.driver?'Building card\u2026':'No driver assigned')+'</div>'
         +'</div>'
+        +vehBar
         +buttons
         +groupLine
         +'<button onclick="toggleConfirmSent('+r.id+')" style="width:100%;padding:.6rem;background:none;border:1.5px solid var(--green);color:var(--green);border-radius:8px;font-weight:700;cursor:pointer;font-size:.85rem;font-family:\'DM Sans\',sans-serif;">Mark confirmation text sent</button>'
@@ -12911,7 +13204,7 @@ function renderConfirmations(){
       const imgEl=document.getElementById('dc-prev-'+r.id);
       const loaderEl=document.getElementById('dc-prev-'+r.id+'-loader');
       if(!imgEl) return;
-      warmDriverCardImage(r.driver.trim()).then(async function(file){
+      warmDriverCardImage(r.driver.trim(), _rideCardVi(r)).then(async function(file){
         // BUG FIX (found while investigating a report of both card AND selfie missing from a
         // sent confirmation together): this used to return here immediately whenever the card
         // failed to build, which meant window._confFilesMap[r.id] was never set AT ALL - not
@@ -12956,7 +13249,7 @@ function renderConfirmations(){
         // (below) padding the flat file list with a second PNG that has no business being
         // there. Aligned to the same single rule the other three places already use.
         if(file && _fm.selfie && r.type==='AP PICK UP'){
-          try{ _fm.combined = await buildCombinedCardSelfieImageFile(r.driver.trim(), _selfieOwner); }catch(e){ console.warn('combined card+selfie build failed',e); }
+          try{ _fm.combined = await buildCombinedCardSelfieImageFile(r.driver.trim(), _selfieOwner, _rideCardVi(r)); }catch(e){ console.warn('combined card+selfie build failed',e); }
         }
         window._confFilesMap[r.id]=_fm;
         // Legacy flat list (default selection) kept for any fallback path.
@@ -13629,7 +13922,8 @@ function buildClientVCard(ride){
   // driver who ferries clients for several different admins/drivers can tell them apart
   // in their own phone contacts at a glance. createdBy is whoever scheduled THIS ride,
   // same short login-style name shown throughout the rest of the app (Kat, Morgan, Reed...).
-  const owner = (ride.createdBy||'').trim();
+  // v1406: the tag is whoever the CLIENT belongs to (Kat's client booked by Morgan reads "(Kat)"), not whoever typed the booking.
+  const owner = _clientOwnerTag(ride);
   const displayName = owner ? name+' ('+owner+')' : name;
   const phone = _phoneDigits(clientPhoneFor(ride));
   const parts = name.split(' ');
@@ -13661,9 +13955,19 @@ const _sentParts = {};
 // Returns the driver-card CANVAS itself (not yet exported to a file), so the exact same
 // drawing logic can be reused both for a standalone card (buildDriverCardImageFile) and for a
 // combined card+selfie image (buildCombinedCardSelfieImageFile below) without duplicating it.
-async function _buildDriverCardCanvas(name){
+// v1407: `vi` = which of the driver's vehicle cards to draw (index into driverVehicles). Omitted / 0 =
+// the primary card, exactly as before. Before this, every confirmation sent the PRIMARY card no matter which
+// vehicle the ride was set to, so a driver with two cards could never send the second one.
+function _cardPhotoFor(name, vi){
+  var primary = (typeof DRIVER_PHOTOS!=='undefined' && DRIVER_PHOTOS[name]) ? DRIVER_PHOTOS[name] : '';
+  if(typeof vi==='number' && vi>0){
+    try{ var v=(driverVehicles(name)||[])[vi]; if(v && v.photo) return v.photo; }catch(e){}
+  }
+  return primary;
+}
+async function _buildDriverCardCanvas(name, vi){
   await _ensureDriverPhotoLoaded(name);
-  const photoSrc = (typeof DRIVER_PHOTOS!=='undefined' && DRIVER_PHOTOS[name]) ? DRIVER_PHOTOS[name] : '';
+  const photoSrc = _cardPhotoFor(name, vi);
   const initials = name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
   const color    = driverColor(name);
   const SERIF    = "'Playfair Display',Georgia,'Times New Roman',serif";
@@ -13708,8 +14012,8 @@ async function _buildDriverCardCanvas(name){
   });
 }
 
-async function buildDriverCardImageFile(name){
-  const cv = await _buildDriverCardCanvas(name);
+async function buildDriverCardImageFile(name, vi){
+  const cv = await _buildDriverCardCanvas(name, vi);
   return new Promise(res=>cv.toBlob(b=>{
     res(b ? new File([b],(name.split(' ')[0]||'Driver')+'-card.png',{type:'image/png'}) : null);
   },'image/png'));
@@ -13740,8 +14044,8 @@ function _loadImageFromDataUrl(dataUrl){
 // Generated fresh from whatever driver/selfie apply to THIS ride, every time - never a
 // pre-made, manually uploaded image, so this works identically for all ~20 drivers with no
 // per-driver setup required.
-async function buildCombinedCardSelfieImageFile(cardDriverName, selfieOwnerName){
-  const cardCv = await _buildDriverCardCanvas(cardDriverName);
+async function buildCombinedCardSelfieImageFile(cardDriverName, selfieOwnerName, vi){
+  const cardCv = await _buildDriverCardCanvas(cardDriverName, vi);
   const selfieDataUrl = getDriverSelfie(selfieOwnerName);
   const selfieImg = await _loadImageFromDataUrl(selfieDataUrl);
   if(!selfieImg){
@@ -13787,10 +14091,13 @@ function _cachePromise(store, key, builder){
     return result;
   });
 }
-function warmDriverCardImage(name){
+function warmDriverCardImage(name, vi){
   if(!name) return Promise.resolve(null);
-  return _cachePromise(_driverCardImgCache, name, function(){ return buildDriverCardImageFile(name); });
+  var _k = (typeof vi==='number' && vi>0) ? (name+'#'+vi) : name;
+  return _cachePromise(_driverCardImgCache, _k, function(){ return buildDriverCardImageFile(name, vi); });
 }
+// The vehicle-card index to use for a ride (0 = primary, until a vehicle has been picked).
+function _rideCardVi(r){ try{ return (r && r.driver) ? rideVehicleIdx(r) : 0; }catch(e){ return 0; } }
 // v1265: this used to be prebuildAllDriverCardImages(). At EVERY app open, 1.8s after login, it built a card for every
 // driver (~21), and each card starts with `await _ensureDriverPhotoLoaded(name)` - so every open fetched every driver's
 // photo from Firebase and drew and PNG-encoded 21 canvases, whether anyone needed one or not. That quietly undid the
@@ -13827,7 +14134,7 @@ async function textClient(id, opts){
     const assigned=(r.driver||'').trim();
     if(assigned){
       try{
-        const cardImg=await warmDriverCardImage(assigned);
+        const cardImg=await warmDriverCardImage(assigned, _rideCardVi(r));
         if(cardImg) files=[cardImg];
       }catch(e){ files=[]; }
     }
@@ -14145,7 +14452,7 @@ function openRideModal(id){
   }
   if(!canSeeRide(r)){ activeRideId=null; showToast('This ride is private','error'); return; }
   if(r.status==='placeholder'){ openPlaceholderViewModal(id); return; }
-  if(r.driver) warmDriverCardImage((r.driver||"").trim());
+  if(r.driver) warmDriverCardImage((r.driver||"").trim(), _rideCardVi(r));
   document.getElementById('rm-title').textContent=(r.private?'\uD83D\uDD12 ':'')+r.client;
   // driver assign row
   const drRow=document.getElementById('rm-driver-row');
@@ -14576,6 +14883,7 @@ function renderRideView(r){
         ${(function(){ var _sd=apPickupSides(r); var _pk=_sd.misfiled ? (r.terminal ? (String(r.terminal).replace(/\s*terminal\s*$/i,'')+' Terminal') : 'Airport') : _sd.pickup; return _pk?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:78px;flex-shrink:0;margin-top:2px;">PICKUP</span><div style="font-size:.86rem;">${mapsLink(_pk,"var(--accent)", (r.type==='AP PICK UP'&&r.terminal)?terminalToAddress(r.terminal):null)}</div></div>`:''; })()}
         ${extraStopsHtml}
         ${apPickupSides(r).home?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:78px;flex-shrink:0;margin-top:2px;">DESTINATION</span><div style="font-size:.86rem;">${mapsLink(apPickupSides(r).home,"var(--accent)", ((r.type==='AP RUN'||r.type==='AP ROUND TRIP')&&r.terminal)?terminalToAddress(r.terminal):null)}</div></div>`:''}
+        ${(r.type==='ROUND TRIP' && r.rtDestination)?`<div style="display:flex;align-items:flex-start;gap:.6rem;"><span style="font-size:.66rem;font-weight:700;letter-spacing:.5px;color:var(--mid);min-width:78px;flex-shrink:0;margin-top:2px;">RETURN TO</span><div style="font-size:.86rem;">${mapsLink(r.rtDestination,"var(--accent)",null)}</div></div>`:''}
       </div>
     </div>` : ''}
 
@@ -16843,6 +17151,7 @@ function editTypeChanged(){
   try{ _editSprinterHoursVisibility(); }catch(e){}
   // v1325: Return Flight # / Return Terminal only on an AP Round Trip (as on the Quote page); suggested pickup follows the type.
   var _rtf=document.getElementById('edit-ap-rt-fields'); if(_rtf) _rtf.style.display=(t==='AP ROUND TRIP')?'block':'none';
+  var _rtd=document.getElementById('edit-rt-dest-group'); if(_rtd) _rtd.style.display=(t==='ROUND TRIP')?'':'none';   // v1405: a split AP round trip's return address is simply the leg's Destination
   try{ updateSuggestedPickupTime('edit'); }catch(e){}
 }
 // The hours box only matters for a Sprinter Van on a plain Round Trip (the one case that bills by the hour).
@@ -16959,10 +17268,26 @@ function toggleEditMode(on){
   var _egc=document.getElementById('edit-gate-code'); if(_egc) _egc.value = r.gateCode||'';
   var _epv=document.getElementById('edit-private'); if(_epv) _epv.checked = !!r.private;
   document.getElementById('edit-home').value     = r.home||'';
+  try{ var _erd=document.getElementById('edit-rt-dest'); if(_erd) _erd.value = r.rtDestination||''; restoreStopRows('edit', (r.xstop==='Y'?1:r.xstop), r.xstopAddr); }catch(e){}   // v1405
   document.getElementById('edit-notes').value    = r.notes||'';
   (function(){ var _rd=document.getElementById('edit-reqdriver'); if(_rd){ var _isCreator=(currentUser&&currentUser.name===r.createdBy); _rd.value=(_isCreator&&r.reqDriverNote)?r.reqDriverNote:''; _rd.closest('.form-group').style.display=_isCreator?'block':'none'; } })();
 }
 
+// v1405: after the return address (rtMiles) or the number of extra stops changed, re-price - but only when the fee was still exactly the calculator's
+// number for the ride as it stood (base = that ride, with any date/time surcharge change already applied). Returns a toast message or ''.
+function _repriceOnExtrasChange(r, base){
+  var stopsNow = Math.max(0, parseInt(r.xstop==='Y'?1:r.xstop)||0), stopsWas = Math.max(0, parseInt(base.xstop==='Y'?1:base.xstop)||0);
+  var milesNow = parseFloat(r.rtMiles)||0, milesWas = parseFloat(base.rtMiles)||0;
+  if(stopsNow===stopsWas && Math.abs(milesNow-milesWas)<0.5) return '';
+  if(r.xxl || r.pairId!=null || r.status==='paid' || r.paidAt || r.invoiced) return '';
+  var oldP = parseFloat(base.price)||0; if(!(oldP>0)) return '';
+  var before = _priceRide(_priceInputsFromRecord(base)).total;
+  if(Math.abs(before-oldP)>0.5) return '';
+  var after = Math.round(_priceRide(_priceInputsFromRecord(r)).total*100)/100;
+  if(Math.abs(after-oldP)<0.005) return '';
+  r.price = after;
+  return 'fee $'+oldP+' \u2192 $'+after+' ('+(stopsNow!==stopsWas?'extra stops':'return distance')+')';
+}
 // v1379: after a date/time edit, re-detect Premium / Traffic / Holiday / Christmas for the new moment. If the ride's fee was
 // still exactly what the pricing engine gives for the old state, update the flags and the fee together. Returns a message
 // for the toast, or '' when nothing changed (custom fee, paid/invoiced, split or XXL ride, same surcharges).
@@ -17022,7 +17347,7 @@ async function saveRideEdits(){
   var _rideEditSnapshot = {
     client: r.client, phone: r.phone, email: r.email, date: r.date, time: r.time,
     miles: r.miles, pax: r.pax, flight: r.flight, terminal: r.terminal, vehicle: r.vehicle,
-    type: r.type, pickup: r.pickup, home: r.home, notes: r.notes,
+    type: r.type, pickup: r.pickup, home: r.home, notes: r.notes, rtDestination: r.rtDestination, xstopAddr: r.xstopAddr,
   };
   var _repOld = Object.assign({}, r);   // v1379: the ride as it was, to re-price a date/time change
   // Apply all edits
@@ -17067,6 +17392,27 @@ async function saveRideEdits(){
   r.gateCode  = document.getElementById('edit-gate-code')?.value.trim()||'';
   r.private   = !!document.getElementById('edit-private')?.checked;
   r.home      = document.getElementById('edit-home').value.trim();
+  // v1405: extra stops (count + addresses) and, for a plain Round Trip, the return drop-off address are editable here too.
+  var _stopsBefore = Math.max(0, parseInt(r.xstop==='Y'?1:r.xstop)||0);
+  try{
+    var _nStops = stopRows('edit').length;
+    r.xstop = _nStops; r.xstopAddr = _nStops>0 ? getStopAddresses('edit').join('; ') : '';
+  }catch(e){}
+  try{
+    if(document.getElementById('edit-type').value==='ROUND TRIP'){
+      var _newRd = (document.getElementById('edit-rt-dest')?.value||'').trim();
+      var _oldRd = (_repOld.rtDestination||'').trim();
+      if(!_newRd){ delete r.rtDestination; delete r.rtMiles; }
+      else{
+        r.rtDestination = _newRd;
+        // the return leg's own distance: destination -> return address. Re-measured when the address (or the destination) changed.
+        if(_newRd!==_oldRd || r.home!==_repOld.home || !(parseFloat(r.rtMiles)>0)){
+          try{ var _rt = await _resolveRouteMeters(r.home, _newRd); r.rtMiles = _floorMiles(_rt.meters); }
+          catch(e){ r.rtMiles = 0; showToast('Could not measure the return distance \u2014 it is billed as the same distance as the way out until it can be', 'error'); }
+        }
+      }
+    } else { delete r.rtDestination; delete r.rtMiles; }
+  }catch(e){ console.warn('return address save', e); }
   // Price is edited exclusively through the Edit Fee flow now, not here — deliberately not
   // touching r.price on save, so this form can never accidentally overwrite the real fee.
   // r.confirmed (a legacy boolean) is no longer set anywhere — confirmation status now lives
@@ -17093,6 +17439,8 @@ async function saveRideEdits(){
     {key:'type', label:'trip type', format:function(o,n){ return (typeof _tripTypeLabel==='function'?_tripTypeLabel(o):o)+'\u2192'+(typeof _tripTypeLabel==='function'?_tripTypeLabel(n):n); }},
     {key:'pickup', label:'pickup address'},
     {key:'home', label:'destination address'},
+    {key:'rtDestination', label:'return drop-off address'},
+    {key:'xstopAddr', label:'extra stops'},
     {key:'notes', label:'notes'},
     // Reported directly: a ride went from Chase to Kat around the time Morgan edited its
     // destination address, and the history showed ONLY "edited: destination address" - no
@@ -17142,14 +17490,23 @@ async function saveRideEdits(){
   // number. A hand-typed or negotiated fee is never touched (the toast below warns instead).
   var _repMsg = '';
   try{ _repMsg = _repriceOnDateChange(r, _repOld); }catch(e){ _repMsg=''; }
+  // v1405: a changed return address or number of stops re-prices the ride the same careful way: only when the fee is still exactly what the
+  // calculator gives for the ride as it was (a negotiated / hand-typed fee is never touched).
+  try{
+    var _baseline = Object.assign({}, _repOld, { premium:r.premium, traffic:r.traffic, holiday:r.holiday, christmas:r.christmas, price:r.price });
+    var _xMsg = _repriceOnExtrasChange(r, _baseline);
+    if(_xMsg) _repMsg = _repMsg ? (_repMsg+'; '+_xMsg) : _xMsg;
+  }catch(e){ console.warn('extras reprice', e); }
   // v1391: a changed DATE voids the confirmation. The client was told the old day, so the green check comes off the calendar, the
   // Confirmed status goes back to Scheduled, and the ride shows up on To Confirm again once its new day is tomorrow.
   var _confReset = false;
   try{
-    if(_rideEditSnapshot && _rideEditSnapshot.date && r.date && r.date!==_rideEditSnapshot.date && (r.confirmSent || r.status==='confirmed')){
+    // v1405: a changed pickup TIME voids it too (the client was told the old time).
+    var _dtChanged = !!(_rideEditSnapshot && _rideEditSnapshot.date && r.date && (r.date!==_rideEditSnapshot.date || ((r.time||'')!==(_rideEditSnapshot.time||'') && (_rideEditSnapshot.time||'') )));
+    if(_dtChanged && (r.confirmSent || r.status==='confirmed')){
       r.confirmSent=false; delete r.confirmSentBy; delete r.confirmSentAt;
       if(r.status==='confirmed') r.status='scheduled';
-      touchRide(r, 'confirmation reset (date changed)');
+      touchRide(r, (r.date!==_rideEditSnapshot.date) ? 'confirmation reset (date changed)' : 'confirmation reset (time changed)');
       _confReset = true;
     }
   }catch(e){}
@@ -17542,7 +17899,9 @@ function _buildRouteUrlsFrom(r, startAddr, endAddr, linkRide){
     if(home) stops = [home].concat(stops);
     if(endPt) stops = stops.concat([endPt]);
   } else {
-    stops = [home, pickup].concat(extras).concat([dropoff, endPt]).filter(Boolean);
+    // v1404: a plain Round Trip whose return goes to a different address stops there before the route ends.
+    var _retStop = (t==='ROUND TRIP' && r.rtDestination) ? [String(r.rtDestination).trim()] : [];
+    stops = [home, pickup].concat(extras).concat([dropoff]).concat(_retStop).concat([endPt]).filter(Boolean);
   }
   // Remove consecutive duplicates and empty strings
   stops = stops.filter(function(s,i){ return s && s!==stops[i-1]; });
@@ -21638,6 +21997,7 @@ function resetQuickAddForm(){
   var hide=function(id){ var el=document.getElementById(id); if(el) el.style.display='none'; };
   hide('qa-client-warn'); hide('qa-phone-hint'); hide('qa-avail-warn');
   hide('qa-rt-section'); hide('qa-xstop-addr-wrap'); hide('qa-vehicle2-group');
+  try{ rtAddrReset('qa'); }catch(e){}   // v1404
   var err=document.getElementById('qa-error'); if(err) err.textContent='';
   var md=document.getElementById('qa-miles-display'); if(md) md.innerHTML='\u2014';
   var ms=document.getElementById('qa-mileage-status'); if(ms) ms.textContent='';
@@ -21710,7 +22070,7 @@ function recalcQa(){
   try{ _syncPlainRtLeg2('qa'); }catch(e){}
   let res=_priceRide({
     rtSeparate: _plainRtSeparate('qa'),
-    type: qaType, vehicle: veh, miles: qaMiles,
+    type: qaType, vehicle: veh, miles: qaMiles, miles2: _rtMiles2('qa'), firstLeg: rtFirstLegType('qa'),   // v1404/v1405
     sprinterHours: (document.getElementById('qa-sprinter-hours')||{}).value,
     wait: document.getElementById('qa-wait')?.value,
     stops: (typeof stopRows==='function') ? stopRows('qa').length : 0,
@@ -22858,8 +23218,9 @@ function renderAddrPickers(prefix){
   var type=(document.getElementById(prefix+'-type')||{}).value||'';
   // Which slot holds the airport terminal rather than a saved client address. Offering a saved
   // address there is what used to overwrite the terminal with "Home".
-  var terminalSlot = (type==='AP PICK UP') ? 'pickup'
-                   : (type==='AP RUN'||type==='AP ROUND TRIP') ? 'dest' : null;
+  var _effT = (type==='AP ROUND TRIP') ? rtFirstLegType(prefix) : type;   // v1405
+  var terminalSlot = (_effT==='AP PICK UP') ? 'pickup'
+                   : (_effT==='AP RUN'||_effT==='AP ROUND TRIP') ? 'dest' : null;
   ['pickup','dest'].forEach(function(slot){
     var sel=document.getElementById(_addrModeId(prefix,slot));
     var inp=document.getElementById(_addrFieldId(prefix,slot));
@@ -22961,6 +23322,7 @@ function _gatherQaRide(client, qaType){
     extraPhones: formatPhoneList((document.getElementById('qa-extra-phones')||{}).value||''),
     miles:parseFloat((document.getElementById('qa-miles-hidden')||{}).value)||0,pax:parseInt(document.getElementById('qa-pax')?.value)||1,checkedBags:parseInt(document.getElementById('qa-checked-bags')?.value)||0,carryOnBags:parseInt(document.getElementById('qa-carryon-bags')?.value)||0,rt:'',email:document.getElementById('qa-email')?document.getElementById('qa-email').value.trim():'',
     holiday:qaAddonState.holiday?'Y':'N',christmas:qaAddonState.christmas?'Y':'N',late:qaAddonState.late?'Y':'N',premium:qaAddonState.premium?'Y':'N',fuel:qaAddonState.fuel?'Y':'N',xstop:stopRows('qa').length,xstopAddr:getStopAddresses('qa').join('; '),traffic:qaAddonState.traffic?'Y':'N',...Object.fromEntries(customSurchargeList().map(function(c){return [c.key, qaAddonState[c.key]?'Y':'N'];})),rtDate:(qaType==='ROUND TRIP') ? (document.getElementById('qa-rt-date')?.value||'') : '',
+    rtDestination:rtAddrState('qa').addr, rtMiles:rtAddrState('qa').miles||0,   /* v1404 */
     rtDateAP:document.getElementById('qa-rt-date')?.value||'',rtTime:document.getElementById('qa-rt-time')?.value||'',...Object.fromEntries(Object.keys(qaAddonStateLeg2).map(function(k){return ['rt_'+k, qaAddonStateLeg2[k]?'Y':'N'];})),wait:parseFloat(document.getElementById('qa-wait')?.value)||0,
     confirmed:false, createdBy:currentUser?.name||'',
     newClient: !!(document.getElementById('qa-new-client')?.checked),
@@ -23275,6 +23637,7 @@ function _schedulingTripDetailsText(r){
     lines1.push('\u23F0 Pickup Time: '+fmtTime12(r.time)+' \u2014 Return Time: '+fmtTime12(r.rt));
     lines1.push('');
     lines1.push('\uD83D\uDE97 Transportation between '+tf1.from+' and '+tf1.to);
+    if(r.rtDestination) lines1.push('\u21A9\uFE0F Return trip: '+tf1.to+' to '+String(r.rtDestination).trim());   // v1404
     lines1.push('');
     lines1.push('\uD83D\uDCB0 Total: $'+(parseFloat(r.price)||0).toFixed(0)+' (Gratuity not included but always appreciated)');
     return lines1.join('\n');
@@ -23443,6 +23806,8 @@ function clearQuoteForm(){
   // Matches Quick Add's own reset - the return terminal defaults back to "same as leg 1"
   // (checked, picker hidden) on a fresh quote rather than carrying over a previous quote's
   // unchecked/manually-picked state in the same session.
+  try{ rtAddrReset('q'); }catch(e){}   // v1404
+  try{ var _qfr=document.getElementById('q-rt-first-run'); if(_qfr) _qfr.checked=true; ['q-leg-run','q-leg-pickup'].forEach(function(id){ var c=document.getElementById(id); if(c) c.checked=false; }); }catch(e){}   // v1405
   const qrtsEl=document.getElementById('q-rt-terminal-same'); if(qrtsEl) qrtsEl.checked=true;
   const qrttEl=document.getElementById('q-rt-terminal'); if(qrttEl) qrttEl.style.display='none';
   if(typeof restoreStopRows==='function') restoreStopRows('q', 0, ''); var _qac=document.getElementById('q-add-client'); if(_qac) _qac.checked=true;
@@ -26075,7 +26440,7 @@ async function saveDriverCards(){
     // on this device, before the 24h window would otherwise catch up on its own.
     try{ if(typeof _writeDriverPhotoOverrideCacheEntry==='function') _writeDriverPhotoOverrideCacheEntry(dn, vehicles[0].photo||''); }catch(e){}
   }catch(e){ console.warn('save driver photo', e); }
-  try{ if(typeof _driverCardImgCache!=='undefined') delete _driverCardImgCache[dn]; }catch(e){}
+  try{ if(typeof _driverCardImgCache!=='undefined') Object.keys(_driverCardImgCache).forEach(function(k){ if(k===dn || k.indexOf(dn+'#')===0) delete _driverCardImgCache[k]; }); }catch(e){}
   var ov=document.getElementById('edit-photo-overlay'); if(ov) ov.remove();
   showToast('\u2713 '+(vehicles.length>1?vehicles.length+' vehicle cards saved':'Card saved')+' for '+dn.split(' ')[0]);
   try{ renderDriverMembers(); }catch(e){}
@@ -29981,16 +30346,36 @@ function buildDriverCardText(fullName, includeVenmo){
   return lines.join('\n');
 }
 
-async function downloadDriverCard(fullName){
+// v1407: drivers with several vehicle cards: choose which one to download (Team tab).
+function _pickDriverVehicleCard(fullName, onPick){
+  var list=driverVehicles(fullName);
+  if(list.length<2){ onPick(0); return; }
+  var ov=document.createElement('div'); ov.id='drv-card-picker-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:15000;display:flex;align-items:center;justify-content:center;padding:1.5rem;';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  window._drvCardPickCb=onPick;
+  var rows=list.map(function(v,i){
+    var thumb = v.photo
+      ? '<div style="width:58px;height:40px;border-radius:6px;background:#eee center/cover no-repeat;background-image:url(\''+v.photo+'\');flex-shrink:0;border:1px solid var(--light);"></div>'
+      : '<div style="width:58px;height:40px;border-radius:6px;background:#f4f2f8;flex-shrink:0;border:1px solid var(--light);"></div>';
+    return '<button onclick="var cb=window._drvCardPickCb;document.getElementById(\'drv-card-picker-overlay\').remove();if(cb)cb('+i+')" style="display:flex;align-items:center;gap:.7rem;width:100%;text-align:left;padding:.6rem;margin-bottom:.5rem;border:1.5px solid var(--light);border-radius:10px;background:#fff;cursor:pointer;font-family:\'DM Sans\',sans-serif;">'+thumb+'<span style="font-size:.88rem;font-weight:600;color:#0f172a;">'+escHtml((v.label||('Vehicle '+(i+1)))+(v.year?(' \u00b7 '+v.year):''))+'</span></button>';
+  }).join('');
+  ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:380px;width:100%;padding:1.3rem;box-shadow:0 24px 60px rgba(0,0,0,.35);">'
+    +'<div style="font-size:1.05rem;font-weight:800;color:#0f172a;margin-bottom:.8rem;">Which card?</div>'+rows
+    +'<button onclick="document.getElementById(\'drv-card-picker-overlay\').remove()" style="width:100%;margin-top:.3rem;padding:.5rem;background:none;border:none;color:var(--mid);font-size:.8rem;cursor:pointer;">Cancel</button></div>';
+  document.body.appendChild(ov);
+}
+async function downloadDriverCard(fullName, vi){
+  if(typeof vi!=='number' && driverVehicles(fullName).length>1){ _pickDriverVehicleCard(fullName, function(i){ downloadDriverCard(fullName, i); }); return; }
   // Render the ACTUAL card (photo + vehicle + name) to a PNG and download it —
   // not an HTML preview. Uses the same canvas builder as the "Send everything" bundle.
   showToast('\u23F3 Building card image\u2026');
   let file=null;
-  try{ file = await buildDriverCardImageFile(fullName); }
+  try{ file = await buildDriverCardImageFile(fullName, vi); }
   catch(e){ console.error(e); }
   if(!file){ showToast('Could not build card image','error'); return; }
   const safe = fullName.replace(/[^a-z0-9]+/gi,'_');
-  const fname = `NDA_${safe}_card.png`;
+  const fname = `NDA_${safe}_card${(typeof vi==="number"&&vi>0)?("_"+(vi+1)):""}.png`;
   try{
     const url = URL.createObjectURL(file);
     const a = document.createElement('a');
@@ -33549,6 +33934,15 @@ function markPartSent(rideId, partKey){
 
 async function sendAllConf(id){
   const r=_rideById(id); if(!r) return;
+  // v1407: more than one vehicle card and none chosen yet - ask which one goes out before sending
+  // (sendConfText already did this; "Send everything" skipped it and always sent the primary card).
+  // The checkbox state is read after the pick; the picker doesn't re-render while a callback is pending.
+  try{
+    if(r.driver && driverVehicles(r.driver).length>1 && typeof r.vehicleIdx!=='number'){
+      openVehiclePicker(id, function(){ sendAllConf(id); });
+      return;
+    }
+  }catch(e){}
   // Read the per-ride checklist (falls back to checked if a box is missing).
   const g=function(k){ var el=document.getElementById('cchk-'+id+'-'+k); return el? el.checked : true; };
   // Selfie is only ever meaningful for a true AP PICK UP - the row itself doesn't even render
@@ -33581,7 +33975,7 @@ async function sendAllConf(id){
   // runs before textClient() below, not after, so it doesn't touch the timing textClient
   // itself depends on for its own send call.
   if(g('card') && !fm.card && r.driver){
-    try{ fm.card = await warmDriverCardImage(r.driver.trim()); }catch(e){}
+    try{ fm.card = await warmDriverCardImage(r.driver.trim(), _rideCardVi(r)); }catch(e){}
     // Genuinely failed even after a fresh retry - this is rare (buildDriverCardImageFile's own
     // fallback means a missing/broken photo still resolves to an initials card; only a real
     // toBlob() failure reaches here) but was completely silent before now. The success popup
@@ -33618,7 +34012,7 @@ async function sendAllConf(id){
     // above, not a routine path.
     var _selfieOwnerForCombine = feeOwnerFor(r.createdBy)||r.driver.trim();
     if(!fm.combined){
-      try{ fm.combined = await buildCombinedCardSelfieImageFile(r.driver.trim(), _selfieOwnerForCombine); }catch(e){}
+      try{ fm.combined = await buildCombinedCardSelfieImageFile(r.driver.trim(), _selfieOwnerForCombine, _rideCardVi(r)); }catch(e){}
     }
     // BUG FIX: buildCombinedCardSelfieImageFile has its own internal fallback - when the selfie
     // exists as data but can't actually be DECODED into an image, it returns a card-ONLY file,
@@ -33771,7 +34165,7 @@ async function copyConfPart(id, partKey){
     // keyed .card slot instead, which is never ambiguous, with the same fresh-build
     // fallback as before for a cold start.
     const cardFile=((window._confFilesMap||{})[id]||{}).card
-      || await warmDriverCardImage((r.driver||'').trim());
+      || await warmDriverCardImage((r.driver||'').trim(), _rideCardVi(r));
     if(!cardFile){ showToast('Driver card not ready','error'); return; }
     if(window.ClipboardItem && navigator.clipboard && navigator.clipboard.write){
       try{
@@ -34313,7 +34707,12 @@ async function _vehPickerChoose(id, idx){
   // leaving those stale would make the sheet disagree with the ride until the next reload.
   // Only needed now that the picker can be re-opened after the fact (it previously ran once,
   // before anything had been rendered from the old value).
+  // v1407: the card is now drawn from the chosen vehicle, so anything already built from the old choice
+  // is stale: the per-ride files, the legacy merged list, and the confirmation preview.
+  try{ var _fmv=(window._confFilesMap||{})[id]; if(_fmv){ _fmv.card=null; _fmv.combined=null; } delete _confirmShareFiles[id]; }catch(e){}
+  try{ if(r && r.driver) warmDriverCardImage((r.driver||'').trim(), _rideCardVi(r)); }catch(e){}
   try{ if(r) renderRideView(r); }catch(e){}
+  try{ if(!_vehPickerCb && document.getElementById('conf-card-'+id)) renderConfirmations(); }catch(e){}
   try{ refreshDash(); }catch(e){}
   try{ renderIncome(); }catch(e){}
   try{ renderDashIncome(); }catch(e){}
@@ -34350,7 +34749,7 @@ async function sendDriverCard(id){
   // could return the day-of selfie instead of the driver card whenever the card itself
   // isn't in the flat list. Uses the explicitly keyed .card slot.
   const cardFile=((window._confFilesMap||{})[id]||{}).card
-    || await warmDriverCardImage(r.driver.trim());
+    || await warmDriverCardImage(r.driver.trim(), _rideCardVi(r));
   if(!cardFile){ showToast('Driver card not ready \u2014 try again in a moment','error'); return; }
   let copied=false;
   if(window.ClipboardItem && navigator.clipboard && navigator.clipboard.write){
@@ -39492,9 +39891,17 @@ registerSW();
 // Reads the explicit "which happens first" choice for a round trip - defaults to AP RUN if
 // the choice UI isn't present for some reason, matching the only behavior that existed before
 // this choice was added, so nothing silently changes for any code path that doesn't know about it.
-function qaRtFirstLegType(){
-  var el = document.getElementById('qa-rt-first-pickup');
+// v1405: which leg of an AP Round Trip happens first - 'AP RUN' (drop-off, the usual) or 'AP PICK UP' (client arriving first).
+// ONE function for Quote (p='q') and Quick Add (p='qa'); each form has a radio pair  <p>-rt-first-run / <p>-rt-first-pickup.
+function rtFirstLegType(p){
+  var el = document.getElementById(p+'-rt-first-pickup');
   return (el && el.checked) ? 'AP PICK UP' : 'AP RUN';
+}
+function qaRtFirstLegType(){ return rtFirstLegType('qa'); }
+// The type that decides which address box holds the airport: an AP Round Trip is laid out like its FIRST leg.
+function _effType(p){
+  var t=(document.getElementById(p+'-type')||{}).value||'';
+  return (t==='AP ROUND TRIP') ? rtFirstLegType(p) : t;
 }
 
 // Updates every label and field that depends on which leg actually happens first - the section
@@ -39502,6 +39909,7 @@ function qaRtFirstLegType(){
 // labels, and the radio buttons' own active styling. One choice, everything else follows.
 function qaRtFirstLegChanged(){
   var first = qaRtFirstLegType();
+  try{ rtAddrRender('qa'); }catch(e){}   // v1404: wording follows which leg comes first
   var second = (first==='AP RUN') ? 'AP PICK UP' : 'AP RUN';
 
   var runLabel = document.getElementById('qa-rt-first-run-label');
@@ -39594,6 +40002,7 @@ function qaTypeChanged(){
   // just above this function for why.
   const sec=document.getElementById('qa-rt-section');
   if(sec) sec.style.display=(isAPRT||isRT)?'block':'none';
+  try{ if(!(isAPRT||isRT)) rtAddrReset('qa'); rtAddrRender('qa'); }catch(e){}   // v1404
   // "Which happens first" only makes sense between an AP Run and an AP Pickup - a plain round
   // trip always goes pickup -> destination -> pickup, nothing to choose.
   const secFirst=document.getElementById('qa-rt-first-section');
