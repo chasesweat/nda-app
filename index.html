@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="version" content="202608191407">
+<meta name="version" content="202608191408">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>NWDA App</title>
 
@@ -4715,6 +4715,22 @@ async function _purgeOldSavedQuotes(){
     // Ages from sentAt when the quote has been sent - see _quoteAgeFrom(). A quote with neither
     // timestamp can't be aged at all and is dropped, same as before.
     savedQuotes = (savedQuotes||[]).filter(function(q){ var from=_quoteAgeFrom(q); return from && from >= cutoff; });
+    // v1407: a quote whose ride date has passed is dead weight - removed automatically. The LAST date on the quote counts
+    // (a round trip's return date if it is later), so a trip still under way is kept. No date = untouched (the age rule above
+    // still applies). The last 20 removed are kept on this phone (nda-removed-past-quotes) in case one was wanted.
+    try{
+      var _today = toDateStr(nowET());
+      var _past = (savedQuotes||[]).filter(function(q){
+        if(!q) return false;
+        var last = [q.date, q.rtDate, q.rtDateAP].filter(function(d){ return /^\d{4}-\d{2}-\d{2}$/.test(d||''); }).sort().pop();
+        return !!last && last < _today;
+      });
+      if(_past.length){
+        try{ var _keep=JSON.parse(localStorage.getItem('nda-removed-past-quotes')||'[]'); _past.forEach(function(q){ _keep.push({removedAt:_syncNow(), quote:q}); }); localStorage.setItem('nda-removed-past-quotes', JSON.stringify(_keep.slice(-20))); }catch(e){}
+        savedQuotes = savedQuotes.filter(function(q){ return _past.indexOf(q)<0; });
+        console.log('[retention] removed '+_past.length+' saved quote(s) whose ride date has passed');
+      }
+    }catch(e){ console.warn('past-date quote purge failed', e); }
     if(savedQuotes.length !== before){
       await saveSavedQuotes();
       if(typeof renderSavedQuotes==='function') renderSavedQuotes();
